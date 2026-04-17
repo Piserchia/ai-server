@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies src/runner/ appends here. -->
 
+## 2026-04-17 — Fix: audit_log.append `kind` argument collision
+
+**Agent task**: Diagnose why all jobs fail immediately with `TypeError: append() got multiple values for argument 'kind'`.
+
+**Files changed**:
+- `src/runner/session.py` — renamed `kind=job.kind` keyword argument to `job_kind=job.kind` in the `audit_log.append(job_id, "job_started", ...)` call at line 182. The positional `"job_started"` already fills the `kind` parameter in `audit_log.append(job_id, kind, **fields)`, so passing `kind=` as a keyword collided.
+
+**Why**: This bug broke INV-2 (every job must write `job_started` + terminal event). The crash happened before the audit log file was created, so `volumes/audit_log/` was empty — no jobs could run at all.
+
+**Side effects**: The audit log field name for the job's kind changes from `kind` to `job_kind` in `job_started` events. No downstream code reads this field yet, so no migration needed.
+
+**Gotchas discovered**:
+- `audit_log.append(job_id, kind, **fields)` uses `kind` as a positional param name. Never pass `kind=` as a keyword in `**fields` — it collides. Use `job_kind` instead.
+
 ## 2026-04-17 — Phase 2: write-back verification + failure escalation + tests
 
 **Agent task**: Complete Phase 2 — ship the `research-report` skill end-to-end with write-back enforcement and model escalation on failure.

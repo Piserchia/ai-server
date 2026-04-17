@@ -183,7 +183,7 @@ async def run_session(job: Job) -> dict[str, Any]:
         job_id,
         "job_started",
         description=job.description,
-        kind=job.kind,
+        job_kind=job.kind,
         skill=skill_name,
         cwd=str(cwd),
         model=options.model,

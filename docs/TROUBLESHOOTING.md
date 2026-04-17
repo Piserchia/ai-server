@@ -109,6 +109,16 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch]
 
 And remove the instruction in the skill body about using it.
 
+### Root cause #6: `audit_log.append()` `kind` parameter collision
+
+**Diagnostic**: runner.log shows `TypeError: append() got multiple values for argument 'kind'` in `session.py:run_session`. Jobs fail within 1 second. `volumes/audit_log/` is empty (no `.jsonl` files created at all).
+
+**Root cause**: `audit_log.append(job_id, kind, **fields)` takes `kind` as its second positional argument. If any caller also passes `kind=` as a keyword in `**fields`, Python raises `TypeError`. This happened in the `job_started` call: `audit_log.append(job_id, "job_started", ..., kind=job.kind)`.
+
+**Fix**: already applied — renamed the keyword to `job_kind=job.kind`. If you see this pattern elsewhere, use `job_kind` instead of `kind` in `**fields`.
+
+**Prevention**: avoid naming any keyword argument `kind` when calling `audit_log.append()`.
+
 ---
 
 ## Symptom: job gets stuck in `running` state and never completes or fails
