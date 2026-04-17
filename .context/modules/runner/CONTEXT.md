@@ -1,6 +1,6 @@
 # Runner module
 
-**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`
+**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`
 
 ## Purpose
 
@@ -20,6 +20,8 @@ Three async tasks running in one process:
 - `src.runner.session.interrupt(job_id)` — signal a running session to stop.
 - `src.runner.quota.is_paused()` / `pause_queue(...)` / `clear()` — queue pause state.
 - `src.runner.router.route(description)` — rule-based skill matcher; returns a skill name or `None`.
+- `src.runner.mcp_projects.create_server()` — returns an `McpSdkServerConfig` for the projects MCP server (tools: `list_projects`, `get_project`, `read_project_logs`, `restart_project`).
+- `src.runner.mcp_dispatch.create_server()` — returns an `McpSdkServerConfig` for the dispatch MCP server (tool: `enqueue_job`).
 
 ## Dependencies
 
@@ -42,10 +44,8 @@ refuses to start if `ANTHROPIC_API_KEY` is set or `claude` CLI is missing.
 
 ## Testing
 
-None yet (Phase 1). Phase 2 adds:
-- `tests/test_router.py` — rule match/miss cases
-- `tests/test_session.py` — mocked SDK
-- `tests/test_quota.py` — pause/resume, ISO-parsing edge cases
+- `tests/test_pure_functions.py` — router, flag parser, writeback classifier (Phase 2).
+- `tests/test_mcp_tools.py` — pure-function tests for MCP tool helpers: `_format_project`, `_read_log_tail`, `_validate_enqueue_args` (Phase 4B). No DB/Redis/SDK.
 
 ## Key invariants (see `.context/SYSTEM.md` for the full list)
 
@@ -61,3 +61,5 @@ None yet (Phase 1). Phase 2 adds:
 - `interrupt()` races with session completion; we check `_running_sessions` map and
   return False if already gone. No error.
 - `ResultMessage.usage` is best-effort — older SDK versions may not populate it.
+- `ClaudeAgentOptions.mcp_servers` is a `dict[str, McpSdkServerConfig]`, not a list. The dict key is the server name used for routing.
+- MCP `@tool` functions receive a single `args: dict` parameter, not keyword args. Always access fields via `args["key"]` or `args.get("key", default)`.

@@ -38,6 +38,8 @@ from src.db import (
 from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
 from src.registry.skills import load as load_skill
+from src.runner.events import event_loop
+from src.runner.review import ReviewOutcome, get_git_diff, run_code_review
 from src.runner import quota, session as session_mod, writeback
 
 logger = structlog.get_logger()
@@ -141,6 +143,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.completed, result=result)
         log.info("job completed")
 
+        # Code review — runs for skills that opt in via post_review.trigger
+        if job.kind not in ("chat", "_writeback") and not (job.payload or {}).get("escalated_from"):
+            try:
+                await _maybe_review(job, result)
+            except Exception:
+                log.exception("code review failed (non-fatal)")
+
         # Write-back verification — skip for chat and the _writeback skill itself
         if job.kind not in ("chat", "_writeback") and job.resolved_skill != "_writeback":
             try:
@@ -178,6 +187,58 @@ async def _process_job(job_id: uuid.UUID) -> None:
             await _maybe_escalate(job)
         except Exception:
             log.exception("escalation attempt failed (non-fatal)")
+
+
+async def _maybe_review(job: Job, result: dict) -> None:
+    """
+    After a code-touching session, run the code-review sub-agent on the diff.
+    Stamps jobs.review_outcome. If blocker, changes status to awaiting_user.
+    """
+    skill_name = job.resolved_skill
+    if not skill_name:
+        return
+    skill_cfg = load_skill(skill_name)
+    if not skill_cfg:
+        return
+
+    trigger = skill_cfg.post_review.get("trigger", "never")
+    if trigger == "never":
+        return
+
+    # Resolve the cwd
+    if job.project_id:
+        async with async_session() as s:
+            proj = await s.get(Project, job.project_id)
+            cwd = settings.projects_dir / proj.slug if proj else settings.server_root
+    else:
+        slug = (job.payload or {}).get("project_slug")
+        cwd = (
+            settings.projects_dir / slug
+            if slug and (settings.projects_dir / slug).exists()
+            else settings.server_root
+        )
+
+    diff = get_git_diff(cwd)
+    if not diff:
+        logger.debug("no diff for review, skipping", job_id=str(job.id)[:8])
+        return
+
+    outcome = await run_code_review(str(job.id), diff, cwd)
+
+    # Stamp review_outcome on the job
+    async with session_scope() as s:
+        await s.execute(
+            update(Job).where(Job.id == job.id).values(
+                review_outcome=outcome.value,
+            )
+        )
+
+    if outcome == ReviewOutcome.blocker:
+        logger.warning("code review BLOCKER", job_id=str(job.id)[:8])
+        await _finish_job(
+            job.id, JobStatus.awaiting_user,
+            error="Code review flagged a blocker. Check the audit log.",
+        )
 
 
 async def _verify_writeback(job: Job, result: dict) -> None:
@@ -423,6 +484,7 @@ async def main() -> None:
         asyncio.create_task(_job_loop(), name="job_loop"),
         asyncio.create_task(_scheduler_loop(), name="scheduler_loop"),
         asyncio.create_task(_cancel_listener(), name="cancel_listener"),
+        asyncio.create_task(event_loop(_shutdown), name="event_loop"),
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
     logger.info("runner stopped")

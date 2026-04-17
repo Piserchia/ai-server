@@ -128,5 +128,6 @@ See `.context/modules/hosting/CONTEXT.md` for the full manifest schema and docum
 
 - Phase 1 ✓ (commit 05ad5e7): skeleton, 3 processes, Phase 1 smoke test verified locally
 - Phase 2 ✓ (commit 6e58fe3): `research-report` + `_writeback` skills, write-back verification hook, failure-escalation hook, 52-test pure-function suite
-- Phase 3 IN PROGRESS: domain `chrispiserchia.com` + Cloudflare tunnel + Caddy + `baseball-bingo` (static) + `market-tracker` (3-service) + healthchecks
-- Phase 4: `new-project`, `new-skill`, `app-patch`, `code-review`, `self-diagnose`, `project-evaluate` skills
+- Phase 3 ✓: domain `chrispiserchia.com` + Cloudflare tunnel + Caddy + `baseball-bingo` (static) + `market-tracker` (3-service) + healthchecks
+- Phase 4 ✓: `code-review` sub-agent + MCP servers (projects, dispatch) + `new-project` (two-phase Opus) + `app-patch` (direct push) + `new-skill` + `project-evaluate` + `self-diagnose` + event triggers (4 async tasks now)
+- Phase 5: `server-upkeep`, `backup`, `server-patch`, `review-and-improve`

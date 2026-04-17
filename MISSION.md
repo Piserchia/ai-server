@@ -172,8 +172,8 @@ Things the system is **explicitly prohibited from doing** autonomously:
 |---|---|---|---|
 | 1 — Skeleton | **SHIPPED** (commit `05ad5e7`) | — (in-repo) | Jobs flow; SDK integration; audit log; subscription auth; 3-process topology |
 | 2 — First real skill + write-back + escalation + tests | **SHIPPED** (commit `6e58fe3`) | — (in-repo) | `research-report` runs end-to-end; write-back hook enforces CHANGELOG updates; failure escalation promotes Sonnet → Opus 4.7 automatically; 52-test pure-function suite |
-| 3 — Domain + tunnel + Caddy + first project (`bingo`) | planned | [`docs/PHASE_3_PLAN.md`](docs/PHASE_3_PLAN.md) | Multi-project hosting works |
-| 4 — Expansion skills (`new-project`, `app-patch`, `new-skill`, `self-diagnose`, `code-review`) | planned | [`docs/PHASE_4_PLAN.md`](docs/PHASE_4_PLAN.md) | System can add and repair projects autonomously |
+| 3 — Domain + tunnel + Caddy + bingo + market-tracker | **SHIPPED** (commit `9f47681`) | [`docs/PHASE_3_PLAN.md`](docs/PHASE_3_PLAN.md) | Multi-project hosting works; `bingo.chrispiserchia.com` + `market-tracker.chrispiserchia.com` live |
+| 4 — Expansion skills + MCP servers + event triggers | **SHIPPED** | [`docs/PHASE_4_PLAN.md`](docs/PHASE_4_PLAN.md) | 7 skills (code-review, new-project, app-patch, new-skill, self-diagnose, project-evaluate) + 2 MCP servers + event-triggered auto-diagnose; 102-test suite |
 | 5 — Operations (`server-upkeep`, `backup`, `server-patch`, `review-and-improve`) | planned | [`docs/PHASE_5_PLAN.md`](docs/PHASE_5_PLAN.md) | System maintains itself; proposes improvements via PR |
 | 6 — Polish (`research-deep`, `idea-generation`, `project-update-poll`, `restore`) | planned | [`docs/PHASE_6_PLAN.md`](docs/PHASE_6_PLAN.md) | Full catalog |
 

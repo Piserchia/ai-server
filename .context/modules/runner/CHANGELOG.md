@@ -2,6 +2,96 @@
 
 <!-- Newest entries at top. Every session that modifies src/runner/ appends here. -->
 
+## 2026-04-17 — Phase 4F: self-diagnose skill + event trigger loop
+
+**Files created**:
+- `skills/self-diagnose/SKILL.md` — Diagnose failures with risk classification. Auto-applies very-low/low risk fixes, delegates medium to app-patch (direct push) or server-patch (Phase 5, manual only for now), outputs diagnosis only for high risk. Tags: needs-projects-mcp, needs-dispatch-mcp.
+- `src/runner/events.py` — Fourth async task. Polls every 60s. Rule 1: skill failed >= 2x in 10 min → enqueue self-diagnose. Rule 2: project unhealthy > 20 min → enqueue self-diagnose. Deduplication via recent job query.
+- `tests/test_events.py` — 14 pure-function tests for `_should_trigger_skill_diagnose` and `_should_trigger_project_diagnose`.
+
+**Files changed**:
+- `src/runner/main.py` — Added `event_loop` as fourth async task in `main()`.
+
+**Why**: Automated failure recovery. The event loop detects repeated failures and unhealthy projects, then enqueues self-diagnose jobs without user intervention. Per user decision: app-patch pushes freely, server code changes require Telegram Y/N (delegated to server-patch when it ships in Phase 5).
+
+## 2026-04-17 — Phase 4G: project-evaluate skill + router rule
+
+**Agent task**: Build Module G of Phase 4 -- the `project-evaluate` skill that automates producing manifest.yml + .context/CONTEXT.md for existing projects.
+
+**Files created**:
+- `skills/project-evaluate/SKILL.md` -- Skill definition with full procedure for analyzing a project codebase, generating manifest.yml, .context/CONTEXT.md, CLAUDE.md, and .context/CHANGELOG.md. Includes non-destructive overwrite checks via AskUserQuestion.
+
+**Files changed**:
+- `src/runner/router.py` -- Added routing rule for `project-evaluate` skill. Pattern matches "evaluate/assess/document/onboard project/app". Placed before the "new project" rules so "evaluate project X" does not fall through.
+- `.context/SKILLS_REGISTRY.md` -- Added `project-evaluate` to the Installed table.
+
+**Why**: Projects in `projects/` need standardized documentation (manifest.yml, .context/CONTEXT.md) to be registerable for hosting via `register-project.sh`. This skill automates producing that documentation by analyzing the project's codebase.
+
+**Side effects**: The new router rule introduces four new trigger words (evaluate, assess, document, onboard) followed by "project" or "app". These are distinct from existing triggers and placed before the "new project" rules to avoid conflicts.
+
+## 2026-04-17 — Phase 4E: new-skill meta-skill
+
+**Agent task**: Create Module E of Phase 4 -- the `new-skill` meta-skill that authors new skills from natural-language descriptions.
+
+**Files created**:
+- `skills/new-skill/SKILL.md` -- Meta-skill system prompt. Opus 4.7 / high, acceptEdits mode, 30 max turns, post_review always. 10-step procedure covering analysis, overlap check, structural reference, drafting, support files, router rules, registry updates, scheduling, commit, and summary.
+
+**Files changed**:
+- `.context/SKILLS_REGISTRY.md` -- Moved `new-skill` from Planned to Installed table.
+
+**Why**: `new-skill` is the self-expansion mechanism: once installed, the server can author additional skills from plain-language descriptions without manual SKILL.md authoring. This completes the meta-skill layer of Phase 4.
+
+**Side effects**: None. No `src/` files were modified -- the router already had `new-skill` rules from a prior session (lines 42-43 in router.py). The skill is purely additive.
+
+## 2026-04-17 — Phase 4D: app-patch skill
+
+**Files created**: `skills/app-patch/SKILL.md`
+**Why**: Lets the system patch existing projects via `/task fix <project>: <issue>`. Direct commit + push to main per user decision (no PR gate for project repos). Code review sub-agent runs after every patch via `post_review: { trigger: always }`.
+
+## 2026-04-17 — Phase 4B: in-process MCP servers for projects + dispatch
+
+**Agent task**: Build Module B of Phase 4 — two in-process MCP servers that give skills structured access to the projects registry and job dispatch.
+
+**Files created**:
+- `src/runner/mcp_projects.py` — MCP server with four tools: `list_projects`, `get_project`, `read_project_logs`, `restart_project`. Uses `create_sdk_mcp_server()` from the Claude Agent SDK. Pure helpers `_format_project()` and `_read_log_tail()` are separated for testability.
+- `src/runner/mcp_dispatch.py` — MCP server with one tool: `enqueue_job`. Wraps `src.gateway.jobs.enqueue_job()` with `created_by="dispatch-mcp"`. Pure helper `_validate_enqueue_args()` separated for testability.
+- `tests/test_mcp_tools.py` — 21 pure-function tests covering `_format_project`, `_read_log_tail`, and `_validate_enqueue_args`. No DB, no Redis, no SDK.
+
+**Files changed**:
+- `src/runner/session.py` — added MCP server injection in `_build_options()`. Skills opt in via `_NEEDS_PROJECTS_MCP` / `_NEEDS_DISPATCH_MCP` name sets (module-level) or `"needs-projects-mcp"` / `"needs-dispatch-mcp"` tags in SKILL.md frontmatter. MCP servers are passed as a dict to `ClaudeAgentOptions(mcp_servers=...)`.
+
+**Why**: Skills like `self-diagnose` and `review-and-improve` need structured project introspection and the ability to spawn child jobs. MCP servers provide this via typed tool calls rather than ad-hoc Bash/file reads, making skill prompts simpler and more reliable.
+
+**Side effects**:
+- Skills in the opt-in sets now receive extra MCP tools in their sessions. These tools are additive and do not affect existing tool access.
+- The `enqueue_job` MCP tool creates jobs with `created_by="dispatch-mcp"` for audit trail visibility.
+
+**Gotchas discovered**:
+- `ClaudeAgentOptions.mcp_servers` is a `dict[str, McpSdkServerConfig]`, not a list. The server name key must match the name passed to `create_sdk_mcp_server()`.
+- The `@tool` decorator's function receives a single `args: dict` parameter with all input fields, not keyword arguments.
+
+## 2026-04-17 — Phase 4 Module A: Code review sub-agent infrastructure
+
+**Agent task**: Add synchronous code-review sub-agent that evaluates diffs after code-touching sessions.
+
+**Files created**:
+- `src/runner/review.py` — `run_code_review()` spins up an Opus 4.7 / plan-mode session to review a diff. `_parse_outcome()` extracts LGTM/CHANGES/BLOCKER from the reviewer's first line. `get_git_diff()` helper for extracting diffs. Diff truncated at 50K chars.
+- `skills/code-review/SKILL.md` — User-triggerable code review. Plan mode, read-only tools, max 5 turns.
+- `tests/test_review.py` — 16 pure-function tests for `_parse_outcome` and `get_git_diff`.
+
+**Files changed**:
+- `src/runner/main.py` — Added `_maybe_review()` post-session hook. Runs after successful sessions for skills with `post_review.trigger` set in frontmatter. Gets git diff, runs review, stamps `review_outcome` on the job. If BLOCKER, changes job status to `awaiting_user`.
+- `src/runner/router.py` — Added routing rule for `code-review` skill.
+
+**Why**: The code-review sub-agent is the quality gate for all Phase 4 coding skills (`new-project`, `app-patch`, `new-skill`). Skills opt in via `post_review: { trigger: always }` in their frontmatter.
+
+**Side effects**: No existing skills have `post_review` set, so this hook is inert until Phase 4 skills are added. Zero impact on existing behavior.
+
+**Design decisions**:
+- Synchronous (blocks parent job), not async child job — because the parent's final status depends on the review outcome.
+- Skills must opt in via `post_review.trigger: always` (default is `never`). Keeps the review surface explicit.
+- Escalated jobs skip review (prevents reviewing the same diff twice after a failure retry).
+
 ## 2026-04-17 — Fix: audit_log.append `kind` argument collision
 
 **Agent task**: Diagnose why all jobs fail immediately with `TypeError: append() got multiple values for argument 'kind'`.

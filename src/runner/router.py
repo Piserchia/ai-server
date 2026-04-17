@@ -26,6 +26,12 @@ _RULES: list[tuple[str, str]] = [
     (r"\b(typeerror|valueerror|nameerror|attributeerror|keyerror|indexerror|"
      r"runtimeerror|stack trace|traceback|segfault)\b", "app-patch"),
 
+    # ── Code review ──
+    (r"\b(review|code review|review (the |this |my )?diff)\b", "code-review"),
+
+    # ── Project evaluation ──
+    (r"\b(evaluate|assess|document|onboard)\s+(project|app)\b", "project-evaluate"),
+
     # ── Projects ──
     (r"\bnew project[:\s]", "new-project"),
     (r"\b(scaffold|create a project|make me an app|spin up)\b", "new-project"),

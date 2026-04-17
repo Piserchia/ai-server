@@ -1,0 +1,17 @@
+slug: <SLUG>
+name: <NAME>
+mission: "<MISSION>"
+type: service
+subdomain: <SLUG>
+port: <PORT>
+healthcheck: /health
+start_command: "uvicorn main:app --host 0.0.0.0 --port <PORT>"
+web_strategy: native-web
+platforms:
+  primary: web
+  web: native
+description: "<DESCRIPTION>"
+created_at: "<TODAY>"
+git:
+  repo: "https://github.com/Piserchia/<SLUG>"
+  branch: main

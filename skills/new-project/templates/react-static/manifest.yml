@@ -1,0 +1,16 @@
+slug: <SLUG>
+name: <NAME>
+mission: "<MISSION>"
+type: static
+subdomain: <SLUG>
+web_root: dist
+web_strategy: native-web
+platforms:
+  primary: web
+  web: native
+description: "<DESCRIPTION>"
+created_at: "<TODAY>"
+build_command: "npm run build"
+git:
+  repo: "https://github.com/Piserchia/<SLUG>"
+  branch: main
