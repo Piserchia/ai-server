@@ -50,6 +50,9 @@ _RULES: list[tuple[str, str]] = [
     (r"\b(research|summarize|summary|report on|weekly update on|market summary)\b",
      "research-report"),
 
+    # ── Restore ──
+    (r"\brestore\b", "restore"),
+
     # ── Server ──
     (r"\bserver:", "server-patch"),
     (r"\bupdate (the )?(server|runner|bot|web gateway)\b", "server-patch"),

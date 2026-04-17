@@ -26,7 +26,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from src.config import settings
 from src.db import CHANNEL_JOB_DONE, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
-from src.models import Job, JobKind, JobStatus, Project
+from src.models import Job, JobKind, JobStatus, Project, Schedule
 from src.runner import quota
 
 logger = structlog.get_logger()
@@ -298,6 +298,123 @@ async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+# ── Schedule management ────────────────────────────────────────────────────
+
+
+async def cmd_schedule(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _guard(update) is None:
+        return
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "Usage:\n"
+            "`/schedule list`\n"
+            "`/schedule add <name> <cron> <kind>: <desc>`\n"
+            "`/schedule pause <name>`\n"
+            "`/schedule resume <name>`",
+            parse_mode="Markdown",
+        )
+        return
+
+    sub = args[0].lower()
+
+    if sub == "list":
+        async with async_session() as s:
+            result = await s.execute(select(Schedule).order_by(Schedule.name))
+            rows = list(result.scalars())
+        if not rows:
+            await update.message.reply_text("No schedules configured.")
+            return
+        lines = ["*Schedules:*"]
+        for sched in rows:
+            icon = "\u23f8" if sched.paused else "\u25b6"
+            nxt = sched.next_run_at.strftime("%m-%d %H:%M") if sched.next_run_at else "—"
+            lines.append(f"{icon} `{sched.name}` `{sched.cron_expression}` next: {nxt}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    elif sub == "add" and len(args) >= 4:
+        # Format: /schedule add <name> <cron-5-fields> <kind>: <description>
+        name = args[1]
+        # Find the cron expression (5 space-separated fields)
+        remaining = " ".join(args[2:])
+        parts = remaining.split()
+        if len(parts) < 6:
+            await update.message.reply_text(
+                "Need: `/schedule add <name> <min> <hr> <dom> <mon> <dow> <kind>: <desc>`",
+                parse_mode="Markdown",
+            )
+            return
+        cron_expr = " ".join(parts[:5])
+        rest = " ".join(parts[5:])
+
+        # Validate cron
+        try:
+            from croniter import croniter
+            croniter(cron_expr)
+        except (ValueError, KeyError):
+            await update.message.reply_text(f"Invalid cron: `{cron_expr}`", parse_mode="Markdown")
+            return
+
+        # Parse kind: description
+        if ":" in rest:
+            kind_str, desc = rest.split(":", 1)
+            kind_str = kind_str.strip().replace("_", "-")
+            desc = desc.strip()
+        else:
+            kind_str = rest.strip().replace("_", "-")
+            desc = f"Scheduled {kind_str}"
+
+        try:
+            from src.db import session_scope
+            async with session_scope() as s:
+                sched = Schedule(
+                    name=name,
+                    cron_expression=cron_expr,
+                    job_kind=kind_str,
+                    job_description=desc,
+                    paused=False,
+                )
+                s.add(sched)
+            await update.message.reply_text(
+                f"Created schedule `{name}` (`{cron_expr}` → {kind_str})",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+                await update.message.reply_text(f"Schedule `{name}` already exists.", parse_mode="Markdown")
+            else:
+                await update.message.reply_text(f"Error: {str(exc)[:200]}")
+
+    elif sub == "pause" and len(args) >= 2:
+        name = args[1]
+        from src.db import session_scope
+        async with session_scope() as s:
+            result = await s.execute(
+                sql_update(Schedule).where(Schedule.name == name).values(paused=True)
+            )
+            if result.rowcount == 0:
+                await update.message.reply_text(f"No schedule named `{name}`.", parse_mode="Markdown")
+                return
+        await update.message.reply_text(f"Paused `{name}`.", parse_mode="Markdown")
+
+    elif sub == "resume" and len(args) >= 2:
+        name = args[1]
+        from src.db import session_scope
+        async with session_scope() as s:
+            result = await s.execute(
+                sql_update(Schedule).where(Schedule.name == name).values(paused=False)
+            )
+            if result.rowcount == 0:
+                await update.message.reply_text(f"No schedule named `{name}`.", parse_mode="Markdown")
+                return
+        await update.message.reply_text(f"Resumed `{name}`.", parse_mode="Markdown")
+
+    else:
+        await update.message.reply_text(
+            "Unknown subcommand. Use: list, add, pause, resume."
+        )
+
+
 # ── Done-notification listener ──────────────────────────────────────────────
 
 
@@ -394,6 +511,7 @@ def main() -> None:
     app.add_handler(CommandHandler("rate", cmd_rate))
     app.add_handler(CommandHandler("projects", cmd_projects))
     app.add_handler(CommandHandler("resume", cmd_resume))
+    app.add_handler(CommandHandler("schedule", cmd_schedule))
 
     logger.info("telegram bot starting")
     app.run_polling(close_loop=False)

@@ -2,6 +2,25 @@
 
 <!-- Newest entries at top. Every session that modifies src/runner/ appends here. -->
 
+## 2026-04-17 — Phase 6: research-deep, idea-generation, project-update-poll, restore skills
+
+**Files created**:
+- `skills/research-deep/SKILL.md` — Deep-dive research skill. Opus 4.7 / high, 80 max turns, escalation to xhigh on failure. 10-20 sources, 2000-5000 words, mandatory "Where sources disagree" and "How I researched this" sections. Output to `projects/research-deep/`.
+- `skills/idea-generation/SKILL.md` — Idea generation skill. Sonnet 4.6 / medium, 20 max turns. Generates 3-5 novel ideas, deduped against `projects/ideas/history.jsonl`. Supports actionable/speculative/technical-only/product-only styles.
+- `skills/project-update-poll/SKILL.md` — Project update polling skill. Haiku 4.5 / low, 4 max turns. Runs a project's `on_update` command from manifest.yml. One retry on failure, no diagnosis.
+- `skills/restore/SKILL.md` — Restore from backup skill. Sonnet 4.6 / medium, 30 max turns. Destructive: requires "RESTORE <date>" confirmation, second confirmation for >30 day old backups. Stops services, restores pg_dump + audit logs, restarts.
+
+**Files changed**:
+- `src/runner/router.py` — Added routing rule for `restore` skill (pattern: `\brestore\b`). Verified `research-deep` and `idea-generation` rules already exist; no duplicates added.
+- `.context/SKILLS_REGISTRY.md` — Moved `research-deep`, `idea-generation`, `project-update-poll`, `restore` from Planned to Installed.
+
+**Scaffolded**:
+- `projects/ideas/` — Private ideas storage with CLAUDE.md, .context/CONTEXT.md, .context/CHANGELOG.md, empty history.jsonl. Not git-initialized (skill bootstraps on first run).
+
+**Why**: Phase 6 adds four utility skills. `research-deep` is the heavyweight research path (vs `research-report`'s standard path). `idea-generation` provides creative brainstorming with dedup. `project-update-poll` enables cheap scheduled polling of project update commands. `restore` is the disaster recovery path paired with the `backup` script (Phase 5 planned).
+
+**Side effects**: The `restore` router rule is broad (`\brestore\b`) — any message containing "restore" will route there. This is intentional since restore is a rare, deliberate action. `project-update-poll` has no router rule (triggered only via schedules/payload).
+
 ## 2026-04-17 — Phase 5: server-upkeep, server-patch, review-and-improve skills
 
 **Files created**:

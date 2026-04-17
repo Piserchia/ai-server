@@ -20,6 +20,10 @@
 | `server-upkeep` | Sonnet 4.6 / low (→ Sonnet 4.6 / medium on failure) | Daily health audit: rotate logs, VACUUM DB, check project status, DM anomalies only | 5 |
 | `server-patch` | Opus 4.7 / xhigh (post-review always, manual merge) | Modify server code (src/, scripts/, alembic/). Always PR-gated, never auto-merged | 5 |
 | `review-and-improve` | Opus 4.7 / max (plan mode) | Analyze recent job data, propose tuning changes. Dispatches server-patch follow-up | 5 |
+| `research-deep` | Opus 4.7 / high (-> Opus 4.7 / xhigh on failure) | Deep-dive research: 10-20 sources, 2000-5000 words, conflicting-evidence treatment | 6 |
+| `idea-generation` | Sonnet 4.6 / medium | Generate 3-5 novel ideas, deduped against prior ideas in history.jsonl | 6 |
+| `project-update-poll` | Haiku 4.5 / low | Run a project's configured `on_update` command. Cheap, fast, fail-silent | 6 |
+| `restore` | Sonnet 4.6 / medium | Restore from backup tarball. DESTRUCTIVE -- requires explicit user confirmation | 6 |
 
 ## Planned (in order of build)
 
@@ -28,10 +32,6 @@
 | `notify` (no-LLM MCP tool) | — | 4 |
 | `healthcheck-all` (script) | — | 5 |
 | `backup` (script) | — | 5 |
-| `research-deep` | Opus 4.7 / high | 6 |
-| `idea-generation` | Sonnet 4.6 / medium | 6 |
-| `project-update-poll` | Haiku 4.5 / low | 6 |
-| `restore` | Sonnet 4.6 / medium | 6 |
 
 ## Conventions
 

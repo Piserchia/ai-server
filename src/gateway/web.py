@@ -17,6 +17,8 @@ Run: uvicorn src.gateway.web:app --host 127.0.0.1 --port 8080
 
 from __future__ import annotations
 
+import asyncio
+import json
 import secrets
 import uuid
 from typing import Annotated
@@ -26,10 +28,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update as sql_update
+from sse_starlette.sse import EventSourceResponse
 
 from src import audit_log
 from src.config import settings
-from src.db import async_session
+from src.db import CHANNEL_JOB_STREAM, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project
 from src.runner import quota
@@ -220,6 +223,53 @@ async def quota_status() -> dict:
         "reset_at": reset_at.isoformat() if reset_at else None,
         "reason": reason,
     }
+
+
+# ── SSE streaming ──────────────────────────────────────────────────────────
+
+
+@app.get("/api/jobs/{job_id}/stream")
+async def stream_job(job_id: str, request: Request, token: str | None = None):
+    """SSE endpoint for live job tailing. Auth via query param ?token=."""
+    if token != settings.web_auth_token:
+        raise HTTPException(401, "Invalid token")
+
+    job = await find_job_by_prefix(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    async def event_generator():
+        # 1. Send existing audit log events
+        existing = audit_log.read(job.id, limit=500)
+        for evt in existing:
+            yield {"event": "audit", "data": json.dumps(evt, default=str)}
+
+        # 2. If still running, subscribe to Redis for live events
+        if job.status in (JobStatus.queued.value, JobStatus.running.value):
+            pubsub = redis.pubsub()
+            channel = f"{CHANNEL_JOB_STREAM}:{job.id}"
+            await pubsub.subscribe(channel)
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    msg = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=2
+                    )
+                    if msg and msg.get("type") == "message":
+                        yield {"event": "audit", "data": msg.get("data", "")}
+                    # Check if job completed
+                    async with async_session() as s:
+                        j = await s.get(Job, job.id)
+                        if j and j.status not in (
+                            JobStatus.queued.value, JobStatus.running.value
+                        ):
+                            yield {"event": "done", "data": j.status}
+                            break
+            finally:
+                await pubsub.unsubscribe(channel)
+
+    return EventSourceResponse(event_generator())
 
 
 # ── Dashboard shell ─────────────────────────────────────────────────────────

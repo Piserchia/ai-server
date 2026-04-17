@@ -131,4 +131,4 @@ See `.context/modules/hosting/CONTEXT.md` for the full manifest schema and docum
 - Phase 3 ✓: domain `chrispiserchia.com` + Cloudflare tunnel + Caddy + `baseball-bingo` (static) + `market-tracker` (3-service) + healthchecks
 - Phase 4 ✓: `code-review` sub-agent + MCP servers (projects, dispatch) + `new-project` (two-phase Opus) + `app-patch` (direct push) + `new-skill` + `project-evaluate` + `self-diagnose` + event triggers (4 async tasks now)
 - Phase 5 ✓: `server-upkeep` (daily at 03:00) + `backup` (nightly at 04:00, no retention cap) + `server-patch` (PR-gated, manual merge) + `review-and-improve` (idle-queue triggered, up to 1/day) + `retention.py` (audit log rotation)
-- Phase 6: `research-deep`, `idea-generation`, `project-update-poll`, `restore`
+- Phase 6 ✓: `research-deep` + `idea-generation` + `project-update-poll` + `restore` + `/schedule` Telegram command + SSE streaming endpoint + `retrospective.py` auto-tuning queries. All 6 phases complete.
