@@ -35,6 +35,8 @@
 | `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
 | `src/gateway/web.py` | FastAPI: /api/jobs + dashboard | config, db, models, gateway.jobs, audit_log | (entry point) |
 | `src/gateway/telegram_bot.py` | Telegram 6 commands + done-notification DMs | config, db, models, gateway.jobs, audit_log | (entry point) |
+| `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
+| `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
 
 ## Data flow
 
@@ -111,9 +113,20 @@ bash scripts/run.sh stop
   surface is complex; Phase 4+ can add integration tests once we have a stable
   set of skills to test against.
 
+## Hosting
+
+- **Domain**: `chrispiserchia.com` (Cloudflare Registrar)
+- **Tunnel**: Cloudflare named tunnel `ai-server`, config at `~/.cloudflared/config.yml`
+- **Reverse proxy**: Caddy at `$PROJECT_ROOT/Caddyfile` + `Caddyfile.d/*.conf`
+- **Per-project supervision**: `~/Library/LaunchAgents/com.assistant.project.*.plist`
+- **Healthcheck**: `scripts/healthcheck-all.sh` every 5 min via `com.assistant.healthcheck-all.plist`
+- **Project registry**: `.context/PROJECTS_REGISTRY.md` (index) + per-project `.context/CONTEXT.md`
+
+See `.context/modules/hosting/CONTEXT.md` for the full manifest schema and documentation standard.
+
 ## Active workstreams
 
 - Phase 1 ✓ (commit 05ad5e7): skeleton, 3 processes, Phase 1 smoke test verified locally
-- Phase 2 ✓ (this commit): `research-report` + `_writeback` skills, write-back verification hook, failure-escalation hook, 52-test pure-function suite
-- Phase 3: domain + Cloudflare named tunnel + Caddy + migrate `bingo` as first hosted project
-- Phase 4: `new-project`, `new-skill`, `app-patch`, `code-review`, `self-diagnose` skills
+- Phase 2 ✓ (commit 6e58fe3): `research-report` + `_writeback` skills, write-back verification hook, failure-escalation hook, 52-test pure-function suite
+- Phase 3 IN PROGRESS: domain `chrispiserchia.com` + Cloudflare tunnel + Caddy + `baseball-bingo` (static) + `market-tracker` (3-service) + healthchecks
+- Phase 4: `new-project`, `new-skill`, `app-patch`, `code-review`, `self-diagnose`, `project-evaluate` skills

@@ -1,27 +1,53 @@
-# Projects registry
+# Projects Registry
 
-> Master index of hosted projects. Updated by `register-project.sh` (Phase 3+)
-> and by skills that create projects (`research-report` scaffolds `research/` on
-> first run).
+> Index of all projects hosted by the ai-server. Each project has its own git
+> repo (gitignored by ai-server) and its own `.context/CONTEXT.md` following
+> the standard documentation format (Mission, Platforms, Web Serving,
+> Architecture, Status).
+>
+> Updated by `register-project.sh` and by skills that create projects.
 
-## Currently scaffolded
+## Currently hosted
 
-| Slug | Type | Hosted? | Created by | Phase |
-|---|---|---|---|---|
-| `research` | content | no (content storage only) | `research-report` skill on first run | 2 |
+| Slug | Type | Subdomain | Primary platform | Web strategy | Source | Phase |
+|------|------|-----------|-----------------|--------------|--------|-------|
+| `baseball-bingo` | static | `bingo.chrispiserchia.com` | iOS | legacy-shim | `github.com/Piserchia/baseball-bingo` | 3 |
+| `market-tracker` | service | `market-tracker.chrispiserchia.com` | web | native-web | `github.com/Piserchia/market-tracker` | 3 |
+| `research` | content | (not hosted) | — | — | this repo (`projects/research/`) | 2 |
 
 `research` is a content-storage project: it holds dated markdown research
 reports as its own git repo, gitignored from the server repo. It has no
-`manifest.yml` and is not served publicly. The research-report skill appends
-every run to `projects/research/.context/CHANGELOG.md`.
+`manifest.yml` and is not served publicly.
 
-## Planned (Phase 3 migrations from the old repo)
+## Documentation standard
 
-| Slug | Type | Subdomain | Source | Phase |
-|---|---|---|---|---|
-| `bingo` | static | `bingo.<domain>` | old repo's `baseball_bingo.html` | 3 |
-| `market-tracker` | service | `market-tracker.<domain>` | `github.com/Piserchia/market-tracker` | 3 |
+Every project's `.context/CONTEXT.md` includes:
+- **Mission**: what the project does, who it's for
+- **Platforms**: primary platform + web relationship
+- **Web Serving**: how it's exposed on chrispiserchia.com (may differ from primary platform)
+- **Architecture**: tech stack, key modules, data flow
+- **Status**: what works, what's planned
+
+The `manifest.yml` is the machine-readable hosting contract (parsed by
+`scripts/register-project.sh`). The `.context/CONTEXT.md` is the human + AI
+readable documentation.
+
+## Adding a project
+
+1. Clone or scaffold into `projects/<slug>/`
+2. Write `manifest.yml` (see `.context/modules/hosting/CONTEXT.md` for schema)
+3. Write `.context/CONTEXT.md` following the standard
+4. Run `bash scripts/register-project.sh <slug>`
+5. Update this registry
+
+Phase 4's `new-project` skill automates steps 1-5.
 
 ## Port allocation
 
 See `projects/_ports.yml`. Increment only; ports are never reused.
+
+## Pending work
+
+- **baseball-bingo**: Merge web-legacy HTML with iOS app — design a Vapor backend
+  reusing the Swift bingo-engine to serve matchup-specific cards via web browser.
+  See `projects/baseball-bingo/web-legacy/README.md` for design options.

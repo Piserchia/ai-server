@@ -6,3 +6,6 @@
 
 # Project ports start here
 # 9001-9999 reserved for projects
+8787: market-tracker          # Mining dashboard (main)
+8788: market-tracker-stocks   # Stocks dashboard (sub-service)
+8789: market-tracker-crypto   # Crypto dashboard (sub-service)

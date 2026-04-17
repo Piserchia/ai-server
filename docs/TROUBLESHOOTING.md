@@ -311,6 +311,58 @@ relevant skill's SKILL.md, and it'll usually diagnose in one turn.
 
 ---
 
+## Symptom: cloudflared tunnel shows "tls: internal error" connecting to Caddy
+
+**Root cause**: Caddy's `tls internal` generates self-signed certs via a local CA. The root cert can't be installed into the macOS trust store without `sudo`, so TLS handshakes fail even with `noTLSVerify: true` in cloudflared config (the error is server-side, not client-side).
+
+**Fix**: Use HTTP between cloudflared and Caddy. The tunnel itself is encrypted end-to-end; the localhost hop doesn't need TLS.
+
+1. Caddyfile and per-project snippets use `http://` prefix (e.g., `http://bingo.chrispiserchia.com`)
+2. cloudflared config points to `http://localhost:80` instead of `https://localhost:443`
+3. Remove `tls internal` from all Caddy site blocks
+
+**Prevention**: The `setup-caddy.sh` and `register-project.sh` scripts generate `http://` prefixed configs by default.
+
+---
+
+## Symptom: cloudflared system service starts but tunnel has no active connections
+
+**Diagnostic**:
+```bash
+cloudflared tunnel info ai-server    # "no active connection"
+tail -20 /Library/Logs/com.cloudflare.cloudflared.err.log
+```
+
+**Common causes**:
+
+1. **Config not at `/etc/cloudflared/`**: The system service runs as root and looks for config at `/etc/cloudflared/config.yml`, not `~/.cloudflared/`. Fix: `sudo cp ~/.cloudflared/config.yml /etc/cloudflared/`
+2. **Credentials file not copied**: Also copy the `<tunnel-uuid>.json` file to `/etc/cloudflared/`.
+3. **Plist missing `tunnel run` arguments**: The default `cloudflared service install` plist just runs `cloudflared` with no subcommand. It needs `tunnel` and `run` arguments. Fix: `sudo sed -i.bak 's|</array>|<string>tunnel</string><string>run</string></array>|' /Library/LaunchDaemons/com.cloudflare.cloudflared.plist`
+4. **Service not started**: Use `sudo launchctl bootstrap system /Library/LaunchDaemons/com.cloudflare.cloudflared.plist` (not the old `launchctl load`).
+
+---
+
+## Symptom: Project launchd service can't find Python modules (`ModuleNotFoundError`)
+
+**Diagnostic**: `tail volumes/logs/project.<slug>.err.log` shows `ModuleNotFoundError: No module named 'flask'` (or similar).
+
+**Root cause**: launchd runs with a minimal PATH. If Python packages were installed via pyenv, the launchd plist needs both `PYENV_ROOT` and pyenv shims in PATH. Using `bash -lc` alone isn't sufficient because bash login shells may not load pyenv's zsh-specific init.
+
+**Fix**: Use the full path to the pyenv python binary in the manifest's `start_command`:
+```yaml
+start_command: "/Users/<user>/.pyenv/versions/3.12.13/bin/python3 server.py"
+```
+
+Or set both env vars in the launchd plist:
+```xml
+<key>PATH</key>
+<string>/Users/<user>/.pyenv/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+<key>PYENV_ROOT</key>
+<string>/Users/<user>/.pyenv</string>
+```
+
+---
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:

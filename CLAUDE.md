@@ -7,7 +7,8 @@ You are working inside the assistant server. This directive is always in effect.
 1. Read `SERVER.md` if you need an architecture overview.
 2. For server-code work, read `.context/SYSTEM.md` and the relevant `.context/modules/<x>/CONTEXT.md`.
 3. For project-scoped work: `cd projects/<slug>` and read that project's `CLAUDE.md` and `.context/CONTEXT.md` first.
-4. For debug/patch work, tail the last 20 entries of `volumes/audit_log/<related_job_ids>.jsonl`.
+4. For cross-project work (skills that touch multiple projects): read `.context/PROJECTS_REGISTRY.md` for the index of all hosted projects. Each project's `.context/CONTEXT.md` follows a standard format with Mission, Platforms, Web Serving, Architecture, and Status sections. Read the registry first, then drill into individual projects as needed.
+5. For debug/patch work, tail the last 20 entries of `volumes/audit_log/<related_job_ids>.jsonl`.
 
 ## While you work
 
