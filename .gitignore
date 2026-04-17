@@ -1,0 +1,44 @@
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+Pipfile.lock
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Runtime state
+volumes/audit_log/*.jsonl
+volumes/audit_log/*.summary.md
+volumes/audit_log/archive/
+volumes/logs/*.log
+volumes/logs/*.log.*
+volumes/pids/
+
+# Projects are separate repos
+projects/*/
+!projects/_ports.yml
+!projects/README.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# OS
+Thumbs.db

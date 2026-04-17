@@ -1,0 +1,20 @@
+# Changelog: registry
+
+## 2026-04-16 — Initial bootstrap (Phase 1)
+
+**Agent task**: Create registry loaders from scratch.
+
+**Files created**:
+- `src/registry/skills.py` — SKILL.md frontmatter parser
+- `src/registry/manifest.py` — project manifest.yml loader + validator
+
+**Why**: Skills and manifests are the two pieces of declarative configuration
+the runner and the registration script read at runtime. Parsers live here so
+multiple callers can share them.
+
+**Side effects**: None — new module.
+
+**Gotchas discovered**:
+- Frontmatter parsing is tolerant: missing frontmatter, malformed YAML, or
+  missing fields all fall through to defaults rather than raising. This keeps
+  the system running even when a skill author writes an imperfect SKILL.md.

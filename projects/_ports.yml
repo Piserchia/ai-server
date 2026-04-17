@@ -1,0 +1,8 @@
+# Port allocation registry. Increment only; never reuse a port.
+# Managed by new-project skill + scripts/register-project.sh.
+
+# Core server (not a project per se, but reserves the port)
+8080: web-gateway
+
+# Project ports start here
+# 9001-9999 reserved for projects

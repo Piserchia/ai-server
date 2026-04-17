@@ -1,0 +1,23 @@
+# Changelog: gateway
+
+## 2026-04-16 — Initial bootstrap (Phase 1)
+
+**Agent task**: Create the three gateway processes from scratch.
+
+**Files created**:
+- `src/gateway/jobs.py` — shared enqueue/cancel/find helpers
+- `src/gateway/web.py` — FastAPI with 8 routes + HTMX dashboard
+- `src/gateway/telegram_bot.py` — 9-command bot + done-listener + quota notifier
+
+**Why**: Three submission pathways (Telegram, web form, programmatic API) with
+one consistent backend.
+
+**Side effects**: None — new module.
+
+**Gotchas discovered**:
+- Telegram's `Update` type collides with SQLAlchemy's `update` function. Import
+  the latter as `sql_update` in telegram_bot.py.
+- `_job_to_chat` dict is in-process; on bot restart any pending jobs lose their
+  DM destination. Acceptable for now; users can `/status` to check.
+- Dashboard renders JSON responses client-side for simplicity. Works but is ugly
+  on slow connections; consider server-side rendering in Phase 2.
