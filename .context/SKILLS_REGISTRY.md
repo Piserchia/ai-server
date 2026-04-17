@@ -17,17 +17,17 @@
 | `new-project` | Opus 4.7 / high (two-phase: plan arch then implement) | Scaffold, document, deploy, and register a new project | 4 |
 
 | `self-diagnose` | Opus 4.7 / high | Investigate failures + apply fixes based on risk classification | 4 |
+| `server-upkeep` | Sonnet 4.6 / low (→ Sonnet 4.6 / medium on failure) | Daily health audit: rotate logs, VACUUM DB, check project status, DM anomalies only | 5 |
+| `server-patch` | Opus 4.7 / xhigh (post-review always, manual merge) | Modify server code (src/, scripts/, alembic/). Always PR-gated, never auto-merged | 5 |
+| `review-and-improve` | Opus 4.7 / max (plan mode) | Analyze recent job data, propose tuning changes. Dispatches server-patch follow-up | 5 |
 
 ## Planned (in order of build)
 
 | Skill | Model / Effort | Phase |
 |---|---|---|
 | `notify` (no-LLM MCP tool) | — | 4 |
-| `server-upkeep` | Sonnet 4.6 / low | 5 |
 | `healthcheck-all` (script) | — | 5 |
 | `backup` (script) | — | 5 |
-| `server-patch` | Opus 4.7 / xhigh (plan + manual merge) | 5 |
-| `review-and-improve` | Opus 4.7 / max (plan mode) | 5 |
 | `research-deep` | Opus 4.7 / high | 6 |
 | `idea-generation` | Sonnet 4.6 / medium | 6 |
 | `project-update-poll` | Haiku 4.5 / low | 6 |

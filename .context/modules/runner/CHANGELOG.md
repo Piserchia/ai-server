@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies src/runner/ appends here. -->
 
+## 2026-04-17 — Phase 5: server-upkeep, server-patch, review-and-improve skills
+
+**Files created**:
+- `skills/server-upkeep/SKILL.md` — Daily health audit skill. Sonnet 4.6 / low, 20 max turns. Rotates logs, VACUUMs DB, checks tunnel/project/process health, reports anomalies only (outputs SILENT when all quiet, always reports on Sundays). Tags: scheduled, operations.
+- `skills/server-patch/SKILL.md` — Server code modification skill. Opus 4.7 / xhigh, 60 max turns. Always PR-gated via `gh pr create`, never auto-merged. Post-review trigger always (Opus 4.7 / high reviewer). Commit metadata includes Requires-migration, Requires-env-change, Rollback. Tags: server, maintenance, manual-merge-required.
+- `skills/review-and-improve/SKILL.md` — Retrospective auditor skill. Opus 4.7 / max, plan mode, 30 max turns. Queries job success rates, ratings, escalation/writeback frequency, code-review outcomes. Proposes structured changes for skills with >25% failure, <3 avg rating, frequent escalation, or 0 runs in 30 days. Dispatches server-patch via enqueue_job MCP. Tags: retrospective, needs-dispatch-mcp.
+
+**Files changed**:
+- `.context/SKILLS_REGISTRY.md` — Moved `server-upkeep`, `server-patch`, `review-and-improve` from Planned to Installed.
+
+**Why**: Phase 5 completes the operational autonomy layer. `server-upkeep` handles daily housekeeping without human attention (SILENT output suppresses DMs). `server-patch` is the only path for modifying server code, enforcing branch + PR + human-merge. `review-and-improve` closes the feedback loop by analyzing job data and dispatching improvement patches.
+
+**Side effects**: No `src/` files modified. These are skill definitions only — the runner already supports all required features (post_review, escalation, MCP dispatch, SILENT output).
+
 ## 2026-04-17 — Phase 4F: self-diagnose skill + event trigger loop
 
 **Files created**:

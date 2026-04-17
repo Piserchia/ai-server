@@ -174,7 +174,7 @@ Things the system is **explicitly prohibited from doing** autonomously:
 | 2 — First real skill + write-back + escalation + tests | **SHIPPED** (commit `6e58fe3`) | — (in-repo) | `research-report` runs end-to-end; write-back hook enforces CHANGELOG updates; failure escalation promotes Sonnet → Opus 4.7 automatically; 52-test pure-function suite |
 | 3 — Domain + tunnel + Caddy + bingo + market-tracker | **SHIPPED** (commit `9f47681`) | [`docs/PHASE_3_PLAN.md`](docs/PHASE_3_PLAN.md) | Multi-project hosting works; `bingo.chrispiserchia.com` + `market-tracker.chrispiserchia.com` live |
 | 4 — Expansion skills + MCP servers + event triggers | **SHIPPED** | [`docs/PHASE_4_PLAN.md`](docs/PHASE_4_PLAN.md) | 7 skills (code-review, new-project, app-patch, new-skill, self-diagnose, project-evaluate) + 2 MCP servers + event-triggered auto-diagnose; 102-test suite |
-| 5 — Operations (`server-upkeep`, `backup`, `server-patch`, `review-and-improve`) | planned | [`docs/PHASE_5_PLAN.md`](docs/PHASE_5_PLAN.md) | System maintains itself; proposes improvements via PR |
+| 5 — Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** | [`docs/PHASE_5_PLAN.md`](docs/PHASE_5_PLAN.md) | Nightly backup, daily upkeep, PR-gated server patches, idle-queue retrospectives; 109-test suite |
 | 6 — Polish (`research-deep`, `idea-generation`, `project-update-poll`, `restore`) | planned | [`docs/PHASE_6_PLAN.md`](docs/PHASE_6_PLAN.md) | Full catalog |
 
 **For debugging Phase 1/2 issues in Claude Code CLI:** [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).

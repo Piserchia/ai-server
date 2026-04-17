@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from src.runner.events import (
     _should_trigger_skill_diagnose,
     _should_trigger_project_diagnose,
+    _should_trigger_idle_review,
 )
 
 NOW = datetime.now(timezone.utc)
@@ -111,3 +112,27 @@ class TestProjectDiagnose:
     def test_empty_projects(self):
         result = _should_trigger_project_diagnose([], [])
         assert result == []
+
+
+class TestIdleQueueReview:
+    def test_idle_queue_no_prior_review(self):
+        assert _should_trigger_idle_review(0, None) is True
+
+    def test_idle_queue_old_review(self):
+        assert _should_trigger_idle_review(0, NOW - timedelta(hours=25)) is True
+
+    def test_idle_queue_recent_review(self):
+        assert _should_trigger_idle_review(0, NOW - timedelta(hours=12)) is False
+
+    def test_busy_queue_no_trigger(self):
+        assert _should_trigger_idle_review(3, None) is False
+
+    def test_busy_queue_old_review(self):
+        assert _should_trigger_idle_review(1, NOW - timedelta(hours=30)) is False
+
+    def test_exactly_at_cooldown_triggers(self):
+        # Exactly 24h ago: the cooldown has elapsed, so trigger
+        assert _should_trigger_idle_review(0, NOW - timedelta(hours=24)) is True
+
+    def test_just_under_cooldown(self):
+        assert _should_trigger_idle_review(0, NOW - timedelta(hours=23, minutes=59)) is False

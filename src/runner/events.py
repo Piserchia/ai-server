@@ -27,6 +27,7 @@ POLL_INTERVAL_SECONDS = 60
 SKILL_FAILURE_WINDOW_MINUTES = 10
 SKILL_FAILURE_THRESHOLD = 2
 PROJECT_UNHEALTHY_MINUTES = 20
+REVIEW_COOLDOWN_HOURS = 24
 
 
 def _should_trigger_skill_diagnose(
@@ -190,6 +191,55 @@ async def _check_project_health() -> None:
         logger.warning("event-triggered self-diagnose for project", slug=slug)
 
 
+def _should_trigger_idle_review(
+    queued_or_running: int,
+    last_review_at: datetime | None,
+    cooldown_hours: int = REVIEW_COOLDOWN_HOURS,
+) -> bool:
+    """
+    Pure function: return True if the queue is idle and review-and-improve
+    hasn't run recently enough. Maximizes subscription token usage during
+    idle periods.
+    """
+    if queued_or_running > 0:
+        return False
+    if last_review_at is None:
+        return True  # never run before
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)
+    return last_review_at < cutoff
+
+
+async def _check_idle_queue_review() -> None:
+    """If queue is idle and review-and-improve hasn't run in 24h, enqueue one."""
+    async with async_session() as s:
+        # Count queued + running jobs (excluding review-and-improve itself)
+        result = await s.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(Job.status.in_([JobStatus.queued.value, JobStatus.running.value]))
+        )
+        active_count = result.scalar() or 0
+
+        # Last review-and-improve completion
+        result = await s.execute(
+            select(Job.completed_at)
+            .where(Job.resolved_skill == "review-and-improve")
+            .where(Job.status == JobStatus.completed.value)
+            .order_by(Job.completed_at.desc())
+            .limit(1)
+        )
+        row = result.first()
+        last_review = row[0] if row else None
+
+    if _should_trigger_idle_review(active_count, last_review):
+        await enqueue_job(
+            "Idle-queue retrospective: analyze recent job data and propose improvements",
+            kind="review-and-improve",
+            created_by="event-trigger:idle-queue",
+        )
+        logger.info("idle-queue review-and-improve enqueued")
+
+
 async def event_loop(shutdown: asyncio.Event) -> None:
     """
     Fourth async task in the runner. Polls every 60 seconds for conditions
@@ -207,6 +257,11 @@ async def event_loop(shutdown: asyncio.Event) -> None:
             await _check_project_health()
         except Exception:
             logger.exception("event loop: project health check error (non-fatal)")
+
+        try:
+            await _check_idle_queue_review()
+        except Exception:
+            logger.exception("event loop: idle queue review check error (non-fatal)")
 
         try:
             await asyncio.wait_for(shutdown.wait(), timeout=POLL_INTERVAL_SECONDS)
