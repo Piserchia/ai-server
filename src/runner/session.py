@@ -90,8 +90,11 @@ def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
         if matched:
             return matched, load_skill(matched)
         return "", None   # generic task, use defaults + full tool set
-    # Any other kind maps directly to a skill of the same name (with underscores → dashes)
-    skill_name = job.kind.replace("_", "-")
+    # Any other kind maps directly to a skill of the same name.
+    # Underscores become dashes EXCEPT a leading underscore (marks internal skills):
+    #   research_report → research-report
+    #   _writeback      → _writeback   (leading _ preserved)
+    skill_name = job.kind if job.kind.startswith("_") else job.kind.replace("_", "-")
     return skill_name, load_skill(skill_name)
 
 

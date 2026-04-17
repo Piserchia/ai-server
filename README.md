@@ -76,10 +76,17 @@ See `SERVER.md` for architecture, `.context/SYSTEM.md` for the module graph,
 and `docs/assistant-system-design.md` for the full design doc including skill
 catalog, model selection framework, self-evaluation mechanics, and phase plan.
 
+## Testing
+
+```bash
+pipenv run pytest                  # runs all tests (Phase 2: 52 pure-function tests)
+pipenv run pytest tests/test_pure_functions.py -v
+```
+
 ## Phases
 
-- **Phase 1** (this commit): skeleton — runner + web + bot + 2 skills (`chat`, `route`)
-- **Phase 2**: first real skill (`research-report`)
+- **Phase 1** (commit `05ad5e7`): skeleton — runner + web + bot + `chat` skill
+- **Phase 2** (this commit): `research-report` skill, write-back verification hook, failure-escalation hook, 52 pure-function tests
 - **Phase 3**: domain + Cloudflare tunnel + Caddy + project hosting
 - **Phase 4**: expansion skills (`new-project`, `app-patch`, `new-skill`, `self-diagnose`, `code-review`)
 - **Phase 5**: operations skills (`server-upkeep`, `backup`, `server-patch`, `review-and-improve`)

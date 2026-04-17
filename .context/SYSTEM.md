@@ -26,9 +26,10 @@
 | `src/models.py` | ORM: Job, Schedule, Project | — | db, runner, gateway, registry |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
 | `src/runner/session.py` | One Agent SDK session per job | config, db, models, audit_log, registry.skills, runner.quota, runner.router | runner.main |
-| `src/runner/main.py` | Job loop + scheduler + cancel listener | config, db, models, runner.session, runner.quota, audit_log | (entry point) |
+| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation hooks | config, db, models, runner.session, runner.quota, runner.writeback, gateway.jobs, registry.skills, audit_log | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher | — | runner.session |
 | `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
+| `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
 | `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
 | `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
@@ -96,14 +97,23 @@ bash scripts/run.sh stop
 
 ## Known technical debt / open items
 
-- **Phase 1 has no tests yet.** Add pytest + fakeredis coverage in Phase 2.
-- **Write-back verification hook in runner is TODO** — planned for Phase 2 alongside the first real skill.
-- **Quota detection is heuristic** — string-match on error messages. Once the SDK surfaces structured rate_limit errors we should switch to typed detection.
-- **No pre-commit hooks installed yet** — will add in Phase 2 (blocks commits touching src/ without CHANGELOG update).
-- **Dashboard is HTMX shell** — enough for Phase 1; add SSE streaming for live job tail in Phase 2.
+- **Write-back verification is in place** (Phase 2); if the primary session skips
+  the PROTOCOL.md write-back, the runner enqueues a `_writeback` child job.
+  Frequent triggering is a signal that the primary skill's SKILL.md needs clearer
+  write-back instructions.
+- **Escalation via `on_failure` frontmatter works** (Phase 2); one level only,
+  guarded by `escalated_from` payload flag to prevent loops.
+- **Quota detection is heuristic** — string-match on error messages. Once the SDK
+  surfaces structured rate_limit errors, switch to typed detection.
+- **Dashboard is HTMX shell** — enough for Phase 1/2; add SSE streaming for live
+  job tail in Phase 3.
+- **No integration tests yet** — only pure-function unit tests. The SDK mock
+  surface is complex; Phase 4+ can add integration tests once we have a stable
+  set of skills to test against.
 
 ## Active workstreams
 
-- Phase 1 bootstrap (this commit)
-- Phase 2: first real skill (research-report) end-to-end
-- Phase 3: domain + Caddy + named tunnel + first project migration
+- Phase 1 ✓ (commit 05ad5e7): skeleton, 3 processes, Phase 1 smoke test verified locally
+- Phase 2 ✓ (this commit): `research-report` + `_writeback` skills, write-back verification hook, failure-escalation hook, 52-test pure-function suite
+- Phase 3: domain + Cloudflare named tunnel + Caddy + migrate `bingo` as first hosted project
+- Phase 4: `new-project`, `new-skill`, `app-patch`, `code-review`, `self-diagnose` skills

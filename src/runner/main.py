@@ -35,8 +35,10 @@ from src.db import (
     redis,
     session_scope,
 )
-from src.models import Job, JobStatus, Schedule
-from src.runner import quota, session as session_mod
+from src.gateway.jobs import enqueue_job
+from src.models import Job, JobStatus, Project, Schedule
+from src.registry.skills import load as load_skill
+from src.runner import quota, session as session_mod, writeback
 
 logger = structlog.get_logger()
 _shutdown = asyncio.Event()
@@ -139,6 +141,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.completed, result=result)
         log.info("job completed")
 
+        # Write-back verification — skip for chat and the _writeback skill itself
+        if job.kind not in ("chat", "_writeback") and job.resolved_skill != "_writeback":
+            try:
+                await _verify_writeback(job, result)
+            except Exception:
+                log.exception("writeback verification failed (non-fatal)")
+
     except quota.QuotaExhausted as exc:
         # Pause the queue, requeue this job at the front so it retries after reset
         await quota.pause_queue(exc.reset_at, exc.reason)
@@ -162,6 +171,122 @@ async def _process_job(job_id: uuid.UUID) -> None:
         audit_log.append(str(job_id), "job_failed", error=str(exc)[:500])
         await _finish_job(job_id, JobStatus.failed, error=str(exc)[:500])
         log.exception("job failed")
+
+        # Escalation: if the skill declares on_failure, enqueue a retry with
+        # the escalated model/effort. One level only, guarded by a payload flag.
+        try:
+            await _maybe_escalate(job)
+        except Exception:
+            log.exception("escalation attempt failed (non-fatal)")
+
+
+async def _verify_writeback(job: Job, result: dict) -> None:
+    """
+    After a session completes, check if it modified non-doc files without
+    updating any CHANGELOG. If so, enqueue a child `_writeback` job.
+    """
+    # Resolve the cwd that the session ran in (same logic as session.py)
+    if job.project_id:
+        async with async_session() as s:
+            proj = await s.get(Project, job.project_id)
+            cwd = settings.projects_dir / proj.slug if proj else settings.server_root
+    else:
+        slug = (job.payload or {}).get("project_slug")
+        cwd = (
+            settings.projects_dir / slug
+            if slug and (settings.projects_dir / slug).exists()
+            else settings.server_root
+        )
+
+    needs, modified = writeback.needs_writeback(cwd)
+    if not needs:
+        return
+
+    parent_summary = (result or {}).get("summary", "")[:2000]
+    description = (
+        f"Write-back follow-up for job {str(job.id)[:8]} "
+        f"({job.resolved_skill or job.kind}). "
+        f"Prior session modified: {', '.join(modified[:10])}. "
+        f"Update any CHANGELOG.md files that should reflect these changes."
+    )
+    payload = {
+        "parent_job_summary": parent_summary,
+        "modified_files": modified,
+        "cwd": str(cwd),
+    }
+    child = await enqueue_job(
+        description,
+        kind="_writeback",
+        payload=payload,
+        project_id=job.project_id,
+        created_by=f"writeback:{str(job.id)[:8]}",
+    )
+    # Link child → parent
+    async with session_scope() as s:
+        await s.execute(
+            update(Job).where(Job.id == child.id).values(parent_job_id=job.id)
+        )
+    audit_log.append(
+        str(job.id), "writeback_spawned",
+        child_job_id=str(child.id),
+        modified_files=modified[:20],
+    )
+    logger.info("write-back child job enqueued", parent=str(job.id), child=str(child.id))
+
+
+async def _maybe_escalate(job: Job) -> None:
+    """
+    If the failed job's skill declares on_failure escalation, enqueue a retry
+    with the escalated config. One level only; guarded by the `escalated_from`
+    payload flag to prevent loops.
+    """
+    if (job.payload or {}).get("escalated_from"):
+        return   # already an escalation; don't recurse
+
+    skill_name = job.resolved_skill
+    if not skill_name:
+        return
+    skill_cfg = load_skill(skill_name)
+    if not skill_cfg or not skill_cfg.escalation:
+        return
+    on_failure = skill_cfg.escalation.get("on_failure")
+    if not on_failure:
+        return
+
+    esc_model = on_failure.get("model")
+    esc_effort = on_failure.get("effort")
+    if not esc_model and not esc_effort:
+        return
+
+    new_payload = dict(job.payload or {})
+    new_payload["escalated_from"] = str(job.id)
+    if esc_model:
+        new_payload["model"] = esc_model
+    if esc_effort:
+        new_payload["effort"] = esc_effort
+
+    child = await enqueue_job(
+        job.description,
+        kind=job.kind,
+        payload=new_payload,
+        project_id=job.project_id,
+        created_by=f"escalation:{str(job.id)[:8]}",
+    )
+    async with session_scope() as s:
+        await s.execute(
+            update(Job).where(Job.id == child.id).values(parent_job_id=job.id)
+        )
+    audit_log.append(
+        str(job.id), "escalation_spawned",
+        child_job_id=str(child.id),
+        escalated_model=esc_model,
+        escalated_effort=esc_effort,
+    )
+    logger.info(
+        "escalation child job enqueued",
+        parent=str(job.id), child=str(child.id),
+        model=esc_model, effort=esc_effort,
+    )
 
 
 async def _finish_job(

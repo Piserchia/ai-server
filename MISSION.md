@@ -171,7 +171,7 @@ Things the system is **explicitly prohibited from doing** autonomously:
 | Phase | Status | What it proves |
 |---|---|---|
 | 1 — Skeleton | **SHIPPED** (commit `05ad5e7`) | Jobs flow; SDK integration; audit log; subscription auth; 3-process topology |
-| 2 — First real skill (`research-report`) + write-back verification | planned | One complete workflow works end-to-end |
+| 2 — First real skill + write-back + escalation + tests | **SHIPPED** | `research-report` runs end-to-end; write-back hook enforces CHANGELOG updates; failure escalation promotes Sonnet → Opus 4.7 automatically; 52-test pure-function suite |
 | 3 — Domain + tunnel + Caddy + first project (`bingo`) | planned | Multi-project hosting works |
 | 4 — Expansion skills (`new-project`, `app-patch`, `new-skill`, `self-diagnose`, `code-review`) | planned | System can add and repair projects autonomously |
 | 5 — Operations (`server-upkeep`, `backup`, `server-patch`, `review-and-improve`) | planned | System maintains itself; proposes improvements via PR |

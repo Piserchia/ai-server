@@ -34,6 +34,11 @@ _RULES: list[tuple[str, str]] = [
     (r"\b(why (did|is|isn't)|what (went wrong|happened|broke))\b", "self-diagnose"),
     (r"\b(diagnose|investigate)\b", "self-diagnose"),
 
+    # ── Skills (meta) — must come BEFORE research rules so
+    #    "new skill: daily BTC summary" doesn't match "summary" first
+    (r"\bnew skill[:\s]", "new-skill"),
+    (r"\badd a skill\b", "new-skill"),
+
     # ── Research ──
     (r"\bdeep (research|dive|analysis)\b", "research-deep"),
     (r"\b(research|summarize|summary|report on|weekly update on|market summary)\b",
@@ -42,10 +47,6 @@ _RULES: list[tuple[str, str]] = [
     # ── Server ──
     (r"\bserver:", "server-patch"),
     (r"\bupdate (the )?(server|runner|bot|web gateway)\b", "server-patch"),
-
-    # ── Skills (meta) ──
-    (r"\bnew skill[:\s]", "new-skill"),
-    (r"\badd a skill\b", "new-skill"),
 
     # ── Ideas ──
     (r"\b(brainstorm|ideas for|generate ideas|idea generation)\b", "idea-generation"),
