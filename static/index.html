@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>chrispiserchia.com</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0f1117;
+    color: #e4e4e7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 60px 20px;
+  }
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .subtitle {
+    color: #71717a;
+    font-size: 0.95rem;
+    margin-bottom: 48px;
+  }
+
+  .projects {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+    max-width: 900px;
+    width: 100%;
+  }
+
+  .card {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 12px;
+    padding: 24px;
+    transition: border-color 0.2s, transform 0.2s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+
+  .card:hover {
+    border-color: #3f3f46;
+    transform: translateY(-2px);
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .card-name {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .card-type {
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .type-static { background: #1e3a5f; color: #60a5fa; }
+  .type-service { background: #1a3d2e; color: #4ade80; }
+
+  .card-url {
+    color: #a1a1aa;
+    font-size: 0.85rem;
+    margin-bottom: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  .card-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: #71717a;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .dot-green { background: #4ade80; }
+  .dot-gray { background: #52525b; }
+
+  .loading {
+    color: #52525b;
+    font-size: 0.9rem;
+    padding: 40px;
+  }
+
+  footer {
+    margin-top: auto;
+    padding-top: 60px;
+    color: #3f3f46;
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>chrispiserchia.com</h1>
+<p class="subtitle">Hosted projects</p>
+
+<div class="projects" id="projects">
+  <div class="loading">Loading projects...</div>
+</div>
+
+<footer>Powered by ai-server</footer>
+
+<script>
+(async () => {
+  const container = document.getElementById('projects');
+  try {
+    const res = await fetch('/api/projects/public');
+    const projects = await res.json();
+
+    if (!projects.length) {
+      container.innerHTML = '<div class="loading">No projects yet.</div>';
+      return;
+    }
+
+    container.innerHTML = projects.map(p => {
+      const url = `https://${p.subdomain}`;
+      const isHealthy = p.last_healthy_at !== null;
+      const typeClass = p.type === 'static' ? 'type-static' : 'type-service';
+      const dotClass = (p.type === 'static' || isHealthy) ? 'dot-green' : 'dot-gray';
+      const statusText = p.type === 'static' ? 'Static' :
+        isHealthy ? 'Healthy' : 'Unknown';
+
+      const ago = p.last_healthy_at
+        ? timeAgo(new Date(p.last_healthy_at))
+        : '';
+
+      return `
+        <a href="${url}" class="card" target="_blank" rel="noopener">
+          <div class="card-header">
+            <span class="card-name">${formatName(p.slug)}</span>
+            <span class="card-type ${typeClass}">${p.type}</span>
+          </div>
+          <div class="card-url">${p.subdomain}</div>
+          <div class="card-status">
+            <span class="dot ${dotClass}"></span>
+            ${statusText}${ago ? ' &middot; ' + ago : ''}
+          </div>
+        </a>
+      `;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<div class="loading">Failed to load projects.</div>';
+  }
+})();
+
+function formatName(slug) {
+  return slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function timeAgo(date) {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+  return Math.floor(seconds / 86400) + 'd ago';
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,12 @@
 # Changelog: gateway
 
+## 2026-04-17 — Public landing page + projects API
+
+**Files changed**:
+- `src/gateway/web.py` — Added `/api/projects/public` (no-auth endpoint returning project list for the landing page). Extracted shared `_get_projects()` helper used by both the auth'd and public endpoints.
+
+**Why**: The public landing page at `chrispiserchia.com` needs to fetch project data without an auth token.
+
 ## 2026-04-16 — Initial bootstrap (Phase 1)
 
 **Agent task**: Create the three gateway processes from scratch.

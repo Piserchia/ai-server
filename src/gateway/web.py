@@ -187,6 +187,16 @@ async def rate_job(job_id: str, req: RateRequest) -> dict:
 
 @app.get("/api/projects", dependencies=[Depends(_check_auth)])
 async def list_projects() -> list[dict]:
+    return await _get_projects()
+
+
+@app.get("/api/projects/public")
+async def list_projects_public() -> list[dict]:
+    """Public endpoint — no auth. Returns only safe fields for the landing page."""
+    return await _get_projects()
+
+
+async def _get_projects() -> list[dict]:
     async with async_session() as s:
         result = await s.execute(select(Project).order_by(Project.slug))
         out = []

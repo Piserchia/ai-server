@@ -2,8 +2,19 @@
     admin localhost:2019
 }
 
-# Dashboard at apex and dashboard subdomain
-http://chrispiserchia.com, http://dashboard.chrispiserchia.com {
+# Public landing page at apex — lists hosted projects
+http://chrispiserchia.com {
+    handle /api/* {
+        reverse_proxy localhost:8080
+    }
+    handle {
+        root * "/Users/alfredbot.ai.butler/Library/Application Support/ai-server/static"
+        file_server
+    }
+}
+
+# Auth-protected dashboard at dashboard subdomain
+http://dashboard.chrispiserchia.com {
     reverse_proxy localhost:8080
 }
 
