@@ -9,11 +9,14 @@ Build a personal assistant server that **runs continuously on a Mac Mini**,
 accepts natural-language requests via Telegram or web, executes them through
 the Claude Agent SDK, and **hosts the resulting projects on a single public
 domain** — while managing, diagnosing, and extending itself and its project
-catalog with minimal human intervention.
+catalog with minimal human intervention. It should also be self healing and 
+self learning (ie finding improvements) at managing, diagnosing and extending itself
+and its project catalog from a modular level so that the system can continue 
+to grow in efficiency and effectiveness over time.
 
 The system is single-tenant (Chris only). It prefers **documenting itself
 well** over trying to be clever. It prefers **Claude subscription** over API
-billing. It prefers **PR gates** over autonomous code writes.
+billing. 
 
 ## Objectives and how we accomplish them
 
