@@ -21,7 +21,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 
 | § 7 Rec | Priority | Title | Status | Commit | Date |
 |---------|----------|-------|--------|--------|------|
-| 1 | P1 | Learning extractor post-session hook | planned | — | — |
+| 1 | P1 | Learning extractor post-session hook | **SHIPPED** | `542334c` | 2026-04-18 |
 | 2 | — | Audit-log-derived context consumption signal | planned | — | — |
 | 3 | P1 | Seed module `skills/` dirs | **SHIPPED** | `adc1cbf` | 2026-04-18 |
 | 4 | — | Graph-walked context injection | planned | — | — |
@@ -31,7 +31,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 8 | — | Budget accounting | planned | — | — |
 | 9 | — | Audit log index | planned | — | — |
 | 10 | P1 | Proposal-applied tracking | planned | — | — |
-| 11 | — | Fix `test_review.py` collection errors | planned | — | — |
+| 11 | — | Fix `test_review.py` collection errors | **RESOLVED (non-issue)** | `542334c` | 2026-04-18 |
 | 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | planned | — | — |
 | 13 | — | `_writeback` "why" quality gate | planned | — | — |
 | 14 | — | Chunk-level doc retrieval | planned | — | — |
