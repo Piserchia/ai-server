@@ -3,7 +3,7 @@
 You are working inside the assistant server. This directive is always in effect.
 
 ## Before you act
-
+-1. Read `MISSION.md` for the overall mission and objectives.
 0. Read `.context/INDEX.md` for a complete map of all documentation.
 1. Read `SERVER.md` if you need an architecture overview.
 2. For server-code work, read `.context/SYSTEM.md` and the relevant `.context/modules/<x>/CONTEXT.md`.
@@ -22,8 +22,30 @@ You are working inside the assistant server. This directive is always in effect.
 
 - Update `CHANGELOG.md` for every module you touched. Format: see `.context/PROTOCOL.md`.
 - Update `CONTEXT.md` if the module's public interface changed.
+- Update global documentation based on what you changed (see table below).
 - Your final text message becomes the job's summary — make it one paragraph that describes what was done, what's left, and where to look.
 - Run any tests the skill declares. If the skill doesn't declare a test command, run `pytest` in the module you touched.
+
+## Documentation update map
+
+When you make a change, update the corresponding global docs:
+
+| What changed | Update these |
+|---|---|
+| Added/removed a skill (`skills/<name>/`) | `.context/SKILLS_REGISTRY.md` |
+| Added/removed a project (`projects/<slug>/`) | `.context/PROJECTS_REGISTRY.md`, `projects/_ports.yml` (if service) |
+| Added/removed a file in `src/runner/` | `.context/modules/runner/CONTEXT.md` (Paths line + public interface) |
+| Added/removed a file in `src/gateway/` | `.context/modules/gateway/CONTEXT.md` |
+| Added/removed a file in `src/` (any module) | `.context/SYSTEM.md` (module graph table) |
+| Changed a module's public API | That module's `.context/modules/<x>/CONTEXT.md` |
+| Added a new script (`scripts/`) | `.context/SYSTEM.md` (module graph) |
+| Changed hosting config (Caddy, tunnel, launchd) | `.context/modules/hosting/CONTEXT.md` |
+| Added a new documentation file | `.context/INDEX.md` |
+| Discovered a new failure mode | `docs/Troubleshooting.md` |
+| Discovered a non-obvious gotcha | Relevant `skills/GOTCHAS.md` or module skills dir |
+
+The `scripts/lint_docs.py` script (also in the pytest suite) validates that
+registries stay in sync. Run `python scripts/lint_docs.py` to check.
 
 ## Hard rules
 
