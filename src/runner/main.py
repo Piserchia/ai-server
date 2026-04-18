@@ -39,6 +39,7 @@ from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
 from src.registry.skills import load as load_skill
 from src.runner.events import event_loop
+from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
 from src.runner.review import ReviewOutcome, get_git_diff, run_code_review
 from src.runner import quota, session as session_mod, writeback
 
@@ -156,6 +157,18 @@ async def _process_job(job_id: uuid.UUID) -> None:
                 await _verify_writeback(job, result)
             except Exception:
                 log.exception("writeback verification failed (non-fatal)")
+
+        # Learning extraction — skip chat, all internal skills (any kind starting
+        # with "_"), and escalation retries (would double-count).
+        is_internal = job.kind == "chat" or job.kind.startswith("_")
+        is_internal_skill = (job.resolved_skill or "").startswith("_")
+        is_escalation = bool((job.payload or {}).get("escalated_from"))
+        if not is_internal and not is_internal_skill and not is_escalation:
+            try:
+                learning_summary = (result or {}).get("summary", "") if result else ""
+                await maybe_extract_learning(str(job_id), learning_summary)
+            except Exception:
+                log.exception("learning extraction failed (non-fatal)")
 
     except quota.QuotaExhausted as exc:
         # Pause the queue, requeue this job at the front so it retries after reset

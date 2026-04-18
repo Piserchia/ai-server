@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-18 — Added learning extractor post-session hook (Rec 1)
+
+**Files changed**:
+- `src/runner/learning.py` (NEW, ~280 lines) — Haiku classifier that runs after each successful non-chat, non-internal job. Pure helpers (`should_extract`, `parse_learning_response`, `format_audit_excerpt`, `list_installed_modules`) + async `extract_learning` (one-turn Haiku call, returns `LearningProposal`) + `maybe_extract_and_enqueue` (full pipeline entry point).
+- `src/runner/main.py` — Added import of `maybe_extract_and_enqueue`. Added hook call in `_process_job` after writeback verification. Conditions: skip chat kind, skip any kind starting with `_`, skip internal skills (resolved_skill starts with `_`), skip escalation retries (`escalated_from` flag in payload).
+- `skills/_learning_apply/SKILL.md` (NEW, internal skill) — Sonnet 4.6 / low, leading-underscore kind, takes payload from the classifier and appends to `.context/modules/<module>/skills/<CATEGORY>.md` using the `APPEND_ENTRIES_BELOW` marker. Dedup check by title grep before append. Commits locally; does not push.
+- `.context/SKILLS_REGISTRY.md` — registered `_learning_apply` as internal skill.
+- `.context/SYSTEM.md` — added `src/runner/learning.py` row to module graph.
+- `.context/modules/runner/CONTEXT.md` — added `learning.py` to Paths, documented `maybe_extract_and_enqueue` in public interface.
+- `tests/test_learning.py` (NEW) — 4 test classes / 27 pure-function tests covering should_extract, parse_learning_response, format_audit_excerpt, list_installed_modules.
+
+**Why**: Closes the F1 feedback loop per `docs/EVALUATION_2026-04-18.md` § 7 Rec 1. Before this, institutional learnings were supposed to be written back by the primary session per PROTOCOL.md, but in practice only 1 PATTERNS.md existed across 5 modules. The classifier runs on every code-touching job and proposes a learning when appropriate; the internal skill applies it. Token-efficient: the `should_extract` gate avoids Haiku calls on read-only/chat jobs.
+
+**Side effects**: Every successful non-chat, non-internal, non-escalation job now runs a ~5s Haiku classification after the existing writeback + review hooks. Classifier failures are logged and swallowed (non-fatal for the primary job). New audit log event kinds: `learning_extraction_done`, `learning_apply_enqueued`. New `_learning_apply` child job kind can appear in the queue.
+
+**Gotchas discovered**: None yet; will accumulate as the loop runs in production. Likely candidates: classifier over-proposing (too lax) or under-proposing (too strict), `_learning_apply` concurrent-write conflicts on the same file.
+
 ## 2026-04-18 — Seeded skills/ subdirectory per Rec 3 (§ 7 Seed module skills/ dirs)
 
 **Change**: This module now has `.context/modules/runner/skills/` containing stub `GOTCHAS.md`, `PATTERNS.md`, and `DEBUG.md` files. Stubs were created via `scripts/seed-module-skills.sh`; no source code modified.
