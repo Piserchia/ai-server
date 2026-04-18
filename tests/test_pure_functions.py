@@ -191,3 +191,80 @@ class TestWritebackClassifier:
             (cwd / "README.md").write_text("hello\n")
             needs, _ = writeback.needs_writeback(cwd)
             assert needs is False, "Editing only a top-level .md should not trigger writeback"
+
+
+# ── Skill config tests ─────────────────────────────────────────────────────
+
+
+class TestSkillConfig:
+    def test_context_files_parsed(self) -> None:
+        from src.registry.skills import _parse_frontmatter, SkillConfig
+        text = """---
+name: test-skill
+description: test
+context_files: ["docs/Troubleshooting.md", ".context/SYSTEM.md"]
+---
+
+Body here.
+"""
+        fm, body = _parse_frontmatter(text)
+        assert fm["context_files"] == ["docs/Troubleshooting.md", ".context/SYSTEM.md"]
+
+    def test_context_files_defaults_empty(self) -> None:
+        from src.registry.skills import _parse_frontmatter
+        text = """---
+name: test-skill
+description: test
+---
+
+Body here.
+"""
+        fm, _ = _parse_frontmatter(text)
+        assert fm.get("context_files") is None  # absent, defaults to [] in load()
+
+
+# ── Server directive tests ─────────────────────────────────────────────────
+
+
+class TestServerDirective:
+    def test_chat_gets_minimal_directive(self) -> None:
+        from src.registry.skills import SkillConfig
+        from src.runner.session import _build_server_directive
+        from src.config import settings
+
+        cfg = SkillConfig(name="chat", body="")
+        result = _build_server_directive(cfg, settings.server_root)
+        assert "No tool use" in result
+        assert "SYSTEM.md" not in result
+
+    def test_project_scoped_gets_project_directive(self) -> None:
+        from src.registry.skills import SkillConfig
+        from src.runner.session import _build_server_directive
+
+        cfg = SkillConfig(name="app-patch", body="")
+        result = _build_server_directive(cfg, Path("/projects/market-tracker"))
+        assert "market-tracker" in result
+        assert "CLAUDE.md" in result
+
+    def test_server_scoped_gets_full_directive(self) -> None:
+        from src.registry.skills import SkillConfig
+        from src.runner.session import _build_server_directive
+        from src.config import settings
+
+        cfg = SkillConfig(name="server-patch", body="")
+        result = _build_server_directive(cfg, settings.server_root)
+        assert "SYSTEM.md" in result
+        assert "CHANGELOG.md" in result
+
+    def test_context_files_appended(self) -> None:
+        from src.registry.skills import SkillConfig
+        from src.runner.session import _build_server_directive
+        from src.config import settings
+
+        cfg = SkillConfig(
+            name="self-diagnose", body="",
+            context_files=["docs/Troubleshooting.md"],
+        )
+        result = _build_server_directive(cfg, settings.server_root)
+        assert "docs/Troubleshooting.md" in result
+        assert "Read these files first" in result

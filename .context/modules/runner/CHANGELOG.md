@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies src/runner/ appends here. -->
 
+## 2026-04-18 — Context-aware SERVER_DIRECTIVE + context_files frontmatter
+
+**Files changed**:
+- `src/runner/session.py` — Replaced static `SERVER_DIRECTIVE` string with `_build_server_directive(skill_cfg, cwd)` function. Three code paths: chat (minimal), project-scoped (targeted), server-scoped (full). Appends `context_files` reading list when declared in skill frontmatter.
+- `src/registry/skills.py` — Added `context_files: list[str]` field to `SkillConfig` dataclass. Parsed from SKILL.md frontmatter in `load()`.
+
+**Why**: Reduces wasted tokens. Chat sessions no longer get instructions to read SYSTEM.md. Project-scoped sessions get targeted instructions about the project's CLAUDE.md. Skills can declare which docs their sessions should read first.
+
 ## 2026-04-17 — Phase 6: research-deep, idea-generation, project-update-poll, restore skills
 
 **Files created**:

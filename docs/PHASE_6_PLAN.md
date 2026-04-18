@@ -39,15 +39,15 @@ All of these work:
 
 ## Status
 
-- [ ] `research-deep` skill
-- [ ] `idea-generation` skill
-- [ ] `project-update-poll` skill
-- [ ] `restore` skill
-- [ ] `/schedule` command in Telegram
-- [ ] SSE streaming for job detail (web)
-- [ ] Auto-tuning retrospective query module
-- [ ] B2 backup target (optional)
-- [ ] Documentation: PHASE_6_PLAN as executed
+- [x] `research-deep` skill
+- [x] `idea-generation` skill
+- [x] `project-update-poll` skill
+- [x] `restore` skill
+- [x] `/schedule` command in Telegram
+- [x] SSE streaming for job detail (web)
+- [x] Auto-tuning retrospective query module
+- [ ] B2 backup target (skipped — local-only for now)
+- [x] Documentation: PHASE_6_PLAN as executed
 
 ## Decisions locked in
 
@@ -869,3 +869,17 @@ architectural change, not just capability addition.
 - [ ] MISSION.md updated — Phase 6 marked shipped
 - [ ] All CHANGELOGs updated per write-back protocol
 - [ ] Committed, pushed
+
+---
+
+## What actually happened
+
+**Shipped**: 2026-04-17
+
+**Deviations from plan**:
+- B2 cloud backup skipped (user decision — 2TB local SSD is sufficient).
+- Ideas project is private only (not publicly served).
+- SSE streaming uses query param token auth (EventSource doesn't support custom headers).
+- project-update-poll enforces 5-minute minimum interval.
+
+**Key commit**: `9ee2f1a`

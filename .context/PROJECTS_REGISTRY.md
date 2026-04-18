@@ -14,10 +14,15 @@
 | `baseball-bingo` | static | `bingo.chrispiserchia.com` | iOS | legacy-shim | `github.com/Piserchia/baseball-bingo` | 3 |
 | `market-tracker` | service | `market-tracker.chrispiserchia.com` | web | native-web | `github.com/Piserchia/market-tracker` | 3 |
 | `research` | content | (not hosted) | — | — | this repo (`projects/research/`) | 2 |
+| `ideas` | content | (not hosted) | — | — | this repo (`projects/ideas/`) | 6 |
 
 `research` is a content-storage project: it holds dated markdown research
 reports as its own git repo, gitignored from the server repo. It has no
 `manifest.yml` and is not served publicly.
+
+`ideas` is a private content-storage project: it holds generated ideas as dated
+markdown files + a dedup log (`history.jsonl`). No `manifest.yml`, not served
+publicly. The `idea-generation` skill bootstraps and writes to it.
 
 ## Documentation standard
 

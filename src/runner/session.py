@@ -68,20 +68,44 @@ async def interrupt(job_id: str | uuid.UUID) -> bool:
 # ── Skill resolution ────────────────────────────────────────────────────────
 
 
-SERVER_DIRECTIVE = """You are working inside the assistant server.
+def _build_server_directive(skill_cfg: SkillConfig | None, cwd: Path) -> str:
+    """Build a context-appropriate server preamble. Reduces token waste by
+    tailoring the directive to the task type."""
+    base = "You are working inside the assistant server.\n\n"
 
-Before acting:
-1. If your job touches server code, read .context/SYSTEM.md and the relevant module CONTEXT.md.
-2. If the job is scoped to a project (payload.project_slug set), cd projects/<slug> and read
-   that project's CLAUDE.md and .context/CONTEXT.md.
-3. For debug / patch jobs, tail the last ~20 entries of volumes/audit_log/*.jsonl for related work.
+    # Chat: minimal directive
+    if skill_cfg and skill_cfg.name == "chat":
+        return base + "Respond directly. No tool use, no context reading needed.\n"
 
-While working: prefer small committed steps. When you learn something non-obvious, append to
-the relevant skill file (DEBUG.md / PATTERNS.md / GOTCHAS.md).
+    # Project-scoped: point to project context
+    if cwd != settings.server_root:
+        project_slug = cwd.name
+        directive = base + (
+            f"This job is scoped to the `{project_slug}` project at `{cwd}`.\n"
+            "Read that project's CLAUDE.md and .context/CONTEXT.md before acting.\n\n"
+            "While working: prefer small committed steps. When you learn something "
+            "non-obvious, append to the relevant skill file.\n\n"
+            "Before finishing: update the project's .context/CHANGELOG.md. "
+            "Write a one-paragraph summary as your final text message.\n"
+        )
+    else:
+        # Server-scoped: full directive
+        directive = base + (
+            "Before acting:\n"
+            "1. Read .context/SYSTEM.md and the relevant module CONTEXT.md.\n"
+            "2. For debug/patch jobs, tail volumes/audit_log/*.jsonl for related work.\n\n"
+            "While working: prefer small committed steps. When you learn something "
+            "non-obvious, append to the relevant skill file (GOTCHAS.md / PATTERNS.md).\n\n"
+            "Before finishing: update CHANGELOG.md for every module you touched. "
+            "Write a one-paragraph summary as your final text message.\n"
+        )
 
-Before finishing: update CHANGELOG.md for every module you touched. Write a one-paragraph
-summary of what you did as your final text message — this becomes the job's summary.md.
-"""
+    # Append context_files reading list if the skill declares them
+    if skill_cfg and skill_cfg.context_files:
+        files_list = "\n".join(f"- `{f}`" for f in skill_cfg.context_files)
+        directive += f"\n**Read these files first**:\n{files_list}\n"
+
+    return directive
 
 
 def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
@@ -107,10 +131,11 @@ def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
 
 def _build_options(job: Job, cwd: Path, skill_cfg: SkillConfig | None) -> ClaudeAgentOptions:
     """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults."""
-    # System prompt
-    system_prompt = SERVER_DIRECTIVE
+    # System prompt — context-aware preamble + skill body
+    server_directive = _build_server_directive(skill_cfg, cwd)
+    system_prompt = server_directive
     if skill_cfg and skill_cfg.body.strip():
-        system_prompt = f"{SERVER_DIRECTIVE}\n\n---\n\n# Active skill\n\n{skill_cfg.body}"
+        system_prompt = f"{server_directive}\n\n---\n\n# Active skill\n\n{skill_cfg.body}"
 
     # Model + effort + permission + tools
     model = (skill_cfg.model if skill_cfg and skill_cfg.model else settings.default_model)

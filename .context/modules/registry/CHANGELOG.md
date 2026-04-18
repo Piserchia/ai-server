@@ -1,5 +1,9 @@
 # Changelog: registry
 
+## 2026-04-18 — Add context_files field to SkillConfig
+
+**Files changed**: `src/registry/skills.py` — Added `context_files: list[str]` field to SkillConfig, parsed from SKILL.md frontmatter. Skills can declare which documentation files their sessions should read first, reducing token waste.
+
 ## 2026-04-16 — Initial bootstrap (Phase 1)
 
 **Agent task**: Create registry loaders from scratch.

@@ -10,7 +10,7 @@
 | `chat` | Sonnet 4.6 / low | One-shot conversation, no tools | 1 |
 | `research-report` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Web research + dated markdown report under `projects/research/` | 2 |
 | `_writeback` | Sonnet 4.6 / low | **Internal.** Follow-up session that updates CHANGELOGs when the primary session skipped the write-back. Not user-triggerable. | 2 |
-| `code-review` | Opus 4.7 / high (plan mode) | 4 |
+| `code-review` | Opus 4.7 / high (plan mode) | Review code diffs for correctness, security, style. Used as post-session sub-agent and standalone. | 4 |
 | `app-patch` | Opus 4.7 / high | Patch existing projects — direct commit + push to main | 4 |
 | `new-skill` | Opus 4.7 / high | Meta-skill: author new skills from natural-language descriptions | 4 |
 | `project-evaluate` | Opus 4.7 / high | Read a project codebase and produce manifest.yml + standard .context/CONTEXT.md | 4 |
@@ -30,8 +30,13 @@
 | Skill | Model / Effort | Phase |
 |---|---|---|
 | `notify` (no-LLM MCP tool) | — | 4 |
-| `healthcheck-all` (script) | — | 5 |
-| `backup` (script) | — | 5 |
+
+## Scripts (non-skill, no LLM)
+
+| Script | Path | Phase |
+|--------|------|-------|
+| `backup` | `scripts/backup.sh` (launchd timer at 04:00) | 5 |
+| `healthcheck-all` | `scripts/healthcheck-all.sh` (launchd timer every 5 min) | 3 |
 
 ## Conventions
 

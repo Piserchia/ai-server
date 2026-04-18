@@ -30,7 +30,7 @@ Server runs for a week with zero intervention. At the end of the week:
 
 ## Status
 
-Not started. Phases 1-4 are prerequisites. `server-upkeep` depends on all the
+**SHIPPED** (2026-04-17). Phases 1-4 are prerequisites. `server-upkeep` depends on all the
 `jobs` table columns Phase 1 created; `review-and-improve` depends on real
 data in `jobs` from Phases 2-4 actually running.
 
@@ -807,3 +807,17 @@ git push origin main
 ## After Phase 5
 
 Phase 6: polish — remaining skills + nice-to-haves. See `docs/PHASE_6_PLAN.md`.
+
+---
+
+## What actually happened
+
+**Shipped**: 2026-04-17
+
+**Deviations from plan**:
+- review-and-improve uses idle-queue trigger (events.py) rather than fixed cron. Runs when queue is empty and hasn't run in 24h. Maximizes subscription token usage.
+- Backup has no retention cap (2TB SSD) rather than 7-day retention.
+- Cloud backup (B2) skipped for now — local backup sufficient.
+- Cloudflare Access setup deferred to manual configuration step.
+
+**Key commit**: `05fbed9`

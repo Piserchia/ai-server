@@ -1,6 +1,6 @@
 # Runner module
 
-**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`
+**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`
 
 ## Purpose
 
@@ -8,10 +8,11 @@ The runner is the execution engine. It pops jobs off `jobs:queue`, resolves each
 to a skill and a Claude Agent SDK session, streams the session's messages to the
 audit log, and updates the Job row with the result.
 
-Three async tasks running in one process:
+Four async tasks running in one process:
 1. `_job_loop` — BLPOPs from `jobs:queue`, respects `quota.is_paused()`, runs sessions under a semaphore gated by `MAX_CONCURRENT_JOBS`.
 2. `_scheduler_loop` — every 30s, picks schedules with `next_run_at <= now` and enqueues jobs from their templates.
 3. `_cancel_listener` — subscribes to `jobs:cancel` channel, calls `session.interrupt(job_id)` for matches.
+4. `event_loop` — every 60s, checks skill-failure + project-unhealthy + idle-queue rules, auto-enqueues self-diagnose or review-and-improve.
 
 ## Public interface
 
@@ -22,6 +23,10 @@ Three async tasks running in one process:
 - `src.runner.router.route(description)` — rule-based skill matcher; returns a skill name or `None`.
 - `src.runner.mcp_projects.create_server()` — returns an `McpSdkServerConfig` for the projects MCP server (tools: `list_projects`, `get_project`, `read_project_logs`, `restart_project`).
 - `src.runner.mcp_dispatch.create_server()` — returns an `McpSdkServerConfig` for the dispatch MCP server (tool: `enqueue_job`).
+- `review.run_code_review()` — sub-agent that evaluates diffs post-session for code-touching skills.
+- `events.event_loop()` — rules engine that checks for repeated failures and unhealthy projects, auto-enqueuing follow-up jobs.
+- `retention.rotate_audit_logs()` — compresses and archives old JSONL audit log files (called by server-upkeep skill).
+- `retrospective.skill_performance()` — rollup queries for the auto-tuning retrospective (consumed by review-and-improve skill).
 
 ## Dependencies
 
@@ -45,7 +50,9 @@ refuses to start if `ANTHROPIC_API_KEY` is set or `claude` CLI is missing.
 ## Testing
 
 - `tests/test_pure_functions.py` — router, flag parser, writeback classifier (Phase 2).
-- `tests/test_mcp_tools.py` — pure-function tests for MCP tool helpers: `_format_project`, `_read_log_tail`, `_validate_enqueue_args` (Phase 4B). No DB/Redis/SDK.
+- `tests/test_mcp_tools.py` — pure-function tests for MCP tool helpers: `_format_project`, `_read_log_tail`, `_validate_enqueue_args` (Phase 4B). No DB/Redis/SDK. (21 tests)
+- `test_review.py` — code-review outcome parser, reviewer prompt construction (16 tests).
+- `test_events.py` — event-trigger rules: consecutive failures, healthcheck staleness, dedup guards (20 tests).
 
 ## Key invariants (see `.context/SYSTEM.md` for the full list)
 

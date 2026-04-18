@@ -8,10 +8,10 @@ session picking up work on this repo, or a human returning after a break.
 | Doc | Purpose | When to read |
 |---|---|---|
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Failure-mode-first debugging guide | **Always** when something's broken |
-| [`PHASE_3_PLAN.md`](PHASE_3_PLAN.md) | Domain + Cloudflare tunnel + Caddy + first hosted projects | Starting Phase 3 |
-| [`PHASE_4_PLAN.md`](PHASE_4_PLAN.md) | Expansion skills (new-project, app-patch, new-skill, self-diagnose, code-review) + MCP servers + event triggers | Starting Phase 4 |
-| [`PHASE_5_PLAN.md`](PHASE_5_PLAN.md) | Operations (server-upkeep, backup, server-patch, review-and-improve) + Cloudflare Access | Starting Phase 5 |
-| [`PHASE_6_PLAN.md`](PHASE_6_PLAN.md) | Polish (research-deep, idea-generation, project-update-poll, restore, dashboard streaming, /schedule) | Starting Phase 6 |
+| [`PHASE_3_PLAN.md`](PHASE_3_PLAN.md) | Domain + tunnel + Caddy + bingo + market-tracker | **SHIPPED** — historical reference |
+| [`PHASE_4_PLAN.md`](PHASE_4_PLAN.md) | Expansion skills + MCP servers + event triggers | **SHIPPED** — historical reference |
+| [`PHASE_5_PLAN.md`](PHASE_5_PLAN.md) | Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** — historical reference |
+| [`PHASE_6_PLAN.md`](PHASE_6_PLAN.md) | Polish (research-deep, ideas, update-poll, restore, SSE, /schedule) | **SHIPPED** — historical reference |
 | [`assistant-system-design.md`](assistant-system-design.md) | Original full system design doc | Background reading; phase plans supersede it where they disagree |
 
 ## Recommended reading order for a new Claude Code session
@@ -33,6 +33,13 @@ session picking up work on this repo, or a human returning after a break.
 5. Read module-level `../.context/modules/<x>/CONTEXT.md` for every module the
    phase touches
 6. Start executing the runbook at the end of the phase plan
+
+**If you're an SDK session (runner-invoked):**
+
+1. Your SKILL.md already contains your instructions — follow them
+2. If your skill declares `context_files` in frontmatter, read those files first
+3. Otherwise, follow the instructions in your Active Skill section
+4. The server directive preamble has already been tailored to your task type
 
 **If you're making ad-hoc improvements (not tied to a phase):**
 

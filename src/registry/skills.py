@@ -47,6 +47,7 @@ class SkillConfig:
     escalation: dict = field(default_factory=dict)
     post_review: dict = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
+    context_files: list[str] = field(default_factory=list)  # files the session should read first
     no_llm: bool = False               # if True, skill is implemented as a script, runner skips SDK
 
 
@@ -85,6 +86,7 @@ def load(name: str) -> SkillConfig | None:
         escalation=fm.get("escalation", {}),
         post_review=fm.get("post_review", {}),
         tags=fm.get("tags", []),
+        context_files=fm.get("context_files", []),
         no_llm=bool(fm.get("no_llm", False)),
     )
 

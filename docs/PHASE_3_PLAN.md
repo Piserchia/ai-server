@@ -30,7 +30,7 @@ seconds with no manual intervention.
 
 ## Status
 
-**Not started**. Phase 2 is the prerequisite and is committed to main.
+**SHIPPED** (2026-04-17). Phase 2 is the prerequisite and is committed to main.
 
 ## Decisions locked in from prior sessions
 
@@ -925,3 +925,17 @@ Phase 4 builds the expansion skills that turn this from "manually registered pro
 - Domain is live and known to work (`https://bingo.<domain>` accessible)
 
 Phase 4 plan: `docs/PHASE_4_PLAN.md`.
+
+---
+
+## What actually happened
+
+**Shipped**: 2026-04-17
+
+**Deviations from plan**:
+- Used HTTP on localhost (not HTTPS with tls internal) — Caddy's internal CA certs caused TLS handshake failures with cloudflared. Since the tunnel encrypts end-to-end, localhost TLS is unnecessary.
+- market-tracker registered as multi-service (3 Flask servers with path-based Caddy routing) rather than single-service.
+- Added public landing page at chrispiserchia.com listing hosted projects.
+- pyenv paths required explicit handling in launchd plists (full python path in start_command).
+
+**Key commits**: `9f47681` (Phase 3 infra), `ae95d36` (landing page)

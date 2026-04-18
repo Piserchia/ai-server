@@ -10,6 +10,7 @@ escalation:
   on_failure:
     model: claude-opus-4-7
     effort: xhigh
+context_files: ["docs/Troubleshooting.md"]
 tags: [meta, recovery, event-triggered, needs-projects-mcp, needs-dispatch-mcp]
 ---
 

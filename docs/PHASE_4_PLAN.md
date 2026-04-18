@@ -35,7 +35,7 @@ All of these work end-to-end via `/task`:
 
 ## Status
 
-Not started. Phase 3 is the prerequisite — the `new-project` skill depends on
+**SHIPPED** (2026-04-17). Phase 3 is the prerequisite — the `new-project` skill depends on
 `register-project.sh` working.
 
 ## Decisions locked in
@@ -1133,3 +1133,19 @@ To disable post-review:
 ## After Phase 4
 
 Phase 5: operations — making the system self-maintaining. See `docs/PHASE_5_PLAN.md`.
+
+---
+
+## What actually happened
+
+**Shipped**: 2026-04-17
+
+**Deviations from plan**:
+- new-project uses single Opus session with two-phase prompt discipline (plan then implement) rather than two separate jobs. SDK doesn't support model switching mid-session.
+- app-patch uses direct commit + push to main (Option A) rather than branch + PR (Option C). User decision.
+- self-diagnose delegates server code fixes to diagnosis-only (server-patch ships in Phase 5) rather than attempting medium-risk auto-apply.
+- Added project-evaluate skill (not in original plan) for documenting existing projects.
+- Templates are directories (not tarballs) for better git diffs and agent readability.
+- MCP servers use dict interface (not list) per SDK API: `ClaudeAgentOptions(mcp_servers={"name": server})`.
+
+**Key commit**: `42ef735`

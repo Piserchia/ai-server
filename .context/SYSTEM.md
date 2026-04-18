@@ -1,7 +1,7 @@
 # System context
 
 > Source of truth for the server's architecture. Update when modules change.
-> Last updated: 2026-04-16 (Phase 1 bootstrap)
+> Last updated: 2026-04-18 (all phases complete)
 
 ## Tech stack
 
@@ -30,6 +30,12 @@
 | `src/runner/router.py` | Rule-based keyword → skill matcher | — | runner.session |
 | `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
+| `src/runner/review.py` | Code-review sub-agent; evaluates diffs post-session | config, audit_log, claude_agent_sdk | runner.main |
+| `src/runner/events.py` | Event-trigger rules engine (4th async task) | db, models, gateway.jobs | runner.main |
+| `src/runner/mcp_projects.py` | MCP server: project tools (list, get, logs, restart) | config, db, models | runner.session |
+| `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool | gateway.jobs | runner.session |
+| `src/runner/retention.py` | Audit log rotation (compress + archive old JSONL) | config | server-upkeep skill |
+| `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats) | db, models | review-and-improve skill |
 | `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
 | `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
