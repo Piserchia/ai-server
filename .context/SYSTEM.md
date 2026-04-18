@@ -45,6 +45,7 @@
 | `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
 | `scripts/backup.sh` | Nightly pg_dump + audit log + log snapshot | psql, tar | — (launchd timer) |
 | `scripts/seed-schedules.sh` | Insert canonical schedules into DB | psql | — |
+| `scripts/seed-module-skills.sh` | Ensure every `.context/modules/<x>/` has `skills/{GOTCHAS,PATTERNS,DEBUG}.md` stubs | — | bootstrap.sh + test_doc_lint.py |
 | `scripts/lint_docs.py` | Validate registries vs actual files; catches stale docs | — | tests/test_doc_lint.py |
 
 ## Data flow

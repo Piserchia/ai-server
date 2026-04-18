@@ -104,6 +104,11 @@ mkdir -p "$PROJECT_DIR/volumes/audit_log" "$PROJECT_DIR/volumes/logs" \
          "$PROJECT_DIR/projects" "$PROJECT_DIR/skills"
 echo ""
 
+# ── Module skills/ stubs ────────────────────────────────────────────────────
+echo "Seeding module skills/ directories..."
+bash "$SCRIPT_DIR/seed-module-skills.sh"
+echo ""
+
 # ── Git hooks ───────────────────────────────────────────────────────────────
 echo "Installing git pre-commit hook..."
 if [ -d "$PROJECT_DIR/.git" ]; then

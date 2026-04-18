@@ -1,5 +1,16 @@
 # Changelog: db / models
 
+<!-- Newest entries at top. Every session that modifies this module appends here. -->
+
+## 2026-04-18 — Seeded skills/ subdirectory per Rec 3 (§ 7 Seed module skills/ dirs)
+
+**Change**: This module now has `.context/modules/db/skills/` containing stub `GOTCHAS.md`, `PATTERNS.md`, and `DEBUG.md` files. Stubs were created via `scripts/seed-module-skills.sh`; no source code modified.
+
+**Why**: PROTOCOL.md directs sessions to append learnings to these files, but four of five modules had no skills/ directory at all, discouraging write-backs. Creating the directories with format-header stubs removes the friction and gives future sessions a template to append to. See `docs/EVALUATION_2026-04-18.md` § 7 Rec 3.
+
+**Side effects**: None on module behavior. New lint check `check_module_skills_dirs` in `scripts/lint_docs.py` verifies these files continue to exist.
+
+
 ## 2026-04-16 — Initial bootstrap (Phase 1)
 
 **Agent task**: Create the persistence layer from scratch.

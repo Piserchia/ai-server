@@ -11,6 +11,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_projects_registry,
     check_runner_context,
     check_phase_plan_status,
+    check_module_skills_dirs,
 )
 
 
@@ -32,3 +33,8 @@ def test_runner_context_complete():
 def test_phase_plan_status_current():
     warnings = check_phase_plan_status()
     assert warnings == [], f"Phase plan status mismatches: {warnings}"
+
+
+def test_module_skills_dirs_seeded():
+    warnings = check_module_skills_dirs()
+    assert warnings == [], f"Module skills/ dirs missing/incomplete: {warnings}"

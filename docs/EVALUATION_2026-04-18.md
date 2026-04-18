@@ -11,6 +11,34 @@
 
 ---
 
+## Implementation status (live)
+
+As recommendations are implemented they're marked here with commit SHA and
+date. Update this section when a recommendation's work lands.
+
+Numbering here corresponds to § 7 of this document. Priority ordering (from
+§ 8) is: 1 → 5 → 3 → 10 → 2 for the first five (by § 7 numbering).
+
+| § 7 Rec | Priority | Title | Status | Commit | Date |
+|---------|----------|-------|--------|--------|------|
+| 1 | P1 | Learning extractor post-session hook | planned | — | — |
+| 2 | — | Audit-log-derived context consumption signal | planned | — | — |
+| 3 | P1 | Seed module `skills/` dirs | **SHIPPED** | _pending_ | 2026-04-18 |
+| 4 | — | Graph-walked context injection | planned | — | — |
+| 5 | P2 | `context_files` adoption sweep | planned | — | — |
+| 6 | — | Project-level PROTOCOL | planned | — | — |
+| 7 | — | Stale-context warnings in retrospective | planned | — | — |
+| 8 | — | Budget accounting | planned | — | — |
+| 9 | — | Audit log index | planned | — | — |
+| 10 | P1 | Proposal-applied tracking | planned | — | — |
+| 11 | — | Fix `test_review.py` collection errors | planned | — | — |
+| 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | planned | — | — |
+| 13 | — | `_writeback` "why" quality gate | planned | — | — |
+| 14 | — | Chunk-level doc retrieval | planned | — | — |
+| 15 | — | Tool-use-aware code review | planned | — | — |
+
+---
+
 ## 1. What the repo is trying to do
 
 ai-server is a **single-tenant personal assistant server** that runs on a

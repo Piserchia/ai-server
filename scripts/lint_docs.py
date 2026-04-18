@@ -117,6 +117,36 @@ def check_phase_plan_status() -> list[str]:
     return warnings
 
 
+def check_module_skills_dirs() -> list[str]:
+    """Every module under .context/modules/ should have a skills/ directory
+    with GOTCHAS.md, PATTERNS.md, and DEBUG.md — even if only stubs. These
+    are the institutional-knowledge targets that PROTOCOL.md directs sessions
+    to append to; missing files discourage write-backs."""
+    warnings = []
+    modules_dir = REPO_ROOT / ".context" / "modules"
+    if not modules_dir.exists():
+        return [".context/modules/ not found"]
+
+    required = ("GOTCHAS.md", "PATTERNS.md", "DEBUG.md")
+    for module_dir in sorted(modules_dir.iterdir()):
+        if not module_dir.is_dir():
+            continue
+        skills_dir = module_dir / "skills"
+        if not skills_dir.exists():
+            warnings.append(
+                f"Module `{module_dir.name}` has no skills/ dir "
+                f"(run scripts/seed-module-skills.sh)"
+            )
+            continue
+        for fname in required:
+            if not (skills_dir / fname).exists():
+                warnings.append(
+                    f"Module `{module_dir.name}` missing skills/{fname} "
+                    f"(run scripts/seed-module-skills.sh)"
+                )
+    return warnings
+
+
 def run_all() -> dict[str, list[str]]:
     """Run all checks, return {check_name: [warnings]}."""
     return {
@@ -124,6 +154,7 @@ def run_all() -> dict[str, list[str]]:
         "projects_registry": check_projects_registry(),
         "runner_context": check_runner_context(),
         "phase_plan_status": check_phase_plan_status(),
+        "module_skills_dirs": check_module_skills_dirs(),
     }
 
 
