@@ -23,7 +23,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 |---------|----------|-------|--------|--------|------|
 | 1 | P1 | Learning extractor post-session hook | planned | — | — |
 | 2 | — | Audit-log-derived context consumption signal | planned | — | — |
-| 3 | P1 | Seed module `skills/` dirs | **SHIPPED** | _pending_ | 2026-04-18 |
+| 3 | P1 | Seed module `skills/` dirs | **SHIPPED** | `adc1cbf` | 2026-04-18 |
 | 4 | — | Graph-walked context injection | planned | — | — |
 | 5 | P2 | `context_files` adoption sweep | planned | — | — |
 | 6 | — | Project-level PROTOCOL | planned | — | — |
