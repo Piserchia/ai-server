@@ -1,0 +1,16 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+ai-server = {file = ".", editable = true}
+
+[dev-packages]
+pytest = ">=8.1.1"
+pytest-asyncio = ">=0.23.6"
+ruff = ">=0.4.0"
+fakeredis = ">=2.22.0"
+
+[requires]
+python_version = "3.12"

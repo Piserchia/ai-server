@@ -82,8 +82,16 @@ if ! psql -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw assistant; then
     echo "  Creating database 'assistant'..."
     createdb assistant 2>/dev/null || echo "  (may already exist)"
     # Create user if the DSN assumes a non-superuser login
-    psql -d assistant -c "CREATE USER assistant WITH PASSWORD 'CHANGEME';" 2>/dev/null || true
+    # Read password from .env if available, fall back to CHANGEME
+    _pw="CHANGEME"
+    if [ -f "$PROJECT_DIR/.env" ]; then
+        _pw=$(grep -E '^POSTGRES_PASSWORD=' "$PROJECT_DIR/.env" | head -1 | cut -d= -f2-)
+        _pw="${_pw:-CHANGEME}"
+    fi
+    psql -d assistant -c "CREATE USER assistant WITH PASSWORD '$_pw';" 2>/dev/null || true
     psql -d assistant -c "GRANT ALL PRIVILEGES ON DATABASE assistant TO assistant;" 2>/dev/null || true
+    psql -d assistant -c "GRANT ALL ON SCHEMA public TO assistant;" 2>/dev/null || true
+    psql -d assistant -c "ALTER DATABASE assistant OWNER TO assistant;" 2>/dev/null || true
 fi
 
 echo "Running Alembic migrations..."

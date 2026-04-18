@@ -175,3 +175,8 @@ Logs rotated/compressed/deleted: N/N/N
   as "unhealthy".
 - The SILENT output must be the entire final message, with no leading or
   trailing whitespace or extra lines.
+
+## Gotchas (discovered during runs)
+
+- `projects` table has no `status` column — the skill template query that selects `status` will fail. Use only `slug` and `last_healthy_at`.
+- Restart grep pattern ('Starting\|Restarting\|restarted') produces false positives: Telegram error messages contain "restarted" inline, and project startup logs contain "Starting". Count > 3 is not reliable; inspect actual matched lines before flagging.
