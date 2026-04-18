@@ -6,6 +6,7 @@ effort: low
 permission_mode: acceptEdits
 required_tools: [Read, Bash]
 max_turns: 4
+context_files: [".context/PROJECTS_REGISTRY.md"]
 tags: [scheduled, per-project, cheap]
 ---
 

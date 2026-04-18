@@ -10,6 +10,7 @@ escalation:
   on_failure:
     model: claude-opus-4-7
     effort: xhigh
+context_files: ["skills/research-report/SKILL.md"]
 tags: [research, writing, high-quality]
 ---
 

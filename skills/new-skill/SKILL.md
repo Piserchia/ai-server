@@ -8,6 +8,7 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 30
 post_review:
   trigger: always
+context_files: [".context/SKILLS_REGISTRY.md", "skills/README.md"]
 tags: [meta, skill-creation]
 ---
 

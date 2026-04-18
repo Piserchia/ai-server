@@ -6,6 +6,10 @@ effort: medium
 permission_mode: acceptEdits
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 20
+# On first run the projects/ideas/ dir doesn't exist yet — the skill body
+# handles bootstrap. Listing these here nudges the session to read them
+# before re-generating ideas on subsequent runs (essential for dedup).
+context_files: ["projects/ideas/history.jsonl", "projects/ideas/README.md"]
 tags: [creative, scheduled-capable]
 ---
 

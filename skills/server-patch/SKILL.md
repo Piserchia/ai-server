@@ -10,6 +10,7 @@ post_review:
   trigger: always
   reviewer_model: claude-opus-4-7
   reviewer_effort: high
+context_files: [".context/SYSTEM.md", ".context/PROTOCOL.md"]
 tags: [server, maintenance, manual-merge-required]
 ---
 

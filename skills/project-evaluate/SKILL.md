@@ -8,6 +8,7 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion]
 max_turns: 40
 post_review:
   trigger: always
+context_files: [".context/PROJECTS_REGISTRY.md", ".context/modules/hosting/CONTEXT.md"]
 tags: [projects, documentation]
 ---
 

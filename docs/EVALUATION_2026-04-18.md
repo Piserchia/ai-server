@@ -25,7 +25,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 2 | — | Audit-log-derived context consumption signal | planned | — | — |
 | 3 | P1 | Seed module `skills/` dirs | **SHIPPED** | `adc1cbf` | 2026-04-18 |
 | 4 | — | Graph-walked context injection | planned | — | — |
-| 5 | P2 | `context_files` adoption sweep | planned | — | — |
+| 5 | P2 | `context_files` adoption sweep | **SHIPPED** | _pending_ | 2026-04-18 |
 | 6 | — | Project-level PROTOCOL | planned | — | — |
 | 7 | — | Stale-context warnings in retrospective | planned | — | — |
 | 8 | — | Budget accounting | planned | — | — |

@@ -12,6 +12,7 @@ escalation:
   on_failure:
     model: claude-opus-4-7
     effort: max
+context_files: [".context/PROJECTS_REGISTRY.md", "projects/_ports.yml", "projects/README.md", ".context/modules/hosting/CONTEXT.md"]
 tags: [projects, creation]
 ---
 
