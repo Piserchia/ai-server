@@ -42,6 +42,22 @@ All via `src.config.settings`:
 - `DEFAULT_MODEL` (global fallback when skill doesn't specify)
 - `QUOTA_PAUSE_MINUTES` (default 60 when reset time is unknown)
 
+## Context injection
+
+Sessions receive a context-aware server directive via `_build_server_directive()`:
+- **Chat sessions**: minimal preamble (no tool use instructions)
+- **Project-scoped sessions**: targeted to the project's CLAUDE.md and CONTEXT.md
+- **Server-scoped sessions**: full directive pointing to SYSTEM.md and module docs
+
+Skills can declare `context_files` in their SKILL.md frontmatter to specify which
+documentation files their session should read first. These are appended to the
+directive as a "Read these files first" list. This reduces token waste by giving
+sessions exactly the context they need.
+
+MCP servers are injected based on skill name (`_NEEDS_PROJECTS_MCP`,
+`_NEEDS_DISPATCH_MCP` sets) or frontmatter tags (`needs-projects-mcp`,
+`needs-dispatch-mcp`).
+
 ## Auth
 
 Subscription only. The runner calls `_check_subscription_auth()` on startup and

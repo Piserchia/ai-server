@@ -47,3 +47,8 @@
   - Other underscores → dashes: `research_report` → `skills/research-report/`
 - Each skill's YAML frontmatter is the machine contract; the markdown body
   becomes the system prompt.
+- Supported frontmatter fields: `name`, `description`, `model`, `effort`,
+  `permission_mode`, `required_tools`, `max_turns`, `escalation`, `post_review`,
+  `tags`, `context_files`, `no_llm`. See `src/registry/skills.py:SkillConfig`.
+- `context_files`: list of documentation files the session should read first.
+  Injected into the server directive by `session.py:_build_server_directive()`.
