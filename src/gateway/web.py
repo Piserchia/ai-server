@@ -11,6 +11,7 @@ Endpoints:
 - POST /api/jobs/{id}/rate         — submit a 1-5 rating
 - GET  /api/projects               — list projects
 - GET  /api/quota                  — { paused, reset_at, reason }
+- GET  /api/retrospective/context  — context consumption rollup
 
 Run: uvicorn src.gateway.web:app --host 127.0.0.1 --port 8080
 """
@@ -21,6 +22,7 @@ import asyncio
 import json
 import secrets
 import uuid
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -35,7 +37,7 @@ from src.config import settings
 from src.db import CHANNEL_JOB_STREAM, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project
-from src.runner import quota
+from src.runner import quota, retrospective
 
 app = FastAPI(title="Assistant gateway", version="0.1.0")
 security = HTTPBasic(auto_error=False)
@@ -223,6 +225,28 @@ async def quota_status() -> dict:
         "reset_at": reset_at.isoformat() if reset_at else None,
         "reason": reason,
     }
+
+
+@app.get("/api/retrospective/context", dependencies=[Depends(_check_auth)])
+async def context_consumption_report(since: str | None = None) -> list[dict]:
+    """Context consumption rollup: which files each skill actually reads."""
+    since_dt = None
+    if since:
+        since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+    data = await retrospective.context_consumption(since=since_dt)
+    return [
+        {
+            "skill": u.skill,
+            "file_path": u.file_path,
+            "read_count": u.read_count,
+            "total_skill_jobs": u.total_skill_jobs,
+            "read_rate": round(u.read_count / u.total_skill_jobs, 3)
+            if u.total_skill_jobs > 0 else 0.0,
+            "success_rate": round(u.success_rate, 3),
+            "avg_rating": round(u.avg_rating, 2) if u.avg_rating is not None else None,
+        }
+        for u in data
+    ]
 
 
 # ── SSE streaming ──────────────────────────────────────────────────────────

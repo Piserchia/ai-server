@@ -2,6 +2,18 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Added GET /api/retrospective/context route (Rec 2)
+
+**Files changed**:
+- `src/gateway/web.py` — New `GET /api/retrospective/context?since=YYYY-MM-DD`
+  route returning JSON array of context consumption data per (skill, file_path).
+  Computes `read_rate` from `read_count / total_skill_jobs`. Auth-gated.
+
+**Why**: Exposes the context consumption rollup (Rec 2) to the dashboard
+and to skills like review-and-improve that consume it via HTTP.
+
+**Side effects**: None; additive route only.
+
 ## 2026-04-18 — Added /proposals Telegram command (Rec 10)
 
 **Files changed**:

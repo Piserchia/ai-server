@@ -27,6 +27,8 @@ Four async tasks running in one process:
 - `events.event_loop()` — rules engine that checks for repeated failures and unhealthy projects, auto-enqueuing follow-up jobs.
 - `retention.rotate_audit_logs()` — compresses and archives old JSONL audit log files (called by server-upkeep skill).
 - `retrospective.skill_performance()` — rollup queries for the auto-tuning retrospective (consumed by review-and-improve skill).
+- `retrospective.context_consumption(since)` — walks audit logs for Read tool_use events, groups by (skill, file_path), joins jobs for success_rate + avg_rating. Returns `list[ContextUsage]`. Used by review-and-improve to propose context_files additions/removals.
+- `retrospective.parse_read_events(lines)` — pure helper: parses JSONL lines, returns deduplicated `(job_id, file_path)` pairs for Read events.
 - `learning.maybe_extract_and_enqueue(parent_job_id, summary)` — post-session hook. Reads the audit log, gates on whether the job modified files (Write/Edit tool_use), runs a one-turn Haiku classifier that may emit a `LearningProposal`, and enqueues a `_learning_apply` internal child job to append the learning to `.context/modules/<module>/skills/<CATEGORY>.md`. Never raises. Called from `main._process_job` after writeback verification.
 - `proposals.extract_proposal_id(text)` — parse `Proposal-ID: <uuid>` marker (pure).
 - `proposals.find_recent_duplicate(target_file, change_type, lookback_days=30)` — dedup check for review-and-improve.

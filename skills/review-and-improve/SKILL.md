@@ -183,6 +183,50 @@ Proposals: 2
 Dispatched: server-patch job abc123 to implement both proposals.
 ```
 
+## Context files audit (Rec 2)
+
+After gathering performance data, audit which files each skill actually
+reads during sessions. This uses the context consumption rollup from
+`src/runner/retrospective.py`.
+
+### How to use
+
+Call `GET /api/retrospective/context?since=<review_window_start>` or import
+directly:
+
+```python
+from src.runner.retrospective import context_consumption
+usages = await context_consumption(since=review_window_start)
+```
+
+Each entry contains: `skill`, `file_path`, `read_count`, `total_skill_jobs`,
+`success_rate`, `avg_rating`.
+
+### When to propose additions to `context_files`
+
+For each `(skill, file_path)` pair where:
+- `read_count >= 5` (statistically meaningful), AND
+- read rate > 50% of that skill's runs in the window
+
+…and the file is NOT already in the skill's `context_files` frontmatter:
+propose a `change_type=context-files` **addition**. This is a zero-cost win:
+pre-loading a file the session would Read anyway saves a tool call.
+
+### When to propose removals from `context_files`
+
+For each `(skill, file_path)` pair where:
+- `read_count >= 5`, AND
+- read rate < 10%
+
+…and the file IS in the skill's `context_files` frontmatter:
+propose a `change_type=context-files` **removal**. The file is wasting
+static context budget without being useful.
+
+### Dedup
+
+Use the Rec 10 dedup flow: call `find_recent_duplicate(target_file, "context-files")`
+before inserting. Include `Proposal-ID:` in the dispatched PR body.
+
 ## Proposal tracking (Rec 10)
 
 Every proposal is recorded in the `proposals` database table so we can

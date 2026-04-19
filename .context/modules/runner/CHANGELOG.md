@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Added context consumption rollup (Rec 2)
+
+**Files changed**:
+- `src/runner/retrospective.py` — Added `ContextUsage` dataclass,
+  `parse_read_events()` pure helper, `_normalize_path()` pure helper,
+  and `context_consumption()` async rollup function. Walks audit log
+  JSONL files for Read tool_use events, joins against jobs table for
+  skill/status/rating, returns per-(skill, file_path) usage metrics.
+
+**Why**: Teaches `review-and-improve` what files are actually useful to
+skills by measuring actual Read tool usage from audit logs. Files read in
+>50% of a skill's runs should be in `context_files`; files read <10% can
+be removed. Per § 7 Rec 2.
+
+**Side effects**: None on runner execution — this module is imported by
+the gateway web route and by the review-and-improve skill.
+
 ## 2026-04-18 — Added proposals.py helper module (Rec 10)
 
 **Files changed**:
