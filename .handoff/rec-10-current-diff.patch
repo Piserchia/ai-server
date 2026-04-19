@@ -1,0 +1,418 @@
+diff --git a/.context/SYSTEM.md b/.context/SYSTEM.md
+index 427099f..1e5b35a 100644
+--- a/.context/SYSTEM.md
++++ b/.context/SYSTEM.md
+@@ -23,7 +23,7 @@
+ |---|---|---|---|
+ | `src/config.py` | Pydantic settings; no API key, subscription auth | — | Everything |
+ | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
+-| `src/models.py` | ORM: Job, Schedule, Project | — | db, runner, gateway, registry |
++| `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
+ | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
+ | `src/runner/session.py` | One Agent SDK session per job | config, db, models, audit_log, registry.skills, runner.quota, runner.router | runner.main |
+ | `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation hooks | config, db, models, runner.session, runner.quota, runner.writeback, gateway.jobs, registry.skills, audit_log | (entry point) |
+@@ -36,6 +36,7 @@
+ | `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool | gateway.jobs | runner.session |
+ | `src/runner/retention.py` | Audit log rotation (compress + archive old JSONL) | config | server-upkeep skill |
+ | `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats) | db, models | review-and-improve skill |
++| `src/runner/proposals.py` | Proposal tracking helpers (pure + async DB ops); backs `/proposals` + dedup/merge-stamping in review-and-improve + server-patch | db, models | gateway.telegram_bot, review-and-improve skill, server-patch skill |
+ | `src/runner/learning.py` | Post-session Haiku classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
+ | `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
+ | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
+diff --git a/.context/modules/db/CHANGELOG.md b/.context/modules/db/CHANGELOG.md
+index 6b47395..83dff64 100644
+--- a/.context/modules/db/CHANGELOG.md
++++ b/.context/modules/db/CHANGELOG.md
+@@ -2,6 +2,30 @@
+ 
+ <!-- Newest entries at top. Every session that modifies this module appends here. -->
+ 
++## 2026-04-18 — Added `proposals` table + Proposal model (Rec 10)
++
++**Files changed**:
++- `alembic/versions/002_proposals_table.py` (NEW) — creates `proposals` with
++  columns id/proposed_by_job_id(FK→jobs CASCADE)/target_file/change_type/
++  rationale/proposed_at/applied_pr_url/applied_at/outcome. Partial index
++  `ix_proposals_dedup` on `(target_file, change_type) WHERE outcome IN
++  ('pending','rejected')`. Secondary index on `proposed_at`.
++- `src/models.py` — added `ProposalChangeType` enum (default-model,
++  context-files, frontmatter-tweak, doc-update), `ProposalOutcome` enum
++  (pending, merged, rejected, superseded with `is_terminal` property),
++  `Proposal` ORM class with relationship to parent Job.
++
++**Why**: Closes the loop on retrospective proposals per
++`docs/EVALUATION_2026-04-18.md` § 7 Rec 10. Without this table,
++`review-and-improve` could propose the same change month after month
++because the PR got ignored ("proposal zombies"). Now each proposal has
++tracked state so dedup + fate tracking both work.
++
++**Side effects**: Schema goes from 3 tables to 4. Existing code unaffected.
++
++**Gotchas discovered**: Partial indexes in Alembic are easiest via
++`op.execute(...)` with raw SQL — keeps the predicate readable in one place.
++
+ ## 2026-04-18 — Seeded skills/ subdirectory per Rec 3 (§ 7 Seed module skills/ dirs)
+ 
+ **Change**: This module now has `.context/modules/db/skills/` containing stub `GOTCHAS.md`, `PATTERNS.md`, and `DEBUG.md` files. Stubs were created via `scripts/seed-module-skills.sh`; no source code modified.
+diff --git a/.context/modules/db/CONTEXT.md b/.context/modules/db/CONTEXT.md
+index 0212095..27edcc7 100644
+--- a/.context/modules/db/CONTEXT.md
++++ b/.context/modules/db/CONTEXT.md
+@@ -7,13 +7,20 @@
+ Persistence layer. SQLAlchemy async engine, Redis client, ORM models, and the
+ JSONL audit log on disk.
+ 
+-## Schema (3 tables)
++## Schema (4 tables)
+ 
+ - `jobs` — one unit of work. Includes `resolved_skill`, `resolved_model`,
+   `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id` for
+   the auto-tuning loop.
+ - `schedules` — cron recipes that enqueue jobs.
+ - `projects` — registry of hosted projects.
++- `proposals` — tuning/doc proposals emitted by `review-and-improve`.
++  Fields: `id`, `proposed_by_job_id` (FK→jobs, CASCADE), `target_file`,
++  `change_type` ('default-model'|'context-files'|'frontmatter-tweak'|'doc-update'),
++  `rationale`, `proposed_at`, `applied_pr_url`, `applied_at`, `outcome`
++  ('pending'|'merged'|'rejected'|'superseded'). Partial index on
++  `(target_file, change_type) WHERE outcome IN ('pending','rejected')`
++  for fast dedup. See § 7 Rec 10 in `docs/EVALUATION_2026-04-18.md`.
+ 
+ See `src/models.py` for the authoritative schema. No foreign tables, no
+ pgvector, no DuckDB.
+@@ -37,8 +44,12 @@ summary, written at job completion (the final text message from Claude).
+ 
+ ## Migrations
+ 
+-One migration in Phase 1: `alembic/versions/001_initial.py`. Every schema
+-change: new migration file, never edit existing ones.
++Migrations under `alembic/versions/`. Never edit existing ones — new file per change.
++
++- `001_initial.py` — Phase 1. Creates `jobs`, `schedules`, `projects`.
++- `002_proposals_table.py` — Rec 10 (2026-04-18). Creates `proposals` with
++  a partial index on `(target_file, change_type) WHERE outcome IN
++  ('pending','rejected')` for the dedup query.
+ 
+ To add a migration after editing `src/models.py`:
+ ```bash
+diff --git a/.context/modules/gateway/CHANGELOG.md b/.context/modules/gateway/CHANGELOG.md
+index ddc48e6..b231db4 100644
+--- a/.context/modules/gateway/CHANGELOG.md
++++ b/.context/modules/gateway/CHANGELOG.md
+@@ -2,6 +2,22 @@
+ 
+ <!-- Newest entries at top. Every session that modifies this module appends here. -->
+ 
++## 2026-04-18 — Added /proposals Telegram command (Rec 10)
++
++**Files changed**:
++- `src/gateway/telegram_bot.py` — new `cmd_proposals` handler with three
++  modes: no-arg lists pending; `Nd` (e.g. `/proposals 30d`) lists all
++  proposals from last N days; `<id_prefix>` shows details for one proposal.
++  Registered via `CommandHandler("proposals", cmd_proposals)`. Added to
++  `/help` text and module docstring command list.
++
++**Why**: Users need visibility into what `review-and-improve` has proposed
++and what's happened to those proposals. Per Rec 10, proposals are now
++tracked in a DB table; the command is the Telegram-side window into it.
++
++**Side effects**: None on existing commands. New command imports
++`src.runner.proposals` lazily inside the handler so module load stays fast.
++
+ ## 2026-04-18 — Seeded skills/ subdirectory per Rec 3 (§ 7 Seed module skills/ dirs)
+ 
+ **Change**: This module now has `.context/modules/gateway/skills/` containing stub `GOTCHAS.md`, `PATTERNS.md`, and `DEBUG.md` files. Stubs were created via `scripts/seed-module-skills.sh`; no source code modified.
+diff --git a/skills/review-and-improve/SKILL.md b/skills/review-and-improve/SKILL.md
+index eb9cc22..511a8b6 100644
+--- a/skills/review-and-improve/SKILL.md
++++ b/skills/review-and-improve/SKILL.md
+@@ -183,14 +183,72 @@ Proposals: 2
+ Dispatched: server-patch job abc123 to implement both proposals.
+ ```
+ 
++## Proposal tracking (Rec 10)
++
++Every proposal is recorded in the `proposals` database table so we can
++track what got proposed, what got applied, and avoid re-proposing rejected
++or still-pending ideas. Use the `src.runner.proposals` helpers.
++
++### Before proposing: dedup check
++
++```python
++from src.runner.proposals import find_recent_duplicate
++
++dup = await find_recent_duplicate(
++    target_file="skills/research-report/SKILL.md",
++    change_type="frontmatter-tweak",   # one of: default-model | context-files |
++                                       #        frontmatter-tweak | doc-update
++    lookback_days=30,
++)
++if dup is not None:
++    # Already proposed within the last 30 days; skip
++    # Include in summary: "previously proposed (id abc12345), skipping"
++    ...
++```
++
++The partial index on `(target_file, change_type) WHERE outcome IN
++('pending', 'rejected')` keeps this lookup cheap.
++
++### When proposing: insert + embed id in PR body
++
++```python
++from src.runner.proposals import insert_proposal
++
++prop = await insert_proposal(
++    proposed_by_job_id=<this_job_uuid>,
++    target_file="skills/research-report/SKILL.md",
++    change_type="frontmatter-tweak",
++    rationale="Reduce max_turns from 40 to 30; 98% of runs finish by turn 18.",
++)
++pr_body = f"""...your PR description...
++
++Proposal-ID: {prop.id}
++"""
++# Dispatch server-patch with this pr_body so the id survives into GitHub.
++```
++
++`server-patch` detects the `Proposal-ID:` marker on merge and flips the
++outcome to `merged`. Without the marker, the proposal stays `pending`
++forever even after a successful merge, which defeats dedup.
++
++### Summary reporting
++
++In your final summary include two counts:
++- `proposed: N` — new proposals created this run
++- `skipped-dup: M` — proposals that matched a recent existing row
++
++Users can view pending proposals via the `/proposals` Telegram command.
++
+ ## Gotchas (living section — append when you learn something)
+ 
+ - **Skip low-sample skills**: Do not propose changes for skills with fewer
+   than 5 runs in the analysis period. The data is not statistically
+   meaningful.
+-- **Do not repeat proposals**: Before proposing, check the relevant
+-  `CHANGELOG.md` files. If a similar change was already made in the analysis
+-  period, skip it — the fix is already deployed.
++- **Do not repeat proposals**: Before proposing, check the `proposals` table
++  (see "Proposal tracking" section above) — if a row with the same
++  `target_file` and `change_type` has outcome in (`pending`, `rejected`)
++  within the last 30 days, skip it. Note it in the summary as "previously
++  proposed (id `<8-char>`), skipping."
+ - **Never propose changes to `.env` or auth config**: These are out of scope.
+   If the data suggests an auth-related issue, flag it for human review in
+   your summary but do not propose a code change.
+diff --git a/skills/server-patch/SKILL.md b/skills/server-patch/SKILL.md
+index ad8ca69..58593aa 100644
+--- a/skills/server-patch/SKILL.md
++++ b/skills/server-patch/SKILL.md
+@@ -174,6 +174,28 @@ Migration: no. Env change: no.
+ Watch: The quota.py change affects the scheduler loop — verify pause/resume behavior manually.
+ ```
+ 
++### 9. Mark proposal applied (if this PR implements a proposal)
++
++If the PR body or the dispatching job's description contains a
++`Proposal-ID: <uuid>` marker (emitted by `review-and-improve` per Rec 10),
++update the row in the `proposals` table once the PR is merged:
++
++```python
++from src.runner.proposals import extract_proposal_id, mark_proposal_merged
++
++pid = extract_proposal_id(pr_body_or_dispatch_description)
++if pid is not None:
++    merged = await mark_proposal_merged(pid, pr_url)
++    # merged=True: row transitioned from pending/rejected → merged.
++    # merged=False: no matching row or already terminal — not an error.
++```
++
++Call this AFTER the PR is actually merged. If there's no `Proposal-ID:`
++marker, skip this step silently — not every PR originates from a proposal.
++
++This closes the feedback loop: `review-and-improve` won't re-propose the
++same change because the dedup query will see the merged row and skip.
++
+ ## Gotchas (living section — append when you learn something)
+ 
+ - `pipenv run pytest` must be run from the repo root, not from `src/`.
+diff --git a/src/gateway/telegram_bot.py b/src/gateway/telegram_bot.py
+index eed8b8a..5d4c46b 100644
+--- a/src/gateway/telegram_bot.py
++++ b/src/gateway/telegram_bot.py
+@@ -1,5 +1,5 @@
+ """
+-Telegram gateway. Commands: /task /status /cancel /chat /projects /rate /resume /help.
++Telegram gateway. Commands: /task /status /cancel /chat /projects /rate /resume /proposals /schedule /help.
+ 
+ Flag syntax (parsed off the front of /task and /chat descriptions):
+     /task --model=opus-4-7 --effort=high  fix the NaN bug in market-tracker
+@@ -118,6 +118,7 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+         "/cancel <id_prefix> — request cancellation\n"
+         "/rate <id_prefix> <1-5> — rate a completed job (trains the tuner)\n"
+         "/projects — list hosted projects\n"
++        "/proposals — list pending tuning/doc proposals (also: /proposals 30d, /proposals <id>)\n"
+         "/resume — clear a quota pause manually\n"
+         "/help — this message\n\n"
+         "Flags on /task: --model=opus|sonnet|haiku  --effort=low|medium|high|xhigh|max\n"
+@@ -298,6 +299,80 @@ async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+     )
+ 
+ 
++async def cmd_proposals(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
++    """List tuning/doc proposals emitted by review-and-improve.
++
++    Usage:
++      /proposals              — list pending proposals
++      /proposals 30d          — list all proposals in last 30 days with outcome
++      /proposals <id_prefix>  — show details for one proposal
++    """
++    if await _guard(update) is None:
++        return
++    from src.runner.proposals import (
++        format_proposal_line,
++        get_proposal_by_id_prefix,
++        list_pending_proposals,
++        list_recent_proposals,
++    )
++
++    args = ctx.args or []
++
++    if not args:
++        rows = await list_pending_proposals(limit=40)
++        if not rows:
++            await update.message.reply_text("No pending proposals.")
++            return
++        header = f"*Pending proposals* ({len(rows)}):"
++        lines = [header, "```"]
++        for p in rows:
++            lines.append(format_proposal_line(p.id, p.target_file, p.change_type, p.outcome, p.proposed_at))
++        lines.append("```")
++        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
++        return
++
++    arg = args[0]
++
++    if arg.endswith("d") and arg[:-1].isdigit():
++        days = int(arg[:-1])
++        rows = await list_recent_proposals(lookback_days=days, limit=50)
++        if not rows:
++            await update.message.reply_text(f"No proposals in last {days} days.")
++            return
++        header = f"*Proposals (last {days}d)* ({len(rows)}):"
++        lines = [header, "```"]
++        for p in rows:
++            lines.append(format_proposal_line(p.id, p.target_file, p.change_type, p.outcome, p.proposed_at))
++        lines.append("```")
++        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
++        return
++
++    prop = await get_proposal_by_id_prefix(arg)
++    if not prop:
++        await update.message.reply_text(
++            f"No proposal matching `{arg}` (or ambiguous prefix).",
++            parse_mode="Markdown",
++        )
++        return
++    lines = [
++        f"*Proposal* `{str(prop.id)[:8]}`",
++        f"*target*: `{prop.target_file}`",
++        f"*change_type*: `{prop.change_type}`",
++        f"*outcome*: `{prop.outcome}`",
++        f"*proposed_by_job*: `{str(prop.proposed_by_job_id)[:8]}`",
++        f"*proposed_at*: {prop.proposed_at.isoformat(timespec='seconds')}",
++    ]
++    if prop.applied_at:
++        lines.append(f"*applied_at*: {prop.applied_at.isoformat(timespec='seconds')}")
++    if prop.applied_pr_url:
++        lines.append(f"*pr*: {prop.applied_pr_url}")
++    if prop.rationale:
++        lines.append("")
++        lines.append("*rationale*:")
++        lines.append(prop.rationale[:1500])
++    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
++
++
+ # ── Schedule management ────────────────────────────────────────────────────
+ 
+ 
+@@ -511,6 +586,7 @@ def main() -> None:
+     app.add_handler(CommandHandler("rate", cmd_rate))
+     app.add_handler(CommandHandler("projects", cmd_projects))
+     app.add_handler(CommandHandler("resume", cmd_resume))
++    app.add_handler(CommandHandler("proposals", cmd_proposals))
+     app.add_handler(CommandHandler("schedule", cmd_schedule))
+ 
+     logger.info("telegram bot starting")
+diff --git a/src/models.py b/src/models.py
+index f2249ed..5fc30f2 100644
+--- a/src/models.py
++++ b/src/models.py
+@@ -161,6 +161,30 @@ class ProjectType(str, Enum):
+     api = "api"
+ 
+ 
++class ProposalChangeType(str, Enum):
++    """What a proposal is changing. Drives dedup logic."""
++    default_model = "default-model"
++    context_files = "context-files"
++    frontmatter_tweak = "frontmatter-tweak"
++    doc_update = "doc-update"
++
++
++class ProposalOutcome(str, Enum):
++    """Lifecycle state of a proposal."""
++    pending = "pending"
++    merged = "merged"
++    rejected = "rejected"
++    superseded = "superseded"
++
++    @property
++    def is_terminal(self) -> bool:
++        return self in {
++            ProposalOutcome.merged,
++            ProposalOutcome.rejected,
++            ProposalOutcome.superseded,
++        }
++
++
+ class Project(Base):
+     __tablename__ = "projects"
+ 
+@@ -183,3 +207,37 @@ class Project(Base):
+     )
+ 
+     jobs = relationship("Job", back_populates="project", foreign_keys=[Job.project_id])
++
++
++class Proposal(Base):
++    """A tuning / documentation proposal emitted by `review-and-improve`.
++
++    See docs/EVALUATION_2026-04-18.md § 7 Recommendation 10.
++    """
++
++    __tablename__ = "proposals"
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++
++    proposed_by_job_id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True),
++        ForeignKey("jobs.id", ondelete="CASCADE"),
++        nullable=False, index=True,
++    )
++
++    target_file: Mapped[str] = mapped_column(Text, nullable=False, index=True)
++    change_type: Mapped[str] = mapped_column(String(32), nullable=False)
++    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
++
++    proposed_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), nullable=False, default=utcnow,
++    )
++    applied_pr_url: Mapped[str | None] = mapped_column(Text, nullable=True)
++    applied_at: Mapped[datetime | None] = mapped_column(
++        DateTime(timezone=True), nullable=True,
++    )
++    outcome: Mapped[str] = mapped_column(
++        String(16), nullable=False, default=ProposalOutcome.pending.value,
++    )
++
++    proposer = relationship("Job", foreign_keys=[proposed_by_job_id])
