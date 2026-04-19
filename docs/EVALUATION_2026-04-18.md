@@ -30,7 +30,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 7 | — | Stale-context warnings in retrospective | planned | — | — |
 | 8 | — | Budget accounting | planned | — | — |
 | 9 | — | Audit log index | planned | — | — |
-| 10 | P1 | Proposal-applied tracking | **SHIPPED** | _pending_ | 2026-04-18 |
+| 10 | P1 | Proposal-applied tracking | **SHIPPED** | `bbe2bf6` | 2026-04-18 |
 | 11 | — | Fix `test_review.py` collection errors | **RESOLVED (non-issue)** | `542334c` | 2026-04-18 |
 | 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | planned | — | — |
 | 13 | — | `_writeback` "why" quality gate | planned | — | — |
