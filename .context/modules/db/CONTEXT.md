@@ -7,13 +7,20 @@
 Persistence layer. SQLAlchemy async engine, Redis client, ORM models, and the
 JSONL audit log on disk.
 
-## Schema (3 tables)
+## Schema (4 tables)
 
 - `jobs` — one unit of work. Includes `resolved_skill`, `resolved_model`,
   `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id` for
   the auto-tuning loop.
 - `schedules` — cron recipes that enqueue jobs.
 - `projects` — registry of hosted projects.
+- `proposals` — tuning/doc proposals emitted by `review-and-improve`.
+  Fields: `id`, `proposed_by_job_id` (FK→jobs, CASCADE), `target_file`,
+  `change_type` ('default-model'|'context-files'|'frontmatter-tweak'|'doc-update'),
+  `rationale`, `proposed_at`, `applied_pr_url`, `applied_at`, `outcome`
+  ('pending'|'merged'|'rejected'|'superseded'). Partial index on
+  `(target_file, change_type) WHERE outcome IN ('pending','rejected')`
+  for fast dedup. See § 7 Rec 10 in `docs/EVALUATION_2026-04-18.md`.
 
 See `src/models.py` for the authoritative schema. No foreign tables, no
 pgvector, no DuckDB.
@@ -37,8 +44,12 @@ summary, written at job completion (the final text message from Claude).
 
 ## Migrations
 
-One migration in Phase 1: `alembic/versions/001_initial.py`. Every schema
-change: new migration file, never edit existing ones.
+Migrations under `alembic/versions/`. Never edit existing ones — new file per change.
+
+- `001_initial.py` — Phase 1. Creates `jobs`, `schedules`, `projects`.
+- `002_proposals_table.py` — Rec 10 (2026-04-18). Creates `proposals` with
+  a partial index on `(target_file, change_type) WHERE outcome IN
+  ('pending','rejected')` for the dedup query.
 
 To add a migration after editing `src/models.py`:
 ```bash

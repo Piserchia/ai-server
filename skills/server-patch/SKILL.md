@@ -174,6 +174,28 @@ Migration: no. Env change: no.
 Watch: The quota.py change affects the scheduler loop — verify pause/resume behavior manually.
 ```
 
+### 9. Mark proposal applied (if this PR implements a proposal)
+
+If the PR body or the dispatching job's description contains a
+`Proposal-ID: <uuid>` marker (emitted by `review-and-improve` per Rec 10),
+update the row in the `proposals` table once the PR is merged:
+
+```python
+from src.runner.proposals import extract_proposal_id, mark_proposal_merged
+
+pid = extract_proposal_id(pr_body_or_dispatch_description)
+if pid is not None:
+    merged = await mark_proposal_merged(pid, pr_url)
+    # merged=True: row transitioned from pending/rejected → merged.
+    # merged=False: no matching row or already terminal — not an error.
+```
+
+Call this AFTER the PR is actually merged. If there's no `Proposal-ID:`
+marker, skip this step silently — not every PR originates from a proposal.
+
+This closes the feedback loop: `review-and-improve` won't re-propose the
+same change because the dedup query will see the merged row and skip.
+
 ## Gotchas (living section — append when you learn something)
 
 - `pipenv run pytest` must be run from the repo root, not from `src/`.

@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-18 — Added /proposals Telegram command (Rec 10)
+
+**Files changed**:
+- `src/gateway/telegram_bot.py` — new `cmd_proposals` handler with three
+  modes: no-arg lists pending; `Nd` (e.g. `/proposals 30d`) lists all
+  proposals from last N days; `<id_prefix>` shows details for one proposal.
+  Registered via `CommandHandler("proposals", cmd_proposals)`. Added to
+  `/help` text and module docstring command list.
+
+**Why**: Users need visibility into what `review-and-improve` has proposed
+and what's happened to those proposals. Per Rec 10, proposals are now
+tracked in a DB table; the command is the Telegram-side window into it.
+
+**Side effects**: None on existing commands. New command imports
+`src.runner.proposals` lazily inside the handler so module load stays fast.
+
 ## 2026-04-18 — Seeded skills/ subdirectory per Rec 3 (§ 7 Seed module skills/ dirs)
 
 **Change**: This module now has `.context/modules/gateway/skills/` containing stub `GOTCHAS.md`, `PATTERNS.md`, and `DEBUG.md` files. Stubs were created via `scripts/seed-module-skills.sh`; no source code modified.

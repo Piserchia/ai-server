@@ -23,7 +23,7 @@
 |---|---|---|---|
 | `src/config.py` | Pydantic settings; no API key, subscription auth | — | Everything |
 | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
-| `src/models.py` | ORM: Job, Schedule, Project | — | db, runner, gateway, registry |
+| `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
 | `src/runner/session.py` | One Agent SDK session per job | config, db, models, audit_log, registry.skills, runner.quota, runner.router | runner.main |
 | `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation hooks | config, db, models, runner.session, runner.quota, runner.writeback, gateway.jobs, registry.skills, audit_log | (entry point) |
@@ -36,6 +36,7 @@
 | `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool | gateway.jobs | runner.session |
 | `src/runner/retention.py` | Audit log rotation (compress + archive old JSONL) | config | server-upkeep skill |
 | `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats) | db, models | review-and-improve skill |
+| `src/runner/proposals.py` | Proposal tracking helpers (pure + async DB ops); backs `/proposals` + dedup/merge-stamping in review-and-improve + server-patch | db, models | gateway.telegram_bot, review-and-improve skill, server-patch skill |
 | `src/runner/learning.py` | Post-session Haiku classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
 | `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |

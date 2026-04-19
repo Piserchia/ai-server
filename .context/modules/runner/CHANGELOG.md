@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-18 — Added proposals.py helper module (Rec 10)
+
+**Files changed**:
+- `src/runner/proposals.py` (NEW, ~230 lines) — pure helpers + async DB
+  ops for proposal tracking table. Public interface: `extract_proposal_id`,
+  `is_valid_change_type`, `is_valid_outcome`, `format_proposal_line`,
+  `find_recent_duplicate`, `insert_proposal`, `mark_proposal_merged`,
+  `list_pending_proposals`, `list_recent_proposals`, `get_proposal_by_id_prefix`.
+
+**Why**: Supports the `/proposals` Telegram command + dedup/merge-stamping
+in the review-and-improve and server-patch skills per § 7 Rec 10.
+
+**Side effects**: None on runner execution — this module is imported lazily
+by the Telegram handler and by skills that need it.
+
 ## 2026-04-18 — Added learning extractor post-session hook (Rec 1)
 
 **Files changed**:

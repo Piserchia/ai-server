@@ -161,6 +161,30 @@ class ProjectType(str, Enum):
     api = "api"
 
 
+class ProposalChangeType(str, Enum):
+    """What a proposal is changing. Drives dedup logic."""
+    default_model = "default-model"
+    context_files = "context-files"
+    frontmatter_tweak = "frontmatter-tweak"
+    doc_update = "doc-update"
+
+
+class ProposalOutcome(str, Enum):
+    """Lifecycle state of a proposal."""
+    pending = "pending"
+    merged = "merged"
+    rejected = "rejected"
+    superseded = "superseded"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in {
+            ProposalOutcome.merged,
+            ProposalOutcome.rejected,
+            ProposalOutcome.superseded,
+        }
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -183,3 +207,37 @@ class Project(Base):
     )
 
     jobs = relationship("Job", back_populates="project", foreign_keys=[Job.project_id])
+
+
+class Proposal(Base):
+    """A tuning / documentation proposal emitted by `review-and-improve`.
+
+    See docs/EVALUATION_2026-04-18.md § 7 Recommendation 10.
+    """
+
+    __tablename__ = "proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    proposed_by_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+
+    target_file: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    change_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    proposed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow,
+    )
+    applied_pr_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    outcome: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=ProposalOutcome.pending.value,
+    )
+
+    proposer = relationship("Job", foreign_keys=[proposed_by_job_id])

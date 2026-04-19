@@ -1,5 +1,5 @@
 """
-Telegram gateway. Commands: /task /status /cancel /chat /projects /rate /resume /help.
+Telegram gateway. Commands: /task /status /cancel /chat /projects /rate /resume /proposals /schedule /help.
 
 Flag syntax (parsed off the front of /task and /chat descriptions):
     /task --model=opus-4-7 --effort=high  fix the NaN bug in market-tracker
@@ -118,6 +118,7 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "/cancel <id_prefix> — request cancellation\n"
         "/rate <id_prefix> <1-5> — rate a completed job (trains the tuner)\n"
         "/projects — list hosted projects\n"
+        "/proposals — list pending tuning/doc proposals (also: /proposals 30d, /proposals <id>)\n"
         "/resume — clear a quota pause manually\n"
         "/help — this message\n\n"
         "Flags on /task: --model=opus|sonnet|haiku  --effort=low|medium|high|xhigh|max\n"
@@ -296,6 +297,80 @@ async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         f"Queue manually resumed (was paused for: {reason[:100]})."
     )
+
+
+async def cmd_proposals(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """List tuning/doc proposals emitted by review-and-improve.
+
+    Usage:
+      /proposals              — list pending proposals
+      /proposals 30d          — list all proposals in last 30 days with outcome
+      /proposals <id_prefix>  — show details for one proposal
+    """
+    if await _guard(update) is None:
+        return
+    from src.runner.proposals import (
+        format_proposal_line,
+        get_proposal_by_id_prefix,
+        list_pending_proposals,
+        list_recent_proposals,
+    )
+
+    args = ctx.args or []
+
+    if not args:
+        rows = await list_pending_proposals(limit=40)
+        if not rows:
+            await update.message.reply_text("No pending proposals.")
+            return
+        header = f"*Pending proposals* ({len(rows)}):"
+        lines = [header, "```"]
+        for p in rows:
+            lines.append(format_proposal_line(p.id, p.target_file, p.change_type, p.outcome, p.proposed_at))
+        lines.append("```")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    arg = args[0]
+
+    if arg.endswith("d") and arg[:-1].isdigit():
+        days = int(arg[:-1])
+        rows = await list_recent_proposals(lookback_days=days, limit=50)
+        if not rows:
+            await update.message.reply_text(f"No proposals in last {days} days.")
+            return
+        header = f"*Proposals (last {days}d)* ({len(rows)}):"
+        lines = [header, "```"]
+        for p in rows:
+            lines.append(format_proposal_line(p.id, p.target_file, p.change_type, p.outcome, p.proposed_at))
+        lines.append("```")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    prop = await get_proposal_by_id_prefix(arg)
+    if not prop:
+        await update.message.reply_text(
+            f"No proposal matching `{arg}` (or ambiguous prefix).",
+            parse_mode="Markdown",
+        )
+        return
+    lines = [
+        f"*Proposal* `{str(prop.id)[:8]}`",
+        f"*target*: `{prop.target_file}`",
+        f"*change_type*: `{prop.change_type}`",
+        f"*outcome*: `{prop.outcome}`",
+        f"*proposed_by_job*: `{str(prop.proposed_by_job_id)[:8]}`",
+        f"*proposed_at*: {prop.proposed_at.isoformat(timespec='seconds')}",
+    ]
+    if prop.applied_at:
+        lines.append(f"*applied_at*: {prop.applied_at.isoformat(timespec='seconds')}")
+    if prop.applied_pr_url:
+        lines.append(f"*pr*: {prop.applied_pr_url}")
+    if prop.rationale:
+        lines.append("")
+        lines.append("*rationale*:")
+        lines.append(prop.rationale[:1500])
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 # ── Schedule management ────────────────────────────────────────────────────
@@ -511,6 +586,7 @@ def main() -> None:
     app.add_handler(CommandHandler("rate", cmd_rate))
     app.add_handler(CommandHandler("projects", cmd_projects))
     app.add_handler(CommandHandler("resume", cmd_resume))
+    app.add_handler(CommandHandler("proposals", cmd_proposals))
     app.add_handler(CommandHandler("schedule", cmd_schedule))
 
     logger.info("telegram bot starting")

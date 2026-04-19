@@ -183,14 +183,72 @@ Proposals: 2
 Dispatched: server-patch job abc123 to implement both proposals.
 ```
 
+## Proposal tracking (Rec 10)
+
+Every proposal is recorded in the `proposals` database table so we can
+track what got proposed, what got applied, and avoid re-proposing rejected
+or still-pending ideas. Use the `src.runner.proposals` helpers.
+
+### Before proposing: dedup check
+
+```python
+from src.runner.proposals import find_recent_duplicate
+
+dup = await find_recent_duplicate(
+    target_file="skills/research-report/SKILL.md",
+    change_type="frontmatter-tweak",   # one of: default-model | context-files |
+                                       #        frontmatter-tweak | doc-update
+    lookback_days=30,
+)
+if dup is not None:
+    # Already proposed within the last 30 days; skip
+    # Include in summary: "previously proposed (id abc12345), skipping"
+    ...
+```
+
+The partial index on `(target_file, change_type) WHERE outcome IN
+('pending', 'rejected')` keeps this lookup cheap.
+
+### When proposing: insert + embed id in PR body
+
+```python
+from src.runner.proposals import insert_proposal
+
+prop = await insert_proposal(
+    proposed_by_job_id=<this_job_uuid>,
+    target_file="skills/research-report/SKILL.md",
+    change_type="frontmatter-tweak",
+    rationale="Reduce max_turns from 40 to 30; 98% of runs finish by turn 18.",
+)
+pr_body = f"""...your PR description...
+
+Proposal-ID: {prop.id}
+"""
+# Dispatch server-patch with this pr_body so the id survives into GitHub.
+```
+
+`server-patch` detects the `Proposal-ID:` marker on merge and flips the
+outcome to `merged`. Without the marker, the proposal stays `pending`
+forever even after a successful merge, which defeats dedup.
+
+### Summary reporting
+
+In your final summary include two counts:
+- `proposed: N` — new proposals created this run
+- `skipped-dup: M` — proposals that matched a recent existing row
+
+Users can view pending proposals via the `/proposals` Telegram command.
+
 ## Gotchas (living section — append when you learn something)
 
 - **Skip low-sample skills**: Do not propose changes for skills with fewer
   than 5 runs in the analysis period. The data is not statistically
   meaningful.
-- **Do not repeat proposals**: Before proposing, check the relevant
-  `CHANGELOG.md` files. If a similar change was already made in the analysis
-  period, skip it — the fix is already deployed.
+- **Do not repeat proposals**: Before proposing, check the `proposals` table
+  (see "Proposal tracking" section above) — if a row with the same
+  `target_file` and `change_type` has outcome in (`pending`, `rejected`)
+  within the last 30 days, skip it. Note it in the summary as "previously
+  proposed (id `<8-char>`), skipping."
 - **Never propose changes to `.env` or auth config**: These are out of scope.
   If the data suggests an auth-related issue, flag it for human review in
   your summary but do not propose a code change.
