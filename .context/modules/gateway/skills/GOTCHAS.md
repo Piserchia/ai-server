@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-04-20 — Telegram Markdown escaping required for all interpolated DB strings
+
+Any string value read from the database (job titles, project names, user input) that is interpolated into a Telegram `parse_mode="MarkdownV2"` message must be escaped with `telegram.helpers.escape_markdown(value, version=2)` before insertion. Unescaped characters like `.`, `-`, `(`, `)`, `!` trigger a `BadRequest: Can't parse entities` error from Telegram's API. This is especially easy to miss when the field looks like plain text in the DB but contains punctuation at runtime.
+
+_Evidence: job `523e25fc`_
+
 ## 2026-04-20 — Telegram done-listener mapping lost on bot restart
 
 **Symptom**: Job completes but user never receives the Telegram DM with results.
