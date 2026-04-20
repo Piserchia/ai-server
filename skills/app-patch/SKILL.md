@@ -90,43 +90,79 @@ Read the project's context files:
 
 If the project directory does not exist, stop and report it.
 
-### Step 2: Triage — is this a quick fix or a major feature?
+### Step 2: Triage — quick fix or needs a plan?
 
 Assess the request against the codebase:
 
 **Quick fix** (do it now): bug fix, config change, small UI tweak, adding
 a field, fixing a typo. Criteria: touches <5 files, no new architecture,
 no new dependencies, can be done in this session.
+→ Skip to Step 4 (Patch).
 
-**Medium feature** (plan first, then implement): new page, new API endpoint,
-adding a library, moderate refactor. Criteria: touches 5-15 files, clear
-approach, one session of planning + one of implementation.
+**Everything else** (needs a plan): any feature addition, new page, new
+endpoint, new subsystem, refactor, dependency addition. Whether it's 5
+files or 50, produce an implementation plan first.
+→ Go to Step 3 (Plan).
 
-**Major feature** (plan, get approval, implement in phases): new subsystem,
-new backend, auth system, multiplayer, database schema changes. Criteria:
-touches 15+ files, needs architecture decisions, multiple sessions.
+### Step 3: Plan — produce an actionable implementation plan
 
-For **quick fixes**: proceed directly to Step 4 (Patch).
+Write a plan that assumes YOU will build everything. Do not describe gaps
+or missing prerequisites — plan to create them. The plan IS the proposal;
+the user approves and you implement.
 
-For **medium features**: produce a plan in your response describing what
-you'll change, which files, and what the approach is. End your turn — the
-user will reply to approve or adjust. On the next turn, implement.
+**Plan format:**
 
-For **major features**: produce a high-level architecture analysis:
-- What exists today (tech stack, key modules, current limitations)
-- What needs to change (new components, data flow, dependencies)
-- A phased approach (what to build first, second, third)
-- What you need from the user (design decisions, priorities)
+```
+## Implementation Plan: <feature name>
 
-Then emit `task_question` asking which phase to start with, or asking the
-design question that blocks progress. Do NOT attempt to implement a major
-feature in one turn.
+### What exists today
+<2-3 sentences on current state — tech stack, relevant modules>
 
-### Step 3: Plan (medium/major features only)
+### What I'll build
+<Numbered list of concrete changes. Every item = a thing you will do.>
 
-If this is a continuation after the user approved your plan:
-1. Confirm which phase or part you're implementing
-2. List the specific files you'll create or modify
+1. <Create/modify file X to do Y>
+2. <Add dependency Z via pip/npm>
+3. <Create new module for W>
+...
+
+### Build order
+<Which items first, which depend on others>
+
+Phase 1: <foundation — models, schema, config>
+Phase 2: <core logic — business rules, API endpoints>
+Phase 3: <UI / integration — connect everything>
+
+### Files I'll create or modify
+<Exact file paths for every change>
+
+### How to verify
+<What the user should see/test when done>
+```
+
+**Rules for the plan:**
+- Every item uses "I will" language, not "you'd need to" or "this requires"
+- If the feature needs infrastructure that doesn't exist (backend, auth,
+  DB tables), the plan includes creating it
+- If you have a design question that genuinely blocks planning (e.g.,
+  "should groups be invite-only or public?"), emit `task_choices` with
+  the options. But prefer making a reasonable default and noting it in
+  the plan over blocking on every decision.
+- For large plans (3+ phases), implement phase by phase across multiple
+  turns. Each turn implements one phase, commits, and either continues
+  or emits `task_complete`.
+
+**After writing the plan**: end your turn. Your plan text becomes the
+message the user sees. They either:
+- Reply "approved" / "looks good" → next turn you implement
+- Reply with adjustments → next turn you revise the plan
+- Reply "just do phase 1" → next turn you implement phase 1 only
+
+### Step 3b: Implement the plan (continuation turn)
+
+When the user approves (or you're on a continuation turn after approval):
+1. Re-read the plan from the prior turn in the task conversation
+2. Implement the current phase
 3. Proceed to Step 4
 
 ### Step 4: Patch
