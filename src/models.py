@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
+    BigInteger,
     JSON,
     Boolean,
     DateTime,
@@ -275,7 +276,7 @@ class Task(Base):
         String(20), nullable=False, default=TaskStatus.active.value, index=True
     )
     created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
-    chat_id: Mapped[int | None] = mapped_column(nullable=True)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # ^ Telegram chat_id — persisted so bot restarts don't lose the mapping
 
     created_at: Mapped[datetime] = mapped_column(

@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Fix Task.chat_id BigInteger type
+
+**Files changed**: `src/models.py` — Changed `Task.chat_id` from default
+`Integer` to explicit `BigInteger`. Telegram chat IDs exceed int32 range.
+
+**Why**: `asyncpg.DataError: value out of int32 range` on task creation.
+
 ## 2026-04-20 — Added tasks + task_turns tables for multi-turn interaction
 
 **Files changed**:
