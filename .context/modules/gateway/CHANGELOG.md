@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Documentation cleanup: updated CONTEXT.md
+
+**Files changed**:
+- `.context/modules/gateway/CONTEXT.md` — Updated public interface to include
+  `/api/retrospective/context`, `/api/jobs/{id}/stream`, `/api/projects/public`
+  routes. Added `/proposals` and `/schedule` to Telegram commands list.
+  Removed stale Phase 2 references from Testing and Gotchas sections.
+
+**Why**: CONTEXT.md was out of date — missing routes and commands added
+in Phases 5-6 and evaluation recs.
+
+**Side effects**: None.
+
 ## 2026-04-19 — Added GET /api/retrospective/context route (Rec 2)
 
 **Files changed**:

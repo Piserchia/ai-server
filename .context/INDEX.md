@@ -19,6 +19,9 @@
 | Check what's hosted | `.context/PROJECTS_REGISTRY.md` |
 | Check what skills exist | `.context/SKILLS_REGISTRY.md` |
 | Review system performance | `src/runner/retrospective.py`, `skills/review-and-improve/SKILL.md` |
+| See evaluation status | `docs/EVALUATION_2026-04-18.md` (status table at top) |
+| Create a new skill | `skills/TEMPLATE.md` (structure reference), `skills/new-skill/SKILL.md` |
+| Read module institutional knowledge | `.context/modules/<x>/skills/GOTCHAS.md`, `DEBUG.md`, `PATTERNS.md` |
 | Understand hosting setup | `.context/modules/hosting/CONTEXT.md`, `Caddyfile` |
 
 ## Documentation hierarchy
@@ -40,11 +43,13 @@ SERVER.md                           ← Architecture overview for humans
     registry/ CONTEXT.md, CHANGELOG.md
     hosting/  CONTEXT.md, CHANGELOG.md
 docs/
+  EVALUATION_2026-04-18.md          ← Full system evaluation + rec status table
   Troubleshooting.md                ← Failure modes + fixes
   PHASE_3_PLAN.md through PHASE_6_PLAN.md  ← Historical (all shipped)
   README.md                         ← Reading order guide
-skills/<name>/
-  SKILL.md                          ← Frontmatter (config) + body (system prompt)
+skills/
+  TEMPLATE.md                         ← Reference template for new skills
+  <name>/SKILL.md                     ← Frontmatter (config) + body (system prompt)
 projects/<slug>/
   CLAUDE.md                         ← Project session directive
   manifest.yml                      ← Machine-readable hosting config

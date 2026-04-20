@@ -7,11 +7,15 @@ Usage:
     python scripts/lint-docs.py          # prints report, exit 0 if clean
     pipenv run pytest tests/test_doc_lint.py  # same checks as pytest tests
 
-Checks:
+Checks (8):
 1. Every skill directory has a row in SKILLS_REGISTRY.md
 2. Every project directory has a row in PROJECTS_REGISTRY.md
 3. Every src/runner/*.py file is mentioned in runner CONTEXT.md
 4. Phase plan status matches SYSTEM.md workstreams
+5. Every .context/modules/<x>/ has skills/ with GOTCHAS, PATTERNS, DEBUG stubs
+6. Declared module graph deps match actual imports (AST-parsed)
+7. Every skill's context_files reference real files
+8. Non-internal skills have required body sections (Gotchas, min body length)
 """
 
 from __future__ import annotations

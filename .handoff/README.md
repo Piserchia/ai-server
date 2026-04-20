@@ -1,4 +1,12 @@
-# Handoff to Opus 4.6 CLI session
+# ARCHIVED — Handoff to Opus 4.6 CLI session
+
+> **Status**: All evaluation recommendations shipped (2026-04-19/20) except
+> Rec 14 (chunk-level doc retrieval, deferred). This folder is historical
+> reference only. See `docs/EVALUATION_2026-04-18.md` for final status.
+
+---
+
+# Original handoff document
 
 **Date**: 2026-04-18
 **Origin**: Claude chat sessions (claude.ai web) hit tool-call budget limits across

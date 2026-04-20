@@ -41,6 +41,7 @@ When you make a change, update the corresponding global docs:
 | Added a new script (`scripts/`) | `.context/SYSTEM.md` (module graph) |
 | Changed hosting config (Caddy, tunnel, launchd) | `.context/modules/hosting/CONTEXT.md` |
 | Added a new documentation file | `.context/INDEX.md` |
+| Added a new `docs/*.md` report or plan | `.context/INDEX.md`, `docs/README.md` |
 | Discovered a new failure mode | `docs/Troubleshooting.md` |
 | Discovered a non-obvious gotcha | Relevant `skills/GOTCHAS.md` or module skills dir |
 

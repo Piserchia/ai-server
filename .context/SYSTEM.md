@@ -121,11 +121,11 @@ bash scripts/run.sh stop
   guarded by `escalated_from` payload flag to prevent loops.
 - **Quota detection is heuristic** — string-match on error messages. Once the SDK
   surfaces structured rate_limit errors, switch to typed detection.
-- **Dashboard is HTMX shell** — enough for Phase 1/2; add SSE streaming for live
-  job tail in Phase 3.
-- **No integration tests yet** — only pure-function unit tests. The SDK mock
-  surface is complex; Phase 4+ can add integration tests once we have a stable
-  set of skills to test against.
+- **Dashboard has SSE streaming** — `/api/jobs/{id}/stream` provides live job
+  tailing via EventSourceResponse (shipped Phase 6).
+- **Pure-function unit tests only** (289+). Integration tests with SDK mocks
+  deferred indefinitely — the pure-function surface covers core business logic
+  well, and the SDK mock surface is complex with limited payoff.
 
 ## Hosting
 

@@ -19,9 +19,11 @@ the single enqueue/cancel/lookup helper.
 - `cancel_job(job_id)` — publishes to `jobs:cancel`
 - `find_job_by_prefix(prefix) -> Job | None` — accepts 8-char prefix or full UUID
 - FastAPI: `/health`, `/api/jobs` (GET/POST), `/api/jobs/{id}` (GET/DELETE),
-  `/api/jobs/{id}/rate` (POST), `/api/projects`, `/api/quota`
+  `/api/jobs/{id}/rate` (POST), `/api/jobs/{id}/stream` (SSE),
+  `/api/projects`, `/api/projects/public`, `/api/quota`,
+  `/api/retrospective/context`
 - Telegram commands: `/task`, `/chat`, `/status`, `/cancel`, `/rate`,
-  `/projects`, `/resume`, `/help`
+  `/projects`, `/proposals`, `/resume`, `/schedule`, `/help`
 
 ## Flag parsing
 
@@ -50,8 +52,9 @@ Flags land in `job.payload` and take precedence over skill frontmatter.
 
 ## Testing
 
-None yet (Phase 1). Phase 2: add `tests/test_flag_parsing.py`,
-`tests/test_web_api.py` with httpx/ASGI.
+Flag parsing and writeback classification are covered in `tests/test_pure_functions.py`.
+No dedicated gateway integration tests (httpx/ASGI) — pure-function tests cover the
+parsers and classifiers.
 
 ## Gotchas
 
@@ -59,5 +62,5 @@ None yet (Phase 1). Phase 2: add `tests/test_flag_parsing.py`,
   `telegram.Update`. Use `sql_update` alias.
 - `find_job_by_prefix` with a too-short prefix (3 chars) can match many jobs.
   It returns None on ambiguous matches — callers should treat that as "not found".
-- The HTMX dashboard uses no persistent SSE yet; it polls every 5s. Phase 2 adds
-  real streaming via `/api/jobs/{id}/stream` (EventSource).
+- The HTMX dashboard polls every 5s for the job list. Live streaming is available
+  via `/api/jobs/{id}/stream` (SSE/EventSource) for individual job tailing.

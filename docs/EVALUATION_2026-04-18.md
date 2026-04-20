@@ -34,7 +34,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 11 | — | Fix `test_review.py` collection errors | **RESOLVED (non-issue)** | `542334c` | 2026-04-18 |
 | 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | **SHIPPED** | `2a73c0e` | 2026-04-19 |
 | 13 | — | `_writeback` "why" quality gate | **SHIPPED** | `cdb1dbd` | 2026-04-19 |
-| 14 | — | Chunk-level doc retrieval | planned | — | — |
+| 14 | — | Chunk-level doc retrieval | **DEFERRED** | — | — |
 | 15 | — | Tool-use-aware code review | **SHIPPED** | `84a18d3` | 2026-04-19 |
 
 ---

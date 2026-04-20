@@ -26,11 +26,11 @@
 | `restore` | Sonnet 4.6 / medium | Restore from backup tarball. DESTRUCTIVE -- requires explicit user confirmation | 6 |
 | `_learning_apply` | Sonnet 4.6 / low | **Internal.** Appends learning proposals from the learning extractor hook to `.context/modules/<x>/skills/<CATEGORY>.md`. Not user-triggerable. | Rec 1 |
 
-## Planned (in order of build)
+## Deferred
 
-| Skill | Model / Effort | Phase |
-|---|---|---|
-| `notify` (no-LLM MCP tool) | — | 4 |
+| Skill | Reason |
+|---|---|
+| `notify` (no-LLM MCP tool) | Originally planned for Phase 4. MCP dispatch via `enqueue_job` covers the primary use case (spawning child jobs). A dedicated no-LLM notify tool can be added if Telegram DM-on-demand is needed outside job completion. |
 
 ## Scripts (non-skill, no LLM)
 

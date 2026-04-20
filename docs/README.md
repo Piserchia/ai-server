@@ -24,15 +24,16 @@ session picking up work on this repo, or a human returning after a break.
 4. If the root cause doesn't match anything in the file, add a new entry
    following the template at the end of that doc
 
-**If you're implementing a new phase:**
+**If you're working on system improvements (post-phase era):**
+
+All 6 phases are shipped. Improvements are now tracked in
+`docs/EVALUATION_2026-04-18.md` (15 recommendations, 14 shipped, 1 deferred).
 
 1. Read `../MISSION.md` — stay oriented on objectives
 2. Read `../CLAUDE.md` and `../SERVER.md` — current state of the repo
 3. Read `../.context/SYSTEM.md` — module graph and invariants
-4. Read the specific `PHASE_N_PLAN.md` for the phase you're executing
-5. Read module-level `../.context/modules/<x>/CONTEXT.md` for every module the
-   phase touches
-6. Start executing the runbook at the end of the phase plan
+4. Read `docs/EVALUATION_2026-04-18.md` — status table at top shows what's done
+5. Read module-level `../.context/modules/<x>/CONTEXT.md` for modules you'll touch
 
 **If you're an SDK session (runner-invoked):**
 
