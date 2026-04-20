@@ -12,6 +12,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_runner_context,
     check_phase_plan_status,
     check_module_skills_dirs,
+    check_module_graph_imports,
 )
 
 
@@ -38,3 +39,8 @@ def test_phase_plan_status_current():
 def test_module_skills_dirs_seeded():
     warnings = check_module_skills_dirs()
     assert warnings == [], f"Module skills/ dirs missing/incomplete: {warnings}"
+
+
+def test_module_graph_imports():
+    warnings = check_module_graph_imports()
+    assert warnings == [], f"Module graph import mismatches: {warnings}"

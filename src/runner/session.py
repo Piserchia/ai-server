@@ -68,7 +68,11 @@ async def interrupt(job_id: str | uuid.UUID) -> bool:
 # ── Skill resolution ────────────────────────────────────────────────────────
 
 
-def _build_server_directive(skill_cfg: SkillConfig | None, cwd: Path) -> str:
+def _build_server_directive(
+    skill_cfg: SkillConfig | None,
+    cwd: Path,
+    job_description: str = "",
+) -> str:
     """Build a context-appropriate server preamble. Reduces token waste by
     tailoring the directive to the task type."""
     base = "You are working inside the assistant server.\n\n"
@@ -100,12 +104,53 @@ def _build_server_directive(skill_cfg: SkillConfig | None, cwd: Path) -> str:
             "Write a one-paragraph summary as your final text message.\n"
         )
 
+        # Graph-walked context injection (Rec 4): if the job description
+        # references known modules, append dependency context so the session
+        # knows what else to check before making changes.
+        if job_description:
+            directive += _module_dependency_context(job_description)
+
     # Append context_files reading list if the skill declares them
     if skill_cfg and skill_cfg.context_files:
         files_list = "\n".join(f"- `{f}`" for f in skill_cfg.context_files)
         directive += f"\n**Read these files first**:\n{files_list}\n"
 
     return directive
+
+
+def _module_dependency_context(job_description: str) -> str:
+    """If the job description mentions known modules, return a brief dependency
+    note. Returns empty string if no modules detected or graph unavailable."""
+    try:
+        from src.context.module_graph import (
+            detect_modules_in_text,
+            parse_module_graph,
+            reverse_graph,
+        )
+        system_md = (settings.server_root / ".context" / "SYSTEM.md").read_text()
+        graph = parse_module_graph(system_md)
+        if not graph:
+            return ""
+        rev = reverse_graph(graph)
+        mentioned = detect_modules_in_text(job_description, set(graph.keys()))
+        if not mentioned:
+            return ""
+
+        lines = ["\n**Module dependencies** (auto-detected from your task):"]
+        for mod in sorted(mentioned):
+            dependents = rev.get(mod, [])
+            if dependents:
+                dep_str = ", ".join(sorted(dependents))
+                lines.append(
+                    f"- `{mod}` is depended on by: {dep_str}. "
+                    f"Read their CONTEXT.md before changing its API."
+                )
+            else:
+                lines.append(f"- `{mod}` has no dependents in the graph.")
+        lines.append("")
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
@@ -132,7 +177,7 @@ def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
 def _build_options(job: Job, cwd: Path, skill_cfg: SkillConfig | None) -> ClaudeAgentOptions:
     """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults."""
     # System prompt — context-aware preamble + skill body
-    server_directive = _build_server_directive(skill_cfg, cwd)
+    server_directive = _build_server_directive(skill_cfg, cwd, job.description)
     system_prompt = server_directive
     if skill_cfg and skill_cfg.body.strip():
         system_prompt = f"{server_directive}\n\n---\n\n# Active skill\n\n{skill_cfg.body}"

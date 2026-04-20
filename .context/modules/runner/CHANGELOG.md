@@ -2,6 +2,37 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Graph-walked context injection + import lint (Rec 4)
+
+**Files changed**:
+- `src/context/module_graph.py` (NEW) — Pure functions: `parse_module_graph()`
+  parses the SYSTEM.md markdown table into a forward dependency map,
+  `reverse_graph()` builds the reverse map, `extract_imports()` AST-parses
+  Python source for `from src.*` imports, `detect_modules_in_text()` finds
+  module references in free-form text, `module_path_to_shorthand()` converts
+  file paths to graph shorthands.
+- `src/runner/session.py` — `_build_server_directive()` now accepts
+  `job_description` and calls `_module_dependency_context()` for server-scoped
+  sessions. When the description mentions known modules, the directive includes
+  "Module dependencies" section listing dependents and advising to read their
+  CONTEXT.md before API changes.
+- `scripts/lint_docs.py` — New `check_module_graph_imports()` lint check.
+  AST-parses every Python file under `src/`, compares actual imports against
+  declared dependencies in SYSTEM.md module graph. Warns on undeclared deps.
+- `.context/SYSTEM.md` — Fixed undeclared deps for runner.main, runner.session,
+  gateway.web, gateway.telegram_bot, runner.retrospective. Added
+  context.module_graph row.
+- `tests/test_module_graph.py` (NEW, 23 tests) — Pure-function coverage for
+  graph parser, import extractor, module detector, path shorthand conversion.
+- `tests/test_doc_lint.py` — Added `test_module_graph_imports` test.
+
+**Why**: Per § 7 Rec 4. Sessions modifying server modules now get automatic
+dependency context, and the lint check catches undeclared cross-module imports
+before they accumulate.
+
+**Side effects**: The new lint check (6th) runs on every `python3 scripts/lint_docs.py`
+invocation. It caught 12 real undeclared deps from prior phases, now fixed.
+
 ## 2026-04-19 — Added context consumption rollup (Rec 2)
 
 **Files changed**:

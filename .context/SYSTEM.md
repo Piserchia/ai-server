@@ -25,8 +25,8 @@
 | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
 | `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
-| `src/runner/session.py` | One Agent SDK session per job | config, db, models, audit_log, registry.skills, runner.quota, runner.router | runner.main |
-| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation hooks | config, db, models, runner.session, runner.quota, runner.writeback, gateway.jobs, registry.skills, audit_log | (entry point) |
+| `src/runner/session.py` | One Agent SDK session per job | config, db, models, audit_log, registry.skills, runner.quota, runner.router, runner.mcp_projects, runner.mcp_dispatch, context.module_graph | runner.main |
+| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation hooks | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, gateway.jobs, registry.skills, audit_log | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher | — | runner.session |
 | `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
@@ -35,20 +35,21 @@
 | `src/runner/mcp_projects.py` | MCP server: project tools (list, get, logs, restart) | config, db, models | runner.session |
 | `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool | gateway.jobs | runner.session |
 | `src/runner/retention.py` | Audit log rotation (compress + archive old JSONL) | config | server-upkeep skill |
-| `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats) | db, models | review-and-improve skill |
+| `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats + context consumption) | config, db, models | review-and-improve skill, gateway.web |
 | `src/runner/proposals.py` | Proposal tracking helpers (pure + async DB ops); backs `/proposals` + dedup/merge-stamping in review-and-improve + server-patch | db, models | gateway.telegram_bot, review-and-improve skill, server-patch skill |
 | `src/runner/learning.py` | Post-session Haiku classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
+| `src/context/module_graph.py` | Parse SYSTEM.md module graph; dependency detection + import validation | — | runner.session, scripts/lint_docs.py |
 | `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
 | `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
-| `src/gateway/web.py` | FastAPI: /api/jobs + dashboard | config, db, models, gateway.jobs, audit_log | (entry point) |
-| `src/gateway/telegram_bot.py` | Telegram 6 commands + done-notification DMs | config, db, models, gateway.jobs, audit_log | (entry point) |
+| `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes | config, db, models, gateway.jobs, audit_log, runner.retrospective | (entry point) |
+| `src/gateway/telegram_bot.py` | Telegram commands + done-notification DMs | config, db, models, gateway.jobs, audit_log, runner.proposals | (entry point) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
 | `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
 | `scripts/backup.sh` | Nightly pg_dump + audit log + log snapshot | psql, tar | — (launchd timer) |
 | `scripts/seed-schedules.sh` | Insert canonical schedules into DB | psql | — |
 | `scripts/seed-module-skills.sh` | Ensure every `.context/modules/<x>/` has `skills/{GOTCHAS,PATTERNS,DEBUG}.md` stubs | — | bootstrap.sh + test_doc_lint.py |
-| `scripts/lint_docs.py` | Validate registries vs actual files; catches stale docs | — | tests/test_doc_lint.py |
+| `scripts/lint_docs.py` | Validate registries vs actual files; catches stale docs | context.module_graph | tests/test_doc_lint.py |
 
 ## Data flow
 

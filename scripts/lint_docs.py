@@ -20,6 +20,9 @@ import re
 import sys
 from pathlib import Path
 
+# Allow importing from src/
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 # Resolve repo root
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -147,6 +150,65 @@ def check_module_skills_dirs() -> list[str]:
     return warnings
 
 
+def check_module_graph_imports() -> list[str]:
+    """Validate that declared dependencies in SYSTEM.md match actual imports.
+
+    Warns when a Python module under src/ imports from src.X but doesn't
+    declare X in its 'Depends on' column in the module graph table.
+    """
+    from src.context.module_graph import (
+        extract_imports,
+        module_path_to_shorthand,
+        parse_module_graph,
+    )
+
+    system_md = _read(REPO_ROOT / ".context" / "SYSTEM.md")
+    graph = parse_module_graph(system_md)
+    if not graph:
+        return ["Could not parse module graph from SYSTEM.md"]
+
+    warnings = []
+    src_dir = REPO_ROOT / "src"
+
+    for py_file in sorted(src_dir.rglob("*.py")):
+        if py_file.name == "__init__.py":
+            continue
+        rel = str(py_file.relative_to(REPO_ROOT))
+        shorthand = module_path_to_shorthand(rel)
+
+        if shorthand not in graph:
+            continue  # module not in graph table (e.g., src/context/module_graph.py itself)
+
+        declared_deps = set(graph[shorthand])
+        actual_imports = extract_imports(py_file.read_text())
+
+        for imp in actual_imports:
+            if imp in declared_deps:
+                continue
+            # Check if a parent is declared (e.g., declared 'runner'
+            # covers 'runner.session')
+            parts = imp.split(".")
+            if any(".".join(parts[:i]) in declared_deps for i in range(1, len(parts))):
+                continue
+            # Check if imp is a package prefix of any declared dep
+            # (handles `from src.runner import quota` extracting 'runner'
+            # when the module declares 'runner.quota')
+            if any(d.startswith(imp + ".") for d in declared_deps):
+                continue
+            # Skip self-references (module importing from its own package)
+            if imp == shorthand or imp.startswith(shorthand + "."):
+                continue
+            # Skip: import target not in graph at all (likely an external
+            # package or a module not tracked in SYSTEM.md)
+            if imp not in graph:
+                continue
+            warnings.append(
+                f"`{shorthand}` imports `{imp}` but doesn't declare it in SYSTEM.md"
+            )
+
+    return warnings
+
+
 def run_all() -> dict[str, list[str]]:
     """Run all checks, return {check_name: [warnings]}."""
     return {
@@ -155,6 +217,7 @@ def run_all() -> dict[str, list[str]]:
         "runner_context": check_runner_context(),
         "phase_plan_status": check_phase_plan_status(),
         "module_skills_dirs": check_module_skills_dirs(),
+        "module_graph_imports": check_module_graph_imports(),
     }
 
 
