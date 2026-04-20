@@ -50,6 +50,16 @@ async def _guard(update: Update) -> int | None:
     return chat_id
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+
+def _esc_md(text: str) -> str:
+    """Escape Telegram Markdown v1 special characters in user-supplied text."""
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 # ── Flag parsing ────────────────────────────────────────────────────────────
 
 _FLAG_RE = re.compile(r"--(\w+)=(\S+)")
@@ -683,7 +693,7 @@ async def cmd_tasks(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     lines = [f"*Active tasks ({len(tasks)}):*\n"]
     for t in tasks:
         prefix = str(t.id)[:8]
-        desc = t.description[:50]
+        desc = _esc_md(t.description[:50])
         status_icon = {"active": "🔄", "awaiting_user": "❓", "pending_approval": "✋"}.get(t.status, "")
         lines.append(f"`{prefix}` {status_icon} {t.status}: {desc}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
@@ -721,7 +731,7 @@ async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         prefix = str(j.id)[:8]
         icon = status_icons.get(j.status, "")
         skill = j.resolved_skill or j.kind
-        desc = j.description[:40]
+        desc = _esc_md(j.description[:40])
         task_ref = f" (task `{str(j.task_id)[:8]}`)" if j.task_id else ""
         lines.append(f"`{prefix}` {icon} {skill} — {desc}{task_ref}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")

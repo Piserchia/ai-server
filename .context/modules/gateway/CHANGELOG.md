@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Fix Markdown escaping in /tasks, /jobs + add command tests
+
+**Files changed**:
+- `src/gateway/telegram_bot.py` — Added `_esc_md()` helper to escape
+  Telegram Markdown special chars in user-supplied text. Applied to
+  description fields in `/tasks` and `/jobs` output. Fixed silent crash
+  when descriptions contained underscores/backticks.
+- `tests/test_telegram_commands.py` (NEW) — 13 tests for `_esc_md()` and
+  `parse_flags()` regression.
+
+**Why**: `/tasks` crashed with `BadRequest: can't find end of entity` when
+task descriptions contained Markdown-breaking characters.
+
 ## 2026-04-20 — Added /jobs command
 
 **Files changed**: `src/gateway/telegram_bot.py` — New `cmd_jobs` handler.
