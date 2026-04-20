@@ -32,7 +32,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 9 | — | Audit log index | **SHIPPED** | `109c5bd` | 2026-04-19 |
 | 10 | P1 | Proposal-applied tracking | **SHIPPED** | `bbe2bf6` | 2026-04-18 |
 | 11 | — | Fix `test_review.py` collection errors | **RESOLVED (non-issue)** | `542334c` | 2026-04-18 |
-| 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | planned | — | — |
+| 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | **SHIPPED** | _pending_ | 2026-04-19 |
 | 13 | — | `_writeback` "why" quality gate | planned | — | — |
 | 14 | — | Chunk-level doc retrieval | planned | — | — |
 | 15 | — | Tool-use-aware code review | planned | — | — |
