@@ -2,6 +2,15 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Added /jobs command
+
+**Files changed**: `src/gateway/telegram_bot.py` — New `cmd_jobs` handler.
+Shows recent jobs with status icon, skill, description, and linked task ID.
+Usage: `/jobs` (default 10) or `/jobs 25` (max 25).
+
+**Why**: Users couldn't see what jobs are running or recently completed
+without using `/status` on individual job IDs.
+
 ## 2026-04-20 — Fix /approve handler broken query
 
 **Files changed**: `src/gateway/telegram_bot.py` — Removed broken nested

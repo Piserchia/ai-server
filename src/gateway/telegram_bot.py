@@ -1,5 +1,5 @@
 """
-Telegram gateway. Commands: /task /status /cancel /chat /projects /rate /resume /proposals /schedule /reply /approve /tasks /help.
+Telegram gateway. Commands: /task /status /cancel /chat /projects /rate /resume /proposals /schedule /reply /approve /tasks /jobs /help.
 
 Flag syntax (parsed off the front of /task and /chat descriptions):
     /task --model=opus-4-7 --effort=high  fix the NaN bug in market-tracker
@@ -116,6 +116,7 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "/reply <task_id> <response> — respond to a task question or give feedback\n"
         "/approve <task_id> — approve a completed task\n"
         "/tasks — list active tasks\n"
+        "/jobs [N] — list recent N jobs (default 10, max 25)\n"
         "/chat <message> — one-shot conversation\n"
         "/status <id_prefix> — job status\n"
         "/cancel <id_prefix> — request cancellation\n"
@@ -679,12 +680,50 @@ async def cmd_tasks(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("No active tasks.")
         return
 
-    lines = ["*Active tasks:*\n"]
+    lines = [f"*Active tasks ({len(tasks)}):*\n"]
     for t in tasks:
         prefix = str(t.id)[:8]
         desc = t.description[:50]
         status_icon = {"active": "🔄", "awaiting_user": "❓", "pending_approval": "✋"}.get(t.status, "")
         lines.append(f"`{prefix}` {status_icon} {t.status}: {desc}")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """List recent jobs: /jobs [count]"""
+    chat_id = await _guard(update)
+    if chat_id is None:
+        return
+    args = ctx.args or []
+    limit = 10
+    if args and args[0].isdigit():
+        limit = min(int(args[0]), 25)
+
+    async with async_session() as s:
+        result = await s.execute(
+            select(Job)
+            .order_by(Job.created_at.desc())
+            .limit(limit)
+        )
+        jobs = list(result.scalars().all())
+
+    if not jobs:
+        await update.message.reply_text("No jobs yet.")
+        return
+
+    status_icons = {
+        "queued": "⏳", "running": "🔄", "completed": "✅",
+        "failed": "❌", "cancelled": "🚫", "awaiting_user": "❓",
+    }
+
+    lines = [f"*Recent jobs ({len(jobs)}):*\n"]
+    for j in jobs:
+        prefix = str(j.id)[:8]
+        icon = status_icons.get(j.status, "")
+        skill = j.resolved_skill or j.kind
+        desc = j.description[:40]
+        task_ref = f" (task `{str(j.task_id)[:8]}`)" if j.task_id else ""
+        lines.append(f"`{prefix}` {icon} {skill} — {desc}{task_ref}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
@@ -837,6 +876,7 @@ def main() -> None:
     app.add_handler(CommandHandler("reply", cmd_reply))
     app.add_handler(CommandHandler("approve", cmd_approve))
     app.add_handler(CommandHandler("tasks", cmd_tasks))
+    app.add_handler(CommandHandler("jobs", cmd_jobs))
 
     logger.info("telegram bot starting")
     app.run_polling(close_loop=False)
