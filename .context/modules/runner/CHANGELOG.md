@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Stale-context warnings in retrospective (Rec 7)
+
+**Files changed**:
+- `src/runner/retrospective.py` — Added `StaleContextWarning` dataclass,
+  `_newest_mtime()`, `_days_since()` pure helpers, and
+  `stale_context_warnings()` function. Checks for CONTEXT.md files >30d
+  older than newest source, and CHANGELOG.md files with no updates in 60d
+  despite git commits. Synchronous (filesystem + git only).
+
+**Why**: Per § 7 Rec 7. Documentation decay was invisible — now it's a
+measurable finding that review-and-improve can propose to fix.
+
+**Side effects**: None on runner execution. Called by review-and-improve
+skill during retrospective analysis.
+
 ## 2026-04-19 — Project-level protocol reference in directive (Rec 6)
 
 **Files changed**:

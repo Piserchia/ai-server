@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -283,3 +284,129 @@ async def context_consumption(
 
     out.sort(key=lambda x: (-x.read_count, x.skill, x.file_path))
     return out
+
+
+# ── Stale-context warnings (Rec 7) ────────────────────────────────────────
+
+
+@dataclass
+class StaleContextWarning:
+    module: str
+    kind: str          # "context_outdated" or "changelog_stale"
+    detail: str
+    context_age_days: int | None
+    code_age_days: int | None
+
+
+def _newest_mtime(directory: Path, glob: str = "*.py") -> float | None:
+    """Return the newest mtime of files matching glob in directory.
+    Returns None if no files found. Pure filesystem operation."""
+    newest = 0.0
+    found = False
+    for f in directory.glob(glob):
+        found = True
+        mt = f.stat().st_mtime
+        if mt > newest:
+            newest = mt
+    return newest if found else None
+
+
+def _days_since(mtime: float) -> int:
+    """Days between mtime and now."""
+    return int((datetime.now().timestamp() - mtime) / 86400)
+
+
+def _has_recent_git_commits(
+    src_dir: Path,
+    days: int,
+    repo_root: Path,
+) -> bool:
+    """Check if git log shows commits touching src_dir in the last N days.
+
+    Returns False if git is unavailable or the directory has no commits.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", f"--since={days} days ago", "--oneline",
+             "--", str(src_dir.relative_to(repo_root))],
+            capture_output=True, text=True, cwd=str(repo_root), timeout=10,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def stale_context_warnings(
+    context_staleness_days: int = 30,
+    changelog_staleness_days: int = 60,
+) -> list[StaleContextWarning]:
+    """Check for documentation decay across modules.
+
+    Two checks per module:
+    1. CONTEXT.md mtime > context_staleness_days older than newest src file
+    2. CHANGELOG.md has no entries in changelog_staleness_days despite git
+       commits to the module's source in that window
+
+    Synchronous — filesystem + git only, no DB.
+    """
+    warnings: list[StaleContextWarning] = []
+    modules_dir = settings.server_root / ".context" / "modules"
+
+    if not modules_dir.exists():
+        return warnings
+
+    for module_dir in sorted(modules_dir.iterdir()):
+        if not module_dir.is_dir():
+            continue
+        module_name = module_dir.name
+
+        # Find the corresponding src directory
+        src_dir = settings.server_root / "src" / module_name
+        if not src_dir.exists():
+            continue
+
+        # Check 1: CONTEXT.md staleness
+        context_md = module_dir / "CONTEXT.md"
+        if context_md.exists():
+            context_mtime = context_md.stat().st_mtime
+            newest_src = _newest_mtime(src_dir)
+            if newest_src is not None:
+                context_age = _days_since(context_mtime)
+                code_age = _days_since(newest_src)
+                if context_age - code_age > context_staleness_days:
+                    warnings.append(StaleContextWarning(
+                        module=module_name,
+                        kind="context_outdated",
+                        detail=(
+                            f"CONTEXT.md last updated {context_age}d ago, "
+                            f"but newest source file is {code_age}d old"
+                        ),
+                        context_age_days=context_age,
+                        code_age_days=code_age,
+                    ))
+
+        # Check 2: CHANGELOG.md staleness
+        changelog_md = module_dir / "CHANGELOG.md"
+        if changelog_md.exists():
+            changelog_mtime = changelog_md.stat().st_mtime
+            changelog_age = _days_since(changelog_mtime)
+            if changelog_age > changelog_staleness_days:
+                # Only warn if git shows commits in the window
+                has_commits = _has_recent_git_commits(
+                    src_dir, changelog_staleness_days,
+                    settings.server_root,
+                )
+                if has_commits:
+                    warnings.append(StaleContextWarning(
+                        module=module_name,
+                        kind="changelog_stale",
+                        detail=(
+                            f"CHANGELOG.md last updated {changelog_age}d ago, "
+                            f"but git shows commits to src/{module_name}/ "
+                            f"in the last {changelog_staleness_days}d"
+                        ),
+                        context_age_days=changelog_age,
+                        code_age_days=None,
+                    ))
+
+    return warnings

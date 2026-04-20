@@ -183,6 +183,28 @@ Proposals: 2
 Dispatched: server-patch job abc123 to implement both proposals.
 ```
 
+## Stale-context audit (Rec 7)
+
+After gathering performance data, check for documentation decay. Import
+or call:
+
+```python
+from src.runner.retrospective import stale_context_warnings
+warnings = stale_context_warnings()
+```
+
+Each warning has: `module`, `kind` ("context_outdated" or "changelog_stale"),
+`detail`, `context_age_days`, `code_age_days`.
+
+- **context_outdated**: CONTEXT.md is >30 days older than the newest source
+  file in `src/<module>/`. Propose a `change_type=doc-update` to refresh it.
+- **changelog_stale**: CHANGELOG.md hasn't been updated in 60+ days despite
+  git commits to the module. Propose a `change_type=doc-update` to backfill
+  the missing entries.
+
+Use the Rec 10 dedup flow for both: `find_recent_duplicate(target, "doc-update")`
+before inserting a proposal.
+
 ## Context files audit (Rec 2)
 
 After gathering performance data, audit which files each skill actually
