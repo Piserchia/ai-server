@@ -278,6 +278,8 @@ class Task(Base):
     created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
     chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # ^ Telegram chat_id — persisted so bot restarts don't lose the mapping
+    thread_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # ^ Telegram message ID of the bot's root reply — used to post in the right thread
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow

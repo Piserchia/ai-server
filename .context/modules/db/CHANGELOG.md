@@ -2,6 +2,11 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Add thread_message_id to tasks table
+
+**Files changed**: `src/models.py`, `alembic/versions/004_task_thread_message_id.py`
+**Why**: Telegram threads need a message ID to reply in the correct thread.
+
 ## 2026-04-20 — Fix Task.chat_id BigInteger type
 
 **Files changed**: `src/models.py` — Changed `Task.chat_id` from default
