@@ -2,6 +2,15 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Pin response options to /tasks and /jobs output
+
+**Files changed**: `src/gateway/telegram_bot.py` — Each task and job in
+the list output now shows its available actions inline based on status.
+Cross-links between `/tasks` and `/jobs` at the bottom of each listing.
+
+**Why**: Users had to remember which commands to run after seeing a listing.
+Now the next action is right there.
+
 ## 2026-04-20 — Fix Markdown escaping in /tasks, /jobs + add command tests
 
 **Files changed**:

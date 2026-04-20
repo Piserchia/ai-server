@@ -695,7 +695,16 @@ async def cmd_tasks(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         prefix = str(t.id)[:8]
         desc = _esc_md(t.description[:50])
         status_icon = {"active": "🔄", "awaiting_user": "❓", "pending_approval": "✋"}.get(t.status, "")
-        lines.append(f"`{prefix}` {status_icon} {t.status}: {desc}")
+        line = f"`{prefix}` {status_icon} {t.status}: {desc}"
+        if t.status == TaskStatus.awaiting_user.value:
+            line += f"\n  → `/reply {prefix} <answer>`"
+        elif t.status == TaskStatus.pending_approval.value:
+            line += f"\n  → `/approve {prefix}` or `/reply {prefix} <feedback>`"
+        elif t.status == TaskStatus.active.value:
+            line += f"\n  → running, wait for result"
+        lines.append(line)
+
+    lines.append(f"\n`/jobs` to see individual job runs")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
@@ -733,7 +742,16 @@ async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         skill = j.resolved_skill or j.kind
         desc = _esc_md(j.description[:40])
         task_ref = f" (task `{str(j.task_id)[:8]}`)" if j.task_id else ""
-        lines.append(f"`{prefix}` {icon} {skill} — {desc}{task_ref}")
+        line = f"`{prefix}` {icon} {skill} — {desc}{task_ref}"
+        if j.status == JobStatus.completed.value:
+            line += f"\n  → `/rate {prefix} 1-5` or `/status {prefix}`"
+        elif j.status == JobStatus.failed.value:
+            line += f"\n  → `/status {prefix}` for error details"
+        elif j.status in (JobStatus.queued.value, JobStatus.running.value):
+            line += f"\n  → `/cancel {prefix}` to stop"
+        lines.append(line)
+
+    lines.append(f"\n`/tasks` to see task conversations")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
