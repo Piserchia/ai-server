@@ -630,11 +630,8 @@ async def cmd_approve(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
+    from sqlalchemy import func as sqlfunc
     async with async_session() as s:
-        max_turn = await s.execute(
-            select(select(TaskTurn.turn_number).where(TaskTurn.task_id == task.id).correlate(TaskTurn).scalar_subquery())
-        )
-        from sqlalchemy import func as sqlfunc
         max_result = await s.execute(
             select(sqlfunc.max(TaskTurn.turn_number)).where(TaskTurn.task_id == task.id)
         )

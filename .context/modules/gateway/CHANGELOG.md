@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Fix /approve handler broken query
+
+**Files changed**: `src/gateway/telegram_bot.py` — Removed broken nested
+`select(select(...))` in `cmd_approve` that crashed before the status update.
+
+**Why**: `/approve` silently failed — task stayed in `pending_approval`.
+
 ## 2026-04-20 — Multi-turn task commands + API endpoints
 
 **Files changed**:
