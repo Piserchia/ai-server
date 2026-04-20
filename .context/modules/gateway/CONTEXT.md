@@ -22,9 +22,12 @@ the single enqueue/cancel/lookup helper.
   `/api/jobs/{id}/rate` (POST), `/api/jobs/{id}/stream` (SSE),
   `/api/projects`, `/api/projects/public`, `/api/quota`,
   `/api/retrospective/context`, `/api/tasks`, `/api/tasks/{id}`
-- Telegram commands: `/task`, `/chat`, `/status`, `/cancel`, `/rate`,
-  `/projects`, `/proposals`, `/resume`, `/schedule`,
-  `/reply`, `/approve`, `/tasks`, `/help`
+- Telegram primary commands: `/task`, `/status`, `/jobs`, `/help`
+- Telegram admin commands: `/chat`, `/resume`, `/schedule`, `/projects`
+- Thread-based interaction: plain text replies in task threads auto-route as continuations
+- Inline keyboard buttons: approve, cancel, rate, view details, structured choices
+- CallbackQueryHandler: parses `action:task_prefix[:extra]` callback data
+- MessageHandler: detects replies to task threads via `thread_message_id` lookup
 
 ## Flag parsing
 

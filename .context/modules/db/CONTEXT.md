@@ -17,7 +17,8 @@ JSONL audit log on disk.
 - `proposals` — tuning/doc proposals emitted by `review-and-improve`.
 - `tasks` — multi-turn conversation wrappers. Groups related jobs. Status:
   active → awaiting_user → pending_approval → completed. Persists `chat_id`
-  for Telegram DM delivery across bot restarts.
+  for Telegram DM delivery across bot restarts. `thread_message_id` stores
+  the Telegram message ID of the bot's root reply for thread-based interaction.
 - `task_turns` — individual turns in a task conversation. role: user |
   assistant | system. Links to job_id for assistant turns.
   Fields: `id`, `proposed_by_job_id` (FK→jobs, CASCADE), `target_file`,
