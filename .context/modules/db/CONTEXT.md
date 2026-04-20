@@ -7,14 +7,19 @@
 Persistence layer. SQLAlchemy async engine, Redis client, ORM models, and the
 JSONL audit log on disk.
 
-## Schema (4 tables)
+## Schema (6 tables)
 
 - `jobs` — one unit of work. Includes `resolved_skill`, `resolved_model`,
-  `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id` for
-  the auto-tuning loop.
+  `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id`,
+  `task_id` for the auto-tuning loop and multi-turn interaction.
 - `schedules` — cron recipes that enqueue jobs.
 - `projects` — registry of hosted projects.
 - `proposals` — tuning/doc proposals emitted by `review-and-improve`.
+- `tasks` — multi-turn conversation wrappers. Groups related jobs. Status:
+  active → awaiting_user → pending_approval → completed. Persists `chat_id`
+  for Telegram DM delivery across bot restarts.
+- `task_turns` — individual turns in a task conversation. role: user |
+  assistant | system. Links to job_id for assistant turns.
   Fields: `id`, `proposed_by_job_id` (FK→jobs, CASCADE), `target_file`,
   `change_type` ('default-model'|'context-files'|'frontmatter-tweak'|'doc-update'),
   `rationale`, `proposed_at`, `applied_pr_url`, `applied_at`, `outcome`

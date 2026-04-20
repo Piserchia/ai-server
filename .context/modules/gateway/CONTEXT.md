@@ -21,9 +21,10 @@ the single enqueue/cancel/lookup helper.
 - FastAPI: `/health`, `/api/jobs` (GET/POST), `/api/jobs/{id}` (GET/DELETE),
   `/api/jobs/{id}/rate` (POST), `/api/jobs/{id}/stream` (SSE),
   `/api/projects`, `/api/projects/public`, `/api/quota`,
-  `/api/retrospective/context`
+  `/api/retrospective/context`, `/api/tasks`, `/api/tasks/{id}`
 - Telegram commands: `/task`, `/chat`, `/status`, `/cancel`, `/rate`,
-  `/projects`, `/proposals`, `/resume`, `/schedule`, `/help`
+  `/projects`, `/proposals`, `/resume`, `/schedule`,
+  `/reply`, `/approve`, `/tasks`, `/help`
 
 ## Flag parsing
 

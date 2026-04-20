@@ -15,6 +15,7 @@ if not, printing the exact command to fix it.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -169,6 +170,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
                 await maybe_extract_learning(str(job_id), learning_summary)
             except Exception:
                 log.exception("learning extraction failed (non-fatal)")
+
+        # Task lifecycle — if this job belongs to a task, update task state
+        if job.task_id:
+            try:
+                await _update_task_after_job(job, result)
+            except Exception:
+                log.exception("task lifecycle update failed (non-fatal)")
 
     except quota.QuotaExhausted as exc:
         # Pause the queue, requeue this job at the front so it retries after reset
@@ -365,6 +373,96 @@ async def _maybe_escalate(job: Job) -> None:
         parent=str(job.id), child=str(child.id),
         model=esc_model, effort=esc_effort,
     )
+
+
+async def _update_task_after_job(job: Job, result: dict | None) -> None:
+    """After a job completes, update its parent task's state.
+
+    Scans the audit log for task_question or task_complete events to
+    determine whether the task needs user input, approval, or is done.
+    """
+    from src.models import Task, TaskTurn, TaskStatus
+
+    # Record assistant turn
+    summary = (result or {}).get("summary", "") or ""
+    if not summary:
+        summary = f"Job {str(job.id)[:8]} completed."
+
+    async with session_scope() as s:
+        # Get next turn number
+        from sqlalchemy import func as sqlfunc
+        max_turn = await s.execute(
+            select(sqlfunc.max(TaskTurn.turn_number))
+            .where(TaskTurn.task_id == job.task_id)
+        )
+        last = max_turn.scalar() or 0
+
+        s.add(TaskTurn(
+            task_id=job.task_id,
+            turn_number=last + 1,
+            role="assistant",
+            content=summary,
+            job_id=job.id,
+        ))
+
+    # Check audit log for task_question or task_complete events
+    events = audit_log.read(job.id)
+    question = None
+    is_complete = False
+    for evt in events:
+        if evt.get("kind") == "task_question":
+            question = evt.get("question", "")
+        elif evt.get("kind") == "task_complete":
+            is_complete = True
+
+    # Update task status
+    if question:
+        async with session_scope() as s:
+            await s.execute(
+                update(Task)
+                .where(Task.id == job.task_id)
+                .values(status=TaskStatus.awaiting_user.value, updated_at=datetime.now(timezone.utc))
+            )
+        # Notify user via Redis (Telegram bot listens)
+        await redis.publish(
+            "tasks:notify",
+            json.dumps({
+                "task_id": str(job.task_id),
+                "type": "question",
+                "text": question,
+            }),
+        )
+    elif is_complete:
+        async with session_scope() as s:
+            await s.execute(
+                update(Task)
+                .where(Task.id == job.task_id)
+                .values(status=TaskStatus.pending_approval.value, updated_at=datetime.now(timezone.utc))
+            )
+        await redis.publish(
+            "tasks:notify",
+            json.dumps({
+                "task_id": str(job.task_id),
+                "type": "approval_request",
+                "text": summary,
+            }),
+        )
+    else:
+        # Job completed without explicit task signals — treat as pending approval
+        async with session_scope() as s:
+            await s.execute(
+                update(Task)
+                .where(Task.id == job.task_id)
+                .values(status=TaskStatus.pending_approval.value, updated_at=datetime.now(timezone.utc))
+            )
+        await redis.publish(
+            "tasks:notify",
+            json.dumps({
+                "task_id": str(job.task_id),
+                "type": "approval_request",
+                "text": summary,
+            }),
+        )
 
 
 async def _finish_job(

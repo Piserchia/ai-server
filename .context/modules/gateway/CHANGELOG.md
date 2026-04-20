@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Multi-turn task commands + API endpoints
+
+**Files changed**:
+- `src/gateway/telegram_bot.py` — New commands: `/reply` (respond to task),
+  `/approve` (mark task complete), `/tasks` (list active tasks). Modified
+  `/task` to create a Task + first turn before enqueueing the job. Added
+  `_task_notifier` listener for `tasks:notify` Redis channel (DMs questions
+  and approval requests). Updated `/help` text.
+- `src/gateway/web.py` — New endpoints: `GET /api/tasks` (list with status
+  filter), `GET /api/tasks/{id}` (task + turns).
+
+**Why**: Users couldn't respond to task output or approve completion.
+New commands close the interaction loop.
+
+**Side effects**: `/task` now creates a Task row + TaskTurn in addition
+to the Job. `chat_id` persisted on Task (fixes lost DM mapping on bot restart).
+
 ## 2026-04-20 — Documentation cleanup: updated CONTEXT.md
 
 **Files changed**:

@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Added tasks + task_turns tables for multi-turn interaction
+
+**Files changed**:
+- `alembic/versions/003_tasks_table.py` (NEW) — Creates `tasks` and
+  `task_turns` tables, adds `task_id` FK column to `jobs`.
+- `src/models.py` — Added `Task`, `TaskTurn`, `TaskStatus` models.
+  Added `task_id` field to `Job`. Updated docstring (6 tables).
+
+**Why**: Jobs were fire-and-forget. Users couldn't reply to a task's
+output or approve completion. Tasks wrap related jobs into a conversation
+with turn-by-turn context.
+
+**Side effects**: Existing jobs have `task_id = NULL` (unaffected).
+New `/task` commands create a Task automatically.
+
 ## 2026-04-18 — Added `proposals` table + Proposal model (Rec 10)
 
 **Files changed**:

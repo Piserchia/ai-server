@@ -12,6 +12,8 @@ Endpoints:
 - GET  /api/projects               — list projects
 - GET  /api/quota                  — { paused, reset_at, reason }
 - GET  /api/retrospective/context  — context consumption rollup
+- GET  /api/tasks                  — list tasks
+- GET  /api/tasks/{id}             — task + turns
 
 Run: uvicorn src.gateway.web:app --host 127.0.0.1 --port 8080
 """
@@ -36,7 +38,7 @@ from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_STREAM, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
-from src.models import Job, JobKind, JobStatus, Project
+from src.models import Job, JobKind, JobStatus, Project, Task, TaskStatus, TaskTurn
 from src.runner import quota, retrospective
 
 app = FastAPI(title="Assistant gateway", version="0.1.0")
@@ -247,6 +249,76 @@ async def context_consumption_report(since: str | None = None) -> list[dict]:
         }
         for u in data
     ]
+
+
+@app.get("/api/tasks", dependencies=[Depends(_check_auth)])
+async def list_tasks(status: str | None = None, limit: int = 25) -> list[dict]:
+    limit = max(1, min(limit, 100))
+    async with async_session() as s:
+        q = select(Task).order_by(Task.created_at.desc()).limit(limit)
+        if status:
+            q = q.where(Task.status == status)
+        result = await s.execute(q)
+        return [
+            {
+                "id": str(t.id),
+                "description": t.description,
+                "status": t.status,
+                "created_by": t.created_by,
+                "created_at": t.created_at.isoformat(),
+                "updated_at": t.updated_at.isoformat(),
+            }
+            for t in result.scalars()
+        ]
+
+
+@app.get("/api/tasks/{task_id}", dependencies=[Depends(_check_auth)])
+async def get_task(task_id: str) -> dict:
+    async with async_session() as s:
+        # Try full UUID first, then prefix
+        task = None
+        try:
+            import uuid as _uuid
+            task = await s.get(Task, _uuid.UUID(task_id))
+        except ValueError:
+            from sqlalchemy import text
+            result = await s.execute(
+                text("SELECT id FROM tasks WHERE CAST(id AS TEXT) LIKE :p LIMIT 2"),
+                {"p": f"{task_id}%"},
+            )
+            ids = [row[0] for row in result.fetchall()]
+            if len(ids) == 1:
+                task = await s.get(Task, ids[0])
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        result = await s.execute(
+            select(TaskTurn)
+            .where(TaskTurn.task_id == task.id)
+            .order_by(TaskTurn.turn_number)
+        )
+        turns = [
+            {
+                "turn_number": t.turn_number,
+                "role": t.role,
+                "content": t.content,
+                "job_id": str(t.job_id) if t.job_id else None,
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in result.scalars()
+        ]
+
+    return {
+        "task": {
+            "id": str(task.id),
+            "description": task.description,
+            "status": task.status,
+            "created_by": task.created_by,
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat(),
+        },
+        "turns": turns,
+    }
 
 
 # ── SSE streaming ──────────────────────────────────────────────────────────

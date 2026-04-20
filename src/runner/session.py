@@ -226,6 +226,101 @@ def _module_knowledge_context(job_description: str) -> str:
         return ""
 
 
+# ── Task context (multi-turn) ──────────────────────────────────────────────
+
+
+def format_task_turns(turns: list[dict]) -> str:
+    """Format task turns into a compact conversation summary.
+
+    turns: list of {"turn_number": int, "role": str, "content": str, "job_id": str|None}
+    Pure function.
+    """
+    if not turns:
+        return ""
+    lines: list[str] = []
+    for t in turns:
+        role = t["role"]
+        content = t["content"]
+        job_ref = f", job {t['job_id'][:8]}" if t.get("job_id") else ""
+        # Truncate long content to keep context budget reasonable
+        if len(content) > 500:
+            content = content[:500] + "..."
+        lines.append(f"**Turn {t['turn_number']} ({role}{job_ref})**: {content}")
+    return "\n\n".join(lines)
+
+
+def _build_task_context(task_id) -> str:
+    """Load prior turns for a task and format as conversation context.
+
+    Returns a markdown section to prepend to the system prompt, or empty
+    string if no prior turns exist.
+    """
+    try:
+        from src.models import TaskTurn
+        import uuid as _uuid
+
+        tid = task_id if isinstance(task_id, _uuid.UUID) else _uuid.UUID(str(task_id))
+
+        # Synchronous-safe: use a new event loop or run in the existing one.
+        # Since this is called from an async context (via _build_options which
+        # is sync but called from async _process_job), we use a sync query path.
+        # For simplicity, read from DB synchronously via a helper.
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're inside an async context — schedule the coroutine
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                turns_data = pool.submit(
+                    lambda: asyncio.run(_fetch_task_turns(tid))
+                ).result(timeout=5)
+        else:
+            turns_data = asyncio.run(_fetch_task_turns(tid))
+
+        if not turns_data:
+            return ""
+
+        formatted = format_task_turns(turns_data)
+        task_id_short = str(tid)[:8]
+        return (
+            f"## Task conversation ({task_id_short})\n\n"
+            f"{formatted}\n\n"
+            "---\n"
+            "Continue from where the previous turn left off. "
+            "If you need more information from the user, emit a "
+            "`task_question` audit event and complete normally.\n"
+        )
+    except Exception:
+        return ""
+
+
+async def _fetch_task_turns(task_id) -> list[dict]:
+    """Fetch task turns from DB. Returns list of dicts."""
+    from src.models import TaskTurn
+    from sqlalchemy import select
+
+    async with async_session() as s:
+        result = await s.execute(
+            select(
+                TaskTurn.turn_number,
+                TaskTurn.role,
+                TaskTurn.content,
+                TaskTurn.job_id,
+            )
+            .where(TaskTurn.task_id == task_id)
+            .order_by(TaskTurn.turn_number)
+        )
+        return [
+            {
+                "turn_number": row.turn_number,
+                "role": row.role,
+                "content": row.content,
+                "job_id": str(row.job_id) if row.job_id else None,
+            }
+            for row in result.all()
+        ]
+
+
 # ── Budget accounting (Rec 8) ──────────────────────────────────────────────
 
 # Approximate context windows by model family (input tokens).
@@ -275,11 +370,18 @@ def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
 
 def _build_options(job: Job, cwd: Path, skill_cfg: SkillConfig | None) -> ClaudeAgentOptions:
     """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults."""
-    # System prompt — context-aware preamble + skill body
+    # System prompt — context-aware preamble + skill body + task context
     server_directive = _build_server_directive(skill_cfg, cwd, job.description)
     system_prompt = server_directive
+
+    # Multi-turn task context injection
+    if job.task_id:
+        task_ctx = _build_task_context(job.task_id)
+        if task_ctx:
+            system_prompt += f"\n{task_ctx}\n"
+
     if skill_cfg and skill_cfg.body.strip():
-        system_prompt = f"{server_directive}\n\n---\n\n# Active skill\n\n{skill_cfg.body}"
+        system_prompt = f"{system_prompt}\n\n---\n\n# Active skill\n\n{skill_cfg.body}"
 
     # Model + effort + permission + tools
     model = (skill_cfg.model if skill_cfg and skill_cfg.model else settings.default_model)

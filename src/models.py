@@ -1,9 +1,12 @@
 """
-ORM models. Three tables only.
+ORM models. Six tables.
 
-- jobs:       one unit of work. Records model/effort actually used + user rating.
-- schedules:  cron recipes that enqueue jobs.
-- projects:   registry of hosted projects.
+- jobs:        one unit of work. Records model/effort actually used + user rating.
+- schedules:   cron recipes that enqueue jobs.
+- projects:    registry of hosted projects.
+- proposals:   tuning/doc proposals from review-and-improve.
+- tasks:       multi-turn conversation wrappers around related jobs.
+- task_turns:  individual turns (user, assistant, system) within a task.
 
 Audit trail is JSONL files on disk, not a table. See src/audit_log.py.
 
@@ -111,6 +114,10 @@ class Job(Base):
         UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
     )
     # ^ For sub-agent jobs; parent_job_id links back to the spawning session.
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # ^ Multi-turn tasks: groups related jobs into a conversation.
 
     # Provenance
     created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
@@ -153,6 +160,15 @@ class Schedule(Base):
 
     project = relationship("Project", foreign_keys=[project_id])
     jobs = relationship("Job", back_populates="schedule", foreign_keys=[Job.schedule_id])
+
+
+class TaskStatus(str, Enum):
+    """Lifecycle of a multi-turn task."""
+    active = "active"                    # job running or about to run
+    awaiting_user = "awaiting_user"      # job asked a question, waiting for /reply
+    pending_approval = "pending_approval"  # job thinks it's done, waiting for /approve
+    completed = "completed"              # user approved
+    failed = "failed"                    # unrecoverable failure
 
 
 class ProjectType(str, Enum):
@@ -241,3 +257,57 @@ class Proposal(Base):
     )
 
     proposer = relationship("Job", foreign_keys=[proposed_by_job_id])
+
+
+class Task(Base):
+    """Multi-turn conversation wrapper around related jobs.
+
+    A task groups one or more jobs into a conversation. User input and
+    assistant output are recorded as turns. Context flows forward to new
+    jobs via the task log, not by resuming sessions.
+    """
+
+    __tablename__ = "tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=TaskStatus.active.value, index=True
+    )
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    chat_id: Mapped[int | None] = mapped_column(nullable=True)
+    # ^ Telegram chat_id — persisted so bot restarts don't lose the mapping
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    turns = relationship("TaskTurn", back_populates="task", order_by="TaskTurn.turn_number")
+    jobs = relationship("Job", foreign_keys=[Job.task_id])
+
+
+class TaskTurn(Base):
+    """One turn in a multi-turn task conversation."""
+
+    __tablename__ = "task_turns"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    turn_number: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    role: Mapped[str] = mapped_column(String(10), nullable=False)  # user | assistant | system
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    task = relationship("Task", back_populates="turns")

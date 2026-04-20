@@ -18,6 +18,8 @@ Kinds used (keep this list honest — update when adding new kinds):
 - thinking:         {"kind", "ts", "job_id", "text"}             # only if thinking is on
 - note:             {"kind", "ts", "job_id", "text"}             # runner-originated notes
 - context_budget_used: {"kind", "ts", "job_id", "estimated_tokens", "model_budget", "fraction", "skill"}
+- task_question:    {"kind", "ts", "job_id", "question"}           # skill asks user for input
+- task_complete:    {"kind", "ts", "job_id", "summary"}            # skill declares work done
 
 Also writes a human-readable `<job_id>.summary.md` at job completion (written by the runner,
 not here — it's the last turn the assistant produces).

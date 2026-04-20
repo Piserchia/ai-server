@@ -2,6 +2,25 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Multi-turn task interaction with approval flow
+
+**Files changed**:
+- `src/runner/session.py` — Added `format_task_turns()` pure helper and
+  `_build_task_context()` which loads prior turns from DB and injects a
+  "Task conversation" section into the system prompt for continuation jobs.
+  Added `_fetch_task_turns()` async helper.
+- `src/runner/main.py` — Added `_update_task_after_job()` which runs after
+  task-linked jobs complete. Records assistant turns, detects `task_question`
+  and `task_complete` audit events, updates task status, and publishes
+  notifications via `tasks:notify` Redis channel.
+
+**Why**: Jobs were one-shot with no way to respond to output or approve
+completion. Tasks now wrap jobs into multi-turn conversations where the
+user can reply and the system continues with full context.
+
+**Side effects**: Every task-linked job now triggers `_update_task_after_job`
+after completion (non-fatal). Jobs without `task_id` are unaffected.
+
 ## 2026-04-20 — Skill consistency: sections lint, post_review standardization, template
 
 **Files changed**:
