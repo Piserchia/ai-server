@@ -40,6 +40,19 @@ The runner will prepend a `# Prior session` block to your prompt containing:
    **Gotchas discovered**: <if the prior session's summary mentions any>
    ```
 
+   **"Why" quality gate (Rec 13):** The **Why** field must not be empty or
+   generic. If the prior session's summary is too thin to reconstruct
+   reasoning (e.g., just "fixed bug"), read the audit log at
+   `volumes/audit_log/<prior_job_id>.jsonl` to understand what files the
+   session touched and in what order. Use tool_use events (Read, Edit,
+   Write, Bash) to reconstruct the likely reasoning. Acceptable "Why"
+   entries explain the root cause or motivation, not just the action:
+   - Bad: "Changed foo.py"
+   - Bad: "Fixed the bug"
+   - Good: "Changed foo.py because the bar check silently returned True
+     when the input was None, causing the downstream validator to skip
+     validation entirely"
+
 3. If any module's `CONTEXT.md` is stale because of the prior session's
    changes — i.e., the public interface changed — update `CONTEXT.md` too.
    If unsure, don't touch it.
