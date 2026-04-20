@@ -183,6 +183,24 @@ Proposals: 2
 Dispatched: server-patch job abc123 to implement both proposals.
 ```
 
+## Context budget audit (Rec 8)
+
+Check which skills are consuming excessive static context tokens:
+
+```python
+from src.runner.retrospective import context_budget_report
+budgets = context_budget_report(since=review_window_start)
+```
+
+Each entry has: `skill`, `avg_tokens`, `avg_fraction`, `max_fraction`,
+`sample_count`.
+
+Flag any skill where `avg_fraction > 0.30` (using >30% of the model's
+context window for static prompt alone). Propose a `change_type=doc-update`
+to slim the skill's system prompt or reduce its `context_files`.
+
+Skills running on the Sonnet tier (200K window) are most constrained.
+
 ## Stale-context audit (Rec 7)
 
 After gathering performance data, check for documentation decay. Import

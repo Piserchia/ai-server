@@ -2,6 +2,26 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Context budget accounting (Rec 8)
+
+**Files changed**:
+- `src/runner/session.py` — Added `estimate_context_tokens()`,
+  `context_budget_fraction()` pure helpers and `_MODEL_BUDGETS` map.
+  `run_session()` now emits `context_budget_used` audit log event with
+  estimated tokens, model budget, and fraction before starting the session.
+- `src/runner/retrospective.py` — Added `ContextBudget` dataclass,
+  `parse_budget_events()` and `aggregate_context_budgets()` pure helpers,
+  and `context_budget_report()` function. Walks audit logs for
+  `context_budget_used` events and aggregates by skill.
+- `src/audit_log.py` — Documented `context_budget_used` event kind.
+
+**Why**: Per § 7 Rec 8. Skills with oversized static context waste tokens
+on every run. Now measurable: review-and-improve flags skills using >30%
+of the model's context window.
+
+**Side effects**: Every job now emits one extra audit log event
+(`context_budget_used`) before the session starts. ~1ms overhead.
+
 ## 2026-04-19 — Stale-context warnings in retrospective (Rec 7)
 
 **Files changed**:

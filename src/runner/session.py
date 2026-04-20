@@ -155,6 +155,32 @@ def _module_dependency_context(job_description: str) -> str:
         return ""
 
 
+# ── Budget accounting (Rec 8) ──────────────────────────────────────────────
+
+# Approximate context windows by model family (input tokens).
+_MODEL_BUDGETS: dict[str, int] = {
+    "claude-haiku-4-5-20251001": 200_000,
+    "claude-sonnet-4-6": 200_000,
+    "claude-opus-4-7": 200_000,
+}
+_DEFAULT_BUDGET = 200_000
+
+
+def estimate_context_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token. Pure function."""
+    return len(text) // 4
+
+
+def context_budget_fraction(
+    system_prompt: str,
+    model: str,
+) -> tuple[int, int, float]:
+    """Return (estimated_tokens, model_budget, fraction). Pure function."""
+    tokens = estimate_context_tokens(system_prompt)
+    budget = _MODEL_BUDGETS.get(model, _DEFAULT_BUDGET)
+    return tokens, budget, tokens / budget if budget > 0 else 0.0
+
+
 def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
     """
     Determine the skill for this job:
@@ -258,6 +284,19 @@ async def run_session(job: Job) -> dict[str, Any]:
     skill_name, skill_cfg = _resolve_skill(job)
     cwd = await _resolve_cwd(job)
     options = _build_options(job, cwd, skill_cfg)
+
+    # Log context budget usage (Rec 8)
+    ctx_tokens, ctx_budget, ctx_fraction = context_budget_fraction(
+        options.system_prompt or "", options.model or "",
+    )
+    audit_log.append(
+        job_id,
+        "context_budget_used",
+        estimated_tokens=ctx_tokens,
+        model_budget=ctx_budget,
+        fraction=round(ctx_fraction, 4),
+        skill=skill_name,
+    )
 
     # Record what was actually resolved, for the auto-tuning loop
     effort_used = (

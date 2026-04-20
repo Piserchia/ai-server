@@ -286,6 +286,92 @@ async def context_consumption(
     return out
 
 
+# ── Context budget aggregation (Rec 8) ────────────────────────────────────
+
+
+@dataclass
+class ContextBudget:
+    skill: str
+    avg_tokens: int
+    avg_fraction: float
+    max_fraction: float
+    sample_count: int
+
+
+def parse_budget_events(
+    audit_log_lines: list[str],
+) -> list[dict]:
+    """Pure. Parse audit log lines, return list of dicts for
+    context_budget_used events."""
+    results: list[dict] = []
+    for line in audit_log_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            evt = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if evt.get("kind") != "context_budget_used":
+            continue
+        skill = evt.get("skill", "")
+        tokens = evt.get("estimated_tokens", 0)
+        fraction = evt.get("fraction", 0.0)
+        if skill:
+            results.append({
+                "skill": skill,
+                "tokens": tokens,
+                "fraction": fraction,
+            })
+    return results
+
+
+def aggregate_context_budgets(
+    events: list[dict],
+) -> list[ContextBudget]:
+    """Pure. Group budget events by skill and compute stats."""
+    by_skill: dict[str, list[dict]] = {}
+    for evt in events:
+        by_skill.setdefault(evt["skill"], []).append(evt)
+
+    out: list[ContextBudget] = []
+    for skill, evts in sorted(by_skill.items()):
+        tokens = [e["tokens"] for e in evts]
+        fractions = [e["fraction"] for e in evts]
+        out.append(ContextBudget(
+            skill=skill,
+            avg_tokens=int(sum(tokens) / len(tokens)),
+            avg_fraction=sum(fractions) / len(fractions),
+            max_fraction=max(fractions),
+            sample_count=len(evts),
+        ))
+    return out
+
+
+def context_budget_report(
+    since: datetime | None = None,
+) -> list[ContextBudget]:
+    """Walk audit logs for context_budget_used events, aggregate by skill.
+
+    Synchronous — reads JSONL files, no DB.
+    """
+    since = since or (datetime.now(timezone.utc) - timedelta(days=30))
+    log_dir = settings.audit_log_dir
+
+    all_events: list[dict] = []
+    if log_dir.exists():
+        cutoff_ts = since.timestamp()
+        for log_file in log_dir.glob("*.jsonl"):
+            if log_file.stat().st_mtime < cutoff_ts:
+                continue
+            with log_file.open() as f:
+                all_events.extend(parse_budget_events(f.readlines()))
+
+    if not all_events:
+        return []
+    return aggregate_context_budgets(all_events)
+
+
 # ── Stale-context warnings (Rec 7) ────────────────────────────────────────
 
 
