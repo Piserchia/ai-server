@@ -65,6 +65,29 @@ class TestParseFlags:
         assert flags["model"] == "claude-opus-4-7"
 
 
+class TestParseCallback:
+    def test_simple_action(self):
+        from src.gateway.telegram_bot import _parse_callback
+        action, prefix, extra = _parse_callback("approve:abc12345")
+        assert action == "approve"
+        assert prefix == "abc12345"
+        assert extra is None
+
+    def test_action_with_extra(self):
+        from src.gateway.telegram_bot import _parse_callback
+        action, prefix, extra = _parse_callback("rate:abc12345:4")
+        assert action == "rate"
+        assert prefix == "abc12345"
+        assert extra == "4"
+
+    def test_no_prefix(self):
+        from src.gateway.telegram_bot import _parse_callback
+        action, prefix, extra = _parse_callback("garbage")
+        assert action == "garbage"
+        assert prefix is None
+        assert extra is None
+
+
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 

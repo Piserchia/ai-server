@@ -2,6 +2,27 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Thread-based Telegram interface with inline buttons
+
+**Files changed**:
+- `src/gateway/telegram_bot.py` — Rewrote interface from 16 slash commands to
+  thread-based with inline buttons. `/task` creates reply thread with [Cancel]
+  button. Plain text replies in threads auto-route as task continuations.
+  Inline buttons handle approve/cancel/rate/feedback/details/choices.
+  `_task_notifier` posts in threads + sends summary DM. `/help` shows 4
+  commands. `/status` shows active tasks. Removed old slash commands
+  (reply, approve, tasks, cancel, rate, proposals). `@_error_safe` applied
+  to all handlers.
+- `tests/test_telegram_commands.py` — Added `TestParseCallback` (3 tests).
+
+**Why**: 16 slash commands created cognitive overhead. Thread-based approach
+is more natural: start a task, reply in the thread to continue, tap buttons
+for actions. Users no longer need to remember task IDs or command syntax.
+
+**Side effects**: Old `/reply`, `/approve`, `/tasks`, `/cancel`, `/rate`,
+`/proposals` commands removed. Functionality preserved via inline buttons
+and thread replies.
+
 ## 2026-04-20 — Add _error_safe decorator for Telegram handlers
 
 **Files changed**: `src/gateway/telegram_bot.py`

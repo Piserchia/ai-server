@@ -1,5 +1,6 @@
 """
-Telegram gateway. Commands: /task /status /cancel /chat /projects /rate /resume /proposals /schedule /reply /approve /tasks /jobs /help.
+Telegram gateway. Commands: /task /status /jobs /help /chat /resume /schedule.
+Thread-based: reply in task threads to continue. Inline buttons for actions.
 
 Flag syntax (parsed off the front of /task and /chat descriptions):
     /task --model=opus-4-7 --effort=high  fix the NaN bug in market-tracker
@@ -22,8 +23,8 @@ import uuid
 
 import structlog
 from sqlalchemy import select, update as sql_update
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from src.config import settings
 from src.db import CHANNEL_JOB_DONE, async_session, redis
@@ -165,29 +166,23 @@ def parse_flags(text: str) -> tuple[str, dict]:
 # ── Commands ────────────────────────────────────────────────────────────────
 
 
+@_error_safe
 async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if await _guard(update) is None:
         return
     await update.message.reply_text(
-        "Commands:\n"
-        "/task <description> — submit a task (creates a multi-turn task)\n"
-        "/reply <task_id> <response> — respond to a task question or give feedback\n"
-        "/approve <task_id> — approve a completed task\n"
-        "/tasks — list active tasks\n"
-        "/jobs [N] — list recent N jobs (default 10, max 25)\n"
-        "/chat <message> — one-shot conversation\n"
-        "/status <id_prefix> — job status\n"
-        "/cancel <id_prefix> — request cancellation\n"
-        "/rate <id_prefix> <1-5> — rate a completed job (trains the tuner)\n"
-        "/projects — list hosted projects\n"
-        "/proposals — list pending tuning/doc proposals\n"
-        "/resume — clear a quota pause manually\n"
+        "*Commands:*\n\n"
+        "/task <description> — start a new task\n"
+        "  _Reply in the thread to continue. Buttons for actions._\n\n"
+        "/status — see active tasks\n"
+        "/jobs — see recent job runs\n"
         "/help — this message\n\n"
-        "Flags on /task: --model=opus|sonnet|haiku  --effort=low|medium|high|xhigh|max\n"
-        "Example: /task --model=opus --effort=high  write me a FastAPI endpoint for X"
+        "_Admin: /chat, /resume, /schedule_",
+        parse_mode="Markdown",
     )
 
 
+@_error_safe
 async def cmd_task(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = await _guard(update)
     if chat_id is None:
@@ -243,16 +238,23 @@ async def cmd_task(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     _job_to_chat[str(job.id)] = chat_id
 
-    flag_summary = ""
-    if flags:
-        flag_summary = f"\n_flags: {', '.join(f'{k}={v}' for k, v in flags.items())}_"
-    await update.message.reply_text(
-        f"Task `{str(task.id)[:8]}` → job `{str(job.id)[:8]}`{flag_summary}\n"
-        f"I'll DM when it's done. Reply with `/reply {str(task.id)[:8]} <feedback>`.",
+    # Reply in thread with [Cancel] button
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Cancel", callback_data=f"cancel:{str(task.id)[:8]}"),
+    ]])
+    reply = await update.message.reply_text(
+        f"\U0001f504 Working on it... ({_esc_md(description[:60])})",
         parse_mode="Markdown",
+        reply_markup=keyboard,
     )
+    # Save thread_message_id
+    async with async_session() as s:
+        await s.execute(sql_update(Task).where(Task.id == task.id).values(
+            thread_message_id=reply.message_id))
+        await s.commit()
 
 
+@_error_safe
 async def cmd_chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = await _guard(update)
     if chat_id is None:
@@ -273,38 +275,43 @@ async def cmd_chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Thinking... ({str(job.id)[:8]})")
 
 
-async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+@_error_safe
+async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show active tasks with status icons and inline prompts."""
     if await _guard(update) is None:
         return
-    if not ctx.args:
-        await update.message.reply_text("Usage: /status <job_id_prefix>")
-        return
-    job = await find_job_by_prefix(ctx.args[0])
-    if not job:
-        await update.message.reply_text("Job not found (or prefix ambiguous).")
-        return
 
-    lines = [
-        f"Job `{str(job.id)[:8]}` — *{job.status}*",
-        f"Kind: {job.kind}" + (f"  →  skill: {job.resolved_skill}" if job.resolved_skill else ""),
+    active_statuses = [
+        TaskStatus.active.value,
+        TaskStatus.awaiting_user.value,
+        TaskStatus.pending_approval.value,
     ]
-    if job.resolved_model:
-        effort = job.resolved_effort or "medium"
-        lines.append(f"Model: {job.resolved_model} / {effort}")
-    lines.append(f"Created: {job.created_at.strftime('%Y-%m-%d %H:%M UTC')}")
+    async with async_session() as s:
+        result = await s.execute(
+            select(Task)
+            .where(Task.status.in_(active_statuses))
+            .order_by(Task.created_at.desc())
+            .limit(15)
+        )
+        tasks = list(result.scalars().all())
 
-    if job.result:
-        summary = (job.result.get("summary") or "")[:800]
-        if summary:
-            lines.append("")
-            lines.append(summary)
-            if len(job.result.get("summary", "")) > 800:
-                lines.append("\n_(truncated — see web dashboard)_")
-    if job.error_message:
-        lines.append(f"\nError: `{job.error_message[:200]}`")
+    if not tasks:
+        await update.message.reply_text("No active tasks. Start one with /task.")
+        return
 
-    if job.status == JobStatus.completed.value and job.user_rating is None:
-        lines.append(f"\n💡 rate with `/rate {str(job.id)[:8]} 1-5` to train the tuner")
+    status_icons = {"active": "\U0001f504", "awaiting_user": "\u2753", "pending_approval": "\u270b"}
+    lines = [f"*Active tasks ({len(tasks)}):*\n"]
+    for t in tasks:
+        prefix = str(t.id)[:8]
+        desc = _esc_md(t.description[:50])
+        icon = status_icons.get(t.status, "")
+        lines.append(f"`{prefix}` {icon} {desc}")
+        if t.status == TaskStatus.awaiting_user.value:
+            lines.append("  _Reply in thread to answer_")
+        elif t.status == TaskStatus.pending_approval.value:
+            lines.append("  _Tap Approve in thread_")
+        elif t.status == TaskStatus.active.value:
+            lines.append("  _Running..._")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
@@ -358,6 +365,7 @@ async def cmd_rate(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@_error_safe
 async def cmd_projects(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if await _guard(update) is None:
         return
@@ -377,6 +385,7 @@ async def cmd_projects(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+@_error_safe
 async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if await _guard(update) is None:
         return
@@ -467,6 +476,7 @@ async def cmd_proposals(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 # ── Schedule management ────────────────────────────────────────────────────
 
 
+@_error_safe
 async def cmd_schedule(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if await _guard(update) is None:
         return
@@ -604,6 +614,15 @@ async def _find_task_by_prefix(prefix: str) -> Task | None:
         if len(ids) != 1:
             return None
         return await s.get(Task, ids[0])
+
+
+def _parse_callback(data: str) -> tuple[str, str | None, str | None]:
+    """Parse 'action:task_prefix[:extra]' callback data."""
+    parts = data.split(":", 2)
+    action = parts[0]
+    task_prefix = parts[1] if len(parts) > 1 else None
+    extra = parts[2] if len(parts) > 2 else None
+    return action, task_prefix, extra
 
 
 async def cmd_reply(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -756,6 +775,7 @@ async def cmd_tasks(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+@_error_safe
 async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """List recent jobs: /jobs [count]"""
     chat_id = await _guard(update)
@@ -801,6 +821,234 @@ async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     lines.append(f"\n`/tasks` to see task conversations")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+# ── Thread reply handler ───────────────────────────────────────────────────
+
+
+@_error_safe
+async def _handle_thread_reply(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Route plain-text replies in task threads as task continuations."""
+    chat_id = await _guard(update)
+    if chat_id is None:
+        return
+
+    # Must be a reply to a message
+    if not update.message.reply_to_message:
+        return
+    reply_msg_id = update.message.reply_to_message.message_id
+
+    # Look up Task where thread_message_id matches
+    async with async_session() as s:
+        result = await s.execute(
+            select(Task).where(Task.thread_message_id == reply_msg_id)
+        )
+        task = result.scalar_one_or_none()
+
+    if not task:
+        return  # Not a task thread — ignore
+
+    if task.status in (TaskStatus.completed.value, TaskStatus.failed.value):
+        await update.message.reply_text("This task is already finished.")
+        return
+
+    if task.status not in (
+        TaskStatus.active.value,
+        TaskStatus.awaiting_user.value,
+        TaskStatus.pending_approval.value,
+    ):
+        return
+
+    response_text = update.message.text.strip()
+    if not response_text:
+        return
+
+    # Record user turn
+    from sqlalchemy import func as sqlfunc
+    async with async_session() as s:
+        max_turn = await s.execute(
+            select(sqlfunc.max(TaskTurn.turn_number)).where(TaskTurn.task_id == task.id)
+        )
+        last = max_turn.scalar() or 0
+        s.add(TaskTurn(
+            task_id=task.id,
+            turn_number=last + 1,
+            role="user",
+            content=response_text,
+        ))
+        await s.execute(
+            sql_update(Task).where(Task.id == task.id).values(
+                status=TaskStatus.active.value,
+            )
+        )
+        await s.commit()
+
+    # Enqueue continuation job
+    job = await enqueue_job(
+        response_text,
+        kind=JobKind.task.value,
+        payload=None,
+        created_by=f"telegram:{chat_id}",
+    )
+    async with async_session() as s:
+        await s.execute(
+            sql_update(Job).where(Job.id == job.id).values(task_id=task.id)
+        )
+        await s.commit()
+
+    _job_to_chat[str(job.id)] = chat_id
+    await update.message.reply_text("\U0001f504 Continuing...")
+
+
+# ── Inline button handler ─────────────────────────────────────────────────
+
+
+@_error_safe
+async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle inline keyboard button presses."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    # Auth check on the user pressing the button
+    chat_id = update.effective_chat.id
+    if not _is_authorized(chat_id):
+        return
+
+    action, task_prefix, extra = _parse_callback(query.data or "")
+    if not task_prefix:
+        return
+
+    task = await _find_task_by_prefix(task_prefix)
+    if not task:
+        await query.edit_message_text("Task not found.")
+        return
+
+    prefix = str(task.id)[:8]
+
+    if action == "approve":
+        from sqlalchemy import func as sqlfunc
+        async with async_session() as s:
+            max_result = await s.execute(
+                select(sqlfunc.max(TaskTurn.turn_number)).where(TaskTurn.task_id == task.id)
+            )
+            last = max_result.scalar() or 0
+            s.add(TaskTurn(
+                task_id=task.id,
+                turn_number=last + 1,
+                role="system",
+                content="User approved task completion.",
+            ))
+            await s.execute(
+                sql_update(Task).where(Task.id == task.id).values(
+                    status=TaskStatus.completed.value,
+                )
+            )
+            await s.commit()
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(f"\u2705 Task `{prefix}` approved.", parse_mode="Markdown")
+
+    elif action == "cancel":
+        # Find running job for this task and cancel it
+        async with async_session() as s:
+            result = await s.execute(
+                select(Job).where(
+                    Job.task_id == task.id,
+                    Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+                ).order_by(Job.created_at.desc()).limit(1)
+            )
+            job = result.scalar_one_or_none()
+        if job:
+            await cancel_job(job.id)
+        async with async_session() as s:
+            await s.execute(
+                sql_update(Task).where(Task.id == task.id).values(
+                    status=TaskStatus.failed.value,
+                )
+            )
+            await s.commit()
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(f"\U0001f6ab Task `{prefix}` cancelled.", parse_mode="Markdown")
+
+    elif action == "feedback":
+        await query.message.reply_text("Send your feedback as a reply to this message.")
+
+    elif action == "details":
+        async with async_session() as s:
+            result = await s.execute(
+                select(Job).where(Job.task_id == task.id)
+                .order_by(Job.created_at.desc()).limit(1)
+            )
+            job = result.scalar_one_or_none()
+        if not job:
+            await query.message.reply_text("No jobs found for this task.")
+            return
+        lines = [f"Job `{str(job.id)[:8]}` — *{job.status}*"]
+        if job.error_message:
+            lines.append(f"Error: `{job.error_message[:200]}`")
+        if job.result:
+            summary = (job.result.get("summary") or "")[:600]
+            if summary:
+                lines.append(f"\n{summary}")
+        await query.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    elif action == "rate" and extra:
+        try:
+            rating = int(extra)
+        except ValueError:
+            return
+        if rating < 1 or rating > 5:
+            return
+        async with async_session() as s:
+            result = await s.execute(
+                select(Job).where(Job.task_id == task.id)
+                .order_by(Job.created_at.desc()).limit(1)
+            )
+            job = result.scalar_one_or_none()
+        if job:
+            async with async_session() as s:
+                await s.execute(
+                    sql_update(Job).where(Job.id == job.id).values(user_rating=rating)
+                )
+                await s.commit()
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(f"Rated {rating}/5. Thanks!")
+
+    elif action == "choice" and extra:
+        # Record choice as user turn, enqueue continuation
+        from sqlalchemy import func as sqlfunc
+        async with async_session() as s:
+            max_turn = await s.execute(
+                select(sqlfunc.max(TaskTurn.turn_number)).where(TaskTurn.task_id == task.id)
+            )
+            last = max_turn.scalar() or 0
+            s.add(TaskTurn(
+                task_id=task.id,
+                turn_number=last + 1,
+                role="user",
+                content=f"Selected option: {extra}",
+            ))
+            await s.execute(
+                sql_update(Task).where(Task.id == task.id).values(
+                    status=TaskStatus.active.value,
+                )
+            )
+            await s.commit()
+        job = await enqueue_job(
+            f"User selected: {extra}",
+            kind=JobKind.task.value,
+            payload=None,
+            created_by=f"telegram:{chat_id}",
+        )
+        async with async_session() as s:
+            await s.execute(
+                sql_update(Job).where(Job.id == job.id).values(task_id=task.id)
+            )
+            await s.commit()
+        _job_to_chat[str(job.id)] = chat_id
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(f"\U0001f504 Continuing with choice: {extra}")
 
 
 # ── Listeners ──────────────────────────────────────────────────────────────
@@ -875,7 +1123,7 @@ async def _quota_notifier(app: Application) -> None:
 
 
 async def _task_notifier(app: Application) -> None:
-    """Listen for task lifecycle events (questions, approval requests) and DM the user."""
+    """Listen for task lifecycle events and post in threads with inline buttons."""
     pubsub = redis.pubsub()
     await pubsub.subscribe("tasks:notify")
     try:
@@ -890,31 +1138,103 @@ async def _task_notifier(app: Application) -> None:
             task_id = data.get("task_id", "")
             notify_type = data.get("type", "")
             text_content = data.get("text", "")
+            choices = data.get("choices", [])
 
-            # Look up the task to get chat_id
+            # Look up the task to get chat_id and thread_message_id
             task = await _find_task_by_prefix(task_id)
             if not task or not task.chat_id:
                 continue
 
             prefix = str(task.id)[:8]
-            if notify_type == "question":
-                msg_text = (
-                    f"❓ Task `{prefix}` needs your input:\n\n"
-                    f"{text_content[:1000]}\n\n"
-                    f"Reply with `/reply {prefix} <your answer>`"
-                )
-            elif notify_type == "approval_request":
-                msg_text = (
-                    f"✋ Task `{prefix}` is done:\n\n"
-                    f"{text_content[:1000]}\n\n"
-                    f"`/approve {prefix}` to accept\n"
-                    f"`/reply {prefix} <feedback>` to continue"
-                )
-            else:
-                continue
 
             try:
-                await app.bot.send_message(task.chat_id, msg_text, parse_mode="Markdown")
+                if notify_type == "approval_request":
+                    # Reply in thread with result + action buttons
+                    keyboard = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("Approve", callback_data=f"approve:{prefix}"),
+                            InlineKeyboardButton("Send Feedback", callback_data=f"feedback:{prefix}"),
+                            InlineKeyboardButton("View Details", callback_data=f"details:{prefix}"),
+                        ],
+                        [
+                            InlineKeyboardButton("1", callback_data=f"rate:{prefix}:1"),
+                            InlineKeyboardButton("2", callback_data=f"rate:{prefix}:2"),
+                            InlineKeyboardButton("3", callback_data=f"rate:{prefix}:3"),
+                            InlineKeyboardButton("4", callback_data=f"rate:{prefix}:4"),
+                            InlineKeyboardButton("5", callback_data=f"rate:{prefix}:5"),
+                        ],
+                    ])
+                    msg_text = (
+                        f"\u270b Task `{prefix}` is done:\n\n"
+                        f"{text_content[:1000]}"
+                    )
+                    if task.thread_message_id:
+                        await app.bot.send_message(
+                            chat_id=task.chat_id,
+                            text=msg_text,
+                            reply_to_message_id=task.thread_message_id,
+                            reply_markup=keyboard,
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await app.bot.send_message(
+                            chat_id=task.chat_id,
+                            text=msg_text,
+                            reply_markup=keyboard,
+                            parse_mode="Markdown",
+                        )
+                    # Also send summary DM in main chat (not in thread)
+                    await app.bot.send_message(
+                        chat_id=task.chat_id,
+                        text=f"\U0001f4ec Task \"{_esc_md(task.description[:40])}\" needs your approval \u2014 reply in thread above",
+                        parse_mode="Markdown",
+                    )
+
+                elif notify_type == "question":
+                    msg_text = (
+                        f"\u2753 Task `{prefix}` needs your input:\n\n"
+                        f"{text_content[:1000]}\n\n"
+                        f"_Reply to this message with your answer_"
+                    )
+                    if task.thread_message_id:
+                        await app.bot.send_message(
+                            chat_id=task.chat_id,
+                            text=msg_text,
+                            reply_to_message_id=task.thread_message_id,
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await app.bot.send_message(
+                            chat_id=task.chat_id,
+                            text=msg_text,
+                            parse_mode="Markdown",
+                        )
+
+                elif notify_type == "choices" and choices:
+                    buttons = []
+                    for i, choice in enumerate(choices[:8]):
+                        buttons.append([InlineKeyboardButton(
+                            choice[:40],
+                            callback_data=f"choice:{prefix}:{i}",
+                        )])
+                    keyboard = InlineKeyboardMarkup(buttons)
+                    msg_text = f"\U0001f914 Task `{prefix}` — pick one:"
+                    if task.thread_message_id:
+                        await app.bot.send_message(
+                            chat_id=task.chat_id,
+                            text=msg_text,
+                            reply_to_message_id=task.thread_message_id,
+                            reply_markup=keyboard,
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await app.bot.send_message(
+                            chat_id=task.chat_id,
+                            text=msg_text,
+                            reply_markup=keyboard,
+                            parse_mode="Markdown",
+                        )
+
             except Exception:
                 logger.exception("failed to send task notification", task_id=task_id)
     finally:
@@ -938,21 +1258,20 @@ def main() -> None:
         .post_init(_post_init)
         .build()
     )
+    # Primary commands
     app.add_handler(CommandHandler("start", cmd_help))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("task", cmd_task))
-    app.add_handler(CommandHandler("chat", cmd_chat))
     app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("cancel", cmd_cancel))
-    app.add_handler(CommandHandler("rate", cmd_rate))
-    app.add_handler(CommandHandler("projects", cmd_projects))
-    app.add_handler(CommandHandler("resume", cmd_resume))
-    app.add_handler(CommandHandler("proposals", cmd_proposals))
-    app.add_handler(CommandHandler("schedule", cmd_schedule))
-    app.add_handler(CommandHandler("reply", cmd_reply))
-    app.add_handler(CommandHandler("approve", cmd_approve))
-    app.add_handler(CommandHandler("tasks", cmd_tasks))
     app.add_handler(CommandHandler("jobs", cmd_jobs))
+    # Admin commands
+    app.add_handler(CommandHandler("chat", cmd_chat))
+    app.add_handler(CommandHandler("resume", cmd_resume))
+    app.add_handler(CommandHandler("schedule", cmd_schedule))
+    app.add_handler(CommandHandler("projects", cmd_projects))
+    # Thread reply + inline button handlers
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.REPLY, _handle_thread_reply))
+    app.add_handler(CallbackQueryHandler(_handle_button))
 
     logger.info("telegram bot starting")
     app.run_polling(close_loop=False)
