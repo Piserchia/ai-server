@@ -2,6 +2,29 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Debugging: error categorization, incremental index, failure correlation
+
+**Files changed**:
+- `src/runner/audit_index.py` — Added `categorize_error()` pure function
+  that classifies error messages into categories (quota, auth, timeout,
+  tool_error, network, import_error, schema, unknown). Added
+  `error_category` field to `IndexEntry`. Added `append_to_index()` for
+  incremental index updates without full rebuild.
+- `src/runner/main.py` — `job_failed` audit events now include
+  `error_category`. `_finish_job()` calls `append_to_index()` after every
+  job completion/failure for real-time index freshness.
+- `src/runner/events.py` — Multi-skill failure correlation: if 3+ different
+  skills fail within 5 minutes, enqueues a single combined self-diagnose
+  with `target_kind: multi-skill` instead of N separate diagnoses.
+- `.context/SYSTEM.md` — Added `runner.audit_index` to runner.main deps.
+
+**Why**: Error messages were unstructured text — no aggregation possible.
+Audit index was stale between nightly rebuilds. Multi-skill failures
+triggered redundant diagnoses instead of surfacing shared root cause.
+
+**Side effects**: Every finished job now appends to INDEX.jsonl (~1ms).
+New `error_category` field in audit events and index entries.
+
 ## 2026-04-20 — Feedback loops: unified MCP tags, escalation, parent tracking
 
 **Files changed**:

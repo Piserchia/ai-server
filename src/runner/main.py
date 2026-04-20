@@ -185,13 +185,17 @@ async def _process_job(job_id: uuid.UUID) -> None:
         log.warning("quota exhausted — queue paused, job requeued")
 
     except asyncio.TimeoutError:
-        audit_log.append(str(job_id), "job_failed", error="session_timeout")
+        audit_log.append(str(job_id), "job_failed", error="session_timeout",
+                         error_category="timeout")
         await _finish_job(job_id, JobStatus.failed, error="Session timed out")
         log.warning("job timeout")
 
     except Exception as exc:
-        audit_log.append(str(job_id), "job_failed", error=str(exc)[:500])
-        await _finish_job(job_id, JobStatus.failed, error=str(exc)[:500])
+        from src.runner.audit_index import categorize_error
+        err_str = str(exc)[:500]
+        audit_log.append(str(job_id), "job_failed", error=err_str,
+                         error_category=categorize_error(err_str))
+        await _finish_job(job_id, JobStatus.failed, error=err_str)
         log.exception("job failed")
 
         # Escalation: if the skill declares on_failure, enqueue a retry with
@@ -383,6 +387,13 @@ async def _finish_job(
         )
     payload = {"summary": (result or {}).get("summary", "")} if result else {}
     await session_mod.publish_done(str(job_id), status.value, payload=payload)
+
+    # Incremental audit index update (B2)
+    try:
+        from src.runner.audit_index import append_to_index
+        append_to_index(settings.audit_log_dir, str(job_id))
+    except Exception:
+        pass  # non-fatal; nightly rebuild catches anything missed
 
 
 # ── Scheduler loop ──────────────────────────────────────────────────────────

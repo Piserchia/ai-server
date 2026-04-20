@@ -28,6 +28,8 @@ SKILL_FAILURE_WINDOW_MINUTES = 10
 SKILL_FAILURE_THRESHOLD = 2
 PROJECT_UNHEALTHY_MINUTES = 20
 REVIEW_COOLDOWN_HOURS = 24
+MULTI_SKILL_CORRELATION_WINDOW_MINUTES = 5
+MULTI_SKILL_CORRELATION_THRESHOLD = 3
 
 
 def _should_trigger_skill_diagnose(
@@ -137,6 +139,45 @@ async def _check_skill_failures() -> None:
         ]
 
     skills = _should_trigger_skill_diagnose(failures, existing)
+    if not skills:
+        return
+
+    # Multi-skill correlation: if 3+ different skills failed in a tight
+    # window, likely a shared infrastructure issue. Enqueue one combined
+    # diagnosis instead of N separate ones.
+    corr_cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=MULTI_SKILL_CORRELATION_WINDOW_MINUTES,
+    )
+    recent_skill_set = {
+        f.get("resolved_skill")
+        for f in failures
+        if f.get("created_at") and f["created_at"] >= corr_cutoff
+        and f.get("resolved_skill")
+    }
+
+    if len(recent_skill_set) >= MULTI_SKILL_CORRELATION_THRESHOLD:
+        skill_list = sorted(recent_skill_set)
+        desc = (
+            f"Self-diagnose: {len(skill_list)} skills failed within "
+            f"{MULTI_SKILL_CORRELATION_WINDOW_MINUTES} minutes "
+            f"({', '.join(skill_list)}). Likely shared infrastructure issue. "
+            f"Investigate root cause."
+        )
+        await enqueue_job(
+            desc,
+            kind="self-diagnose",
+            payload={
+                "target_kind": "multi-skill",
+                "multi_skill_failures": skill_list,
+            },
+            created_by="event-trigger:correlated",
+        )
+        logger.warning(
+            "event-triggered correlated self-diagnose",
+            skills=skill_list,
+        )
+        return  # skip individual diagnoses
+
     for skill in skills:
         desc = (
             f"Self-diagnose: skill '{skill}' failed {SKILL_FAILURE_THRESHOLD}+ times "

@@ -17,6 +17,34 @@ from pathlib import Path
 from typing import Any
 
 
+def categorize_error(error_message: str) -> str:
+    """Classify an error message into a category for aggregation.
+
+    Pure function. Returns one of: quota, auth, timeout, tool_error,
+    network, import_error, schema, unknown.
+    """
+    if not error_message:
+        return "unknown"
+    msg = error_message.lower()
+
+    if any(k in msg for k in ("quota", "rate limit", "rate_limit", "429", "overloaded")):
+        return "quota"
+    if any(k in msg for k in ("auth", "credential", "login", "unauthorized", "403", "401")):
+        return "auth"
+    if any(k in msg for k in ("timeout", "timed out", "session_timeout", "deadline")):
+        return "timeout"
+    if any(k in msg for k in ("tool not found", "tool_not_found", "tool error")):
+        return "tool_error"
+    if any(k in msg for k in ("modulenotfounderror", "importerror", "no module named")):
+        return "import_error"
+    if any(k in msg for k in ("connection refused", "connectionrefused", "dns ",
+                               "ssl", "network", "econnreset", "enotfound")):
+        return "network"
+    if any(k in msg for k in ("alembic", "migration", "schema", "column", "relation")):
+        return "schema"
+    return "unknown"
+
+
 @dataclass
 class IndexEntry:
     job_id: str
@@ -27,6 +55,7 @@ class IndexEntry:
     user_rating: int | None
     review_outcome: str | None
     error_first_line: str | None
+    error_category: str | None
     keywords: list[str]
 
 
@@ -108,6 +137,8 @@ def build_index_entry(
 
     keywords = _extract_keywords(summary_text)
 
+    error_cat = categorize_error(error_first_line or "") if error_first_line else None
+
     return IndexEntry(
         job_id=job_id,
         skill=skill,
@@ -117,6 +148,7 @@ def build_index_entry(
         user_rating=user_rating,
         review_outcome=review_outcome,
         error_first_line=error_first_line,
+        error_category=error_cat,
         keywords=keywords,
     )
 
@@ -148,6 +180,33 @@ def rebuild_index(audit_log_dir: Path) -> int:
             f.write(json.dumps(entry, default=str) + "\n")
 
     return len(entries)
+
+
+def append_to_index(audit_log_dir: Path, job_id: str) -> bool:
+    """Append a single job to INDEX.jsonl without full rebuild.
+
+    Returns True if an entry was appended, False if skipped (no audit log
+    or no parseable events). Safe to call multiple times for the same
+    job_id — duplicates may occur but are harmless for search_index().
+    """
+    log_file = audit_log_dir / f"{job_id}.jsonl"
+    if not log_file.exists():
+        return False
+
+    with log_file.open() as f:
+        lines = f.readlines()
+
+    summary_path = audit_log_dir / f"{job_id}.summary.md"
+    summary = summary_path.read_text() if summary_path.exists() else ""
+
+    entry = build_index_entry(job_id, lines, summary)
+    if not entry:
+        return False
+
+    index_path = audit_log_dir / "INDEX.jsonl"
+    with index_path.open("a") as f:
+        f.write(json.dumps(asdict(entry), default=str) + "\n")
+    return True
 
 
 def search_index(

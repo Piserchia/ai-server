@@ -26,7 +26,7 @@
 | `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
 | `src/runner/session.py` | One Agent SDK session per job | config, db, models, audit_log, registry.skills, runner.quota, runner.router, runner.mcp_projects, runner.mcp_dispatch, context.module_graph | runner.main |
-| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation hooks | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, gateway.jobs, registry.skills, audit_log | (entry point) |
+| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation hooks | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, gateway.jobs, registry.skills, audit_log | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher | — | runner.session |
 | `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |

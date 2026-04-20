@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from src.runner.audit_index import (
+    categorize_error,
     _extract_keywords,
     build_index_entry,
     search_index,
@@ -42,6 +43,40 @@ class TestExtractKeywords:
     def test_case_insensitive(self):
         result = _extract_keywords("Error ERROR error")
         assert len(result) == 1
+
+
+class TestCategorizeError:
+    def test_empty(self):
+        assert categorize_error("") == "unknown"
+
+    def test_quota(self):
+        assert categorize_error("QuotaExhausted: rate limit hit") == "quota"
+        assert categorize_error("429 Too Many Requests") == "quota"
+
+    def test_auth(self):
+        assert categorize_error("Unauthorized: credentials expired") == "auth"
+        assert categorize_error("401 Not Authorized") == "auth"
+
+    def test_timeout(self):
+        assert categorize_error("session_timeout") == "timeout"
+        assert categorize_error("Task timed out after 1800s") == "timeout"
+
+    def test_tool_error(self):
+        assert categorize_error("Tool not found: WebSearch") == "tool_error"
+
+    def test_network(self):
+        assert categorize_error("ConnectionRefused on port 5432") == "network"
+        assert categorize_error("ECONNRESET by peer") == "network"
+
+    def test_import_error(self):
+        assert categorize_error("ModuleNotFoundError: No module named 'flask'") == "import_error"
+
+    def test_schema(self):
+        assert categorize_error("relation 'proposals' does not exist") == "schema"
+        assert categorize_error("alembic migration failed") == "schema"
+
+    def test_unknown(self):
+        assert categorize_error("something completely unexpected") == "unknown"
 
 
 class TestBuildIndexEntry:
@@ -83,6 +118,7 @@ class TestBuildIndexEntry:
         assert entry is not None
         assert entry.status == "failed"
         assert entry.error_first_line == "QuotaExhausted: rate limit hit"
+        assert entry.error_category == "quota"
 
     def test_cancelled_job(self):
         lines = [
