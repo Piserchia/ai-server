@@ -2,6 +2,41 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Knowledge surfacing: seed module skills + auto-inject + context_files validation
+
+**Files changed**:
+- `.context/modules/runner/skills/GOTCHAS.md` — Seeded with 5 entries from
+  Troubleshooting.md and CHANGELOG gotchas (audit_log.append collision,
+  _writeback false positives, stuck jobs, SDK version mismatch, import lint).
+- `.context/modules/runner/skills/DEBUG.md` — Seeded with 2 entries (8-step
+  failure triage order, quota false positive detection).
+- `.context/modules/gateway/skills/GOTCHAS.md` — Seeded with 2 entries
+  (Telegram done-listener mapping, dashboard 404).
+- `.context/modules/hosting/skills/GOTCHAS.md` — Seeded with 5 entries
+  (cloudflared TLS, config location, plist args, Python modules, TCC).
+- `.context/modules/hosting/skills/DEBUG.md` — Seeded with 2 entries
+  (runner restart checklist, cloudflared no connections).
+- `.context/modules/db/skills/GOTCHAS.md` — Seeded with 2 entries
+  (sqlalchemy.update collision, never edit migrations).
+- `src/runner/session.py` — Added `parse_skill_file_entries()` pure helper
+  and `_module_knowledge_context()` function. Server-scoped sessions now
+  get a "Known issues" section with GOTCHAS/DEBUG entry titles for
+  detected modules.
+- `src/registry/skills.py` — Added context_files validation at load time.
+  Logs warning for missing files.
+- `scripts/lint_docs.py` — New `check_context_files_exist()` (7th check).
+  Validates all skills' context_files reference real files.
+- `skills/idea-generation/SKILL.md` — Removed nonexistent
+  `projects/ideas/README.md` from context_files (caught by new lint check).
+
+**Why**: Module skill files were empty stubs — zero institutional knowledge
+visible to sessions. Now seeded from Troubleshooting.md + CHANGELOG
+gotchas, auto-injected into directives, and context_files are validated.
+
+**Side effects**: Server-scoped sessions mentioning specific modules now
+get a slightly larger directive (entry titles only — compact). New lint
+check (7th) runs on every lint invocation.
+
 ## 2026-04-19 — Tool-use audit in code review (Rec 15)
 
 **Files changed**:

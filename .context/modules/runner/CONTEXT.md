@@ -31,6 +31,7 @@ Four async tasks running in one process:
 - `retrospective.parse_read_events(lines)` — pure helper: parses JSONL lines, returns deduplicated `(job_id, file_path)` pairs for Read events.
 - `retrospective.stale_context_warnings()` — synchronous. Checks for CONTEXT.md files >30d older than newest source file, and CHANGELOG.md with no updates in 60d despite git commits. Returns `list[StaleContextWarning]`.
 - `retrospective.context_budget_report(since)` — synchronous. Walks audit logs for `context_budget_used` events, aggregates by skill. Returns `list[ContextBudget]` with avg/max fraction of model budget used by static context.
+- `session.parse_skill_file_entries(text)` — pure helper: parses module skills file (GOTCHAS.md, DEBUG.md) into entry titles after the APPEND_ENTRIES_BELOW marker.
 - `session.estimate_context_tokens(text)` / `session.context_budget_fraction(prompt, model)` — pure helpers for token estimation (~4 chars/token) and budget fraction calculation.
 - `audit_index.rebuild_index(audit_log_dir)` — builds `INDEX.jsonl` from all audit logs. One line per job with skill, model, status, error, keywords. Called by server-upkeep.
 - `audit_index.search_index(index_path, skill, status, keyword)` — search the index for matching jobs. Used by self-diagnose to find similar past failures.

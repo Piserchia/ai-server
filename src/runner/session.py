@@ -111,6 +111,7 @@ def _build_server_directive(
         # knows what else to check before making changes.
         if job_description:
             directive += _module_dependency_context(job_description)
+            directive += _module_knowledge_context(job_description)
 
     # Append context_files reading list if the skill declares them
     if skill_cfg and skill_cfg.context_files:
@@ -151,6 +152,84 @@ def _module_dependency_context(job_description: str) -> str:
                 lines.append(f"- `{mod}` has no dependents in the graph.")
         lines.append("")
         return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def parse_skill_file_entries(text: str) -> list[str]:
+    """Parse entry titles from a module skills file (GOTCHAS.md, DEBUG.md, etc.).
+
+    Entries start with '## ' after the APPEND_ENTRIES_BELOW marker.
+    Returns a list of entry titles (the text after '## ').
+    Pure function.
+    """
+    titles: list[str] = []
+    after_marker = False
+    for line in text.splitlines():
+        if "APPEND_ENTRIES_BELOW" in line:
+            after_marker = True
+            continue
+        if after_marker and line.startswith("## "):
+            title = line[3:].strip()
+            # Strip date prefix if present (e.g., "2026-04-20 — Title")
+            if " — " in title:
+                title = title.split(" — ", 1)[1]
+            if title:
+                titles.append(title)
+    return titles
+
+
+def _module_knowledge_context(job_description: str) -> str:
+    """If the job description mentions known modules, surface relevant
+    GOTCHAS and DEBUG entries from those modules' skill files.
+
+    Returns a compact section with entry titles only (not full bodies)
+    to keep token budget low. Returns empty string if nothing found.
+    """
+    try:
+        from src.context.module_graph import detect_modules_in_text, parse_module_graph
+        system_md = (settings.server_root / ".context" / "SYSTEM.md").read_text()
+        graph = parse_module_graph(system_md)
+        if not graph:
+            return ""
+        mentioned = detect_modules_in_text(job_description, set(graph.keys()))
+        if not mentioned:
+            return ""
+
+        # Map module shorthands to top-level module names (runner, gateway, db, etc.)
+        module_dirs: set[str] = set()
+        for mod in mentioned:
+            top = mod.split(".")[0]
+            module_dir = settings.server_root / ".context" / "modules" / top / "skills"
+            if module_dir.exists():
+                module_dirs.add(top)
+
+        if not module_dirs:
+            return ""
+
+        sections: list[str] = []
+        for mod_name in sorted(module_dirs):
+            skills_dir = settings.server_root / ".context" / "modules" / mod_name / "skills"
+            entries: list[tuple[str, str]] = []  # (category, title)
+            for fname in ("GOTCHAS.md", "DEBUG.md"):
+                fpath = skills_dir / fname
+                if not fpath.exists():
+                    continue
+                titles = parse_skill_file_entries(fpath.read_text())
+                category = fname.replace(".md", "").lower()
+                for t in titles:
+                    entries.append((category, t))
+
+            if entries:
+                items = "\n".join(
+                    f"  - [{cat}] {title}" for cat, title in entries
+                )
+                sections.append(f"- **{mod_name}**:\n{items}")
+
+        if not sections:
+            return ""
+
+        return "\n**Known issues** (from module skill files):\n" + "\n".join(sections) + "\n"
     except Exception:
         return ""
 

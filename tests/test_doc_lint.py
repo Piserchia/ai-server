@@ -13,6 +13,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_phase_plan_status,
     check_module_skills_dirs,
     check_module_graph_imports,
+    check_context_files_exist,
 )
 
 
@@ -44,3 +45,8 @@ def test_module_skills_dirs_seeded():
 def test_module_graph_imports():
     warnings = check_module_graph_imports()
     assert warnings == [], f"Module graph import mismatches: {warnings}"
+
+
+def test_context_files_exist():
+    warnings = check_context_files_exist()
+    assert warnings == [], f"Broken context_files declarations: {warnings}"

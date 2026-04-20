@@ -24,12 +24,15 @@ malformed YAML all fall back to sensible defaults (driven by settings.default_mo
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 from src.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,6 +76,14 @@ def load(name: str) -> SkillConfig | None:
     if not path.exists():
         return None
     fm, body = _parse_frontmatter(path.read_text())
+    # Validate context_files exist
+    for cf in fm.get("context_files", []):
+        cf_path = settings.server_root / cf
+        if not cf_path.exists():
+            logger.warning(
+                "Skill '%s' declares context_file '%s' but it does not exist",
+                name, cf,
+            )
     return SkillConfig(
         name=fm.get("name", name),
         body=body,
