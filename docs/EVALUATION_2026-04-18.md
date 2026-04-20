@@ -35,7 +35,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | **SHIPPED** | `2a73c0e` | 2026-04-19 |
 | 13 | — | `_writeback` "why" quality gate | **SHIPPED** | `cdb1dbd` | 2026-04-19 |
 | 14 | — | Chunk-level doc retrieval | planned | — | — |
-| 15 | — | Tool-use-aware code review | planned | — | — |
+| 15 | — | Tool-use-aware code review | **SHIPPED** | _pending_ | 2026-04-19 |
 
 ---
 

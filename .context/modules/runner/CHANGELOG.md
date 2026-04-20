@@ -2,6 +2,25 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Tool-use audit in code review (Rec 15)
+
+**Files changed**:
+- `src/runner/review.py` — Added `_summarize_tool_usage()` helper that
+  reads the parent job's audit log and produces a compact tool-count
+  summary (Read: N files, Edit: N, etc.). `run_code_review()` now appends
+  this summary to the review prompt. Updated `REVIEW_SYSTEM_PROMPT` to
+  include an "Approach" section in the output format.
+- `skills/code-review/SKILL.md` — Added Approach section to output format
+  description.
+
+**Why**: Per § 7 Rec 15. Code review previously only evaluated the diff.
+Now the reviewer also sees how the session arrived at the diff (tool usage
+patterns), enabling process quality feedback.
+
+**Side effects**: Every code review that has a parent job ID now reads
+the parent's audit log (~1ms overhead). The review prompt is slightly
+longer.
+
 ## 2026-04-19 — Audit log index (Rec 9)
 
 **Files changed**:

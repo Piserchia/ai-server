@@ -32,7 +32,7 @@ class ReviewOutcome(enum.Enum):
 REVIEW_SYSTEM_PROMPT = """\
 You are a code reviewer for a personal assistant server. You are reviewing a diff
 produced by an automated coding session. Your job is to evaluate the quality,
-correctness, and safety of the changes.
+correctness, and safety of the changes AND the approach used to arrive at them.
 
 Evaluate the diff for:
 1. **Correctness**: Does the code do what it's supposed to? Any logic errors?
@@ -45,9 +45,58 @@ Your response MUST start with exactly one of these words on the first line:
 - `CHANGES` — minor issues that should be fixed but aren't blocking
 - `BLOCKER` — serious issues (security, data loss, broken functionality) that must be fixed
 
-After the verdict line, explain your reasoning. Be specific — reference file names and
-line numbers when pointing out issues.
+After the verdict line, include two sections:
+
+**Review**: Your assessment of the code changes. Be specific — reference file names
+and line numbers when pointing out issues.
+
+**Approach**: If a tool-use summary was provided, comment on the session's methodology.
+Did it read enough context before writing? Did it grep before editing? Did it test after
+changing? Note any process concerns (e.g., "wrote 3 files without reading any first").
+If no tool-use summary was provided, skip this section.
 """
+
+
+def _summarize_tool_usage(parent_job_id: str, max_lines: int = 30) -> str:
+    """Summarize the parent job's tool usage from its audit log.
+
+    Returns a compact summary like:
+      Read: 8 files (models.py, session.py, ...)
+      Grep: 3 searches
+      Edit: 5 edits
+      Bash: 2 commands
+    """
+    events = audit_log.read(parent_job_id)
+    if not events:
+        return ""
+
+    tool_counts: dict[str, int] = {}
+    read_files: list[str] = []
+
+    for evt in events:
+        if evt.get("kind") != "tool_use":
+            continue
+        tool = evt.get("tool_name", "")
+        tool_counts[tool] = tool_counts.get(tool, 0) + 1
+        if tool == "Read":
+            fp = (evt.get("input") or {}).get("file_path", "")
+            if fp:
+                # Just the filename for brevity
+                read_files.append(fp.rsplit("/", 1)[-1])
+
+    if not tool_counts:
+        return ""
+
+    lines = ["Tool usage summary from the coding session:"]
+    for tool in sorted(tool_counts, key=lambda t: -tool_counts[t]):
+        count = tool_counts[tool]
+        extra = ""
+        if tool == "Read" and read_files:
+            shown = read_files[:8]
+            extra = f" ({', '.join(shown)}{'...' if len(read_files) > 8 else ''})"
+        lines.append(f"  {tool}: {count}{extra}")
+
+    return "\n".join(lines[:max_lines])
 
 
 def _parse_outcome(text: str) -> ReviewOutcome:
@@ -109,6 +158,11 @@ async def run_code_review(
             f"\n\n(NOTE: This diff was truncated at {MAX_DIFF_CHARS} characters. "
             "You are seeing a partial diff.)"
         )
+
+    # Append tool-use summary for approach critique (Rec 15)
+    tool_summary = _summarize_tool_usage(parent_job_id)
+    if tool_summary:
+        prompt += f"\n\n{tool_summary}"
 
     options = ClaudeAgentOptions(
         cwd=str(cwd),

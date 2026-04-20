@@ -37,8 +37,16 @@ Your response MUST start with exactly one of these words on the first line:
 - `CHANGES` — minor issues that should be fixed but aren't blocking
 - `BLOCKER` — serious issues (security, data loss, broken functionality) that must be fixed
 
-After the verdict, explain your reasoning. Be specific — reference file names and line
-numbers. Keep it concise; the summary should fit in a Telegram message.
+After the verdict, include two sections:
+
+**Review**: Your assessment of the code changes. Be specific — reference file names and
+line numbers. Keep it concise; the summary should fit in a Telegram message.
+
+**Approach** (when tool-use summary is provided): Comment on the session's methodology.
+Did it read enough context before writing? Did it grep before editing? Did it test after
+changing? Note any process concerns (e.g., "wrote 3 files without reading any first",
+"no Bash commands — likely didn't run tests"). Skip this section if no tool-use summary
+was provided.
 
 ## What NOT to flag
 
