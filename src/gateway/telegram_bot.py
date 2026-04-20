@@ -13,9 +13,11 @@ Run: `python -m src.gateway.telegram_bot`
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import re
+import traceback
 import uuid
 
 import structlog
@@ -58,6 +60,52 @@ def _esc_md(text: str) -> str:
     for ch in ("_", "*", "`", "["):
         text = text.replace(ch, f"\\{ch}")
     return text
+
+
+def _error_safe(handler):
+    """Wrap a command handler with 4-level error handling.
+    Level 1: Reply with error. Level 2: Auto-retry (1x).
+    Level 3: Dispatch self-diagnose. Level 4: Graceful degradation.
+    """
+    @functools.wraps(handler)
+    async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            return await handler(update, ctx)
+        except Exception as first_exc:
+            # Level 1+2: Reply with error + retry once
+            try:
+                await update.message.reply_text(
+                    f"\u26a0\ufe0f Retrying... ({type(first_exc).__name__})"
+                )
+                await asyncio.sleep(1)
+                return await handler(update, ctx)
+            except Exception as retry_exc:
+                # Level 3: Dispatch self-diagnose
+                tb = traceback.format_exc()
+                try:
+                    await enqueue_job(
+                        f"Self-diagnose: Telegram handler '{handler.__name__}' "
+                        f"failed twice. Error: {str(retry_exc)[:200]}",
+                        kind="self-diagnose",
+                        payload={
+                            "target_kind": "bot",
+                            "error": str(retry_exc)[:500],
+                            "traceback": tb[:1000],
+                            "handler": handler.__name__,
+                        },
+                        created_by="bot-error-handler",
+                    )
+                    await update.message.reply_text(
+                        "\u26a0\ufe0f Failed after retry. Auto-diagnosing...\n"
+                        "I've dispatched a self-diagnose job to investigate."
+                    )
+                except Exception:
+                    # Level 4: Graceful degradation
+                    await update.message.reply_text(
+                        f"\u26a0\ufe0f System error: {type(retry_exc).__name__}\n"
+                        "Try again in a few minutes."
+                    )
+    return wrapper
 
 
 # ── Flag parsing ────────────────────────────────────────────────────────────

@@ -63,3 +63,38 @@ class TestParseFlags:
         desc, flags = parse_flags("--model=opus")
         assert desc == ""
         assert flags["model"] == "claude-opus-4-7"
+
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+
+class TestErrorSafeDecorator:
+    def test_successful_handler_passes_through(self):
+        from src.gateway.telegram_bot import _error_safe
+        calls = []
+        @_error_safe
+        async def handler(update, ctx):
+            calls.append(1)
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.message.reply_text = AsyncMock()
+        asyncio.run(handler(update, None))
+        assert calls == [1]
+        update.message.reply_text.assert_not_called()
+
+    def test_exception_retries_then_replies(self):
+        from src.gateway.telegram_bot import _error_safe
+        call_count = 0
+        @_error_safe
+        async def handler(update, ctx):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("boom")
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.message.reply_text = AsyncMock()
+        asyncio.run(handler(update, None))
+        assert call_count == 2  # original + 1 retry
+        # Should have called reply_text at least twice (retry msg + final error msg)
+        assert update.message.reply_text.call_count >= 2

@@ -2,6 +2,12 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Add _error_safe decorator for Telegram handlers
+
+**Files changed**: `src/gateway/telegram_bot.py`
+
+**Why**: Handlers crashed silently. Now: retry once, self-diagnose, graceful degradation.
+
 ## 2026-04-20 — Pin response options to /tasks and /jobs output
 
 **Files changed**: `src/gateway/telegram_bot.py` — Each task and job in
