@@ -9,7 +9,7 @@
 |---|---|
 | Understand the overall system | `SERVER.md`, `.context/SYSTEM.md` |
 | Work on server code (src/) | `.context/modules/<module>/CONTEXT.md`, `.context/PROTOCOL.md` |
-| Work on a specific project | `projects/<slug>/CLAUDE.md`, `projects/<slug>/.context/CONTEXT.md` |
+| Work on a specific project | `projects/<slug>/CLAUDE.md`, `.context/PROJECT_PROTOCOL.md` |
 | Add a new project | `.context/PROJECTS_REGISTRY.md`, `skills/new-project/SKILL.md` |
 | Add a new skill | `.context/SKILLS_REGISTRY.md`, `skills/new-skill/SKILL.md` |
 | Patch a project | `skills/app-patch/SKILL.md` (reads project's own CLAUDE.md) |
@@ -29,7 +29,8 @@ SERVER.md                           ← Architecture overview for humans
 .context/
   INDEX.md                          ← This file (navigation map)
   SYSTEM.md                         ← Module graph, conventions, invariants
-  PROTOCOL.md                       ← Write-back protocol (mandatory)
+  PROTOCOL.md                       ← Write-back protocol (server-scoped, mandatory)
+  PROJECT_PROTOCOL.md               ← Write-back protocol (project-scoped)
   PROJECTS_REGISTRY.md              ← Index of hosted projects
   SKILLS_REGISTRY.md                ← Index of installed skills
   modules/

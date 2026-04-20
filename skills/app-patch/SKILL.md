@@ -30,6 +30,11 @@ If no slug is identifiable from the description or payload, use
 `AskUserQuestion` once to ask which project to patch. Do not ask more than one
 clarifying question; for anything else, make your best judgment and proceed.
 
+## Protocol
+
+Follow `.context/PROJECT_PROTOCOL.md` (in the ai-server root) for the
+write-back protocol. The steps below are specific to app-patch.
+
 ## Procedure
 
 1. **Orient.** Read the project's context files to understand what you're

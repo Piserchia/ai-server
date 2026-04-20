@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Project-level protocol reference in directive (Rec 6)
+
+**Files changed**:
+- `src/runner/session.py` — `_build_server_directive()` now references
+  `.context/PROJECT_PROTOCOL.md` for project-scoped sessions and directs
+  to project's `skills/GOTCHAS.md` for non-obvious learnings.
+
+**Why**: Per § 7 Rec 6. Project-scoped sessions lacked a protocol document
+analogous to PROTOCOL.md. The new PROJECT_PROTOCOL.md gives them write-back
+rules, and the directive now points there.
+
+**Side effects**: None on runner execution — just adds a line to the
+project-scoped directive string.
+
 ## 2026-04-19 — Graph-walked context injection + import lint (Rec 4)
 
 **Files changed**:

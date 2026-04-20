@@ -22,6 +22,12 @@ You are creating a new project that will be hosted at `<slug>.chrispiserchia.com
 This is a two-phase process: **first plan the architecture, then implement it**.
 Do not start writing code until you have completed the architecture plan.
 
+## Protocol
+
+Follow `.context/PROJECT_PROTOCOL.md` (in the ai-server root) for the
+project-scoped write-back protocol. The steps below are specific to
+new-project creation.
+
 ## Inputs
 
 Extract from the job description:

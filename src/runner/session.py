@@ -81,14 +81,16 @@ def _build_server_directive(
     if skill_cfg and skill_cfg.name == "chat":
         return base + "Respond directly. No tool use, no context reading needed.\n"
 
-    # Project-scoped: point to project context
+    # Project-scoped: point to project context + project protocol
     if cwd != settings.server_root:
         project_slug = cwd.name
         directive = base + (
             f"This job is scoped to the `{project_slug}` project at `{cwd}`.\n"
+            "Follow the project protocol at `.context/PROJECT_PROTOCOL.md` "
+            "(in the ai-server root).\n\n"
             "Read that project's CLAUDE.md and .context/CONTEXT.md before acting.\n\n"
             "While working: prefer small committed steps. When you learn something "
-            "non-obvious, append to the relevant skill file.\n\n"
+            "non-obvious, append to the project's skills/GOTCHAS.md.\n\n"
             "Before finishing: update the project's .context/CHANGELOG.md. "
             "Write a one-paragraph summary as your final text message.\n"
         )

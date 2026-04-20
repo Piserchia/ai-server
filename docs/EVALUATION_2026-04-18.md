@@ -26,7 +26,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 3 | P1 | Seed module `skills/` dirs | **SHIPPED** | `adc1cbf` | 2026-04-18 |
 | 4 | — | Graph-walked context injection | **SHIPPED** | `0421f38` | 2026-04-19 |
 | 5 | P2 | `context_files` adoption sweep | **SHIPPED** | `599e577` | 2026-04-18 |
-| 6 | — | Project-level PROTOCOL | planned | — | — |
+| 6 | — | Project-level PROTOCOL | **SHIPPED** | _pending_ | 2026-04-19 |
 | 7 | — | Stale-context warnings in retrospective | planned | — | — |
 | 8 | — | Budget accounting | planned | — | — |
 | 9 | — | Audit log index | planned | — | — |
