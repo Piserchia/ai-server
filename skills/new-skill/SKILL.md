@@ -8,6 +8,10 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 30
 post_review:
   trigger: always
+escalation:
+  on_failure:
+    model: claude-opus-4-7
+    effort: max
 context_files: [".context/SKILLS_REGISTRY.md", "skills/README.md"]
 tags: [meta, skill-creation]
 ---

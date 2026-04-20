@@ -8,6 +8,10 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion]
 max_turns: 60
 post_review:
   trigger: always
+escalation:
+  on_failure:
+    model: claude-opus-4-7
+    effort: xhigh
 tags: [projects, maintenance]
 ---
 

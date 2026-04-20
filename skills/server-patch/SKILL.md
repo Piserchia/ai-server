@@ -11,7 +11,7 @@ post_review:
   reviewer_model: claude-opus-4-7
   reviewer_effort: high
 context_files: [".context/SYSTEM.md", ".context/PROTOCOL.md"]
-tags: [server, maintenance, manual-merge-required]
+tags: [server, maintenance, manual-merge-required, needs-projects-mcp]
 ---
 
 # Server Patch

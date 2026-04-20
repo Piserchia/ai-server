@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Feedback loops: unified MCP tags, escalation, parent tracking
+
+**Files changed**:
+- `src/runner/session.py` — Removed `_NEEDS_PROJECTS_MCP` and
+  `_NEEDS_DISPATCH_MCP` hardcoded sets. MCP injection now uses frontmatter
+  tags as sole source of truth. Added `parent_job_id` field to `job_started`
+  audit log events for child jobs (enables cross-job tracing without DB).
+- `skills/review-and-improve/SKILL.md` — Added `needs-projects-mcp` tag
+  (was hardcoded only).
+- `skills/server-upkeep/SKILL.md` — Added `needs-projects-mcp` tag.
+- `skills/server-patch/SKILL.md` — Added `needs-projects-mcp` tag.
+- `skills/app-patch/SKILL.md` — Added `escalation.on_failure` (Opus 4.7 / xhigh).
+- `skills/new-skill/SKILL.md` — Added `escalation.on_failure` (Opus 4.7 / max).
+
+**Why**: MCP opt-in had a dual source of truth (hardcoded sets + tags).
+Now tags-only — single source, auditable in each SKILL.md. app-patch and
+new-skill previously hard-failed with no retry; now escalate on failure.
+Parent_job_id in audit events enables log-only causality tracing.
+
+**Side effects**: Skills that relied on the hardcoded sets but lacked tags
+would break — all 4 have been updated with the correct tags.
+
 ## 2026-04-20 — Knowledge surfacing: seed module skills + auto-inject + context_files validation
 
 **Files changed**:

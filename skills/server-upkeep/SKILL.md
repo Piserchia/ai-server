@@ -10,7 +10,7 @@ escalation:
   on_failure:
     model: claude-sonnet-4-6
     effort: medium
-tags: [scheduled, operations]
+tags: [scheduled, operations, needs-projects-mcp]
 ---
 
 # Server Upkeep

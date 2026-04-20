@@ -7,7 +7,7 @@ permission_mode: plan
 required_tools: [Read, Bash, Glob, Grep]
 max_turns: 30
 context_files: [".context/SKILLS_REGISTRY.md", ".context/SYSTEM.md"]
-tags: [retrospective, needs-dispatch-mcp]
+tags: [retrospective, needs-projects-mcp, needs-dispatch-mcp]
 ---
 
 # Review and Improve

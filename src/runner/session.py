@@ -41,14 +41,6 @@ from src.runner import quota, router
 
 logger = logging.getLogger(__name__)
 
-# ── MCP server opt-in sets ─────────────────────────────────────────────────
-# Skills opt in by name here or via "needs-projects-mcp" / "needs-dispatch-mcp"
-# tags in their SKILL.md frontmatter.
-
-_NEEDS_PROJECTS_MCP = {"self-diagnose", "review-and-improve", "server-upkeep", "server-patch"}
-_NEEDS_DISPATCH_MCP = {"self-diagnose", "review-and-improve"}
-
-
 # In-process registry of running sessions for /cancel.
 _running_sessions: dict[str, ClaudeSDKClient] = {}
 
@@ -321,16 +313,16 @@ def _build_options(job: Job, cwd: Path, skill_cfg: SkillConfig | None) -> Claude
         kwargs["max_turns"] = skill_cfg.max_turns
 
     # ── MCP server injection ──────────────────────────────────────────
-    # Skills opt in via _NEEDS_*_MCP sets (module-level) or tags in frontmatter.
+    # Skills opt in via "needs-projects-mcp" / "needs-dispatch-mcp" tags
+    # in their SKILL.md frontmatter. Tags are the sole source of truth.
     mcp_servers: dict[str, Any] = {}
-    skill_name = skill_cfg.name if skill_cfg else ""
     skill_tags = skill_cfg.tags if skill_cfg else []
 
-    if skill_name in _NEEDS_PROJECTS_MCP or "needs-projects-mcp" in skill_tags:
+    if "needs-projects-mcp" in skill_tags:
         from src.runner.mcp_projects import create_server as create_projects_mcp
         mcp_servers["projects"] = create_projects_mcp()
 
-    if skill_name in _NEEDS_DISPATCH_MCP or "needs-dispatch-mcp" in skill_tags:
+    if "needs-dispatch-mcp" in skill_tags:
         from src.runner.mcp_dispatch import create_server as create_dispatch_mcp
         mcp_servers["dispatch"] = create_dispatch_mcp()
 
@@ -403,6 +395,7 @@ async def run_session(job: Job) -> dict[str, Any]:
         model=options.model,
         effort=effort_used,
         payload=job.payload,
+        parent_job_id=str(job.parent_job_id) if job.parent_job_id else None,
     )
 
     started_at = datetime.now(timezone.utc)
