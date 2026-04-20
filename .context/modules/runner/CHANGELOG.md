@@ -2,6 +2,27 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-19 — Audit log index (Rec 9)
+
+**Files changed**:
+- `src/runner/audit_index.py` (NEW) — `rebuild_index()` builds
+  `volumes/audit_log/INDEX.jsonl` from all JSONL audit logs. One line
+  per job: `{job_id, skill, model, effort, status, error_first_line,
+  keywords}`. `search_index()` queries the index by skill, status, or
+  keyword. `build_index_entry()` and `_extract_keywords()` are pure
+  and unit-tested.
+- `skills/self-diagnose/SKILL.md` — Added audit log index search step
+  before drilling into individual logs.
+- `skills/server-upkeep/SKILL.md` — Added step 2b to rebuild the index
+  during daily upkeep.
+
+**Why**: Per § 7 Rec 9. Self-diagnose previously had to scan individual
+audit logs to find similar past failures. The index provides O(1) lookup
+by skill/status/keyword.
+
+**Side effects**: `volumes/audit_log/INDEX.jsonl` is created/overwritten
+on each rebuild. Not append-only — safe to delete and rebuild.
+
 ## 2026-04-19 — Context budget accounting (Rec 8)
 
 **Files changed**:

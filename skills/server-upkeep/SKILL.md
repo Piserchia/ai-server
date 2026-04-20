@@ -54,6 +54,15 @@ python3 -c "from src.runner.retention import rotate_audit_logs; from pathlib imp
 
 Record its output (number of files pruned, bytes freed).
 
+### 2b. Rebuild audit log index
+
+```bash
+PYTHONPATH=. python3 -m src.runner.audit_index
+```
+
+This creates/updates `volumes/audit_log/INDEX.jsonl` — one line per job
+with metadata for fast failure lookup by `self-diagnose`.
+
 ### 3. DB maintenance
 
 ```bash

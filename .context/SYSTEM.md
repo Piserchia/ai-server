@@ -35,6 +35,7 @@
 | `src/runner/mcp_projects.py` | MCP server: project tools (list, get, logs, restart) | config, db, models | runner.session |
 | `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool | gateway.jobs | runner.session |
 | `src/runner/retention.py` | Audit log rotation (compress + archive old JSONL) | config | server-upkeep skill |
+| `src/runner/audit_index.py` | Build INDEX.jsonl for fast job lookup by skill/status/keyword | config | server-upkeep skill, self-diagnose skill |
 | `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats + context consumption) | config, db, models | review-and-improve skill, gateway.web |
 | `src/runner/proposals.py` | Proposal tracking helpers (pure + async DB ops); backs `/proposals` + dedup/merge-stamping in review-and-improve + server-patch | db, models | gateway.telegram_bot, review-and-improve skill, server-patch skill |
 | `src/runner/learning.py` | Post-session Haiku classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |

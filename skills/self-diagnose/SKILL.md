@@ -50,6 +50,11 @@ Collect information systematically. Read at least 3 of these sources:
 - Read the project's `.context/CONTEXT.md` for architecture context
 
 **For skill/job issues:**
+- Check the audit log index first for similar past failures:
+  ```bash
+  python3 -c "from src.runner.audit_index import search_index; from pathlib import Path; [print(e) for e in search_index(Path('volumes/audit_log/INDEX.jsonl'), status='failed', skill='<skill_name>')]"
+  ```
+  Or search by keyword: `search_index(path, keyword='<error_keyword>')`
 - Read the audit log: `volumes/audit_log/<job_id>.jsonl` (if job ID available)
 - Query recent failures: `psql assistant -c "SELECT id, kind, error_message, created_at FROM jobs WHERE status = 'failed' ORDER BY created_at DESC LIMIT 10;"`
 - Read `volumes/logs/runner.log` and `volumes/logs/runner.err.log` (last 50 lines)

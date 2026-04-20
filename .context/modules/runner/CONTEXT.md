@@ -1,6 +1,6 @@
 # Runner module
 
-**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`
+**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`
 
 ## Purpose
 
@@ -32,6 +32,8 @@ Four async tasks running in one process:
 - `retrospective.stale_context_warnings()` — synchronous. Checks for CONTEXT.md files >30d older than newest source file, and CHANGELOG.md with no updates in 60d despite git commits. Returns `list[StaleContextWarning]`.
 - `retrospective.context_budget_report(since)` — synchronous. Walks audit logs for `context_budget_used` events, aggregates by skill. Returns `list[ContextBudget]` with avg/max fraction of model budget used by static context.
 - `session.estimate_context_tokens(text)` / `session.context_budget_fraction(prompt, model)` — pure helpers for token estimation (~4 chars/token) and budget fraction calculation.
+- `audit_index.rebuild_index(audit_log_dir)` — builds `INDEX.jsonl` from all audit logs. One line per job with skill, model, status, error, keywords. Called by server-upkeep.
+- `audit_index.search_index(index_path, skill, status, keyword)` — search the index for matching jobs. Used by self-diagnose to find similar past failures.
 - `learning.maybe_extract_and_enqueue(parent_job_id, summary)` — post-session hook. Reads the audit log, gates on whether the job modified files (Write/Edit tool_use), runs a one-turn Haiku classifier that may emit a `LearningProposal`, and enqueues a `_learning_apply` internal child job to append the learning to `.context/modules/<module>/skills/<CATEGORY>.md`. Never raises. Called from `main._process_job` after writeback verification.
 - `proposals.extract_proposal_id(text)` — parse `Proposal-ID: <uuid>` marker (pure).
 - `proposals.find_recent_duplicate(target_file, change_type, lookback_days=30)` — dedup check for review-and-improve.

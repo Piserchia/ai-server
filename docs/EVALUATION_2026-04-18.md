@@ -29,7 +29,7 @@ Numbering here corresponds to § 7 of this document. Priority ordering (from
 | 6 | — | Project-level PROTOCOL | **SHIPPED** | `6cffb19` | 2026-04-19 |
 | 7 | — | Stale-context warnings in retrospective | **SHIPPED** | `6062bb7` | 2026-04-19 |
 | 8 | — | Budget accounting | **SHIPPED** | `c620ac6` | 2026-04-19 |
-| 9 | — | Audit log index | planned | — | — |
+| 9 | — | Audit log index | **SHIPPED** | _pending_ | 2026-04-19 |
 | 10 | P1 | Proposal-applied tracking | **SHIPPED** | `bbe2bf6` | 2026-04-18 |
 | 11 | — | Fix `test_review.py` collection errors | **RESOLVED (non-issue)** | `542334c` | 2026-04-18 |
 | 12 | — | Autoregister projects in `PROJECTS_REGISTRY.md` | planned | — | — |
