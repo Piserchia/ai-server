@@ -20,6 +20,9 @@ _RULES: list[tuple[str, str]] = [
     (r"\b(write|implement|build|refactor|fix|debug|optimize|add|update|patch|rewrite)\s+"
      r".*\b(function|class|method|module|script|endpoint|test|tests|bug|feature|"
      r"api|handler|route|model|migration|schema|query|component|hook)\b", "app-patch"),
+    # Action verb + "app" or project-like noun (catches "update the bingo app to...")
+    (r"\b(fix|update|patch|add|modify|change|upgrade)\s+.*\b(app|project|site|dashboard|page)\b",
+     "app-patch"),
     (r"\b(python|typescript|javascript|rust|go|sql|bash|fastapi|react|sqlalchemy)\b.*"
      r"\b(script|function|code|app|service)\b", "app-patch"),
     (r"\bcode (me |up |)\b", "app-patch"),

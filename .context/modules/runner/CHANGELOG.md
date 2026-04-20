@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Router fix: app-patch pattern for project-level requests
+
+**Files changed**: `src/runner/router.py` — Added pattern matching
+`fix/update/patch/add/modify/change/upgrade` + `app/project/site/dashboard/page`
+so requests like "update the bingo app to add login" route to app-patch.
+
+**Why**: "Update the baseball bingo app..." was falling through to generic
+task (no skill resolved) because the existing patterns required technical
+nouns like `function`, `endpoint`, etc.
+
 ## 2026-04-20 — Multi-turn task interaction with approval flow
 
 **Files changed**:
