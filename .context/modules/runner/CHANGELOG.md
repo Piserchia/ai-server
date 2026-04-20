@@ -2,6 +2,27 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Skill consistency: sections lint, post_review standardization, template
+
+**Files changed**:
+- `scripts/lint_docs.py` — New `check_skill_sections()` (8th lint check).
+  Non-internal skills must have `## Gotchas` section and body >= 10 lines.
+- `skills/TEMPLATE.md` (NEW) — Reference template for skill authors.
+  Documents required frontmatter fields, required body sections (Inputs,
+  Procedure, Quality gate, Gotchas), optional sections, and conventions.
+- `skills/new-skill/SKILL.md` — References TEMPLATE.md as first step.
+- `skills/app-patch/SKILL.md`, `skills/new-project/SKILL.md`,
+  `skills/new-skill/SKILL.md`, `skills/project-evaluate/SKILL.md` —
+  Added explicit `reviewer_model` + `reviewer_effort` to post_review config.
+- `skills/code-review/SKILL.md` — Added `## Gotchas` section (was missing).
+
+**Why**: Skill bodies were structurally inconsistent. No template for new
+skill authors. Post-review config was implicit except for server-patch.
+New lint check catches structural gaps early.
+
+**Side effects**: New lint check (8th) runs on every invocation. Skills
+missing Gotchas will be flagged — code-review was the only one.
+
 ## 2026-04-20 — Debugging: error categorization, incremental index, failure correlation
 
 **Files changed**:

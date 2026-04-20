@@ -239,6 +239,53 @@ def check_context_files_exist() -> list[str]:
     return warnings
 
 
+def check_skill_sections() -> list[str]:
+    """Validate that non-internal skills have required body sections.
+
+    Required for all non-internal skills: ## Gotchas
+    Internal skills (name starts with _) are exempt.
+    Also warns if body is < 20 lines (too thin to be useful).
+    """
+    warnings = []
+    skills_dir = REPO_ROOT / "skills"
+    if not skills_dir.exists():
+        return []
+
+    for child in sorted(skills_dir.iterdir()):
+        skill_md = child / "SKILL.md"
+        if not child.is_dir() or not skill_md.exists():
+            continue
+        slug = child.name
+        if slug.startswith("_"):
+            continue  # internal skills exempt
+
+        text = skill_md.read_text()
+        if not text.startswith("---"):
+            continue
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            continue
+        body = parts[2]
+        body_lines = [l for l in body.strip().splitlines() if l.strip()]
+
+        if len(body_lines) < 10:
+            warnings.append(
+                f"Skill `{slug}` body is only {len(body_lines)} lines (< 10 minimum)"
+            )
+
+        # Check for ## Gotchas (case-insensitive)
+        has_gotchas = any(
+            l.strip().lower().startswith("## gotcha")
+            for l in body.splitlines()
+        )
+        if not has_gotchas:
+            warnings.append(
+                f"Skill `{slug}` missing '## Gotchas' section"
+            )
+
+    return warnings
+
+
 def run_all() -> dict[str, list[str]]:
     """Run all checks, return {check_name: [warnings]}."""
     return {
@@ -249,6 +296,7 @@ def run_all() -> dict[str, list[str]]:
         "module_skills_dirs": check_module_skills_dirs(),
         "module_graph_imports": check_module_graph_imports(),
         "context_files_exist": check_context_files_exist(),
+        "skill_sections": check_skill_sections(),
     }
 
 

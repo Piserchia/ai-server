@@ -8,6 +8,8 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 30
 post_review:
   trigger: always
+  reviewer_model: claude-opus-4-7
+  reviewer_effort: high
 escalation:
   on_failure:
     model: claude-opus-4-7
@@ -22,6 +24,9 @@ You are authoring a brand-new skill for the assistant server. Your output is a
 complete `skills/<slug>/SKILL.md` (plus any support files), a router rule if
 the skill is user-triggerable, and an updated SKILLS_REGISTRY. The code-review
 sub-agent will run automatically after you finish.
+
+**Read `skills/TEMPLATE.md` first** — it defines the required sections
+(Inputs, Procedure, Quality gate, Gotchas) and frontmatter conventions.
 
 ## When to use
 

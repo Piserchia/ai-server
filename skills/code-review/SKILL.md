@@ -54,3 +54,14 @@ was provided.
 - Missing type annotations on unchanged code
 - Missing docstrings on unchanged code
 - "Could be refactored" suggestions that don't fix a real problem
+
+## Gotchas
+
+- **Truncated diffs**: Large diffs are truncated at 50K chars. If the diff
+  ends mid-file, note "partial diff" in your review and focus on what's visible.
+- **Plan mode tools only**: This skill runs in plan mode — you can Read, Glob,
+  and Grep but cannot Write, Edit, or Bash. Don't suggest inline fixes; describe
+  what should change.
+- **Approach section depends on tool-use summary**: The runner injects a tool
+  usage summary from the parent job's audit log. If it's missing (manual
+  invocation), skip the Approach section entirely.

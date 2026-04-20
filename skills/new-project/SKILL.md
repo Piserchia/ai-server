@@ -8,6 +8,8 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, AskUserQuestion
 max_turns: 80
 post_review:
   trigger: always
+  reviewer_model: claude-opus-4-7
+  reviewer_effort: high
 escalation:
   on_failure:
     model: claude-opus-4-7

@@ -14,6 +14,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_module_skills_dirs,
     check_module_graph_imports,
     check_context_files_exist,
+    check_skill_sections,
 )
 
 
@@ -50,3 +51,8 @@ def test_module_graph_imports():
 def test_context_files_exist():
     warnings = check_context_files_exist()
     assert warnings == [], f"Broken context_files declarations: {warnings}"
+
+
+def test_skill_sections():
+    warnings = check_skill_sections()
+    assert warnings == [], f"Skill section issues: {warnings}"
