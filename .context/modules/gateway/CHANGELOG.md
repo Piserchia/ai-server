@@ -2,6 +2,30 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Add /clear admin command
+
+**Files changed**: `src/gateway/telegram_bot.py` — New `cmd_clear` handler.
+Cancels all queued/running jobs, fails all active/awaiting/pending tasks,
+flushes the Redis queue.
+
+**Why**: Users needed a way to bulk-cancel everything without raw SQL.
+
+## 2026-04-20 — Diagnose: cmd_jobs crashes on `_writeback` skill name
+
+**Files changed**: none (diagnosis only — server code edit requires `server-patch` / manual apply).
+
+**Root cause**: `cmd_jobs` (`src/gateway/telegram_bot.py:810`) interpolates
+`skill = j.resolved_skill or j.kind` into a Markdown message without passing it
+through `_esc_md()`. When the skill name begins with `_` (e.g. `_writeback`), the
+leading underscore opens an italic entity that never closes, and the Telegram API
+returns `400 Bad Request: can't find end of the entity starting at byte offset N`.
+
+**Proposed fix**: wrap the assignment in `_esc_md(...)`, and audit sibling
+renderers (`cmd_status`, `cmd_tasks`, callback handlers) for the same pattern.
+See `docs/Troubleshooting.md` → "Telegram handler crashes with 'Can't parse entities'".
+
+**Risk**: medium (server code). Not auto-applied; Phase 5 `server-patch` or manual edit required.
+
 ## 2026-04-20 — Thread-based Telegram interface with inline buttons
 
 **Files changed**:

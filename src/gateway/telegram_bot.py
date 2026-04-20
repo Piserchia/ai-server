@@ -177,7 +177,7 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "/status — see active tasks\n"
         "/jobs — see recent job runs\n"
         "/help — this message\n\n"
-        "_Admin: /chat, /resume, /schedule_",
+        "_Admin: /chat, /resume, /clear, /schedule_",
         parse_mode="Markdown",
     )
 
@@ -396,6 +396,42 @@ async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     await quota.clear()
     await update.message.reply_text(
         f"Queue manually resumed (was paused for: {reason[:100]})."
+    )
+
+
+@_error_safe
+async def cmd_clear(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancel all queued/running jobs and fail all active tasks."""
+    if await _guard(update) is None:
+        return
+
+    async with async_session() as s:
+        # Cancel queued + running jobs
+        result = await s.execute(
+            sql_update(Job)
+            .where(Job.status.in_([JobStatus.queued.value, JobStatus.running.value]))
+            .values(status=JobStatus.cancelled.value)
+        )
+        jobs_cleared = result.rowcount or 0
+
+        # Fail active + awaiting tasks
+        result = await s.execute(
+            sql_update(Task)
+            .where(Task.status.in_([
+                TaskStatus.active.value,
+                TaskStatus.awaiting_user.value,
+                TaskStatus.pending_approval.value,
+            ]))
+            .values(status=TaskStatus.failed.value)
+        )
+        tasks_cleared = result.rowcount or 0
+        await s.commit()
+
+    # Flush the Redis queue
+    await redis.delete("jobs:queue")
+
+    await update.message.reply_text(
+        f"Cleared {jobs_cleared} job(s) and {tasks_cleared} task(s)."
     )
 
 
@@ -1267,6 +1303,7 @@ def main() -> None:
     # Admin commands
     app.add_handler(CommandHandler("chat", cmd_chat))
     app.add_handler(CommandHandler("resume", cmd_resume))
+    app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("schedule", cmd_schedule))
     app.add_handler(CommandHandler("projects", cmd_projects))
     # Thread reply + inline button handlers
