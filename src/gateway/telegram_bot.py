@@ -1002,6 +1002,26 @@ async def _task_notifier(app: Application) -> None:
                         send_kwargs["reply_to_message_id"] = task.thread_message_id
                     await app.bot.send_message(**send_kwargs)
 
+                elif notify_type == "progress":
+                    # Informational update — no buttons, just a note in the thread
+                    send_kwargs = dict(
+                        chat_id=task.chat_id,
+                        text=f"🔄 {text_content[:500]}",
+                    )
+                    if task.thread_message_id:
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
+
+                elif notify_type == "failed":
+                    # Terminal failure — notify in thread
+                    send_kwargs = dict(
+                        chat_id=task.chat_id,
+                        text=f"❌ {text_content[:1000]}",
+                    )
+                    if task.thread_message_id:
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
+
             except Exception:
                 logger.exception("failed to send task notification", task_id=task_id)
     finally:

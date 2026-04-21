@@ -597,6 +597,7 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             }),
         )
     elif is_complete:
+        # task_complete = ALL work done. Go to pending_approval.
         async with session_scope() as s:
             await s.execute(
                 update(Task)
@@ -612,19 +613,48 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             }),
         )
     else:
-        # Job completed without explicit task signals — treat as pending approval
+        # No explicit event = phase complete, auto-continue to next phase.
+        # Enqueue a continuation job with "continue to next phase" instruction.
+        logger.info("auto-continuing task to next phase",
+                    task_id=str(job.task_id)[:8], job_id=str(job.id)[:8])
+
+        continuation_kind = job.resolved_skill or job.kind or "task"
+        continuation_desc = "Continue to the next phase of the plan."
+
+        child = await enqueue_job(
+            continuation_desc,
+            kind=continuation_kind,
+            payload=job.payload,
+            project_id=job.project_id,
+            created_by=f"auto-continue:{str(job.id)[:8]}",
+        )
         async with session_scope() as s:
             await s.execute(
-                update(Task)
-                .where(Task.id == job.task_id)
-                .values(status=TaskStatus.pending_approval.value, updated_at=datetime.now(timezone.utc))
+                update(Job).where(Job.id == child.id).values(
+                    task_id=job.task_id)
             )
+            # Record a system turn noting the auto-continue
+            from sqlalchemy import func as sqlfunc
+            max_turn = await s.execute(
+                select(sqlfunc.max(TaskTurn.turn_number))
+                .where(TaskTurn.task_id == job.task_id)
+            )
+            last = max_turn.scalar() or 0
+            s.add(TaskTurn(
+                task_id=job.task_id,
+                turn_number=last + 1,
+                role="system",
+                content=f"Phase complete. Auto-continuing to next phase (job {str(child.id)[:8]}).",
+            ))
+            await s.commit()
+
+        # Notify user that it's continuing (informational, not blocking)
         await redis.publish(
             "tasks:notify",
             json.dumps({
                 "task_id": str(job.task_id),
-                "type": "approval_request",
-                "text": summary,
+                "type": "progress",
+                "text": f"Phase complete. Auto-continuing... (job {str(child.id)[:8]})",
             }),
         )
 
