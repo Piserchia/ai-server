@@ -647,11 +647,30 @@ async def _handle_thread_reply(update: Update, _: ContextTypes.DEFAULT_TYPE) -> 
         )
         await s.commit()
 
+    # Look up the task's original skill to inherit for continuation
+    original_skill = None
+    async with async_session() as s:
+        result = await s.execute(
+            select(Job.resolved_skill)
+            .where(Job.task_id == task.id)
+            .where(Job.resolved_skill.isnot(None))
+            .order_by(Job.created_at)
+            .limit(1)
+        )
+        row = result.first()
+        if row:
+            original_skill = row[0]
+
+    # Use the original skill as kind so the runner resolves to the same
+    # model/effort/permission. Fall back to generic task if no skill found.
+    continuation_kind = original_skill or JobKind.task.value
+    continuation_payload = {"project_slug": task.description.split(":")[0].strip()} if original_skill else None
+
     # Enqueue continuation job
     job = await enqueue_job(
         response_text,
-        kind=JobKind.task.value,
-        payload=None,
+        kind=continuation_kind,
+        payload=continuation_payload,
         created_by=f"telegram:{chat_id}",
     )
     async with async_session() as s:
