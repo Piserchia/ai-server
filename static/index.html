@@ -142,7 +142,22 @@
       return;
     }
 
-    container.innerHTML = projects.map(p => {
+    // Add dashboard card first
+    const dashboardCard = `
+      <a href="https://dashboard.chrispiserchia.com" class="card" target="_blank" rel="noopener">
+        <div class="card-header">
+          <span class="card-name">Dashboard</span>
+          <span class="card-type" style="background:#2d1f5e;color:#a78bfa;">admin</span>
+        </div>
+        <div class="card-url">dashboard.chrispiserchia.com</div>
+        <div class="card-status">
+          <span class="dot dot-green"></span>
+          Monitor jobs, tasks, and system health
+        </div>
+      </a>
+    `;
+
+    container.innerHTML = dashboardCard + projects.map(p => {
       const url = `https://${p.subdomain}`;
       const isHealthy = p.last_healthy_at !== null;
       const typeClass = p.type === 'static' ? 'type-static' : 'type-service';
