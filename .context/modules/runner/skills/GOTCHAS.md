@@ -14,6 +14,27 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-04-20 — System Python dependencies are not inherited by scripts
+
+Scripts invoked as `python3 <script>` use the system Python 3.9 on this machine, which does **not** include user-level pip packages. The server has no `.venv/`; all runtime dependencies are installed into the user's pip path (`pip3 install`). When a script fails with `ModuleNotFoundError` for a package you know is installed, verify which Python is resolving the import (`which python3` vs the Python that owns the package). The fix is either `pip3 install <package>` under system python, or run the script with the correct interpreter explicitly.
+
+_Evidence: job `78a4c95b`_
+
+## 2026-04-20 — `audit_index.py` requires `pydantic-settings` via system python
+
+**Symptom**: `PYTHONPATH=. python3 -m src.runner.audit_index` fails with `ModuleNotFoundError: No module named 'pydantic_settings'` when using system python3 (3.9).
+
+**Root cause**: The server's Python dependencies are installed in the user's pip path (not a venv), and system python3 lacks `pydantic-settings`.
+
+**Fix**: Run `pip3 install pydantic-settings` once, or use whichever python has the server deps. The server has no `.venv/` — deps are in user site-packages.
+
+## 2026-04-20 — Restart grep false positives (updated)
+
+**Pattern**: grep for `Starting\|Restarting\|restarted` in `volumes/logs/*.log` will match:
+  - Telegram polling error messages containing "restarted" (bot.err.log)  
+  - Application startup log lines like "Starting Crypto Dashboard" (project logs)
+These are not actual process crashes. Always inspect matched lines before flagging restarts as anomalies.
+
 ## 2026-04-20 — `audit_log.append()` kind parameter collision
 
 **Symptom**: Every job fails with `TypeError: append() got multiple values for argument 'kind'`. `volumes/audit_log/` is empty.

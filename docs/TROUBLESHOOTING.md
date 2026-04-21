@@ -99,15 +99,7 @@ If the SDK version is current but specific tools (WebSearch, WebFetch) still fai
 
 **Diagnostic**: audit log shows `tool_use` with `tool_name: AskUserQuestion`, job status stuck at `running` (not `awaiting_user`), no Telegram prompt arrives.
 
-**Fix**: Phase 1 doesn't wire `AskUserQuestion` through to Telegram yet. The job will time out after `SESSION_TIMEOUT_SECONDS`. Short-term fix: remove `AskUserQuestion` from the skill's `required_tools` list. Phase 4 adds proper handling via the awaiting_user status.
-
-Edit `skills/research-report/SKILL.md`:
-```yaml
-required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch]
-# removed AskUserQuestion
-```
-
-And remove the instruction in the skill body about using it.
+**Status**: RESOLVED. `AskUserQuestion` was removed from all skills' `required_tools` lists. The `awaiting_user` job status exists in the runner but no skill currently uses it. If a future skill needs interactive clarification, it would need to re-add `AskUserQuestion` to its tools and wire the prompt through Telegram (not yet implemented).
 
 ### Root cause #6: `audit_log.append()` `kind` parameter collision
 
@@ -139,7 +131,7 @@ psql assistant -c "UPDATE jobs SET status = 'failed', error_message = 'runner cr
 bash scripts/run.sh start
 ```
 
-Phase 5 adds a `_stuck_task_recovery_loop` that auto-fails these. Until then, manual recovery.
+Automated stuck-job recovery (`_stuck_task_recovery_loop`) was planned for Phase 5 but deferred. Manual recovery via the SQL command above is the current approach.
 
 ---
 
@@ -308,6 +300,49 @@ Always start here, in this order:
 
 Paste any of these into a Claude Code session along with this file and the
 relevant skill's SKILL.md, and it'll usually diagnose in one turn.
+
+---
+
+## Symptom: Telegram handler crashes with "Can't parse entities: can't find end of the entity starting at byte offset N"
+
+**Diagnostic**: `bot.err.log` shows `sendMessage "HTTP/1.1 400 Bad Request"` responses. `@_error_safe` retries once, then self-diagnose fires. The failing handler (e.g. `cmd_jobs`, `cmd_status`) sends a message with `parse_mode="Markdown"`.
+
+### Root cause
+
+The handler interpolates a string containing an unescaped Markdown-special character (`_`, `*`, `` ` ``, `[`) into the outgoing message. Telegram's legacy Markdown parser then treats the character as the start of an entity it can never close. Common culprit: skill/kind names that start with underscore (`_writeback`) inserted without running through `_esc_md()`.
+
+Example offender (`src/gateway/telegram_bot.py:810-813`):
+
+```python
+skill = j.resolved_skill or j.kind            # may be "_writeback"
+desc = _esc_md(j.description[:40])            # escaped
+...
+line = f"`{prefix}` {icon} {skill} — {desc}{task_ref}"   # skill NOT escaped
+```
+
+When any of the listed jobs has `kind='_writeback'` (or similarly `_`-prefixed), the leading underscore opens an italic run that the parser can't terminate.
+
+### Fix
+
+Wrap every piece of user- or DB-controlled text in `_esc_md()` before it reaches a Markdown-parsed message. In `cmd_jobs`, change:
+
+```python
+skill = j.resolved_skill or j.kind
+```
+
+to
+
+```python
+skill = _esc_md(j.resolved_skill or j.kind)
+```
+
+Audit sibling handlers (`cmd_status`, `cmd_tasks`, callback renderers) for the same pattern — anywhere DB text lands inside an f-string with `parse_mode="Markdown"`.
+
+### Prevention
+
+- Treat `_esc_md()` as mandatory for every dynamic value in a Markdown-formatted message, not just `description` fields.
+- Alternative: render with `parse_mode=None` for structural messages, reserving Markdown for places where the *formatting* is Claude-authored.
+- Consider adding a unit test that asserts each command renderer produces a Markdown-valid payload when given fixture rows whose text includes `_`, `*`, `[`, `` ` ``.
 
 ---
 
