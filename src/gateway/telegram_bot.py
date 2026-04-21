@@ -1011,6 +1011,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("task", cmd_task))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("tasks", cmd_status))  # alias
     app.add_handler(CommandHandler("jobs", cmd_jobs))
     # Admin commands
     app.add_handler(CommandHandler("chat", cmd_chat))
