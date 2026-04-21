@@ -3,7 +3,7 @@ name: _learning_apply
 description: Internal skill. Appends a learning proposal (from the learning extractor) to the correct module's skills/<CATEGORY>.md file. Not user-triggerable.
 model: claude-sonnet-4-6
 effort: low
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Edit, Bash]
 max_turns: 6
 tags: [internal, learning]

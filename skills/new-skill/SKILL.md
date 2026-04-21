@@ -3,7 +3,7 @@ name: new-skill
 description: Author a new skill (SKILL.md + support files) from a natural-language description
 model: claude-opus-4-7
 effort: high
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 30
 post_review:

@@ -3,7 +3,7 @@ name: server-upkeep
 description: Daily health audit. Rotate logs, VACUUM DB, check project status, DM anomalies only.
 model: claude-sonnet-4-6
 effort: low
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
 max_turns: 20
 escalation:

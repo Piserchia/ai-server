@@ -3,7 +3,7 @@ name: app-patch
 description: Patch an existing project to fix bugs or add features
 model: claude-opus-4-7
 effort: high
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 60
 post_review:

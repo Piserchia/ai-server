@@ -3,7 +3,7 @@ name: research-deep
 description: Deep-dive research with more sources, synthesis, and treatment of conflicting evidence
 model: claude-opus-4-7
 effort: high
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion]
 max_turns: 80
 escalation:

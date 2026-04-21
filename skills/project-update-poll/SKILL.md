@@ -3,7 +3,7 @@ name: project-update-poll
 description: Run a project's configured update command. Cheap, fast, fail-silent.
 model: claude-haiku-4-5-20251001
 effort: low
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Bash]
 max_turns: 4
 context_files: [".context/PROJECTS_REGISTRY.md"]

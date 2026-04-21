@@ -3,7 +3,7 @@ name: idea-generation
 description: Generate 3-5 novel ideas on a topic, deduped against prior ideas
 model: claude-sonnet-4-6
 effort: medium
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 20
 # On first run the projects/ideas/ dir doesn't exist yet — the skill body

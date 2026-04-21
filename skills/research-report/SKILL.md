@@ -3,7 +3,7 @@ name: research-report
 description: Web research + synthesis into a dated markdown report under projects/research/
 model: claude-sonnet-4-6
 effort: medium
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion]
 max_turns: 40
 escalation:

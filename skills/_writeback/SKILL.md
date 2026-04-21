@@ -3,7 +3,7 @@ name: _writeback
 description: Internal skill. The runner spawns this after any session that modified files without updating a CHANGELOG.md. Not user-triggerable.
 model: claude-sonnet-4-6
 effort: low
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 6
 tags: [internal, write-back]

@@ -3,7 +3,7 @@ name: self-diagnose
 description: Investigate failures and propose or apply fixes based on risk classification
 model: claude-opus-4-7
 effort: high
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
 max_turns: 30
 escalation:

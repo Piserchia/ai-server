@@ -3,7 +3,7 @@ name: project-evaluate
 description: Evaluate an existing project and produce manifest.yml + .context/CONTEXT.md in the standard documentation format
 model: claude-opus-4-7
 effort: high
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion]
 max_turns: 40
 post_review:

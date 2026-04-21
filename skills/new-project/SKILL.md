@@ -3,7 +3,7 @@ name: new-project
 description: Scaffold, document, deploy, and register a new project from a natural-language description
 model: claude-opus-4-7
 effort: high
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, AskUserQuestion]
 max_turns: 80
 post_review:

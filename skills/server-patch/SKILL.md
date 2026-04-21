@@ -3,7 +3,7 @@ name: server-patch
 description: Modify server code (src/, scripts/, alembic/). Always PR-gated, never auto-merged.
 model: claude-opus-4-7
 effort: xhigh
-permission_mode: acceptEdits
+permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 60
 post_review:
