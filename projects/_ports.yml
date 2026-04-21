@@ -9,3 +9,4 @@
 8787: market-tracker          # Mining dashboard (main)
 8788: market-tracker-stocks   # Stocks dashboard (sub-service)
 8789: market-tracker-crypto   # Crypto dashboard (sub-service)
+8790: baseball-bingo          # FastAPI backend (web companion)
