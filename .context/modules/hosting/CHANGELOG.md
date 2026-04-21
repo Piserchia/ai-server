@@ -2,6 +2,26 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-21 — baseball-bingo flipped from static to service
+
+**Change**:
+- `projects/baseball-bingo/manifest.yml` edited from `type: static`/`web_root: web-legacy` to `type: service` with `port: 8790`, `healthcheck: /healthz`, and a `start_command` that sources a project-local `.env` for `SESSION_SECRET` before launching `uvicorn web.main:app` via the ai-server virtualenv.
+- Ran `bash scripts/register-project.sh baseball-bingo`. This regenerated `Caddyfile.d/baseball-bingo.conf` from `root * web-legacy` / `file_server` to `reverse_proxy localhost:8790`, generated `~/Library/LaunchAgents/com.assistant.project.baseball-bingo.plist`, loaded it with launchd (KeepAlive on crash, RunAtLoad), reloaded Caddy, and upserted the projects row with `type=service`, `port=8790`.
+
+**Why**: Phase 3 of the Baseball Bingo migration plan. Phase 1 (2026-04-20) built the FastAPI backend; Phase 2 (2026-04-21) added groups/shared-cards/marks + SPA; Phase 3 flips the public URL from the legacy static HTML to the live FastAPI service.
+
+**How to verify**:
+- `launchctl list | grep baseball-bingo` shows a running PID.
+- `curl -sL https://bingo.chrispiserchia.com/healthz` → `{"status":"ok"}`.
+- `curl -sL https://bingo.chrispiserchia.com/` returns the SPA shell.
+- `curl -sI https://bingo.chrispiserchia.com/static/app.js` → `HTTP/2 200 content-type: text/javascript`.
+- End-to-end POST/GET API smoke against `bingo.chrispiserchia.com/api/session` → `api/groups` succeeded with a seeded 25-cell card payload.
+
+**Side effects**:
+- `web-legacy/` remains in the project for reference but is no longer served. The reverse_proxy catches all traffic.
+- `SESSION_SECRET` is stored in `projects/baseball-bingo/.env` (gitignored). Losing that file invalidates every existing session cookie; regenerate and users must re-login.
+- Caddy config is now `http://` only (tunnel handles TLS); reload via `caddy reload --config Caddyfile` is idempotent.
+
 ## 2026-04-20 — Fix silent healthcheck failure + `www.` redirect
 
 **Change**:

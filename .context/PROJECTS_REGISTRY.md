@@ -11,7 +11,7 @@
 
 | Slug | Type | Subdomain | Primary platform | Web strategy | Source | Phase |
 |------|------|-----------|-----------------|--------------|--------|-------|
-| `baseball-bingo` | static | `bingo.chrispiserchia.com` | iOS | legacy-shim | `github.com/Piserchia/baseball-bingo` | 3 |
+| `baseball-bingo` | service | `bingo.chrispiserchia.com` (:8790) | iOS | native-web | `github.com/Piserchia/baseball-bingo` | 3 |
 | `market-tracker` | service | `market-tracker.chrispiserchia.com` | web | native-web | `github.com/Piserchia/market-tracker` | 3 |
 | `research` | content | (not hosted) | — | — | this repo (`projects/research/`) | 2 |
 | `ideas` | content | (not hosted) | — | — | this repo (`projects/ideas/`) | 6 |
@@ -56,6 +56,9 @@ See `projects/_ports.yml`. Increment only; ports are never reused.
 
 ## Pending work
 
-- **baseball-bingo**: Merge web-legacy HTML with iOS app — design a Vapor backend
-  reusing the Swift bingo-engine to serve matchup-specific cards via web browser.
-  See `projects/baseball-bingo/web-legacy/README.md` for design options.
+- **baseball-bingo**: Web companion live at `bingo.chrispiserchia.com` since
+  2026-04-21 (FastAPI + vanilla-JS SPA on :8790 supervised by launchd).
+  Multi-user groups + shared cards + marks + live leaderboard all functional.
+  Future: feed real MLB-derived Log5 probabilities into card generation so the
+  web + iOS platforms produce matchup-specific cards from the same engine.
+  `web-legacy/` remains in-repo for historical reference only.
