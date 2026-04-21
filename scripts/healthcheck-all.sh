@@ -8,6 +8,9 @@
 #   bash scripts/healthcheck-all.sh
 set -uo pipefail
 
+# launchd gives us a minimal PATH; add Homebrew so `yq`, `curl`, `psql` resolve.
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG="$PROJECT_DIR/volumes/logs/healthcheck.log"

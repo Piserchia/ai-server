@@ -13,6 +13,11 @@ http://chrispiserchia.com {
     }
 }
 
+# www → apex redirect (some browsers/links auto-prepend www)
+http://www.chrispiserchia.com {
+    redir https://chrispiserchia.com{uri} permanent
+}
+
 # Auth-protected dashboard at dashboard subdomain
 http://dashboard.chrispiserchia.com {
     reverse_proxy localhost:8080

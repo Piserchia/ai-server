@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Fix silent healthcheck failure + `www.` redirect
+
+**Change**:
+- `scripts/healthcheck-all.sh`: prepend `/opt/homebrew/bin` (and friends) to PATH so launchd-invoked runs can find `yq`. Previously every 5-minute tick logged `checked=0` because `yq` wasn't on launchd's bare PATH and `yq '.slug'` returned empty, causing the script to skip every manifest.
+- `Caddyfile`: add a `www.chrispiserchia.com → https://chrispiserchia.com` 301 redirect. Previously `www.` (and any unmatched subdomain hitting the tunnel wildcard) fell through to a Caddy empty-200 response.
+
+**Why**: User reported "cloudflare site appears to be broken". Investigation showed `last_healthy_at` in `projects` table hadn't been updated for 3 days (market-tracker) / ever (bingo), because the cron healthcheck wasn't actually checking anything. Separately, `www.` returned blank.
+
+**How to verify**:
+- `bash scripts/healthcheck-all.sh` reports `checked=3 healthy=3 failed=0`.
+- `psql assistant -c "SELECT slug, last_healthy_at FROM projects;"` shows a fresh timestamp on `market-tracker` within the last 5 min.
+- `curl -sI https://www.chrispiserchia.com/` returns `HTTP/2 301` with `location: https://chrispiserchia.com/`.
+- Logs `volumes/logs/healthcheck.err.log` stop getting `yq: command not found` appended.
+
+**Gotchas added**:
+- `.context/modules/hosting/skills/GOTCHAS.md` now documents the launchd-PATH trap for shell scripts and the "blank Caddy host" trap for unmatched subdomains.
+
 ## 2026-04-18 — Seeded skills/ subdirectory per Rec 3 (§ 7 Seed module skills/ dirs)
 
 **Change**: This module now has `.context/modules/hosting/skills/` containing stub `GOTCHAS.md`, `PATTERNS.md`, and `DEBUG.md` files. Stubs were created via `scripts/seed-module-skills.sh`; no source code modified.
