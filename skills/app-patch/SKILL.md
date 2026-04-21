@@ -236,6 +236,21 @@ Before emitting `task_complete`:
 If you only analyzed or planned (no code committed), do NOT run this gate
 or emit `task_complete`. Just end your turn with your analysis/plan as text.
 
+## Hard limits
+
+- **NEVER restart the runner or bot.** Do not run `launchctl kickstart` on
+  `com.assistant.runner`, `com.assistant.bot`, or `com.assistant.web`. You
+  ARE running inside the runner — restarting it kills your own session.
+  You may only restart PROJECT services (`com.assistant.project.<slug>`).
+- **NEVER modify ai-server source code.** Your scope is `projects/<slug>/`
+  only. If you need server-side changes, note them in your summary and
+  leave them for a `server-patch` job.
+- **NEVER read or act on files in `docs/superpowers/`** — those are for
+  the human's planning sessions, not for you.
+- **Stay scoped to the project.** If the task conversation mentions a plan,
+  implement THAT plan inside `projects/<slug>/`. Do not implement plans
+  that modify `src/`, `skills/`, or `.context/`.
+
 ## Gotchas (living section — append when you learn something)
 
 - **Separate git repo.** `projects/<slug>/` is its OWN git repo. Always `cd`
@@ -247,3 +262,6 @@ or emit `task_complete`. Just end your turn with your analysis/plan as text.
 - **Push failures.** `git pull --rebase origin main` then retry. No force push.
 - **Major features need multiple turns.** Don't try to build auth + multiplayer
   + UI in one session. Plan first, get approval, implement in phases.
+- **Session killed itself by restarting runner.** A prior session ran
+  `launchctl kickstart` on `com.assistant.runner` thinking it was part of
+  a deployment step. This SIGTERM'd the session (exit 143). NEVER do this.
