@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Fix task notifications: remove parse_mode for AI content
+
+**Files changed**: `src/gateway/telegram_bot.py` — `_task_notifier` now sends
+AI-generated content (summaries, plans) without `parse_mode="Markdown"`.
+Prevents 400 Bad Request from Telegram when content has unmatched markdown.
+
+**Why**: Implementation plans with `##`, `**`, backticks crashed the notification.
+
 ## 2026-04-20 — Add /clear admin command
 
 **Files changed**: `src/gateway/telegram_bot.py` — New `cmd_clear` handler.

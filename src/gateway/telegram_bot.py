@@ -1186,6 +1186,8 @@ async def _task_notifier(app: Application) -> None:
             try:
                 if notify_type == "approval_request":
                     # Reply in thread with result + action buttons
+                    # NOTE: text_content is AI-generated and may contain markdown
+                    # that breaks Telegram's parser. Send WITHOUT parse_mode.
                     keyboard = InlineKeyboardMarkup([
                         [
                             InlineKeyboardButton("Approve", callback_data=f"approve:{prefix}"),
@@ -1200,51 +1202,39 @@ async def _task_notifier(app: Application) -> None:
                             InlineKeyboardButton("5", callback_data=f"rate:{prefix}:5"),
                         ],
                     ])
+                    # Truncate long content for Telegram (4096 char limit)
+                    content_truncated = text_content[:3500]
+                    if len(text_content) > 3500:
+                        content_truncated += "\n\n... (truncated — tap View Details for full)"
                     msg_text = (
-                        f"\u270b Task `{prefix}` is done:\n\n"
-                        f"{text_content[:1000]}"
+                        f"Task {prefix} is done:\n\n"
+                        f"{content_truncated}"
+                    )
+                    send_kwargs = dict(
+                        chat_id=task.chat_id,
+                        text=msg_text,
+                        reply_markup=keyboard,
                     )
                     if task.thread_message_id:
-                        await app.bot.send_message(
-                            chat_id=task.chat_id,
-                            text=msg_text,
-                            reply_to_message_id=task.thread_message_id,
-                            reply_markup=keyboard,
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await app.bot.send_message(
-                            chat_id=task.chat_id,
-                            text=msg_text,
-                            reply_markup=keyboard,
-                            parse_mode="Markdown",
-                        )
-                    # Also send summary DM in main chat (not in thread)
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
+
+                    # Also send short summary DM in main chat (not in thread)
                     await app.bot.send_message(
                         chat_id=task.chat_id,
-                        text=f"\U0001f4ec Task \"{_esc_md(task.description[:40])}\" needs your approval \u2014 reply in thread above",
-                        parse_mode="Markdown",
+                        text=f"Task \"{task.description[:40]}\" needs your approval — tap Approve in thread above",
                     )
 
                 elif notify_type == "question":
                     msg_text = (
-                        f"\u2753 Task `{prefix}` needs your input:\n\n"
-                        f"{text_content[:1000]}\n\n"
-                        f"_Reply to this message with your answer_"
+                        f"Task {prefix} needs your input:\n\n"
+                        f"{text_content[:3500]}\n\n"
+                        f"Reply to this message with your answer."
                     )
+                    send_kwargs = dict(chat_id=task.chat_id, text=msg_text)
                     if task.thread_message_id:
-                        await app.bot.send_message(
-                            chat_id=task.chat_id,
-                            text=msg_text,
-                            reply_to_message_id=task.thread_message_id,
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await app.bot.send_message(
-                            chat_id=task.chat_id,
-                            text=msg_text,
-                            parse_mode="Markdown",
-                        )
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
 
                 elif notify_type == "choices" and choices:
                     buttons = []
@@ -1254,22 +1244,16 @@ async def _task_notifier(app: Application) -> None:
                             callback_data=f"choice:{prefix}:{i}",
                         )])
                     keyboard = InlineKeyboardMarkup(buttons)
-                    msg_text = f"\U0001f914 Task `{prefix}` — pick one:"
+                    question_text = data.get("question", "Pick one:")
+                    msg_text = f"Task {prefix}:\n\n{question_text}"
+                    send_kwargs = dict(
+                        chat_id=task.chat_id,
+                        text=msg_text,
+                        reply_markup=keyboard,
+                    )
                     if task.thread_message_id:
-                        await app.bot.send_message(
-                            chat_id=task.chat_id,
-                            text=msg_text,
-                            reply_to_message_id=task.thread_message_id,
-                            reply_markup=keyboard,
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await app.bot.send_message(
-                            chat_id=task.chat_id,
-                            text=msg_text,
-                            reply_markup=keyboard,
-                            parse_mode="Markdown",
-                        )
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
 
             except Exception:
                 logger.exception("failed to send task notification", task_id=task_id)
