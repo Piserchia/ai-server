@@ -234,17 +234,34 @@ def format_task_turns(turns: list[dict]) -> str:
 
     turns: list of {"turn_number": int, "role": str, "content": str, "job_id": str|None}
     Pure function.
+
+    The LAST assistant turn gets expanded (up to 8000 chars) because it
+    typically contains the plan that the continuation should implement.
+    Older turns are truncated to 500 chars.
     """
     if not turns:
         return ""
+
+    # Find the last assistant turn index
+    last_assistant_idx = -1
+    for i, t in enumerate(turns):
+        if t["role"] == "assistant":
+            last_assistant_idx = i
+
     lines: list[str] = []
-    for t in turns:
+    for i, t in enumerate(turns):
         role = t["role"]
         content = t["content"]
         job_ref = f", job {t['job_id'][:8]}" if t.get("job_id") else ""
-        # Truncate long content to keep context budget reasonable
-        if len(content) > 500:
-            content = content[:500] + "..."
+
+        # Expand the last assistant turn (the plan) — truncate others
+        if i == last_assistant_idx:
+            if len(content) > 8000:
+                content = content[:8000] + "\n\n... (truncated)"
+        else:
+            if len(content) > 500:
+                content = content[:500] + "..."
+
         lines.append(f"**Turn {t['turn_number']} ({role}{job_ref})**: {content}")
     return "\n\n".join(lines)
 
@@ -282,13 +299,32 @@ def _build_task_context(task_id) -> str:
 
         formatted = format_task_turns(turns_data)
         task_id_short = str(tid)[:8]
+
+        # Find the last user turn to extract their latest instruction
+        last_user_msg = ""
+        for t in reversed(turns_data):
+            if t["role"] == "user":
+                last_user_msg = t["content"]
+                break
+
+        instructions = (
+            "---\n"
+            "## Your instructions for this turn\n\n"
+        )
+        if last_user_msg:
+            instructions += f"The user replied: \"{last_user_msg[:500]}\"\n\n"
+        instructions += (
+            "Implement the plan from the conversation above. "
+            "Work only within the project directory. "
+            "If you need more information from the user, emit a "
+            "`task_question` audit event and complete normally. "
+            "When you have committed and pushed working code, emit `task_complete`.\n"
+        )
+
         return (
             f"## Task conversation ({task_id_short})\n\n"
             f"{formatted}\n\n"
-            "---\n"
-            "Continue from where the previous turn left off. "
-            "If you need more information from the user, emit a "
-            "`task_question` audit event and complete normally.\n"
+            f"{instructions}"
         )
     except Exception:
         return ""

@@ -2,6 +2,24 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Smarter execution: pre-flight validation + 3-level escalation chain
+
+**Files changed**:
+- `src/runner/main.py` — Added `_preflight_check()`: validates skill
+  resolution (inherits from task if router doesn't match), CWD existence.
+  Rewrote `_maybe_escalate()` as a 3-level chain: L1 = higher model/effort,
+  L2 = self-diagnose with full audit context, L3 = max-effort last resort.
+  Level 3 failure notifies user via tasks:notify.
+- `src/runner/session.py` — `format_task_turns()` now expands the last
+  assistant turn to 8000 chars (the plan). `_build_task_context()` adds
+  explicit "Your instructions for this turn" section with user's last reply.
+- `.context/SYSTEM.md` — Added `runner.router` to main.py deps.
+
+**Why**: Continuation jobs were losing context (routed wrong, wrong model,
+plan truncated). Failures had no recovery path beyond a single retry.
+Now: pre-flight catches misconfigs instantly, continuations inherit their
+parent skill, and failures escalate through 3 levels before giving up.
+
 ## 2026-04-20 — Router fix: app-patch pattern for project-level requests
 
 **Files changed**: `src/runner/router.py` — Added pattern matching

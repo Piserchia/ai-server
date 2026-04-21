@@ -122,6 +122,48 @@ async def _run_with_semaphore(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None
         await _process_job(job_id)
 
 
+async def _preflight_check(job: Job, log) -> str | None:
+    """Validate job config before running a session. Returns error string or None.
+
+    Checks:
+    1. If task_id set but no skill resolved via router, inherit from task's first job
+    2. CWD path must exist
+    """
+    # Check 1: If this is a task continuation with no skill, inherit from parent
+    if job.task_id and not job.kind.startswith("_"):
+        # The router runs later in run_session, but if kind="task" and description
+        # won't match the router, we can force the skill here by changing job.kind
+        from src.runner.router import route
+        if job.kind == "task" and not route(job.description):
+            # Router won't match — look up the task's original skill
+            async with async_session() as s:
+                result = await s.execute(
+                    select(Job.resolved_skill)
+                    .where(Job.task_id == job.task_id)
+                    .where(Job.resolved_skill.isnot(None))
+                    .order_by(Job.created_at)
+                    .limit(1)
+                )
+                row = result.first()
+                if row and row[0]:
+                    original_skill = row[0]
+                    # Change job kind to force skill resolution
+                    async with async_session() as s2:
+                        await s2.execute(
+                            update(Job).where(Job.id == job.id).values(kind=original_skill)
+                        )
+                        await s2.commit()
+                    job.kind = original_skill
+                    log.info("preflight: inherited skill from task", skill=original_skill)
+
+    # Check 2: CWD existence
+    cwd = await session_mod._resolve_cwd(job)
+    if not cwd.exists():
+        return f"CWD does not exist: {cwd}"
+
+    return None  # all checks passed
+
+
 async def _process_job(job_id: uuid.UUID) -> None:
     async with async_session() as s:
         job = await s.get(Job, job_id)
@@ -136,6 +178,20 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
     log = logger.bind(job_id=str(job_id), kind=job.kind)
     log.info("job started")
+
+    # Pre-flight validation: catch misconfigs before wasting a session
+    preflight_error = await _preflight_check(job, log)
+    if preflight_error:
+        audit_log.append(str(job_id), "job_failed", error=preflight_error,
+                         error_category="preflight")
+        await _finish_job(job_id, JobStatus.failed, error=preflight_error)
+        log.warning("preflight failed", reason=preflight_error)
+        if job.task_id:
+            try:
+                await _update_task_after_job(job, None)
+            except Exception:
+                pass
+        return
 
     try:
         result = await asyncio.wait_for(
@@ -322,57 +378,146 @@ async def _verify_writeback(job: Job, result: dict) -> None:
 
 async def _maybe_escalate(job: Job) -> None:
     """
-    If the failed job's skill declares on_failure escalation, enqueue a retry
-    with the escalated config. One level only; guarded by the `escalated_from`
-    payload flag to prevent loops.
+    Multi-level escalation chain:
+    - Level 0 → 1: Standard escalation (higher model/effort from skill config)
+    - Level 1 → 2: Self-diagnose with full context (audit log + task turns + error)
+    - Level 2 → 3: Full-context max-effort debug (last resort)
+    - Level 3: Give up, notify user
     """
-    if (job.payload or {}).get("escalated_from"):
-        return   # already an escalation; don't recurse
+    payload = job.payload or {}
+    current_level = payload.get("escalation_level", 0)
 
-    skill_name = job.resolved_skill
-    if not skill_name:
-        return
-    skill_cfg = load_skill(skill_name)
-    if not skill_cfg or not skill_cfg.escalation:
-        return
-    on_failure = skill_cfg.escalation.get("on_failure")
-    if not on_failure:
+    if current_level >= 3:
+        # Terminal — notify user of failure
+        if job.task_id:
+            from src.models import Task, TaskStatus
+            async with session_scope() as s:
+                await s.execute(
+                    update(Task).where(Task.id == job.task_id).values(
+                        status=TaskStatus.failed.value)
+                )
+            from src.db import redis as _redis
+            await _redis.publish("tasks:notify", json.dumps({
+                "task_id": str(job.task_id),
+                "type": "failed",
+                "text": f"Task failed after 3 escalation attempts. "
+                        f"Last error: {(job.error_message or 'unknown')[:300]}. "
+                        f"Reply to retry or /clear to abandon.",
+            }))
         return
 
-    esc_model = on_failure.get("model")
-    esc_effort = on_failure.get("effort")
-    if not esc_model and not esc_effort:
-        return
+    if current_level == 0:
+        # Level 0 → 1: Standard escalation via skill config
+        skill_name = job.resolved_skill
+        if not skill_name:
+            # No skill = can't escalate via config. Jump to level 2.
+            current_level = 1  # fall through to level 1→2 below
+        else:
+            skill_cfg = load_skill(skill_name)
+            if skill_cfg and skill_cfg.escalation:
+                on_failure = skill_cfg.escalation.get("on_failure")
+                if on_failure:
+                    esc_model = on_failure.get("model")
+                    esc_effort = on_failure.get("effort")
+                    if esc_model or esc_effort:
+                        new_payload = dict(payload)
+                        new_payload["escalation_level"] = 1
+                        new_payload["escalated_from"] = str(job.id)
+                        if esc_model:
+                            new_payload["model"] = esc_model
+                        if esc_effort:
+                            new_payload["effort"] = esc_effort
 
-    new_payload = dict(job.payload or {})
-    new_payload["escalated_from"] = str(job.id)
-    if esc_model:
-        new_payload["model"] = esc_model
-    if esc_effort:
-        new_payload["effort"] = esc_effort
+                        child = await enqueue_job(
+                            job.description, kind=job.kind, payload=new_payload,
+                            project_id=job.project_id,
+                            created_by=f"escalation:{str(job.id)[:8]}",
+                        )
+                        async with session_scope() as s:
+                            await s.execute(
+                                update(Job).where(Job.id == child.id).values(
+                                    parent_job_id=job.id, task_id=job.task_id)
+                            )
+                        audit_log.append(str(job.id), "escalation_spawned",
+                                         child_job_id=str(child.id), level=1)
+                        logger.info("escalation level 1 enqueued",
+                                    parent=str(job.id)[:8], child=str(child.id)[:8])
+                        return
 
-    child = await enqueue_job(
-        job.description,
-        kind=job.kind,
-        payload=new_payload,
-        project_id=job.project_id,
-        created_by=f"escalation:{str(job.id)[:8]}",
-    )
-    async with session_scope() as s:
-        await s.execute(
-            update(Job).where(Job.id == child.id).values(parent_job_id=job.id)
+            # Skill has no escalation config — fall through to level 2
+            current_level = 1
+
+    if current_level == 1:
+        # Level 1 → 2: Self-diagnose with full context
+        # Gather context for the diagnostic session
+        audit_events = audit_log.read(job.id, limit=30)
+        audit_excerpt = json.dumps(audit_events[-20:], default=str)[:3000] if audit_events else "[]"
+
+        task_context = ""
+        if job.task_id:
+            from src.models import TaskTurn
+            async with async_session() as s:
+                result = await s.execute(
+                    select(TaskTurn.content)
+                    .where(TaskTurn.task_id == job.task_id)
+                    .order_by(TaskTurn.turn_number)
+                )
+                turns = [row[0] for row in result.all()]
+                task_context = "\n---\n".join(turns)[:4000]
+
+        diag_payload = {
+            "escalation_level": 2,
+            "escalated_from": str(job.id),
+            "target_kind": "failed-task",
+            "original_job_id": str(job.id),
+            "original_skill": job.resolved_skill,
+            "error": (job.error_message or "unknown")[:500],
+            "error_category": (payload.get("error_category") or "unknown"),
+            "task_context": task_context,
+            "audit_excerpt": audit_excerpt,
+        }
+
+        child = await enqueue_job(
+            f"Self-diagnose: job {str(job.id)[:8]} ({job.resolved_skill or job.kind}) "
+            f"failed. Error: {(job.error_message or 'unknown')[:100]}",
+            kind="self-diagnose",
+            payload=diag_payload,
+            created_by=f"escalation-L2:{str(job.id)[:8]}",
         )
-    audit_log.append(
-        str(job.id), "escalation_spawned",
-        child_job_id=str(child.id),
-        escalated_model=esc_model,
-        escalated_effort=esc_effort,
-    )
-    logger.info(
-        "escalation child job enqueued",
-        parent=str(job.id), child=str(child.id),
-        model=esc_model, effort=esc_effort,
-    )
+        async with session_scope() as s:
+            await s.execute(
+                update(Job).where(Job.id == child.id).values(
+                    parent_job_id=job.id, task_id=job.task_id)
+            )
+        audit_log.append(str(job.id), "escalation_spawned",
+                         child_job_id=str(child.id), level=2)
+        logger.info("escalation level 2 (self-diagnose) enqueued",
+                    parent=str(job.id)[:8], child=str(child.id)[:8])
+        return
+
+    if current_level == 2:
+        # Level 2 → 3: Full-context max-effort last resort
+        diag_payload = dict(payload)
+        diag_payload["escalation_level"] = 3
+        diag_payload["effort"] = "max"
+
+        child = await enqueue_job(
+            f"LAST RESORT debug: escalation chain exhausted for job {str(job.id)[:8]}. "
+            f"Full context in payload. Fix the root cause.",
+            kind="self-diagnose",
+            payload=diag_payload,
+            created_by=f"escalation-L3:{str(job.id)[:8]}",
+        )
+        async with session_scope() as s:
+            await s.execute(
+                update(Job).where(Job.id == child.id).values(
+                    parent_job_id=job.id, task_id=job.task_id)
+            )
+        audit_log.append(str(job.id), "escalation_spawned",
+                         child_job_id=str(child.id), level=3)
+        logger.info("escalation level 3 (last resort) enqueued",
+                    parent=str(job.id)[:8], child=str(child.id)[:8])
+        return
 
 
 async def _update_task_after_job(job: Job, result: dict | None) -> None:
