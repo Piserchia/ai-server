@@ -25,6 +25,7 @@
 | `project-update-poll` | Haiku 4.5 / low | Run a project's configured `on_update` command. Cheap, fast, fail-silent | 6 |
 | `restore` | Sonnet 4.6 / medium | Restore from backup tarball. DESTRUCTIVE -- requires explicit user confirmation | 6 |
 | `_learning_apply` | Sonnet 4.6 / low | **Internal.** Appends learning proposals from the learning extractor hook to `.context/modules/<x>/skills/<CATEGORY>.md`. Not user-triggerable. | Rec 1 |
+| `god` | Opus 4.7 / max (bypassPermissions, 200 turns) | Full-context, full-permission admin session. Equivalent to a human at the terminal. | — |
 
 ## Deferred
 

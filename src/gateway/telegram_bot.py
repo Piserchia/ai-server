@@ -177,7 +177,7 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "/status — see active tasks\n"
         "/jobs — see recent job runs\n"
         "/help — this message\n\n"
-        "_Admin: /chat, /resume, /clear, /schedule_",
+        "_Admin: /god, /chat, /resume, /clear, /schedule_",
         parse_mode="Markdown",
     )
 
@@ -273,6 +273,57 @@ async def cmd_chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
     _job_to_chat[str(job.id)] = chat_id
     await update.message.reply_text(f"Thinking... ({str(job.id)[:8]})")
+
+
+@_error_safe
+async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Full-context, full-permission god-mode session."""
+    chat_id = await _guard(update)
+    if chat_id is None:
+        return
+    raw = " ".join(ctx.args).strip()
+    if not raw:
+        await update.message.reply_text("Usage: /god <what you want done — full system access>")
+        return
+
+    description, flags = parse_flags(raw)
+    if not description:
+        await update.message.reply_text("Put the task description after any flags.")
+        return
+
+    # Create task (same as /task but with kind="god")
+    task = Task(description=description, created_by=f"telegram:{chat_id}", chat_id=chat_id)
+    async with async_session() as s:
+        s.add(task)
+        await s.commit()
+        await s.refresh(task)
+
+    async with async_session() as s:
+        s.add(TaskTurn(task_id=task.id, turn_number=1, role="user", content=description))
+        await s.commit()
+
+    job = await enqueue_job(
+        description,
+        kind="god",
+        payload=flags or None,
+        created_by=f"telegram:{chat_id}",
+    )
+    async with async_session() as s:
+        await s.execute(sql_update(Job).where(Job.id == job.id).values(task_id=task.id))
+        await s.commit()
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Cancel", callback_data=f"cancel:{str(task.id)[:8]}"),
+    ]])
+    reply = await update.message.reply_text(
+        f"\u26a1 God mode: {_esc_md(description[:60])}",
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
+    async with async_session() as s:
+        await s.execute(sql_update(Task).where(Task.id == task.id).values(
+            thread_message_id=reply.message_id))
+        await s.commit()
 
 
 @_error_safe
@@ -1054,6 +1105,7 @@ def main() -> None:
     app.add_handler(CommandHandler("jobs", cmd_jobs))
     # Admin commands
     app.add_handler(CommandHandler("chat", cmd_chat))
+    app.add_handler(CommandHandler("god", cmd_god))
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("schedule", cmd_schedule))
