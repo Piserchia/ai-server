@@ -33,6 +33,9 @@ projects/*/
 !projects/_ports.yml
 !projects/README.md
 
+# Worktrees
+.worktrees/
+
 # IDE
 .idea/
 .vscode/
