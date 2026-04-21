@@ -56,6 +56,10 @@ Migrations under `alembic/versions/`. Never edit existing ones — new file per 
 - `002_proposals_table.py` — Rec 10 (2026-04-18). Creates `proposals` with
   a partial index on `(target_file, change_type) WHERE outcome IN
   ('pending','rejected')` for the dedup query.
+- `003_tasks_table.py` — 2026-04-20. Creates `tasks` and `task_turns` tables;
+  adds `task_id` FK column to `jobs`.
+- `004_task_thread_message_id.py` — 2026-04-20. Adds `thread_message_id`
+  (BigInteger) to `tasks` for Telegram thread-based interaction.
 
 To add a migration after editing `src/models.py`:
 ```bash

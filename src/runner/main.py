@@ -405,18 +405,37 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             job_id=job.id,
         ))
 
-    # Check audit log for task_question or task_complete events
+    # Check audit log for task_question, task_choices, or task_complete events
     events = audit_log.read(job.id)
     question = None
+    choices_event = None
     is_complete = False
     for evt in events:
-        if evt.get("kind") == "task_question":
+        if evt.get("kind") == "task_choices":
+            choices_event = evt
+        elif evt.get("kind") == "task_question":
             question = evt.get("question", "")
         elif evt.get("kind") == "task_complete":
             is_complete = True
 
     # Update task status
-    if question:
+    if choices_event:
+        async with session_scope() as s:
+            await s.execute(
+                update(Task)
+                .where(Task.id == job.task_id)
+                .values(status=TaskStatus.awaiting_user.value, updated_at=datetime.now(timezone.utc))
+            )
+        await redis.publish(
+            "tasks:notify",
+            json.dumps({
+                "task_id": str(job.task_id),
+                "type": "choices",
+                "question": choices_event.get("question", "Pick one:"),
+                "choices": choices_event.get("options", []),
+            }),
+        )
+    elif question:
         async with session_scope() as s:
             await s.execute(
                 update(Task)

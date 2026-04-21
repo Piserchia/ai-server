@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-04-20 — Telegram interface redesign: threads + inline buttons
+
+**Files changed**: `src/gateway/telegram_bot.py` (major rewrite)
+
+**What changed**:
+- Added `_error_safe` decorator with 4-level error handling (reply → retry → self-diagnose → graceful degrade)
+- `/task` now creates a Telegram reply chain (thread) and stores `thread_message_id` on the Task row
+- Thread replies (plain text) auto-route as task continuations via `_handle_thread_reply` MessageHandler
+- Inline keyboard buttons replace slash commands for: Approve, Cancel, Send Feedback, View Details, Rate 1–5, structured choices
+- `_handle_button` CallbackQueryHandler parses `action:task_prefix[:extra]` callback data
+- `_task_notifier` rewritten to reply in threads with buttons (approval_request, question, choices)
+- `/help` rewritten to show 4 primary commands; `/status` updated with thread context hints
+- Removed dead code: `cmd_cancel`, `cmd_rate`, `cmd_proposals`, `cmd_reply`, `cmd_approve`, `cmd_tasks`
+- `_parse_callback` helper added for callback data parsing
+
+**Why**: Replace 16 slash commands with conversational thread-based interaction.
+
 ## 2026-04-20 — Fix task notifications: remove parse_mode for AI content
 
 **Files changed**: `src/gateway/telegram_bot.py` — `_task_notifier` now sends

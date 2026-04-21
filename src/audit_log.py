@@ -20,6 +20,7 @@ Kinds used (keep this list honest — update when adding new kinds):
 - context_budget_used: {"kind", "ts", "job_id", "estimated_tokens", "model_budget", "fraction", "skill"}
 - task_question:    {"kind", "ts", "job_id", "question"}           # skill asks user for input
 - task_complete:    {"kind", "ts", "job_id", "summary"}            # skill declares work done
+- task_choices:     {"kind", "ts", "job_id", "question", "options"} # skill presents structured choices as inline buttons
 
 Also writes a human-readable `<job_id>.summary.md` at job completion (written by the runner,
 not here — it's the last turn the assistant produces).
