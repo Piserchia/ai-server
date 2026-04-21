@@ -53,8 +53,26 @@ The context_files above are pre-loaded into your directive. Additionally:
 2. Investigate before acting — read relevant files, check logs, understand state
 3. Make changes directly — no need for PRs or approval gates
 4. Test your changes (run tests, hit healthchecks, verify)
-5. Commit and push when done
-6. If working on a task (task_id set), emit `task_complete` when ALL work is done
+5. Update ALL documentation (see below)
+6. Commit and push when done
+7. If working on a task (task_id set), emit `task_complete` when ALL work is done
+
+## Documentation obligations (MANDATORY before task_complete)
+
+### For project changes (`projects/<slug>/`):
+- **Always**: `projects/<slug>/.context/CHANGELOG.md` (What/Why/How-to-verify)
+- **If architecture changed**: `projects/<slug>/.context/CONTEXT.md` (5 sections: Mission, Platforms, Web Serving, Architecture, Status)
+- **If hosting changed**: `projects/<slug>/manifest.yml` (type, port, healthcheck, services)
+- **If gotcha discovered**: `projects/<slug>/skills/GOTCHAS.md`
+
+### For server changes (`src/`, `scripts/`, `skills/`):
+- **Always**: `.context/modules/<name>/CHANGELOG.md` (enforced by pre-commit hook)
+- **If public API changed**: `.context/modules/<name>/CONTEXT.md`
+- **If module graph changed**: `.context/SYSTEM.md`
+- **If project type/port changed**: `projects/_ports.yml`, `.context/PROJECTS_REGISTRY.md`
+- **If gotcha discovered**: `.context/modules/<name>/skills/GOTCHAS.md`
+
+Do NOT emit `task_complete` until documentation is updated.
 
 ## When to restart services
 

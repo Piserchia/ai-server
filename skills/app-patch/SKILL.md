@@ -199,38 +199,63 @@ git commit -m "<concise subject describing the change>"
 git push origin main
 ```
 
-### Step 8: Update docs
+### Step 8: Update ALL documentation
 
-Append to `projects/<slug>/.context/CHANGELOG.md`:
-```
-## YYYY-MM-DD — <short description>
+This is NOT optional. Every documentation artifact that applies must be updated:
 
-**What changed**: <list of files and modifications>
-**Why**: <reasoning>
-**How to verify**: <one sentence>
-```
+**Always update:**
+- `projects/<slug>/.context/CHANGELOG.md`:
+  ```
+  ## YYYY-MM-DD — <short description>
+  **What changed**: <list of files and modifications>
+  **Why**: <reasoning — not just "fixed bug" but root cause>
+  **How to verify**: <exact command or URL to test>
+  ```
+
+**Update IF architecture, dependencies, or hosting changed:**
+- `projects/<slug>/.context/CONTEXT.md` — keep the 5 standard sections
+  (Mission, Platforms, Web Serving, Architecture, Status) current
+
+**Update IF hosting config changed:**
+- `projects/<slug>/manifest.yml` — type, port, healthcheck, start_command, services
+
+**Update IF you discovered something non-obvious:**
+- `projects/<slug>/skills/GOTCHAS.md` — Symptom, Root cause, Fix
+
+**Update in ai-server repo IF applicable** (note in summary for server-patch):
+- `projects/_ports.yml` — if a new port was allocated
+- `.context/PROJECTS_REGISTRY.md` — if project type or subdomain changed
+- Caddy config — if hosting routing changed (run `scripts/register-project.sh`)
 
 ### Step 9: Signal completion
 
-After code is committed and pushed, emit `task_complete`:
+After code is committed, pushed, AND all docs updated, emit `task_complete`:
 
 ```python
 audit_log.append(job_id, "task_complete",
     summary="<one paragraph: what changed, how to verify>")
 ```
 
-Your final text message should be the same summary. This becomes the
-Telegram DM the user receives.
+## Quality gate (run this before emitting task_complete)
 
-## Quality gate
-
-Before emitting `task_complete`:
-
+### Code checks:
 - [ ] Changes are minimal and targeted for this phase
 - [ ] No secrets in the diff
 - [ ] Service restarts and passes healthcheck (if applicable)
-- [ ] `projects/<slug>/.context/CHANGELOG.md` updated
 - [ ] Changes committed and pushed to `origin main`
+
+### Documentation checks (MANDATORY — do not skip):
+- [ ] `projects/<slug>/.context/CHANGELOG.md` updated (What/Why/Verify)
+- [ ] `projects/<slug>/.context/CONTEXT.md` updated IF architecture, deps,
+      or hosting config changed (5 standard sections current)
+- [ ] `projects/<slug>/manifest.yml` updated IF type, port, healthcheck,
+      start_command, or services changed
+- [ ] `projects/<slug>/skills/GOTCHAS.md` updated IF you discovered
+      something non-obvious
+- [ ] Server-level updates noted in summary IF applicable:
+      `_ports.yml`, `PROJECTS_REGISTRY.md`, Caddy config
+
+### Completion:
 - [ ] `task_complete` event emitted with summary
 
 If you only analyzed or planned (no code committed), do NOT run this gate

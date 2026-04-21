@@ -58,17 +58,39 @@ Append an entry to `projects/<slug>/.context/CHANGELOG.md`:
 **How to verify**: <one sentence — curl, open browser, run test>
 ```
 
-### 3.2 Update project CONTEXT.md (if needed)
+### 3.2 Update project CONTEXT.md (when architecture changes)
 
-Update `projects/<slug>/.context/CONTEXT.md` if any of these changed:
-- The project's purpose or scope
-- Its architecture (new modules, changed data flow)
-- Its external dependencies or API surface
-- Its hosting configuration (port, healthcheck, web_root)
+Update `projects/<slug>/.context/CONTEXT.md` if ANY of these are true:
+- You added or removed a module/service
+- You changed the data flow between components
+- You added or removed an external dependency or API
+- You changed hosting config (port, healthcheck, web_root, type)
+- You changed the tech stack (new framework, new language)
+
+The 5 standard sections must stay current:
+- **Mission**: what the project does, who it's for
+- **Platforms**: primary platform + web relationship
+- **Web Serving**: how it's exposed on chrispiserchia.com
+- **Architecture**: tech stack, key modules, data flow
+- **Status**: what works, what's in progress
 
 Do NOT update for minor bug fixes that don't change the architecture.
 
-### 3.3 Record gotchas
+### 3.3 Update manifest.yml (when hosting changes)
+
+Update `projects/<slug>/manifest.yml` if you changed:
+- `type` (static → service, etc.)
+- `port` (new or changed port number)
+- `healthcheck` (path or removal)
+- `start_command` (how the service starts)
+- `services` array (added/removed sub-services)
+- `web_root` (where static files are served from)
+
+After changing manifest, note in your summary that
+`scripts/register-project.sh <slug>` needs to be re-run to update
+Caddy and launchd configs.
+
+### 3.4 Record gotchas
 
 If you discovered something surprising, append to
 `projects/<slug>/skills/GOTCHAS.md` (create if it doesn't exist):
@@ -81,7 +103,15 @@ If you discovered something surprising, append to
 **Fix/workaround**: <what to do>
 ```
 
-### 3.4 Stay in scope
+### 3.5 Server-level docs (note for server-patch)
+
+If your changes affect server-level documentation, note in your summary
+what needs updating. Project-scoped sessions cannot modify these directly:
+- `projects/_ports.yml` — if you allocated a new port
+- `.context/PROJECTS_REGISTRY.md` — if project type or subdomain changed
+- Caddy config — if routing changed
+
+### 3.6 Stay in scope
 
 Project-scoped sessions must NOT:
 - Modify files outside `projects/<slug>/` (except `_ports.yml` and
