@@ -1,6 +1,6 @@
 # Runner module
 
-**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`
+**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`
 
 ## Purpose
 
@@ -42,6 +42,8 @@ Four async tasks running in one process:
 - `proposals.find_recent_duplicate(target_file, change_type, lookback_days=30)` — dedup check for review-and-improve.
 - `proposals.insert_proposal(...)` / `proposals.mark_proposal_merged(proposal_id, pr_url)` — lifecycle mutations.
 - `proposals.list_pending_proposals(...)` / `proposals.list_recent_proposals(...)` / `proposals.get_proposal_by_id_prefix(...)` — query helpers for the /proposals command.
+- `reconcile.reconcile_orphaned_jobs() -> int` — startup hook (called from `main.main()` before the loops). Fails every job left in `running` by a previous process that died mid-job, writing one terminal audit event each. Returns the count.
+- `reconcile.orphaned_job_ids(rows)` — pure helper: given `(job_id, status)` pairs, returns ids stranded in `running`.
 
 ## Dependencies
 
@@ -84,13 +86,18 @@ refuses to start if `ANTHROPIC_API_KEY` is set or `claude` CLI is missing.
 - `tests/test_mcp_tools.py` — pure-function tests for MCP tool helpers: `_format_project`, `_read_log_tail`, `_validate_enqueue_args` (Phase 4B). No DB/Redis/SDK. (21 tests)
 - `test_review.py` — code-review outcome parser, reviewer prompt construction (16 tests).
 - `test_events.py` — event-trigger rules: consecutive failures, healthcheck staleness, dedup guards (20 tests).
+- `test_orphaned_jobs.py` — startup reconciliation: `orphaned_job_ids` filtering + orphan error message categorizes back to `orphaned` (6 tests).
 
 ## Key invariants (see `.context/SYSTEM.md` for the full list)
 
 - INV-1: Every session has resolved model/effort/permission_mode before starting.
-- INV-2: Every job writes `job_started` + exactly one terminal event.
+- INV-2: Every job writes `job_started` + exactly one terminal event. Upheld across
+  crashes by `reconcile.reconcile_orphaned_jobs()` on startup, which writes the missing
+  terminal `job_failed` event for jobs stranded in `running`.
 - INV-8: Cancel requests honored within 2 seconds.
 - INV-12: Quota exhaustion pauses queue; jobs requeued at front of queue.
+- INV-15: On startup the runner reconciles orphaned `running` jobs (fail-only, no
+  auto-requeue) before consuming the queue.
 
 ## Gotchas
 
