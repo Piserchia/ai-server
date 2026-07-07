@@ -32,7 +32,26 @@ cp "$PROJECT_DIR/alembic.ini" "$TMP/" 2>/dev/null || true
 tar -czf "$OUT" -C "$TMP" .
 rm -rf "$TMP"
 
-# 6. No retention cap — 2TB SSD, keep everything
+# 6. Off-site replication — push the tarball off this disk so a single hardware
+#    failure can't erase the DB, audit logs, AND every backup at once.
+#    Guarded: absence of rclone / the 'r2' remote is not an error, and a failed
+#    upload NEVER fails the local backup (the local copy is the source of truth).
+#    Human one-time setup: create R2 bucket 'ai-server-backups' + API token, then
+#    `rclone config` a remote named 'r2'. See docs — no secrets live in the repo.
+if command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q '^r2:'; then
+    if rclone copy "$OUT" r2:ai-server-backups/ --no-traverse 2>>"$PROJECT_DIR/volumes/logs/backup.log"; then
+        echo "$(date -u +%FT%TZ) offsite OK r2:ai-server-backups/$(basename "$OUT")" \
+            >> "$PROJECT_DIR/volumes/logs/backup.log"
+    else
+        echo "$(date -u +%FT%TZ) WARN off-site upload failed for $OUT" \
+            >> "$PROJECT_DIR/volumes/logs/backup.log"
+    fi
+else
+    echo "$(date -u +%FT%TZ) offsite SKIP (rclone or r2: remote not configured)" \
+        >> "$PROJECT_DIR/volumes/logs/backup.log"
+fi
+
+# 7. No retention cap locally — 2TB SSD, keep everything
 
 echo "$(date -u +%FT%TZ) backup $OUT ($(du -h "$OUT" | cut -f1))" \
     >> "$PROJECT_DIR/volumes/logs/backup.log"

@@ -2,7 +2,40 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
-## 2026-04-21 — baseball-bingo flipped from static to service
+## 2026-07-06 — Off-site backup replication to Cloudflare R2
+
+**Change**:
+- `scripts/backup.sh`: after building the local tarball, replicate it off-disk to
+  Cloudflare R2 (`r2:ai-server-backups/`) via `rclone copy`. The push is guarded —
+  if `rclone` isn't installed or the `r2:` remote isn't configured it logs
+  `offsite SKIP`; a failed upload logs `WARN` but never fails the local backup
+  (the local copy remains the source of truth). Added `backup.sh` to this module's
+  Paths line (hosting now owns operational scripts).
+- `skills/server-upkeep/SKILL.md`: new step 8b checks off-site backup freshness
+  (`rclone lsl r2:ai-server-backups`); DMs an anomaly if the newest remote object is
+  > 48h old while rclone is configured. `offsite-not-configured` is not an anomaly.
+- `skills/restore/SKILL.md`: new "Locating a backup" section documents pulling a
+  tarball from R2 when the local disk/copy is gone.
+
+**Why**: Verified gap — local backups, the Postgres DB, and the append-only audit-log
+institutional memory all lived on the same 2TB SSD. A single disk/hardware failure
+would erase all three at once, against the mission's continuity goal. Off-site
+replication + a freshness alarm closes the loop so a silently-broken upload is noticed.
+
+**Human one-time setup required** (not automatable, no secrets in repo):
+`brew install rclone`; create R2 bucket `ai-server-backups` + a scoped API token;
+`rclone config` a remote named `r2` (S3-compatible R2 endpoint). Until then the push
+logs `offsite SKIP` and upkeep reports `not configured` — both non-fatal.
+
+**How to verify**:
+- `bash scripts/backup.sh` writes `volumes/backups/backup-<date>.tar.gz`; with R2
+  configured, `rclone lsl r2:ai-server-backups/` lists it and `backup.log` shows
+  `offsite OK`. With the remote removed, the local backup still succeeds and
+  `backup.log` shows `offsite SKIP`/`WARN`.
+- Running `server-upkeep` with no recent remote object flags a stale-backup anomaly.
+
+**Side effects**: None on local backup behavior (fully backward-compatible). Adds a
+soft dependency on `rclone` (brew) for the off-site leg only.
 
 **Change**:
 - `projects/baseball-bingo/manifest.yml` edited from `type: static`/`web_root: web-legacy` to `type: service` with `port: 8790`, `healthcheck: /healthz`, and a `start_command` that sources a project-local `.env` for `SESSION_SECRET` before launching `uvicorn web.main:app` via the ai-server virtualenv.

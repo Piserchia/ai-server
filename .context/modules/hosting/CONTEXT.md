@@ -1,6 +1,6 @@
 # Hosting module
 
-**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `Caddyfile`, `Caddyfile.d/`
+**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/backup.sh`, `Caddyfile`, `Caddyfile.d/`
 
 ## Purpose
 
@@ -16,6 +16,7 @@ Multi-project hosting on a single public domain via:
 - `healthcheck-all.sh` — probe all projects (runs on 5-min timer via launchd)
 - `setup-tunnel.sh` — one-time: create/update Cloudflare named tunnel (interactive, needs browser)
 - `setup-caddy.sh` — one-time: install Caddy + base Caddyfile + launchd service
+- `backup.sh` — nightly (04:00 via `com.assistant.backup`): pg_dump + audit-log/log snapshot → `volumes/backups/backup-<date>.tar.gz`, then off-site replication to Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`. Off-site push is guarded — absent `rclone`/`r2:` remote or a failed upload never fails the local backup. `server-upkeep` alerts if the newest remote object is > 48h old.
 
 ## Manifest schema
 
