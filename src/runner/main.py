@@ -34,6 +34,7 @@ from src import audit_log
 from src.config import settings
 from src.db import (
     CHANNEL_JOB_CANCEL,
+    KEY_RUNNER_HEARTBEAT,
     QUEUE_JOBS,
     async_session,
     redis,
@@ -91,6 +92,15 @@ async def _job_loop() -> None:
     in_flight: set[asyncio.Task] = set()
 
     while not _shutdown.is_set():
+        # Liveness heartbeat. The loop iterates at least every 2s (BLPOP timeout)
+        # and keeps ticking even while jobs run in the background, so a fresh
+        # value means the runner is alive. GET /health reads this; an external
+        # Cloudflare Worker reads /health so silence can't masquerade as health.
+        try:
+            await redis.set(KEY_RUNNER_HEARTBEAT, datetime.now(timezone.utc).isoformat())
+        except Exception:
+            logger.warning("heartbeat write failed (non-fatal)")
+
         paused, reset_at, reason = await quota.is_paused()
         if paused:
             logger.info("queue paused on quota", reset_at=reset_at.isoformat(), reason=reason[:80])

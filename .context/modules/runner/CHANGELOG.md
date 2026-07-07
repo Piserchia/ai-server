@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-06 — Runner liveness heartbeat
+
+**Files changed**:
+- `src/runner/main.py` — `_job_loop` writes `KEY_RUNNER_HEARTBEAT` (Redis) with the
+  current ISO timestamp on every iteration. The loop ticks ≤2s normally (BLPOP timeout)
+  and keeps ticking while jobs run in the background, so a fresh value means the runner
+  is alive. Non-fatal on Redis error.
+
+**Why**: Feeds the meaningful `GET /health` (gateway) and the external heartbeat Worker
+(`ops/heartbeat-worker/`) so a dead runner is detectable from off-box. See gateway +
+db CHANGELOGs for the same day.
+
+**How to verify**: `redis-cli get heartbeat:runner` returns a recent timestamp while the
+runner is up.
+
 ## 2026-07-06 — Startup reconciliation of orphaned 'running' jobs
 
 **Files changed**:

@@ -78,6 +78,15 @@ but the root cert can't be installed into macOS trust store without sudo. This
 causes TLS handshake failures when cloudflared connects. Since the tunnel itself
 is already encrypted, the localhost hop doesn't need TLS.
 
+## External monitoring
+
+- `Caddyfile.d/health.conf` exposes **only** `/health` at `health.chrispiserchia.com`
+  (everything else 404s) — an unauthenticated public liveness URL.
+- `ops/heartbeat-worker/` is a Cloudflare Worker (Cron Trigger, every 5 min) that polls
+  that URL and Telegram-DMs on outage/recovery. It runs on Cloudflare's edge,
+  independent of the Mac, so a dead runner / sleeping Mac / dropped tunnel produces an
+  alert instead of silence. Deploy + secrets: see `ops/heartbeat-worker/README.md`.
+
 ## Gotchas
 
 - `cloudflared tunnel login` needs a browser. Run at the Mac's console, not over SSH.

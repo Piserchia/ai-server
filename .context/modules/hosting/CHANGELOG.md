@@ -2,6 +2,32 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-06 — External dead-man's-switch heartbeat
+
+**Change**:
+- `Caddyfile.d/health.conf` (new) — exposes only `/health` at
+  `health.chrispiserchia.com` (all other paths 404), an unauthenticated public
+  liveness URL for the external monitor.
+- `ops/heartbeat-worker/` (new) — Cloudflare Worker with a Cron Trigger (`*/5 * * * *`)
+  that polls the health URL and Telegram-DMs after 2 consecutive failures, with an
+  all-clear on recovery. State in KV. Files: `wrangler.toml`, `src/index.ts`,
+  `package.json`, `tsconfig.json`, `README.md`.
+
+**Why**: Every in-process alerter (server-upkeep, done-DMs, quota) runs inside the
+runner; if the runner/Mac/tunnel dies, silence looks like health. This monitor lives
+off-box on Cloudflare's edge and closes that gap. Pairs with the meaningful `/health`
+(gateway) + runner heartbeat (runner) landed the same day.
+
+**Human one-time setup** (see `ops/heartbeat-worker/README.md`): route
+`health.chrispiserchia.com` on the `ai-server` tunnel; `wrangler kv namespace create
+HEARTBEAT_KV` and paste the id into `wrangler.toml`; `wrangler secret put
+TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`; `wrangler deploy`. Reload Caddy for the new
+vhost (`caddy reload --config Caddyfile`).
+
+**How to verify**: `curl -s https://health.chrispiserchia.com/health | jq` → 200;
+`launchctl stop com.assistant.runner` → 503 within ~90s and a Telegram alert after two
+Worker ticks (`wrangler tail`); restart → all-clear DM.
+
 ## 2026-07-06 — Off-site backup replication to Cloudflare R2
 
 **Change**:

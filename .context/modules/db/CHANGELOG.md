@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-06 — Runner heartbeat key + health staleness setting
+
+**Files changed**:
+- `src/db.py` — new Redis key constant `KEY_RUNNER_HEARTBEAT = "heartbeat:runner"`
+  (runner SETs it each loop; `/health` reads it). No schema/migration change.
+- `src/config.py` — new setting `runner_heartbeat_stale_seconds` (default 90):
+  `/health` returns 503 if the heartbeat is older than this.
+
+**Why**: Supports the external dead-man's-switch (A3). Redis key names live in one
+place per the "don't inline channel strings" convention.
+
+**Side effects**: None — additive constant + setting with a safe default.
+
 ## 2026-04-20 — Add thread_message_id to tasks table
 
 **Files changed**: `src/models.py`, `alembic/versions/004_task_thread_message_id.py`

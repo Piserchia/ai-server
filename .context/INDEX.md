@@ -1,7 +1,7 @@
 # Documentation Index
 
 > For any new Claude session: read this file to know what exists and where to look.
-> Last updated: 2026-04-18
+> Last updated: 2026-07-06
 
 ## Quick navigation
 
@@ -23,6 +23,7 @@
 | Create a new skill | `skills/TEMPLATE.md` (structure reference), `skills/new-skill/SKILL.md` |
 | Read module institutional knowledge | `.context/modules/<x>/skills/GOTCHAS.md`, `DEBUG.md`, `PATTERNS.md` |
 | Understand hosting setup | `.context/modules/hosting/CONTEXT.md`, `Caddyfile` |
+| Understand external monitoring | `ops/heartbeat-worker/README.md`, `.context/modules/hosting/CONTEXT.md` (External monitoring) |
 
 ## Documentation hierarchy
 
@@ -47,6 +48,8 @@ docs/
   Troubleshooting.md                ← Failure modes + fixes
   PHASE_3_PLAN.md through PHASE_6_PLAN.md  ← Historical (all shipped)
   README.md                         ← Reading order guide
+ops/
+  heartbeat-worker/                 ← Cloudflare Worker: external dead-man's-switch (polls /health, alerts Telegram)
 skills/
   TEMPLATE.md                         ← Reference template for new skills
   <name>/SKILL.md                     ← Frontmatter (config) + body (system prompt)

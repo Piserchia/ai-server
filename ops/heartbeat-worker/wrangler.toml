@@ -1,0 +1,32 @@
+# External dead-man's-switch for ai-server.
+#
+# A Cloudflare Worker with a Cron Trigger that polls the server's public
+# /health endpoint every 5 minutes and DMs Telegram when it goes dark. It runs
+# on Cloudflare's edge — completely independent of the Mac Mini — so a dead
+# runner, a stuck web process, a sleeping Mac, or a dropped tunnel all produce
+# an alert instead of silence.
+#
+# Deploy: see README.md (needs a KV namespace + two secrets).
+
+name = "ai-server-heartbeat"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+HEALTH_URL = "https://health.chrispiserchia.com/health"
+# Consecutive failed checks before alerting (2 × 5min = ~10min of downtime).
+FAILURES_BEFORE_ALERT = "2"
+
+# Bind a KV namespace for consecutive-failure state. Create it once with:
+#   wrangler kv namespace create HEARTBEAT_KV
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "HEARTBEAT_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Secrets (NOT stored here — set with `wrangler secret put`):
+#   TELEGRAM_BOT_TOKEN   — the same bot token the server uses
+#   TELEGRAM_CHAT_ID     — the chat id to alert (your own)
