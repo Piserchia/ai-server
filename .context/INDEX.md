@@ -19,6 +19,7 @@
 | Check what's hosted | `.context/PROJECTS_REGISTRY.md` |
 | Check what skills exist | `.context/SKILLS_REGISTRY.md` |
 | Review system performance | `src/runner/retrospective.py`, `skills/review-and-improve/SKILL.md` |
+| Regression-test a skill's behaviour | `evals/README.md`, `evals/run.py`, `evals/cases/<skill>.yml` |
 | See evaluation status | `docs/EVALUATION_2026-04-18.md` (status table at top) |
 | Create a new skill | `skills/TEMPLATE.md` (structure reference), `skills/new-skill/SKILL.md` |
 | Read module institutional knowledge | `.context/modules/<x>/skills/GOTCHAS.md`, `DEBUG.md`, `PATTERNS.md` |
@@ -48,6 +49,10 @@ docs/
   Troubleshooting.md                ← Failure modes + fixes
   PHASE_3_PLAN.md through PHASE_6_PLAN.md  ← Historical (all shipped)
   README.md                         ← Reading order guide
+evals/
+  README.md                         ← Behavioural skill-eval harness (regression net for skills)
+  harness.py / run.py               ← Pure logic (tested) + on-demand orchestrator
+  cases/<skill>.yml                 ← Eval cases: input + rubric + baseline_score
 ops/
   heartbeat-worker/                 ← Cloudflare Worker: external dead-man's-switch (polls /health, alerts Telegram)
 skills/
