@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-06 — Meaningful /health for external dead-man's-switch
+
+**Files changed**:
+- `src/gateway/web.py` — `/health` now reads the runner heartbeat + queue depth from
+  Redis and pings Postgres; returns **503** (not 200) when the runner heartbeat is
+  stale or DB/Redis is unreachable, with a JSON body `{status, runner_ok,
+  runner_heartbeat_age_s, queue_depth, db_ok, redis_ok}`. Extracted pure helper
+  `health_verdict()`.
+- `tests/test_health.py` (new) — 6 pure-function tests for the verdict.
+
+**Why**: Part of the external heartbeat monitor (A3). All in-process alerters go
+silent if the runner dies, so `/health` had to actually reflect runner liveness for
+an off-box Worker (`ops/heartbeat-worker/`) to detect outages. Previously `/health`
+always returned `{"status":"ok"}` regardless of runner state.
+
+**Depends on**: runner writes `heartbeat:runner` each loop (see runner CHANGELOG);
+`KEY_RUNNER_HEARTBEAT` constant + `runner_heartbeat_stale_seconds` setting.
+
+**How to verify**: `curl -s localhost:8080/health | jq` → 200 with a small
+`runner_heartbeat_age_s` while the runner is up; `launchctl stop com.assistant.runner`
+→ 503 within ~90s.
+
 ## 2026-04-20 — Telegram interface redesign: threads + inline buttons
 
 **Files changed**: `src/gateway/telegram_bot.py` (major rewrite)

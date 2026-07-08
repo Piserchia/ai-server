@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Runner
     max_concurrent_jobs: int = 2
     session_timeout_seconds: int = 1800
+    # GET /health returns 503 if the runner heartbeat is older than this. The
+    # runner writes it every loop (≤2s normally, ~30s during a quota pause), so
+    # 90s tolerates a pause without false alarms.
+    runner_heartbeat_stale_seconds: int = 90
 
     # Quota
     quota_pause_minutes: int = 60

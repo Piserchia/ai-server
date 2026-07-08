@@ -1,0 +1,18 @@
+skill: research-report
+cases:
+  - name: focused-topic
+    input: "Research the current state of solid-state EV batteries in 2026: who is shipping, key remaining obstacles, and realistic timelines."
+    rubric:
+      - "Produces a structured markdown report, not a chat reply"
+      - "Cites multiple distinct sources (roughly 5-8) with links or clear attribution"
+      - "Covers all three asked-for angles: who ships, obstacles, timelines"
+      - "Distinguishes reported fact from speculation where the evidence is thin"
+    baseline_score: 4
+
+  - name: narrow-question
+    input: "Research whether Postgres or SQLite is the better default for a single-node personal automation server, with concrete trade-offs."
+    rubric:
+      - "Gives a clear recommendation with reasoning, not a both-sides non-answer"
+      - "Names concrete trade-offs (concurrency, ops, backup, footprint)"
+      - "Cites sources for non-obvious claims"
+    baseline_score: 4

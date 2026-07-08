@@ -22,6 +22,13 @@ the single enqueue/cancel/lookup helper.
   `/api/jobs/{id}/rate` (POST), `/api/jobs/{id}/stream` (SSE),
   `/api/projects`, `/api/projects/public`, `/api/quota`,
   `/api/retrospective/context`, `/api/tasks`, `/api/tasks/{id}`
+- `GET /health` — unauthenticated liveness probe. Returns **200** only when the
+  runner heartbeat (`heartbeat:runner` in Redis, written every loop) is fresher than
+  `runner_heartbeat_stale_seconds` (default 90s) AND Postgres + Redis are reachable;
+  otherwise **503** with `{status, runner_ok, runner_heartbeat_age_s, queue_depth,
+  db_ok, redis_ok}`. Polled by the external heartbeat Worker (`ops/heartbeat-worker/`).
+- `web.health_verdict(heartbeat_age, db_ok, redis_ok, stale_after) -> (runner_ok, healthy)`
+  — pure helper behind `/health` (tested in `tests/test_health.py`).
 - Telegram primary commands: `/task`, `/status`, `/jobs`, `/help`
 - Telegram admin commands: `/chat`, `/resume`, `/schedule`, `/projects`
 - Thread-based interaction: plain text replies in task threads auto-route as continuations
@@ -57,8 +64,9 @@ Flags land in `job.payload` and take precedence over skill frontmatter.
 ## Testing
 
 Flag parsing and writeback classification are covered in `tests/test_pure_functions.py`.
+`tests/test_health.py` covers the `/health` verdict logic (`health_verdict`).
 No dedicated gateway integration tests (httpx/ASGI) — pure-function tests cover the
-parsers and classifiers.
+parsers, classifiers, and the health verdict.
 
 ## Gotchas
 

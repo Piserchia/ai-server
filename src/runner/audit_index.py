@@ -21,12 +21,18 @@ def categorize_error(error_message: str) -> str:
     """Classify an error message into a category for aggregation.
 
     Pure function. Returns one of: quota, auth, timeout, tool_error,
-    network, import_error, schema, unknown.
+    network, import_error, schema, orphaned, unknown.
+
+    ``orphaned`` is set directly by startup reconciliation (runner/reconcile.py)
+    for jobs stranded in 'running' by a crashed process; it is also matched here
+    so re-classification of such messages stays consistent.
     """
     if not error_message:
         return "unknown"
     msg = error_message.lower()
 
+    if "startup reconciliation" in msg or "orphaned" in msg:
+        return "orphaned"
     if any(k in msg for k in ("quota", "rate limit", "rate_limit", "429", "overloaded")):
         return "quota"
     if any(k in msg for k in ("auth", "credential", "login", "unauthorized", "403", "401")):

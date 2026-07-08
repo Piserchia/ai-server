@@ -323,8 +323,42 @@ In your final summary include two counts:
 
 Users can view pending proposals via the `/proposals` Telegram command.
 
+## Skill-behaviour regression guard (eval harness)
+
+Any proposal that changes a skill's **system prompt or frontmatter** (its
+`SKILL.md`) can silently degrade output quality — the metrics above (fail rate,
+ratings) lag by days. Guard skill-mutating proposals with the behavioural eval
+harness (`evals/`, see `evals/README.md`) so a regression is caught before merge,
+not after.
+
+For each skill you propose to modify **that has a case file** (`evals/cases/<skill>.yml`):
+
+1. **Baseline now** (before any change), so the delta is measured against current
+   behaviour:
+   ```bash
+   python -m evals.run --skill <skill>
+   ```
+   Note the per-case scores from the printed report / `evals/results/<date>-<skill>.md`.
+
+2. **Instruct the dispatched `server-patch`** to re-run `python -m evals.run --skill
+   <skill>` after applying the change and to **paste the before/after score delta into
+   the PR body**. `run.py` exits non-zero if any case regresses (score drops ≥1 vs its
+   baseline) — treat that as a **blocking** result: the skill change does not merge
+   until the regression is understood or the baseline is deliberately re-set with
+   `--update-baseline`.
+
+3. If the skill has **no** case file, say so in the proposal and consider proposing a
+   new `evals/cases/<skill>.yml` as a follow-up — a skill worth tuning is worth a
+   regression net.
+
+This does not apply to `context-files` or `doc-update` proposals (they don't change
+the system prompt), nor to skills without case files.
+
 ## Gotchas (living section — append when you learn something)
 
+- **Eval harness needs the live stack**: `evals/run.py` enqueues real jobs and uses
+  subscription auth, so it runs locally/on-box, not in CI. Budget a few minutes per
+  skill (it waits for each job to finish).
 - **Skip low-sample skills**: Do not propose changes for skills with fewer
   than 5 runs in the analysis period. The data is not statistically
   meaningful.

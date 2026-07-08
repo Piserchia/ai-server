@@ -21,6 +21,24 @@ Extract from the job description (and optionally `payload`):
 - **tarball_path** (required): path to the backup `.tar.gz` file
 - **date** (optional): the date label of the backup (used in confirmation prompt)
 
+## Locating a backup
+
+Backups live in two places (see `scripts/backup.sh`):
+
+- **Local:** `volumes/backups/backup-<date>.tar.gz` — the primary source.
+- **Off-site:** Cloudflare R2 bucket `ai-server-backups/` — the disaster copy, used
+  when the local disk is gone or the local tarball is missing/corrupt.
+
+If the requested tarball isn't present locally, pull it from R2 first (requires
+`rclone` + the `r2:` remote configured):
+
+```bash
+rclone lsl r2:ai-server-backups/                      # list available off-site backups
+rclone copy r2:ai-server-backups/backup-<date>.tar.gz volumes/backups/
+```
+
+Then use the local path as `tarball_path` below.
+
 ## Procedure
 
 1. **First confirmation.** Use `AskUserQuestion` to confirm the restore:

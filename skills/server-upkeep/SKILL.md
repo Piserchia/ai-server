@@ -129,6 +129,25 @@ df -h $HOME
 
 If any filesystem is above 80% usage, flag as anomaly.
 
+### 8b. Off-site backup freshness
+
+Backups are replicated off-disk to Cloudflare R2 by `scripts/backup.sh`. A
+silently-broken upload must not stay silent — verify a recent remote object exists:
+
+```bash
+# Newest remote object's age. Skip cleanly if rclone/r2 isn't configured yet.
+if command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q '^r2:'; then
+  rclone lsl r2:ai-server-backups/ 2>/dev/null | sort -k2 | tail -1
+else
+  echo "offsite-not-configured"
+fi
+```
+
+If the newest remote backup is more than 48 hours old (or the listing is empty
+while rclone *is* configured), flag as an anomaly — off-site replication is
+broken even though local backups may be fine. `offsite-not-configured` is not an
+anomaly (the human hasn't set up R2 yet); note it once and move on.
+
 ### 9. Summary decision
 
 Collect all findings and apply the reporting rules:
@@ -142,6 +161,7 @@ these conditions is true:
 - Writeback frequency > 20/day average over 7 days (from step 7)
 - Tunnel is down or unhealthy (from step 4)
 - DB maintenance failed (from step 3)
+- Off-site backup stale > 48h while rclone is configured (from step 8b)
 - Any other genuinely unexpected error during the audit
 
 **Sunday override**: If today is Sunday, always produce a summary even if
@@ -166,6 +186,7 @@ Server upkeep — YYYY-MM-DD
 Disk: XX% used
 Tunnel: healthy | DOWN
 DB vacuum: OK | FAILED
+Off-site backup: fresh (<age>) | STALE >48h | not configured
 Projects stale >24h: none | <list>
 Restarts today: N
 Writebacks (7d): N (N/day avg)

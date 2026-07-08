@@ -2,7 +2,56 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
-## 2026-04-20 — Smarter execution: pre-flight validation + 3-level escalation chain
+## 2026-07-06 — Runner liveness heartbeat
+
+**Files changed**:
+- `src/runner/main.py` — `_job_loop` writes `KEY_RUNNER_HEARTBEAT` (Redis) with the
+  current ISO timestamp on every iteration. The loop ticks ≤2s normally (BLPOP timeout)
+  and keeps ticking while jobs run in the background, so a fresh value means the runner
+  is alive. Non-fatal on Redis error.
+
+**Why**: Feeds the meaningful `GET /health` (gateway) and the external heartbeat Worker
+(`ops/heartbeat-worker/`) so a dead runner is detectable from off-box. See gateway +
+db CHANGELOGs for the same day.
+
+**How to verify**: `redis-cli get heartbeat:runner` returns a recent timestamp while the
+runner is up.
+
+## 2026-07-06 — Startup reconciliation of orphaned 'running' jobs
+
+**Files changed**:
+- `src/runner/reconcile.py` (new) — `reconcile_orphaned_jobs()` + pure helper
+  `orphaned_job_ids()`. On startup, any job still `status='running'` is a leftover
+  from a process that died mid-job; each is marked `failed` with a terminal
+  `job_failed` audit event (`error_category='orphaned'`).
+- `src/runner/main.py` — call `reconcile_orphaned_jobs()` in `main()` after the auth
+  check, before starting the loops. Non-fatal on error.
+- `src/runner/audit_index.py` — `categorize_error()` now recognises `orphaned` (matches
+  "startup reconciliation"/"orphaned") and documents it in the taxonomy.
+- `tests/test_orphaned_jobs.py` (new) — 6 pure-function tests.
+
+**Why**: The per-job timeout (`session_timeout_seconds`) only guards jobs the *current*
+process runs. A runner killed mid-job (crash, SIGKILL, `launchctl stop`, power loss)
+left its Job row in `running` forever — violating INV-2 (missing terminal event) and
+making the job look perpetually in-flight to self-diagnose/upkeep. Reconciliation writes
+the missing terminal event on next boot.
+
+**Design**: Fail-only, no auto-requeue — a job may have had side effects before the
+crash; blindly re-running could double them. **Idempotent**: reconcile checks the job's
+audit log for an existing terminal event first — if none, it synthesises `job_failed`
+and fails the row; if one already exists (the rare crash *between* writing the event and
+committing the DB update), it reconciles the row to that recorded outcome without writing
+a second event. This keeps INV-2 at exactly one terminal event across repeated restarts.
+Each reconciled job also updates the incremental audit index (mirrors `_finish_job`).
+
+**New invariant**: INV-15 — runner reconciles orphaned `running` jobs on startup before
+consuming the queue. Added to `.context/SYSTEM.md`.
+
+**How to verify**: insert a row with `status='running'`, restart the runner, confirm it
+flips to `failed` with a `job_failed` audit event categorised `orphaned`;
+`pipenv run pytest tests/test_orphaned_jobs.py`.
+
+**Side effects**: None on normal operation (no `running` rows at a clean startup → no-op).
 
 **Files changed**:
 - `src/runner/main.py` — Added `_preflight_check()`: validates skill

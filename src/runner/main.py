@@ -5,6 +5,9 @@ Runner entry point. Async tasks:
 2. _scheduler_loop:  cron → enqueue new jobs.
 3. _cancel_listener: subscribes to jobs:cancel, interrupts matching session.
 
+On startup, before the loops begin, reconcile_orphaned_jobs() fails any job left
+in 'running' by a previous process that died mid-job (see runner/reconcile.py).
+
 Run: `python -m src.runner.main`
 Stop: SIGTERM. In-flight jobs finish within session_timeout_seconds.
 
@@ -31,6 +34,7 @@ from src import audit_log
 from src.config import settings
 from src.db import (
     CHANNEL_JOB_CANCEL,
+    KEY_RUNNER_HEARTBEAT,
     QUEUE_JOBS,
     async_session,
     redis,
@@ -41,6 +45,7 @@ from src.models import Job, JobStatus, Project, Schedule
 from src.registry.skills import load as load_skill
 from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
+from src.runner.reconcile import reconcile_orphaned_jobs
 from src.runner.review import ReviewOutcome, get_git_diff, run_code_review
 from src.runner import quota, session as session_mod, writeback
 
@@ -87,6 +92,15 @@ async def _job_loop() -> None:
     in_flight: set[asyncio.Task] = set()
 
     while not _shutdown.is_set():
+        # Liveness heartbeat. The loop iterates at least every 2s (BLPOP timeout)
+        # and keeps ticking even while jobs run in the background, so a fresh
+        # value means the runner is alive. GET /health reads this; an external
+        # Cloudflare Worker reads /health so silence can't masquerade as health.
+        try:
+            await redis.set(KEY_RUNNER_HEARTBEAT, datetime.now(timezone.utc).isoformat())
+        except Exception:
+            logger.warning("heartbeat write failed (non-fatal)")
+
         paused, reset_at, reason = await quota.is_paused()
         if paused:
             logger.info("queue paused on quota", reset_at=reset_at.isoformat(), reason=reason[:80])
@@ -795,6 +809,15 @@ async def main() -> None:
     )
     loop = asyncio.get_running_loop()
     _install_signal_handlers(loop)
+
+    # Reconcile jobs stranded in 'running' by a previous process that died
+    # mid-job. Must run before the job loop starts consuming the queue.
+    try:
+        n = await reconcile_orphaned_jobs()
+        if n:
+            logger.warning("startup: failed orphaned running jobs", count=n)
+    except Exception:
+        logger.exception("orphaned-job reconciliation failed (non-fatal)")
 
     tasks = [
         asyncio.create_task(_job_loop(), name="job_loop"),

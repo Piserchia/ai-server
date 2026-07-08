@@ -1,0 +1,18 @@
+# NOTE: code-review reviews the *current branch's git diff* (runner/review.py:get_git_diff),
+# so this case is environment-dependent: run it on a scratch branch that contains a diff
+# with a known planted bug, then judge whether the review caught it. baseline_score is left
+# null until a human establishes one against a stable fixture, so it never false-flags a
+# regression in the meantime. Treat this as the template for fixture-based review evals.
+skill: code-review
+cases:
+  - name: catches-planted-bug
+    input: >
+      Review the pending changes on the current branch. A reference fixture diff
+      introduces an off-by-one error in a range loop and a missing null check on a
+      dict lookup.
+    rubric:
+      - "Returns a clear verdict (LGTM / CHANGES / BLOCKER)"
+      - "Identifies the off-by-one error"
+      - "Identifies the missing null/None check"
+      - "Does not invent issues unrelated to the diff (low false-positive rate)"
+    baseline_score: null

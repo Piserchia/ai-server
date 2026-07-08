@@ -3,7 +3,7 @@ Web gateway. FastAPI.
 
 Endpoints:
 - GET  /                           — HTMX dashboard shell
-- GET  /health                     — unauthenticated health probe
+- GET  /health                     — unauthenticated liveness probe (503 if runner heartbeat stale or DB/Redis down)
 - POST /api/jobs                   — create a job (supports model/effort/permission in body)
 - GET  /api/jobs                   — list jobs
 - GET  /api/jobs/{id}              — job + audit log
@@ -28,15 +28,15 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update as sql_update
+from sqlalchemy import select, text, update as sql_update
 from sse_starlette.sse import EventSourceResponse
 
 from src import audit_log
 from src.config import settings
-from src.db import CHANNEL_JOB_STREAM, async_session, redis
+from src.db import CHANNEL_JOB_STREAM, KEY_RUNNER_HEARTBEAT, QUEUE_JOBS, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project, Task, TaskStatus, TaskTurn
 from src.runner import quota, retrospective
@@ -122,9 +122,70 @@ def _serialize(job: Job) -> JobOut:
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 
+def health_verdict(
+    heartbeat_age: float | None,
+    db_ok: bool,
+    redis_ok: bool,
+    stale_after: float,
+) -> tuple[bool, bool]:
+    """Pure. Returns ``(runner_ok, healthy)`` from the collected liveness signals.
+
+    ``runner_ok`` is true only when a heartbeat exists and is within
+    ``stale_after`` seconds. ``healthy`` additionally requires DB and Redis.
+    """
+    runner_ok = heartbeat_age is not None and heartbeat_age <= stale_after
+    healthy = db_ok and redis_ok and runner_ok
+    return runner_ok, healthy
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    """Liveness probe used by the external Cloudflare Worker dead-man's-switch.
+
+    Returns 200 only when the runner heartbeat is fresh AND the DB and Redis are
+    reachable; otherwise 503. This makes "silence" (a dead runner, a stuck web
+    process, a sleeping Mac) observable to something outside this process tree.
+    Unauthenticated by design so the edge Worker can poll it.
+    """
+    now = datetime.now(timezone.utc)
+    db_ok = True
+    redis_ok = True
+    heartbeat_age: float | None = None
+    queue_depth: int | None = None
+
+    try:
+        hb = await redis.get(KEY_RUNNER_HEARTBEAT)
+        queue_depth = await redis.llen(QUEUE_JOBS)
+        if hb:
+            try:
+                ts = datetime.fromisoformat(hb)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                heartbeat_age = (now - ts).total_seconds()
+            except ValueError:
+                heartbeat_age = None
+    except Exception:
+        redis_ok = False
+
+    try:
+        async with async_session() as s:
+            await s.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+
+    runner_ok, healthy = health_verdict(
+        heartbeat_age, db_ok, redis_ok, settings.runner_heartbeat_stale_seconds
+    )
+
+    body = {
+        "status": "ok" if healthy else "degraded",
+        "runner_ok": runner_ok,
+        "runner_heartbeat_age_s": round(heartbeat_age, 1) if heartbeat_age is not None else None,
+        "queue_depth": queue_depth,
+        "db_ok": db_ok,
+        "redis_ok": redis_ok,
+    }
+    return JSONResponse(body, status_code=200 if healthy else 503)
 
 
 @app.post("/api/jobs", dependencies=[Depends(_check_auth)])

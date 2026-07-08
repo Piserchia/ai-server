@@ -45,6 +45,7 @@ QUEUE_JOBS = "jobs:queue"                         # RPUSH from gateways, BLPOP f
 CHANNEL_JOB_STREAM = "jobs:stream"                # pub: jobs:stream:<job_id>
 CHANNEL_JOB_DONE = "jobs:done"                    # pub: jobs:done:<job_id>
 CHANNEL_JOB_CANCEL = "jobs:cancel"                # pub: jobs:cancel (body = job_id)
+KEY_RUNNER_HEARTBEAT = "heartbeat:runner"         # SET by runner each loop = ISO ts (liveness)
 
 
 @asynccontextmanager
