@@ -37,8 +37,12 @@ making the job look perpetually in-flight to self-diagnose/upkeep. Reconciliatio
 the missing terminal event on next boot.
 
 **Design**: Fail-only, no auto-requeue — a job may have had side effects before the
-crash; blindly re-running could double them. Terminal audit event is written before the
-DB update so INV-2 is upheld even if the update fails partway.
+crash; blindly re-running could double them. **Idempotent**: reconcile checks the job's
+audit log for an existing terminal event first — if none, it synthesises `job_failed`
+and fails the row; if one already exists (the rare crash *between* writing the event and
+committing the DB update), it reconciles the row to that recorded outcome without writing
+a second event. This keeps INV-2 at exactly one terminal event across repeated restarts.
+Each reconciled job also updates the incremental audit index (mirrors `_finish_job`).
 
 **New invariant**: INV-15 — runner reconciles orphaned `running` jobs on startup before
 consuming the queue. Added to `.context/SYSTEM.md`.

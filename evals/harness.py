@@ -67,7 +67,12 @@ def load_cases(path: str | Path) -> list[EvalCase]:
     data = yaml.safe_load(Path(path).read_text()) or {}
     skill = data.get("skill") or Path(path).stem
     cases: list[EvalCase] = []
-    for raw in data.get("cases", []):
+    for idx, raw in enumerate(data.get("cases", [])):
+        for required in ("name", "input"):
+            if required not in raw:
+                raise ValueError(
+                    f"case #{idx} in {Path(path).name} is missing required key {required!r}"
+                )
         cases.append(
             EvalCase(
                 skill=skill,

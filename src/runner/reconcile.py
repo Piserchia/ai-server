@@ -9,14 +9,21 @@ for jobs the *current* process is running. If the runner is killed mid-job
 
 At runner startup nothing is executing yet, so any row still in ``running`` is a
 leftover from a previous process that died mid-job. ``reconcile_orphaned_jobs``
-marks each such row ``failed``, writes a terminal audit event (preserving INV-2:
-exactly one terminal event per job), and returns the count. Fail-only for now —
-no auto-requeue — to keep restart behaviour predictable and avoid re-running a
-job that may have already had side effects before the crash.
+brings each such row to a terminal state:
+
+- If the job's audit log has **no** terminal event, the process died before
+  finishing: synthesise a ``job_failed`` event (``error_category='orphaned'``) so
+  INV-2 holds, and mark the row ``failed``. Fail-only, no auto-requeue — a job may
+  have had side effects before the crash, so blindly re-running could double them.
+- If a terminal event **already exists** (the rare crash *between* writing the
+  event and committing the DB update), don't write a second one — reconcile the
+  DB row to match the outcome the log already records. This keeps INV-2 at exactly
+  one terminal event and makes reconciliation idempotent across repeated restarts.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -24,8 +31,10 @@ import structlog
 from sqlalchemy import select, update
 
 from src import audit_log
+from src.config import settings
 from src.db import session_scope
 from src.models import Job, JobStatus
+from src.runner.audit_index import append_to_index
 
 logger = structlog.get_logger()
 
@@ -34,6 +43,12 @@ ORPHAN_ERROR = (
     "Runner restarted while this job was still 'running'; marked failed by "
     "startup reconciliation (the process that owned it is gone)."
 )
+
+_TERMINAL_EVENT_STATUS = {
+    "job_completed": JobStatus.completed,
+    "job_failed": JobStatus.failed,
+    "job_cancelled": JobStatus.cancelled,
+}
 
 
 def orphaned_job_ids(rows: Iterable[tuple]) -> list:
@@ -46,8 +61,34 @@ def orphaned_job_ids(rows: Iterable[tuple]) -> list:
     return [jid for jid, status in rows if status == JobStatus.running.value]
 
 
+def _existing_terminal_status(job_id) -> JobStatus | None:
+    """Return the status implied by an already-written terminal event, or None.
+
+    None is the normal orphan case: the process died before writing any terminal
+    event. A non-None result means we must reconcile the DB to that outcome rather
+    than inventing a new (duplicate, possibly conflicting) one.
+    """
+    path = settings.audit_log_dir / f"{job_id}.jsonl"
+    if not path.exists():
+        return None
+    result: JobStatus | None = None
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            evt = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        st = _TERMINAL_EVENT_STATUS.get(evt.get("kind", ""))
+        if st is not None:
+            result = st  # last terminal event wins
+    return result
+
+
 async def reconcile_orphaned_jobs() -> int:
-    """Fail every job left in ``running`` from a previous process. Returns count.
+    """Bring every job left in ``running`` by a previous process to a terminal
+    state. Returns the count reconciled.
 
     Call once at startup, before the job loop begins consuming the queue.
     """
@@ -61,23 +102,35 @@ async def reconcile_orphaned_jobs() -> int:
     if not ids:
         return 0
 
-    # Terminal audit event per job first, so INV-2 holds even if the DB update
-    # below fails partway (the event is the durable record of the transition).
+    # Decide each job's terminal outcome. Synthesise a job_failed event only when
+    # the log has none (write it before the DB update so the durable record leads);
+    # otherwise adopt the existing terminal outcome without a duplicate event.
+    resolutions: list[tuple] = []  # (job_id, JobStatus, error_message_or_None)
     for job_id in ids:
-        audit_log.append(
-            str(job_id), "job_failed", error=ORPHAN_ERROR, error_category=ORPHAN_CATEGORY
-        )
+        existing = _existing_terminal_status(job_id)
+        if existing is None:
+            audit_log.append(
+                str(job_id), "job_failed",
+                error=ORPHAN_ERROR, error_category=ORPHAN_CATEGORY,
+            )
+            resolutions.append((job_id, JobStatus.failed, ORPHAN_ERROR))
+        else:
+            resolutions.append((job_id, existing, None))
 
     async with session_scope() as s:
-        await s.execute(
-            update(Job)
-            .where(Job.id.in_(ids))
-            .values(
-                status=JobStatus.failed.value,
-                error_message=ORPHAN_ERROR,
-                completed_at=datetime.now(timezone.utc),
-            )
-        )
+        for job_id, status, err in resolutions:
+            values = {"status": status.value, "completed_at": datetime.now(timezone.utc)}
+            if err is not None:
+                values["error_message"] = err
+            await s.execute(update(Job).where(Job.id == job_id).values(**values))
+
+    # Keep the incremental audit index in step (nightly rebuild would otherwise be
+    # the first place these show up), mirroring _finish_job.
+    for job_id, _, _ in resolutions:
+        try:
+            append_to_index(settings.audit_log_dir, str(job_id))
+        except Exception:
+            pass  # non-fatal; nightly rebuild catches anything missed
 
     logger.warning(
         "reconciled orphaned jobs", count=len(ids), job_ids=[str(j) for j in ids]

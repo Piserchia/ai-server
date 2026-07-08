@@ -20,13 +20,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-
-import yaml
 
 from src import audit_log
 from src.config import settings
@@ -74,9 +73,14 @@ def _read_output(job: Job) -> str:
 
 
 def _run_judge(prompt: str, timeout_s: int = 120) -> str:
-    """Invoke the LLM judge via the subscription-auth `claude` CLI (headless)."""
+    """Invoke the LLM judge via the subscription-auth `claude` CLI (headless).
+
+    The prompt is piped on stdin, not passed as an argv element — skill outputs
+    (e.g. full research reports) can exceed the OS argv length limit.
+    """
     proc = subprocess.run(
-        ["claude", "-p", prompt, "--model", JUDGE_MODEL],
+        ["claude", "-p", "--model", JUDGE_MODEL],
+        input=prompt,
         capture_output=True,
         text=True,
         timeout=timeout_s,
@@ -110,14 +114,33 @@ async def _run_case(case: EvalCase, job_timeout_s: int) -> CaseResult:
 
 
 def _update_baselines(case_file: Path, results: list[CaseResult]) -> None:
-    """Rewrite baseline_score in the case file to the freshly measured scores."""
-    data = yaml.safe_load(case_file.read_text()) or {}
-    by_name = {r.case: r for r in results if r.score is not None}
-    for raw in data.get("cases", []):
-        r = by_name.get(raw["name"])
-        if r is not None:
-            raw["baseline_score"] = r.score
-    case_file.write_text(yaml.safe_dump(data, sort_keys=False))
+    """Update ``baseline_score`` in-place for cases that already have a numeric
+    baseline, preserving comments and formatting (a full YAML re-dump would strip
+    them). Cases with a null/absent baseline are left untouched — those are
+    human-managed (e.g. environment-dependent cases like code-review that must stay
+    null until a human sets a stable baseline)."""
+    existing = {c.name: c for c in load_cases(case_file)}
+    updates = {
+        r.case: r.score
+        for r in results
+        if r.score is not None
+        and existing.get(r.case) is not None
+        and existing[r.case].baseline_score is not None
+    }
+    if not updates:
+        return
+    lines = case_file.read_text().splitlines()
+    current: str | None = None
+    for i, line in enumerate(lines):
+        name_m = re.match(r"\s*-?\s*name:\s*(.+?)\s*$", line)
+        if name_m:
+            current = name_m.group(1).strip().strip("\"'")
+            continue
+        if current in updates:
+            base_m = re.match(r"(\s*baseline_score:\s*)(.+?)\s*$", line)
+            if base_m:
+                lines[i] = f"{base_m.group(1)}{updates.pop(current)}"
+    case_file.write_text("\n".join(lines) + "\n")
 
 
 async def _run_skill(skill: str, job_timeout_s: int, update_baseline: bool) -> list[CaseResult]:
@@ -125,7 +148,11 @@ async def _run_skill(skill: str, job_timeout_s: int, update_baseline: bool) -> l
     if not case_file.exists():
         print(f"no eval cases for skill {skill!r} ({case_file})", file=sys.stderr)
         return []
-    cases = load_cases(case_file)
+    try:
+        cases = load_cases(case_file)
+    except Exception as exc:  # malformed case file — report it, don't abort --all
+        print(f"failed to load {case_file}: {exc}", file=sys.stderr)
+        return []
     results = [await _run_case(c, job_timeout_s) for c in cases]
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

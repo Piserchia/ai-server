@@ -42,7 +42,7 @@ Four async tasks running in one process:
 - `proposals.find_recent_duplicate(target_file, change_type, lookback_days=30)` — dedup check for review-and-improve.
 - `proposals.insert_proposal(...)` / `proposals.mark_proposal_merged(proposal_id, pr_url)` — lifecycle mutations.
 - `proposals.list_pending_proposals(...)` / `proposals.list_recent_proposals(...)` / `proposals.get_proposal_by_id_prefix(...)` — query helpers for the /proposals command.
-- `reconcile.reconcile_orphaned_jobs() -> int` — startup hook (called from `main.main()` before the loops). Fails every job left in `running` by a previous process that died mid-job, writing one terminal audit event each. Returns the count.
+- `reconcile.reconcile_orphaned_jobs() -> int` — startup hook (called from `main.main()` before the loops). Brings every job left in `running` by a previous process to a terminal state: synthesises a `job_failed` event (`error_category='orphaned'`) + fails the row when the audit log has no terminal event, else adopts the existing terminal outcome without writing a duplicate (idempotent across restarts). Updates the incremental audit index for each. Returns the count.
 - `reconcile.orphaned_job_ids(rows)` — pure helper: given `(job_id, status)` pairs, returns ids stranded in `running`.
 
 ## Dependencies

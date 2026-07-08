@@ -6,10 +6,17 @@ Run: pipenv run pytest tests/test_orphaned_jobs.py -v
 
 from __future__ import annotations
 
+import types
 import uuid
 
 from src.models import JobStatus
-from src.runner.reconcile import ORPHAN_CATEGORY, ORPHAN_ERROR, orphaned_job_ids
+from src.runner import reconcile
+from src.runner.reconcile import (
+    ORPHAN_CATEGORY,
+    ORPHAN_ERROR,
+    _existing_terminal_status,
+    orphaned_job_ids,
+)
 
 
 class TestOrphanedJobIds:
@@ -50,3 +57,46 @@ class TestOrphanConstants:
         from src.runner.audit_index import categorize_error
 
         assert categorize_error(ORPHAN_ERROR) == "orphaned"
+
+
+class TestExistingTerminalStatus:
+    """Idempotency guard: reconcile must not write a second terminal event when
+    the crash landed between the event write and the DB commit."""
+
+    def _patch_dir(self, tmp_path, monkeypatch):
+        # audit_log_dir is a @property on Settings, so swap the module-level
+        # `settings` reference for a fake with a plain attribute.
+        monkeypatch.setattr(
+            reconcile, "settings", types.SimpleNamespace(audit_log_dir=tmp_path)
+        )
+
+    def _write(self, tmp_path, monkeypatch, job_id, lines):
+        self._patch_dir(tmp_path, monkeypatch)
+        (tmp_path / f"{job_id}.jsonl").write_text("\n".join(lines))
+
+    def test_no_file_returns_none(self, tmp_path, monkeypatch):
+        self._patch_dir(tmp_path, monkeypatch)
+        assert _existing_terminal_status(uuid.uuid4()) is None
+
+    def test_only_job_started_returns_none(self, tmp_path, monkeypatch):
+        jid = uuid.uuid4()
+        self._write(tmp_path, monkeypatch, jid, ['{"kind": "job_started"}'])
+        assert _existing_terminal_status(jid) is None
+
+    def test_detects_completed(self, tmp_path, monkeypatch):
+        jid = uuid.uuid4()
+        self._write(tmp_path, monkeypatch, jid,
+                    ['{"kind": "job_started"}', '{"kind": "job_completed"}'])
+        assert _existing_terminal_status(jid) is JobStatus.completed
+
+    def test_detects_failed(self, tmp_path, monkeypatch):
+        jid = uuid.uuid4()
+        self._write(tmp_path, monkeypatch, jid,
+                    ['{"kind": "job_started"}', '{"kind": "job_failed", "error": "x"}'])
+        assert _existing_terminal_status(jid) is JobStatus.failed
+
+    def test_ignores_malformed_lines(self, tmp_path, monkeypatch):
+        jid = uuid.uuid4()
+        self._write(tmp_path, monkeypatch, jid,
+                    ['not json', '', '{"kind": "job_cancelled"}'])
+        assert _existing_terminal_status(jid) is JobStatus.cancelled

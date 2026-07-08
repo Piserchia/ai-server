@@ -28,36 +28,40 @@ export default {
     ctx.waitUntil(check(env));
   },
 
-  // Manual trigger for testing: `curl https://<worker-url>/` runs one check.
+  // Manual trigger for testing: `curl https://<worker-url>/` runs a probe WITHOUT
+  // touching the alert state (KV), so testing during a real outage can't skew the
+  // counter or trip/reset an alert.
   async fetch(_req: Request, env: Env): Promise<Response> {
-    const result = await check(env);
+    const result = await probe(env);
     return new Response(JSON.stringify(result, null, 2), {
       headers: { "content-type": "application/json" },
     });
   },
 };
 
-async function check(env: Env): Promise<{ ok: boolean; detail: string; failures: number }> {
-  const threshold = parseInt(env.FAILURES_BEFORE_ALERT || "2", 10);
-
-  let ok = false;
-  let detail = "";
+/** Side-effect-free health probe. No KV, no alerts — safe to call ad hoc. */
+async function probe(env: Env): Promise<{ ok: boolean; detail: string }> {
   try {
     const resp = await fetch(env.HEALTH_URL, {
       method: "GET",
       signal: AbortSignal.timeout(10_000),
       cf: { cacheTtl: 0 },
     });
-    ok = resp.status === 200;
-    detail = `HTTP ${resp.status}`;
+    const ok = resp.status === 200;
+    let detail = `HTTP ${resp.status}`;
     if (!ok) {
       const body = await resp.text().catch(() => "");
       if (body) detail += ` — ${body.slice(0, 300)}`;
     }
+    return { ok, detail };
   } catch (err) {
-    ok = false;
-    detail = `fetch error: ${err instanceof Error ? err.message : String(err)}`;
+    return { ok: false, detail: `fetch error: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+async function check(env: Env): Promise<{ ok: boolean; detail: string; failures: number }> {
+  const threshold = parseInt(env.FAILURES_BEFORE_ALERT || "2", 10);
+  const { ok, detail } = await probe(env);
 
   const failures = parseInt((await env.HEARTBEAT_KV.get(FAIL_KEY)) || "0", 10);
   const alerted = (await env.HEARTBEAT_KV.get(ALERTED_KEY)) === "1";
