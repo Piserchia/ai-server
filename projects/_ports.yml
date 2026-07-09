@@ -10,3 +10,4 @@
 8788: market-tracker-stocks   # Stocks dashboard (sub-service)
 8789: market-tracker-crypto   # Crypto dashboard (sub-service)
 8790: baseball-bingo          # FastAPI backend (web companion)
+8791: atlas                   # Next.js web (dash-scheduler + pm-edge run portless under launchd)

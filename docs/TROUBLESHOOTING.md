@@ -346,6 +346,32 @@ Audit sibling handlers (`cmd_status`, `cmd_tasks`, callback renderers) for the s
 
 ---
 
+## Symptom: self-diagnose fires for Telegram handler with error "boom"
+
+**Diagnostic**: incoming self-diagnose job description looks like
+`Telegram handler 'handler' failed twice. Error: boom` — the handler name is
+literally the identifier `handler` and the error is literally `boom`.
+
+**Root cause**: this is not a production failure. The exact strings come from
+`tests/test_telegram_commands.py::test_exception_retries_then_replies` (line
+116: `raise ValueError("boom")`). The `@_error_safe` wrapper retries once,
+producing the "failed twice" phrasing. Either a human manually invoked
+self-diagnose with a synthetic payload, or an event-trigger fired on
+test-flavored data.
+
+**Fix**: verify by:
+1. `tail volumes/logs/bot.err.log` — should show only 200 OK responses
+2. `launchctl list | grep com.assistant.bot` — should show exit code 0
+3. `psql assistant -c "SELECT id FROM jobs WHERE error_message ILIKE '%boom%';"` — should return zero rows
+
+If all three pass, no action is required. Close the diagnose job with a note.
+
+**Prevention**: self-diagnose could recognize the sentinel strings
+(`handler`/`boom`) as synthetic and no-op immediately. Low priority — the
+manual verification is fast.
+
+---
+
 ## Symptom: cloudflared tunnel shows "tls: internal error" connecting to Caddy
 
 **Root cause**: Caddy's `tls internal` generates self-signed certs via a local CA. The root cert can't be installed into the macOS trust store without `sudo`, so TLS handshakes fail even with `noTLSVerify: true` in cloudflared config (the error is server-side, not client-side).

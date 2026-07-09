@@ -1,7 +1,7 @@
 # System context
 
 > Source of truth for the server's architecture. Update when modules change.
-> Last updated: 2026-04-18 (all phases complete)
+> Last updated: 2026-07-09 (Atlas project integrated; 3 Atlas skills added)
 
 ## Tech stack
 
@@ -147,3 +147,4 @@ See `.context/modules/hosting/CONTEXT.md` for the full manifest schema and docum
 - Phase 4 ✓: `code-review` sub-agent + MCP servers (projects, dispatch) + `new-project` (two-phase Opus) + `app-patch` (direct push) + `new-skill` + `project-evaluate` + `self-diagnose` + event triggers (4 async tasks now)
 - Phase 5 ✓: `server-upkeep` (daily at 03:00) + `backup` (nightly at 04:00, no retention cap) + `server-patch` (PR-gated, manual merge) + `review-and-improve` (idle-queue triggered, up to 1/day) + `retention.py` (audit log rotation)
 - Phase 6 ✓: `research-deep` + `idea-generation` + `project-update-poll` + `restore` + `/schedule` Telegram command + SSE streaming endpoint + `retrospective.py` auto-tuning queries. All 6 phases complete.
+- Atlas integration (2026-07-09): `atlas-report`, `atlas-report-sweep`, `atlas-redeploy` skills registered; `Caddyfile.d/atlas.conf` added; atlas port 8791 in `_ports.yml`; atlas registered as a hosted service (Tailscale-gated via Cloudflare Access).
