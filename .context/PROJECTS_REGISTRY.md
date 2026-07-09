@@ -12,7 +12,7 @@
 | Slug | Type | Subdomain | Primary platform | Web strategy | Source | Phase |
 |------|------|-----------|-----------------|--------------|--------|-------|
 | `baseball-bingo` | service | `bingo.chrispiserchia.com` (:8790) | iOS | native-web | `github.com/Piserchia/baseball-bingo` | 3 |
-| `market-tracker` | service | `market-tracker.chrispiserchia.com` | web | native-web | `github.com/Piserchia/market-tracker` | 3 |
+| `market-tracker` | **RETIRED** | ~~`market-tracker.chrispiserchia.com`~~ | — | — | `github.com/Piserchia/market-tracker` (archived) | — |
 | `atlas` | service | `atlas.chrispiserchia.com` (:8791, CF Access gated) | web | native-web | `~/Documents/repos/atlas` (local, GitHub pending) | — |
 | `research` | content | (not hosted) | — | — | this repo (`projects/research/`) | 2 |
 | `research-deep` | content | (not hosted) | — | — | this repo (`projects/research-deep/`) | 6 |
