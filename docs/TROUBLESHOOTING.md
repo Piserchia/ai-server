@@ -366,14 +366,14 @@ test-flavored data.
 
 If all three pass, no action is required. Close the diagnose job with a note.
 
-**Prevention**: self-diagnose should recognize the sentinel strings
-(`handler`/`boom`) as synthetic and no-op immediately. This scenario has now
-fired **7+ times** (see `psql assistant -c "SELECT COUNT(*) FROM jobs WHERE
-kind='self-diagnose' AND description ILIKE '%boom%';"`), so it's worth wiring
-a short-circuit in `skills/self-diagnose/SKILL.md` (or the event trigger that
-enqueues it) that detects the exact literal pattern
-`Telegram handler 'handler' failed twice. Error: boom` and closes the job
-with a "synthetic — no action" summary without running the full procedure.
+**Prevention**: as of 2026-07-09, `skills/self-diagnose/SKILL.md` has a
+Step 0 short-circuit that detects the literal pattern
+`Telegram handler 'handler' failed twice. Error: boom` and exits with a
+"synthetic — no action" summary. If future test fixtures produce new
+sentinel-flavored payloads, append them to the sentinel table in Step 0
+rather than letting each one trigger a full Opus diagnosis. Total pre-fix
+fires: **8** (query: `psql assistant -c "SELECT COUNT(*) FROM jobs WHERE
+kind='self-diagnose' AND description ILIKE '%boom%';"`).
 
 ---
 
