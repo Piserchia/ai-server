@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-07-09 — Missing task_complete signal causes silent auto-continue loop
+
+When a job finishes its work but never emits a `task_complete` signal, the runner does not mark the job as done and instead re-enters the auto-continue handler on each polling cycle. This produces a silent loop that consumes turns without any visible error. Always ensure every code path in a skill or job handler reaches a `task_complete` (or equivalent terminal signal) before returning, and check the audit log for repeated `auto-continue` entries if a job appears to hang or spin.
+
+_Evidence: job `426cfc49`_
+
 ## 2026-07-09 — Unmatched job descriptions trigger silent auto-continue chains
 
 When a dispatched sub-agent's description string does not match any expected pattern in the runner's routing logic, the job may silently fall through to an auto-continue handler instead of failing loudly. This produces a chain of continuation turns that consume quota without making progress. Always verify that Agent tool `description` values match a known routing key, and check the audit log for repeated `auto-continue` entries if a job seems to loop without resolution.
