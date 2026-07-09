@@ -63,6 +63,10 @@ _RULES: list[tuple[str, str]] = [
     # ── Ideas ──
     (r"\b(brainstorm|ideas for|generate ideas|idea generation)\b", "idea-generation"),
 
+    # ── Atlas operations ──
+    (r"\bredeploy atlas\b", "atlas-redeploy"),
+    (r"\batlas[- ](redeploy|deploy|restart|update)\b", "atlas-redeploy"),
+
     # ── Retrospective ──
     (r"\b(retrospective|audit the system|review (my|the) (system|server|projects))\b",
      "review-and-improve"),

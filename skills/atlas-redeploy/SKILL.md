@@ -85,10 +85,31 @@ Any service NOT RUNNING or a non-200 → tail its err log
 (`~/Library/Application Support/ai-server/volumes/logs/project.atlas*.err.log`), include the
 tail in the summary, and flag the deploy DEGRADED.
 
-### 6. Summary
+### 6. Summary + task_complete
 
 One paragraph: BEFORE→AFTER commits deployed, gates run + results, services restarted,
 healthcheck code. If stopped at a gate: what failed and where to look.
+
+**Always emit `task_complete` at the end** — this is a single-shot skill; it must signal
+completion so the runner doesn't auto-continue to a next phase. After writing your summary,
+run this Bash command (replacing `<ONE_LINE_SUMMARY>` with your actual result sentence):
+
+```bash
+LOGDIR="$HOME/Library/Application Support/ai-server/volumes/audit_log"
+# Find this job's audit log (most recent file with this skill's job_started event)
+LOG=$(ls -t "$LOGDIR"/*.jsonl 2>/dev/null | while read f; do
+  grep -ql '"skill": *"atlas-redeploy"' "$f" 2>/dev/null && echo "$f" && break
+done)
+if [ -n "$LOG" ]; then
+  JOB_ID=$(basename "$LOG" .jsonl)
+  TS=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
+  printf '{"ts":"%s","job_id":"%s","kind":"task_complete","summary":"%s"}\n' \
+    "$TS" "$JOB_ID" "<ONE_LINE_SUMMARY>" >> "$LOG"
+  echo "task_complete emitted for job $JOB_ID"
+else
+  echo "WARNING: could not find atlas-redeploy audit log to emit task_complete"
+fi
+```
 
 ## Hard rules
 

@@ -452,6 +452,113 @@ Or set both env vars in the launchd plist:
 
 ---
 
+## Symptom: web dashboard `/api/tasks` (Active tasks) lists tasks whose underlying jobs are all completed/failed/cancelled
+
+### Diagnostic
+
+```bash
+psql assistant -c "
+SELECT t.id::text, t.status, LEFT(t.description,50) AS desc,
+       (SELECT string_agg(j.status, ',' ORDER BY j.created_at)
+        FROM jobs j WHERE j.task_id = t.id) AS job_statuses,
+       (SELECT string_agg(j.created_by, ',' ORDER BY j.created_at)
+        FROM jobs j WHERE j.task_id = t.id) AS created_by
+FROM tasks t
+WHERE t.status IN ('active','awaiting_user','pending_approval')
+ORDER BY t.updated_at DESC LIMIT 20;"
+```
+
+If any row shows `created_by = telegram:...,auto-continue:...,auto-continue:...`
+and `job_statuses = completed,completed,...` (with more than 1 job) — the
+auto-continue loop is the culprit.
+
+### Root cause
+
+The dashboard endpoint (`/api/tasks` in `src/gateway/web.py:315`) filters by
+`Task.status`, not by the status of any child job — this is by design (a task
+is a multi-turn wrapper; it stays "active" until it emits `task_complete` or
+is manually approved).
+
+But `src/runner/main.py:_update_task_after_job` has a permissive default:
+whenever a task-linked job finishes without emitting `task_choices`,
+`task_question`, or `task_complete` audit events, it treats that as "phase
+complete, auto-continue" and enqueues a new job whose description is
+`"Continue to the next phase of the plan."` (line 629+). The task never
+transitions and a fresh job is spawned every time. For single-shot skills
+(`atlas-redeploy` is the canonical case) this becomes an infinite loop of
+re-deploys until an unrelated failure (rate limit, timeout, etc.) breaks it.
+
+The problem compounds when the router (`src/runner/router.py`) has no rule
+matching the task description — `/task redeploy atlas` returns
+`resolved_skill=None`, so the atlas-redeploy `SKILL.md` (which would have
+instructed the model to emit `task_complete`) is never loaded as a system
+prompt. The model improvises the deploy without knowing it's expected to
+signal completion.
+
+### Fix
+
+**Immediate cleanup** (stops the runaway):
+
+```bash
+# Cancel any queued auto-continue jobs
+psql assistant -c "
+UPDATE jobs SET status='cancelled',
+       completed_at=NOW(),
+       error_message='cancelled: auto-continue loop mitigation'
+ WHERE status IN ('queued','running')
+   AND created_by LIKE 'auto-continue:%';"
+
+# Retire stuck 'active' tasks whose children are all terminal
+psql assistant -c "
+UPDATE tasks t SET status='failed', updated_at=NOW()
+ WHERE t.status='active'
+   AND NOT EXISTS (
+     SELECT 1 FROM jobs j
+      WHERE j.task_id = t.id
+        AND j.status IN ('queued','running'));"
+```
+
+**Long-term (three complementary changes)**:
+
+1. **Add a router rule** so `/task redeploy atlas` resolves to `atlas-redeploy`.
+   In `src/runner/router.py:_RULES`, before the general research/action rules:
+
+   ```python
+   (r"\bredeploy atlas\b", "atlas-redeploy"),
+   ```
+
+2. **Teach the skill to emit `task_complete`**. Append to
+   `skills/atlas-redeploy/SKILL.md` §6 "Summary": when the job runs with
+   `job.task_id` set, emit `task_complete` after writing the summary, e.g.:
+
+   ```python
+   from src.audit_log import append
+   append(job_id, "task_complete", summary="<one-line result>")
+   ```
+
+3. **Make auto-continue opt-in on the server side** — modify
+   `src/runner/main.py:_update_task_after_job` so the "no signal" branch
+   marks the task `pending_approval` (or `completed` for skills whose
+   frontmatter declares `single_shot: true`), instead of enqueuing another
+   job. Add a payload flag `payload.auto_continue = True` for skills that
+   genuinely want the multi-phase behavior.
+
+Change #1 is required so #2 takes effect. #3 is defense-in-depth against
+future single-shot skills making the same mistake — it's server code, so it
+needs `server-patch` (Phase 5) and manual PR merge.
+
+### Prevention
+
+- Every skill that runs inside a `/task` context should emit exactly one of
+  `task_question`, `task_choices`, or `task_complete` before returning.
+- Add a lint / audit-index check that flags jobs which finished with
+  `job.task_id IS NOT NULL` but no task_* event in the audit log.
+- When adding a new skill, if it's single-shot (no follow-up phases),
+  document that in the frontmatter and either emit `task_complete` on
+  success or set a payload flag the runner respects.
+
+---
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
