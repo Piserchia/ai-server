@@ -28,6 +28,9 @@ Parse the target from the job description:
 - `atlas-report: asset <SYMBOL>` (or "report on NVDA") → per-asset report
 - `atlas-report: sector <stock|crypto|commodity>` (or "crypto sector report") → sector review
 - `atlas-report: portfolio brief` (or "portfolio brief"/"weekly brief") → strategist brief
+- `atlas-report: tax review` (or "tax report"/"tax implications") → tax_researcher over the
+  whole book's lots (`atlas-dash packet --tax`; save with `--tax`). Its Limitations MUST
+  include "This is research, not tax advice — confirm any action with a tax professional."
 
 ## Procedure
 
@@ -39,6 +42,7 @@ All commands from `$HOME/Library/Application Support/ai-server/projects/atlas`, 
 ```bash
 atlas-dash packet <SYMBOL>            # asset
 atlas-dash packet --sector <CLASS>    # sector
+atlas-dash packet --tax               # tax review (whole-book lots)
 atlas-dash packet                     # portfolio
 ```
 
@@ -70,7 +74,7 @@ to the owner's decision, never advice.
 
 ```bash
 atlas-dash save-report \
-  [--symbol <SYMBOL> | --sector <CLASS>]   # omit both for portfolio brief
+  [--symbol <SYMBOL> | --sector <CLASS> | --tax]   # none = portfolio brief
   --payload-file /tmp/atlas-payload-<job>.json \
   --packet-file /tmp/atlas-packet-<job>.json \
   --model "<the model you are running as>"
@@ -105,17 +109,12 @@ dashboard_gaps filed. Report renders at https://atlas.chrispiserchia.com/reports
 
 ## Gotchas
 
-- **Citation checker is strict**: only cite fields from the packet's `indicators` object in
-  `indicators_cited`; never include `price_stats` fields. The evaluator rejects anything not
-  in `indicators`.
-- **Portfolio packet has no `indicators` key** (known dashboard gap, filed 2026-07-09): portfolio
-  brief reports cannot pass citation evaluation until the dashboard adds an `indicators` key with
-  aggregated `SYMBOL.indicator` fields. Until then the portfolio brief skill always fails the
-  citation check — do NOT retry more than twice; instead report the blocker.
-- **Sector packets flatten indicators** to `SYMBOL.indicator` keys — cite them in that exact form,
-  not as the raw indicator name alone.
-- **BTC/Kraken feed**: Kraken uses `XBT/USD` or `BTC/USD` not `BTC` as the ccxt symbol. If the
-  BTC packet is empty (`last_success: null`) it means the feed is broken — report it and skip,
-  do not author a crypto report from thin data.
-- **`body_md` section names are exact**: evaluator checks for `## Suggestion` (not `## Actions`),
-  `## Risks` (plural), `## Limitations`. Deviating from the exact heading causes a score blocker.
+- **Packet is the only number source.** Never recall a price, ratio, or indicator from training
+  data. If the packet is empty (`"indicators": {}`), stop and ask for a refresh — do not guess.
+- **Sector packets use `SYMBOL.indicator` keys** (e.g. `NVDA.rsi_14`, not `rsi_14`). Citing
+  the short form fails the evaluator.
+- **Portfolio packet has no `indicators` key** — cite `totals.*` or `per_asset.SYMBOL.*` fields
+  only; the evaluator does not check these (known gap), so just be accurate.
+- **Promise language fails.** "Will", "guaranteed", "certain" are automatic blockers.
+- **`atlas-dash learn` only takes one rule per call.** Loop over multiple findings; each gets
+  its own call. Batch strings are silently truncated.
