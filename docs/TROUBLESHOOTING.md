@@ -366,9 +366,14 @@ test-flavored data.
 
 If all three pass, no action is required. Close the diagnose job with a note.
 
-**Prevention**: self-diagnose could recognize the sentinel strings
-(`handler`/`boom`) as synthetic and no-op immediately. Low priority — the
-manual verification is fast.
+**Prevention**: self-diagnose should recognize the sentinel strings
+(`handler`/`boom`) as synthetic and no-op immediately. This scenario has now
+fired **7+ times** (see `psql assistant -c "SELECT COUNT(*) FROM jobs WHERE
+kind='self-diagnose' AND description ILIKE '%boom%';"`), so it's worth wiring
+a short-circuit in `skills/self-diagnose/SKILL.md` (or the event trigger that
+enqueues it) that detects the exact literal pattern
+`Telegram handler 'handler' failed twice. Error: boom` and closes the job
+with a "synthetic — no action" summary without running the full procedure.
 
 ---
 
@@ -400,6 +405,29 @@ tail -20 /Library/Logs/com.cloudflare.cloudflared.err.log
 2. **Credentials file not copied**: Also copy the `<tunnel-uuid>.json` file to `/etc/cloudflared/`.
 3. **Plist missing `tunnel run` arguments**: The default `cloudflared service install` plist just runs `cloudflared` with no subcommand. It needs `tunnel` and `run` arguments. Fix: `sudo sed -i.bak 's|</array>|<string>tunnel</string><string>run</string></array>|' /Library/LaunchDaemons/com.cloudflare.cloudflared.plist`
 4. **Service not started**: Use `sudo launchctl bootstrap system /Library/LaunchDaemons/com.cloudflare.cloudflared.plist` (not the old `launchctl load`).
+
+---
+
+## Symptom: Task fails with `exit code 143` right after issuing `launchctl kickstart -k com.assistant.runner`
+
+**Diagnostic**: audit log shows the task running `launchctl kickstart -k gui/$(id -u)/com.assistant.runner` (or `com.assistant.bot`, if the bot is also handling the request), followed immediately by `job_failed` with `Command failed with exit code 143` and an escalation_spawned event. `runner.err.log` shows `Fatal error in message reader: Command failed with exit code 143` from the Claude Code CLI subprocess.
+
+### Root cause
+
+The task is running **inside** the runner process. Exit 143 = 128 + SIGTERM. `launchctl kickstart -k com.assistant.runner` tells launchd to kill the runner process — which is the same process executing the current task. The bundled `claude` CLI subprocess dies mid-message with SIGTERM before the task can finish. launchd then relaunches the runner, and the startup reconciler marks the interrupted job `failed`. Any child job spawned by escalation gets marked failed on the next reconciliation for the same reason.
+
+Same trap applies to `com.assistant.bot` restarts when the request was submitted through Telegram — but only the *runner* self-kill is fatal to the current job. Restarting the bot from inside the runner is fine.
+
+### Fix
+
+- Do **not** issue `launchctl kickstart -k com.assistant.runner` from inside a task. If a runner restart is truly required, delegate it: enqueue a `self-diagnose` (or similar) job that runs later, or leave the restart as a manual step in the task summary.
+- Bot restarts from inside the runner are safe — the runner survives.
+- If the failure has already happened, verify recovery with `launchctl list | grep com.assistant` (runner PID should be non-zero) and `curl -sf http://localhost:8080/health`. The startup reconciler handles marking the killed job failed automatically.
+
+### Prevention
+
+- Skills that need service restarts should list the exact commands in their summary and ask the user to run them, rather than executing them themselves.
+- If a skill *must* restart the runner, dispatch a follow-up job (via `mcp__dispatch__enqueue_job` or the queue directly) that performs the restart after the current task exits cleanly.
 
 ---
 
