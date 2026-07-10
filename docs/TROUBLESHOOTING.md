@@ -459,6 +459,36 @@ runtime pulls only. Jobs and skills must never git-commit in projects/atlas; a f
 on the Mini is committed in dev and deployed via atlas-redeploy. The atlas-redeploy skill
 now emits the divergence evidence automatically.
 
+## Symptom: a skill-triggered job ignores its skill and does unrelated "helpful" work
+
+### Diagnostic
+
+`resolved_skill` on the job is empty/NULL even though the description starts with a
+skill name (`atlas-portfolio: …`). The router (`src/runner/router.py`) has no rule for
+that prefix, so the job ran as a GENERIC task: full tool set, server directive only,
+and the model free-associated the description against whatever context it found.
+First occurrence 2026-07-10: `atlas-portfolio: answer or execute the pending
+instruction(s)` — a generic session read the atlas dev repo's feature plan, decided
+"pending instructions" meant the plan's pending work package, and implemented it
+(committing to the dev repo) instead of recording the owner's sale. The commit was
+plausible-looking and even passed tsc while hiding a runtime SQL error.
+
+### Fix
+
+Enqueue skill jobs by **kind**, not description-prefix: `POST /api/jobs
+{"kind": "atlas_portfolio", "description": "atlas-portfolio: <the instruction>"}`.
+`_resolve_skill` maps kind `foo_bar` → skill `foo-bar` deterministically, the SKILL.md
+becomes the session's system prompt, and `resolved_skill` is populated for the audit
+trail. The atlas web routes for portfolio-chat do this now.
+
+### Prevention
+
+Any new web/gateway trigger for a skill must pass `kind`. The older atlas-chat
+description-routed triggers survive on the specificity of their descriptions —
+migrate them to `kind` whenever touched. Vague descriptions ("the pending
+instruction(s)") are prompt-injection surface for generic sessions: keep the actual
+instruction in the description.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
