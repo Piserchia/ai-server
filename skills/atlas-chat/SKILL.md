@@ -21,8 +21,10 @@ teach the concepts, never bluff.
 
 ## Inputs
 
-Job description: `atlas-chat: report <REPORT_UUID> — answer the pending question(s)`.
-Extract the UUID.
+Job description, two scopes:
+- `atlas-chat: report <REPORT_UUID> — answer the pending question(s)` → report Q&A
+- `atlas-chat: asset <SYMBOL> — answer the pending question(s)` → **chart analyst**:
+  technical read over the LIVE packet (the user is looking at the chart right now)
 
 ## Procedure
 
@@ -32,7 +34,8 @@ All from `$HOME/Library/Application Support/ai-server/projects/atlas`, after
 ### 1. Load the context bundle
 
 ```bash
-atlas-dash chat-context <REPORT_UUID> > /tmp/atlas-chat-<job>.json
+atlas-dash chat-context <REPORT_UUID> > /tmp/atlas-chat-<job>.json   # report scope
+atlas-dash chat-context --asset <SYMBOL> > /tmp/atlas-chat-<job>.json # asset scope
 ```
 
 It contains: the report (body, verdict, kind, model), **the exact packet the report was
@@ -58,12 +61,23 @@ Rules, in priority order:
 5. Markdown, ≤300 words unless the question genuinely needs more. End with nothing —
    no sign-offs.
 
+### 2b. Chart-analyst answers (asset scope)
+
+The kickoff question asks for the chart's most important takeaways. Structure:
+**bold the headline of each observation** (the UI renders your bold as the brass
+highlight), one line of evidence each (packet values verbatim), then key levels
+(support/resistance/invalidation from SMA/ATR/profile triggers in the packet),
+then a momentum (RSI/MACD/ROC) + volatility (ATR/BB width) read. Everything
+citable comes from the packet; the candle chart itself you cannot see — say so
+if asked about visual patterns the indicators can't express.
+
 ### 3. Persist the reply
 
 Write the answer to `/tmp/atlas-answer-<job>.md`, then:
 
 ```bash
-atlas-dash chat-save <REPORT_UUID> --role assistant --content-file /tmp/atlas-answer-<job>.md
+atlas-dash chat-save <REPORT_UUID> --role assistant --content-file /tmp/atlas-answer-<job>.md   # report
+atlas-dash chat-save --asset <SYMBOL> --role assistant --content-file /tmp/atlas-answer-<job>.md # asset
 ```
 
 Multiple pending questions → ONE reply covering all of them, saved once.
