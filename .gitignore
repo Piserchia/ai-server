@@ -45,3 +45,4 @@ projects/*/
 
 # OS
 Thumbs.db
+volumes/jobs.db
