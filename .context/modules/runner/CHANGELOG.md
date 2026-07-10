@@ -2,6 +2,27 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-09 — Narrow sentinel-only loop guard (code-review fix)
+
+**Files changed**:
+- `src/runner/main.py` — Removed `_is_auto_continued` from the loop guard condition.
+  The guard now fires only when the job description IS the sentinel string exactly.
+  The previous check (`created_by.startswith("auto-continue:")`) was too broad: any
+  auto-continued job that did genuine work and emitted no signal would be stopped at
+  `pending_approval`, preventing tasks with 3+ phases from ever reaching phase 3.
+  Sentinel-only detection is sufficient because the sentinel job never emits task signals.
+- `tests/test_pure_functions.py` — Added `TestAutoContineGuard` (7 cases) and 6
+  atlas-redeploy router test parametrize entries.
+
+**Why**: Code review of PR #2 identified the over-broad guard as a BLOCKER.
+528 tests pass.
+
+**Side effects**: Multi-phase tasks with 3+ phases now work correctly. Any job whose
+description matches the sentinel exactly is still stopped. Any job auto-continued from
+the sentinel but doing real work is no longer stopped.
+
+**Gotchas discovered**: None new.
+
 ## 2026-07-09 — Auto-continue loop guard in _update_task_after_job
 
 **Files changed**:

@@ -628,17 +628,18 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
         )
     else:
         # No explicit event emitted. Guard against infinite auto-continue loops:
-        # If this job's description IS the sentinel, or the job was itself created
-        # by auto-continue, stop here and request approval instead.
+        # Only stop when the job IS the sentinel message itself — the sentinel
+        # never emits a task signal by construction, so this check is both
+        # necessary and sufficient to break the loop without cutting off
+        # legitimate 3+ phase tasks (whose auto-continued jobs do real work
+        # and may need further continuations).
         _SENTINEL = "Continue to the next phase of the plan."
         _is_sentinel = (job.description or "").strip() == _SENTINEL
-        _is_auto_continued = (job.created_by or "").startswith("auto-continue:")
 
-        if _is_sentinel or _is_auto_continued:
+        if _is_sentinel:
             logger.warning(
-                "auto-continue loop detected — stopping at pending_approval",
+                "auto-continue sentinel detected — stopping at pending_approval",
                 task_id=str(job.task_id)[:8], job_id=str(job.id)[:8],
-                is_sentinel=_is_sentinel, is_auto_continued=_is_auto_continued,
             )
             async with session_scope() as s:
                 await s.execute(
@@ -658,8 +659,8 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                     turn_number=last + 1,
                     role="system",
                     content=(
-                        "Auto-continue loop detected: job emitted no task signal and was "
-                        "itself a continuation. Task moved to pending_approval — "
+                        "Auto-continue sentinel detected: job emitted no task signal. "
+                        "Task moved to pending_approval — "
                         "approve to close or reply to continue."
                     ),
                 ))

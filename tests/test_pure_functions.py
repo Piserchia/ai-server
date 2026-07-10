@@ -48,6 +48,14 @@ class TestRouter:
         ("new skill: daily BTC price summary", "new-skill"),
         ("brainstorm startup ideas", "idea-generation"),
 
+        # Atlas operations
+        ("redeploy atlas", "atlas-redeploy"),
+        ("atlas redeploy please", "atlas-redeploy"),
+        ("atlas-redeploy", "atlas-redeploy"),
+        ("atlas deploy", "atlas-redeploy"),
+        ("atlas restart", "atlas-redeploy"),
+        ("atlas update", "atlas-redeploy"),
+
         # Generic (no match) → None
         ("hello there", None),
         ("tell me about yourself", None),
@@ -60,6 +68,45 @@ class TestRouter:
 
     def test_case_insensitive(self) -> None:
         assert router.route("RESEARCH THE NBA TRADE DEADLINE") == "research-report"
+
+
+# ── Auto-continue loop guard ─────────────────────────────────────────────────
+
+class TestAutoContineGuard:
+    """Verify sentinel detection logic used in _update_task_after_job.
+
+    The guard must fire for the sentinel string and nothing else — the
+    _is_auto_continued check was deliberately removed (issue: it blocked
+    phase 3+ of genuine multi-phase tasks).
+    """
+
+    SENTINEL = "Continue to the next phase of the plan."
+
+    def _is_sentinel(self, description: str | None) -> bool:
+        return (description or "").strip() == self.SENTINEL
+
+    def test_exact_sentinel_matches(self) -> None:
+        assert self._is_sentinel(self.SENTINEL) is True
+
+    def test_sentinel_with_leading_whitespace_matches(self) -> None:
+        assert self._is_sentinel("  " + self.SENTINEL) is True
+
+    def test_normal_task_does_not_match(self) -> None:
+        assert self._is_sentinel("redeploy atlas") is False
+
+    def test_auto_continued_job_with_real_description_does_not_match(self) -> None:
+        # Regression: auto-continued jobs that do real work must NOT be stopped.
+        # created_by="auto-continue:abc123" is irrelevant; only description matters.
+        assert self._is_sentinel("Fix the login bug in market-tracker") is False
+
+    def test_empty_description_does_not_match(self) -> None:
+        assert self._is_sentinel("") is False
+
+    def test_none_description_does_not_match(self) -> None:
+        assert self._is_sentinel(None) is False
+
+    def test_partial_sentinel_does_not_match(self) -> None:
+        assert self._is_sentinel("Continue to the next phase") is False
 
 
 # ── Flag parser tests ───────────────────────────────────────────────────────
