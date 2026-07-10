@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-10 — Next.js ISR gotcha documented
+
+**Agent task**: Write-back for job bfcab76c — atlas skill suite refactor and new skills
+**Files changed**:
+- `.context/modules/hosting/skills/GOTCHAS.md` — Added entry: Next.js ISR routes need `dynamic='force-dynamic'` to avoid build-time pre-rendering failures
+
+**Why**: A deploy (job `15bbc829`) hit a build-time pre-rendering failure on a route that depended on runtime data. Next.js pre-renders by default; adding `export const dynamic = 'force-dynamic'` forces server-side rendering per request and prevents stale/broken HTML in deployed pages.
+**Side effects**: None observed
+**Gotchas discovered**: Without `force-dynamic`, a build may succeed but serve stale or broken HTML at runtime.
+
 ## 2026-07-06 — External dead-man's-switch heartbeat
 
 **Change**:

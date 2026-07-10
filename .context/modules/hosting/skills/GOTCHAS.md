@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-07-10 — Next.js ISR routes need `dynamic='force-dynamic'` to avoid build-time pre-rendering
+
+Next.js will attempt to pre-render routes at build time by default, which fails for routes that depend on runtime data (e.g., database queries, environment-specific URLs). Adding `export const dynamic = 'force-dynamic'` at the top of the route file opts it out of static generation and ensures it renders on each request. This is especially common for API routes or pages that fetch from a database or external service. Without this export, the build may succeed but the deployed page will serve stale or broken HTML.
+
+_Evidence: job `15bbc829`_
+
 ## 2026-04-20 — healthcheck launchd silently ran with `checked=0`
 
 **Symptom**: `volumes/logs/healthcheck.out.log` showed `checked=0 healthy=0 failed=0` on every 5-min tick despite manifests being present. `last_healthy_at` stopped updating, so the landing page status dots for `type: service` projects went stale (and would have gone gray for apps with a nonexistent dot rule).
