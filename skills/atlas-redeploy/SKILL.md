@@ -126,3 +126,17 @@ healthcheck code. If stopped at a gate: what failed and where to look.
 **Global-protocol exemption**: do NOT update `CHANGELOG.md` (or any tracked file)
 inside `projects/atlas` — it is a pull-only clone (single-writer rule) and any tracked
 edit blocks every future deploy. Changelog entries for atlas belong in the DEV repo.
+
+## Gotchas
+
+- **Three launchd services, not one**: `com.assistant.project.atlas` (Next.js web),
+  `com.assistant.project.atlas-dash-scheduler` (Python scheduler), and
+  `com.assistant.project.atlas-pm-edge` (PM-Edge scanner). Restart only what changed;
+  when in doubt restart all three.
+- **Logs are in the server log dir**, not the project: check
+  `~/Library/Application Support/ai-server/volumes/logs/project.atlas*.err.log` for
+  crash output after a restart.
+- **Build is deterministic, not judgment** (step 4): run the exact `grep '^web/'` check on
+  the range; skipping a needed build ships a stale UI (incident 2026-07-10).
+- **`ff-only` pull can fail if the runtime clone has local commits** (shouldn't happen, but if
+  it does: do NOT force-push or reset — stop, report, let the human resolve).

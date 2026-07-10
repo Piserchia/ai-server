@@ -54,3 +54,19 @@ prioritize: portfolio brief > sectors > remaining assets, and list what was skip
 
 Table: target → saved report id + evaluation score (or job id if fanned out, or SKIPPED).
 Mention every `learn` entry filed. Reports render at https://atlas.chrispiserchia.com/reports.
+
+## Gotchas
+
+- **Fan-out requires `enqueue_job` MCP tool** — only available if the runner's mcp_dispatch
+  server is active in this session. If the tool is absent fall through to sequential mode
+  immediately (don't error).
+- **Asset-first ordering matters**: sectors and portfolio read `latest_suggestion` from per-asset
+  reports, so always generate asset reports before sector reports before the portfolio brief.
+- **Empty BTC packet blocks crypto sector and degrades portfolio**: if Kraken feed is broken
+  (BTC `last_success: null`), skip BTC, skip the crypto sector, note it in the summary. The
+  portfolio brief can still run but will have gaps.
+- **Portfolio brief evaluator: RESOLVED 2026-07-10** — portfolio packets now carry a flattened
+  `indicators` map (`SYMBOL.indicator` + `macro.SERIES`); cite those keys and the citation
+  checker passes. (The 2026-07-09 "always fails" bug is gone.)
+- **`atlas-dash refresh` is mandatory before enumeration** — a sweep on stale data is worse than
+  a skipped sweep. If refresh exits non-zero, stop and report.

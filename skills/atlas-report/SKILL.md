@@ -110,3 +110,18 @@ dashboard_gaps filed. Report renders at https://atlas.chrispiserchia.com/reports
 **Global-protocol exemption**: do NOT update `CHANGELOG.md` (or any tracked file)
 inside `projects/atlas` — it is a pull-only clone (single-writer rule) and any tracked
 edit blocks every future deploy. Changelog entries for atlas belong in the DEV repo.
+
+## Gotchas
+
+- **Packet is the only number source.** Never recall a price, ratio, or indicator from training
+  data. If the packet is empty (`"indicators": {}`), stop and ask for a refresh — do not guess.
+- **Sector packets use `SYMBOL.indicator` keys** (e.g. `NVDA.rsi_14`, not `rsi_14`). Citing
+  the short form fails the evaluator.
+- **Portfolio packets DO have a flattened `indicators` map since 2026-07-10**
+  (`SYMBOL.indicator` + `macro.SERIES` keys) and the evaluator checks it — cite those keys,
+  not bare `totals.*` prose numbers.
+- **Crypto asset packets carry the on-chain layer as `macro.*` keys since 2026-07-10**
+  (MVRV_Z, NUPL, BTC_FUNDING, BTC_ETF_FLOW/_5D) — cite them like any indicator.
+- **Promise language fails.** "Will", "guaranteed", "certain" are automatic blockers.
+- **`atlas-dash learn` only takes one rule per call.** Loop over multiple findings; each gets
+  its own call. Batch strings are silently truncated.
