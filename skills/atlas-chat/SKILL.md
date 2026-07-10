@@ -25,6 +25,10 @@ Job description, two scopes:
 - `atlas-chat: report <REPORT_UUID> — answer the pending question(s)` → report Q&A
 - `atlas-chat: asset <SYMBOL> — answer the pending question(s)` → **chart analyst**:
   technical read over the LIVE packet (the user is looking at the chart right now)
+- `atlas-chat: market — answer the pending question(s)` → **market analyst**: the
+  /indicators risk dashboard (VIX complex, credit, rates). Context via
+  `chat-context --market`; reply via `chat-save --market`. Think in regimes; bold
+  divergences; read levels against the glossary bands.
 
 ## Procedure
 
@@ -36,6 +40,7 @@ All from `$HOME/Library/Application Support/ai-server/projects/atlas`, after
 ```bash
 atlas-dash chat-context <REPORT_UUID> > /tmp/atlas-chat-<job>.json   # report scope
 atlas-dash chat-context --asset <SYMBOL> > /tmp/atlas-chat-<job>.json # asset scope
+atlas-dash chat-context --market > /tmp/atlas-chat-<job>.json           # market scope
 ```
 
 It contains: the report (body, verdict, kind, model), **the exact packet the report was
