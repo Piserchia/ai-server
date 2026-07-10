@@ -26,6 +26,9 @@
 | `restore` | Sonnet 4.6 / medium | Restore from backup tarball. DESTRUCTIVE -- requires explicit user confirmation | 6 |
 | `_learning_apply` | Sonnet 4.6 / low | **Internal.** Appends learning proposals from the learning extractor hook to `.context/modules/<x>/skills/<CATEGORY>.md`. Not user-triggerable. | Rec 1 |
 | `god` | Opus 4.7 / max (bypassPermissions, 200 turns) | Full-context, full-permission admin session. Equivalent to a human at the terminal. | — |
+| `atlas-report` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Author one Atlas expert report (asset / sector / portfolio) on subscription auth; persisted + evaluated via `atlas-dash save-report`; evaluator lessons feed the expert's knowledge file (`atlas-dash learn`) | — |
+| `atlas-report-sweep` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Weekly full pass: refresh data, enumerate targets, one report per holding + sector + the portfolio (fan-out via enqueue_job, sequential fallback). Scheduled Sunday evenings | — |
+| `atlas-redeploy` | Sonnet 4.6 / low (→ Opus 4.7 / high on failure) | Deploy pipeline for projects/atlas: ff-only pull, migrate, test gates (red = no restart), build, restart, healthcheck. Trigger: `/task redeploy atlas` after dev-repo commits | — |
 
 ## Deferred
 
