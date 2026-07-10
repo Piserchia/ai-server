@@ -106,3 +106,7 @@ dashboard_gaps filed. Report renders at https://atlas.chrispiserchia.com/reports
 - Empty packet indicators → fail: user must run `atlas-dash refresh` first. Never author from
   thin data.
 - save-report is the only write path; `atlas-dash learn` is the only knowledge write path.
+
+**Global-protocol exemption**: do NOT update `CHANGELOG.md` (or any tracked file)
+inside `projects/atlas` — it is a pull-only clone (single-writer rule) and any tracked
+edit blocks every future deploy. Changelog entries for atlas belong in the DEV repo.

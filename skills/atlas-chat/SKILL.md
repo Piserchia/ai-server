@@ -98,3 +98,7 @@ One line: report id, the question(s) gist, whether the packet sufficed or gaps w
 
 - (2026-07-09, at creation) `chat-save --content-file` exists precisely so you never
   shell-quote markdown; do not pass answers via `--content`.
+
+**Global-protocol exemption**: do NOT update `CHANGELOG.md` (or any tracked file)
+inside `projects/atlas` — it is a pull-only clone (single-writer rule) and any tracked
+edit blocks every future deploy. Changelog entries for atlas belong in the DEV repo.

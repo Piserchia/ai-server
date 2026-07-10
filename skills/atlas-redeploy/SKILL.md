@@ -114,3 +114,7 @@ healthcheck code. If stopped at a gate: what failed and where to look.
 - `--ff-only` always. Divergence between dev repo and runtime clone is a human decision.
 - Red tests never reach production. No exceptions, including "it's just a docs change"
   (docs-only ranges will pass the gates anyway, so run them).
+
+**Global-protocol exemption**: do NOT update `CHANGELOG.md` (or any tracked file)
+inside `projects/atlas` — it is a pull-only clone (single-writer rule) and any tracked
+edit blocks every future deploy. Changelog entries for atlas belong in the DEV repo.
