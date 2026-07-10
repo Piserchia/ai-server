@@ -77,7 +77,10 @@ Write the answer to `/tmp/atlas-answer-<job>.md`, then:
 
 ```bash
 atlas-dash chat-save <REPORT_UUID> --role assistant --content-file /tmp/atlas-answer-<job>.md   # report
-atlas-dash chat-save --asset <SYMBOL> --role assistant --content-file /tmp/atlas-answer-<job>.md # asset
+atlas-dash chat-save --asset <SYMBOL> --role assistant --content-file /tmp/atlas-answer-<job>.md # asset chat
+atlas-dash chat-save --asset <SYMBOL> --kind analysis --role assistant --content-file /tmp/atlas-answer-<job>.md # CHART ANALYSIS
+# Use --kind analysis when the job description says "chart ANALYSIS request" (or the
+# pending user message has kind=analysis) — the UI pins it until the data refreshes.
 ```
 
 Multiple pending questions → ONE reply covering all of them, saved once.
