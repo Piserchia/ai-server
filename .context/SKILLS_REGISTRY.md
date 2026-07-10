@@ -32,6 +32,7 @@
 | `atlas-daily-brief` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Pre-open synthesis: market regime + book + signal flips + crypto cycle + on-deck items, ≤250 words; delivered via job summary (Telegram) and pinned into the /indicators market chat. Schedule: daily 12:00 UTC | — |
 | `atlas-chat` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Answer an owner question about one Atlas report, inline on the report page — as the authoring sector expert, grounded in the report's own packet/charter/knowledge/glossary; persists via `atlas-dash chat-save`. Trigger: web enqueues `atlas-chat: report <uuid>` | — |
 | `atlas-redeploy` | Sonnet 4.6 / low (→ Opus 4.7 / high on failure) | Deploy pipeline for projects/atlas: ff-only pull, migrate, test gates (red = no restart), build, restart, healthcheck. Trigger: `/task redeploy atlas` after dev-repo commits | — |
+| `atlas-portfolio` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Portfolio manager: answers book questions AND records owner-stated transactions ("sold 0.5 BTC at 64k") via engine CLI sell/set-position/add-holding — idempotency check before writes, ambiguity asks instead of guessing, replies via `chat-save --portfolio`. Trigger: web enqueues `atlas-portfolio: <text>` | — |
 
 ## Deferred
 
