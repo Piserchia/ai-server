@@ -1,7 +1,7 @@
 # Documentation Index
 
 > For any new Claude session: read this file to know what exists and where to look.
-> Last updated: 2026-07-06
+> Last updated: 2026-07-10
 
 ## Quick navigation
 
@@ -20,7 +20,9 @@
 | Check what skills exist | `.context/SKILLS_REGISTRY.md` |
 | Review system performance | `src/runner/retrospective.py`, `skills/review-and-improve/SKILL.md` |
 | Regression-test a skill's behaviour | `evals/README.md`, `evals/run.py`, `evals/cases/<skill>.yml` |
-| See evaluation status | `docs/EVALUATION_2026-04-18.md` (status table at top) |
+| See evaluation status | `docs/EVALUATION_2026-04-18.md` (architecture) and `docs/EVALUATION_2026-07-10.md` (runtime audit; status tables at top of each) |
+| Fix a defect found in the July audit | `docs/superpowers/plans/2026-07-10-eval-remediation.md` (task-by-task plan T1–T17) |
+| Understand the atlas project | `docs/EVALUATION_2026-07-10-atlas.md`, `projects/atlas/CLAUDE.md` |
 | Create a new skill | `skills/TEMPLATE.md` (structure reference), `skills/new-skill/SKILL.md` |
 | Read module institutional knowledge | `.context/modules/<x>/skills/GOTCHAS.md`, `DEBUG.md`, `PATTERNS.md` |
 | Understand hosting setup | `.context/modules/hosting/CONTEXT.md`, `Caddyfile` |
@@ -46,6 +48,10 @@ SERVER.md                           ← Architecture overview for humans
     hosting/  CONTEXT.md, CHANGELOG.md
 docs/
   EVALUATION_2026-04-18.md          ← Full system evaluation + rec status table
+  EVALUATION_2026-07-10.md          ← Runtime audit: loop defects, cleanup, subagent suite + task table
+  EVALUATION_2026-07-10-atlas.md    ← Atlas deep-dive (doc verdicts, contract check, ops)
+  superpowers/plans/                ← Executable implementation plans (incl. 2026-07-10 remediation)
+  superpowers/specs/                ← Specs behind shipped plans
   Troubleshooting.md                ← Failure modes + fixes
   PHASE_3_PLAN.md through PHASE_6_PLAN.md  ← Historical (all shipped)
   README.md                         ← Reading order guide
