@@ -366,14 +366,9 @@ test-flavored data.
 
 If all three pass, no action is required. Close the diagnose job with a note.
 
-**Prevention**: as of 2026-07-09, `skills/self-diagnose/SKILL.md` has a
-Step 0 short-circuit that detects the literal pattern
-`Telegram handler 'handler' failed twice. Error: boom` and exits with a
-"synthetic — no action" summary. If future test fixtures produce new
-sentinel-flavored payloads, append them to the sentinel table in Step 0
-rather than letting each one trigger a full Opus diagnosis. Total pre-fix
-fires: **8** (query: `psql assistant -c "SELECT COUNT(*) FROM jobs WHERE
-kind='self-diagnose' AND description ILIKE '%boom%';"`).
+**Prevention**: self-diagnose could recognize the sentinel strings
+(`handler`/`boom`) as synthetic and no-op immediately. Low priority — the
+manual verification is fast.
 
 ---
 
@@ -408,29 +403,6 @@ tail -20 /Library/Logs/com.cloudflare.cloudflared.err.log
 
 ---
 
-## Symptom: Task fails with `exit code 143` right after issuing `launchctl kickstart -k com.assistant.runner`
-
-**Diagnostic**: audit log shows the task running `launchctl kickstart -k gui/$(id -u)/com.assistant.runner` (or `com.assistant.bot`, if the bot is also handling the request), followed immediately by `job_failed` with `Command failed with exit code 143` and an escalation_spawned event. `runner.err.log` shows `Fatal error in message reader: Command failed with exit code 143` from the Claude Code CLI subprocess.
-
-### Root cause
-
-The task is running **inside** the runner process. Exit 143 = 128 + SIGTERM. `launchctl kickstart -k com.assistant.runner` tells launchd to kill the runner process — which is the same process executing the current task. The bundled `claude` CLI subprocess dies mid-message with SIGTERM before the task can finish. launchd then relaunches the runner, and the startup reconciler marks the interrupted job `failed`. Any child job spawned by escalation gets marked failed on the next reconciliation for the same reason.
-
-Same trap applies to `com.assistant.bot` restarts when the request was submitted through Telegram — but only the *runner* self-kill is fatal to the current job. Restarting the bot from inside the runner is fine.
-
-### Fix
-
-- Do **not** issue `launchctl kickstart -k com.assistant.runner` from inside a task. If a runner restart is truly required, delegate it: enqueue a `self-diagnose` (or similar) job that runs later, or leave the restart as a manual step in the task summary.
-- Bot restarts from inside the runner are safe — the runner survives.
-- If the failure has already happened, verify recovery with `launchctl list | grep com.assistant` (runner PID should be non-zero) and `curl -sf http://localhost:8080/health`. The startup reconciler handles marking the killed job failed automatically.
-
-### Prevention
-
-- Skills that need service restarts should list the exact commands in their summary and ask the user to run them, rather than executing them themselves.
-- If a skill *must* restart the runner, dispatch a follow-up job (via `mcp__dispatch__enqueue_job` or the queue directly) that performs the restart after the current task exits cleanly.
-
----
-
 ## Symptom: Project launchd service can't find Python modules (`ModuleNotFoundError`)
 
 **Diagnostic**: `tail volumes/logs/project.<slug>.err.log` shows `ModuleNotFoundError: No module named 'flask'` (or similar).
@@ -452,112 +424,40 @@ Or set both env vars in the launchd plist:
 
 ---
 
-## Symptom: web dashboard `/api/tasks` (Active tasks) lists tasks whose underlying jobs are all completed/failed/cancelled
+## Symptom: atlas redeploy reports "diverged" / ff-only pull refused in projects/atlas
 
 ### Diagnostic
-
 ```bash
-psql assistant -c "
-SELECT t.id::text, t.status, LEFT(t.description,50) AS desc,
-       (SELECT string_agg(j.status, ',' ORDER BY j.created_at)
-        FROM jobs j WHERE j.task_id = t.id) AS job_statuses,
-       (SELECT string_agg(j.created_by, ',' ORDER BY j.created_at)
-        FROM jobs j WHERE j.task_id = t.id) AS created_by
-FROM tasks t
-WHERE t.status IN ('active','awaiting_user','pending_approval')
-ORDER BY t.updated_at DESC LIMIT 20;"
+ATLAS="$HOME/Library/Application Support/ai-server/projects/atlas"
+git -C "$ATLAS" status --short && git -C "$ATLAS" remote -v
+git -C "$ATLAS" fetch origin
+git -C "$ATLAS" log --oneline origin/master..HEAD   # runtime-only commits (the violation)
+git -C "$ATLAS" log --oneline HEAD..origin/master   # undeployed dev commits
 ```
-
-If any row shows `created_by = telegram:...,auto-continue:...,auto-continue:...`
-and `job_statuses = completed,completed,...` (with more than 1 job) — the
-auto-continue loop is the culprit.
 
 ### Root cause
-
-The dashboard endpoint (`/api/tasks` in `src/gateway/web.py:315`) filters by
-`Task.status`, not by the status of any child job — this is by design (a task
-is a multi-turn wrapper; it stays "active" until it emits `task_complete` or
-is manually approved).
-
-But `src/runner/main.py:_update_task_after_job` has a permissive default:
-whenever a task-linked job finishes without emitting `task_choices`,
-`task_question`, or `task_complete` audit events, it treats that as "phase
-complete, auto-continue" and enqueues a new job whose description is
-`"Continue to the next phase of the plan."` (line 629+). The task never
-transitions and a fresh job is spawned every time. For single-shot skills
-(`atlas-redeploy` is the canonical case) this becomes an infinite loop of
-re-deploys until an unrelated failure (rate limit, timeout, etc.) breaks it.
-
-The problem compounds when the router (`src/runner/router.py`) has no rule
-matching the task description — `/task redeploy atlas` returns
-`resolved_skill=None`, so the atlas-redeploy `SKILL.md` (which would have
-instructed the model to emit `task_complete`) is never loaded as a system
-prompt. The model improvises the deploy without knowing it's expected to
-signal completion.
+A commit was born in the runtime clone instead of the dev repo (~/Documents/repos/atlas).
+The runtime clone is a pull-only deploy target; any commit made there (hotfix, migration
+rename, "quick fix on the Mini") permanently blocks ff-only pulls. First occurrence
+2026-07-09: a dbmate migration-collision repair was committed on the Mini with the host
+git identity while the dev repo got its own equivalent commit — same content, different
+SHAs. Also check `remote -v`: after the 2026-07-09 pm-edge→atlas rename, origin must be
+`~/Documents/repos/atlas`.
 
 ### Fix
-
-**Immediate cleanup** (stops the runaway):
-
 ```bash
-# Cancel any queued auto-continue jobs
-psql assistant -c "
-UPDATE jobs SET status='cancelled',
-       completed_at=NOW(),
-       error_message='cancelled: auto-continue loop mitigation'
- WHERE status IN ('queued','running')
-   AND created_by LIKE 'auto-continue:%';"
-
-# Retire stuck 'active' tasks whose children are all terminal
-psql assistant -c "
-UPDATE tasks t SET status='failed', updated_at=NOW()
- WHERE t.status='active'
-   AND NOT EXISTS (
-     SELECT 1 FROM jobs j
-      WHERE j.task_id = t.id
-        AND j.status IN ('queued','running'));"
+git -C "$ATLAS" branch backup-$(date +%F)            # preserve, never destroy evidence
+git -C "$ATLAS" remote set-url origin "$HOME/Documents/repos/atlas"   # if wrong
+git -C "$ATLAS" fetch origin
+git -C "$ATLAS" reset --hard <last common commit>    # then: /task redeploy atlas
+# afterwards: git log master..backup-<date> — if anything unique, cherry-pick INTO DEV
 ```
 
-**Long-term (three complementary changes)**:
-
-1. **Add a router rule** so `/task redeploy atlas` resolves to `atlas-redeploy`.
-   In `src/runner/router.py:_RULES`, before the general research/action rules:
-
-   ```python
-   (r"\bredeploy atlas\b", "atlas-redeploy"),
-   ```
-
-2. **Teach the skill to emit `task_complete`**. Append to
-   `skills/atlas-redeploy/SKILL.md` §6 "Summary": when the job runs with
-   `job.task_id` set, emit `task_complete` after writing the summary, e.g.:
-
-   ```python
-   from src.audit_log import append
-   append(job_id, "task_complete", summary="<one-line result>")
-   ```
-
-3. **Make auto-continue opt-in on the server side** — modify
-   `src/runner/main.py:_update_task_after_job` so the "no signal" branch
-   marks the task `pending_approval` (or `completed` for skills whose
-   frontmatter declares `single_shot: true`), instead of enqueuing another
-   job. Add a payload flag `payload.auto_continue = True` for skills that
-   genuinely want the multi-phase behavior.
-
-Change #1 is required so #2 takes effect. #3 is defense-in-depth against
-future single-shot skills making the same mistake — it's server code, so it
-needs `server-patch` (Phase 5) and manual PR merge.
-
 ### Prevention
-
-- Every skill that runs inside a `/task` context should emit exactly one of
-  `task_question`, `task_choices`, or `task_complete` before returning.
-- Add a lint / audit-index check that flags jobs which finished with
-  `job.task_id IS NOT NULL` but no task_* event in the audit log.
-- When adding a new skill, if it's single-shot (no follow-up phases),
-  document that in the frontmatter and either emit `task_complete` on
-  success or set a payload flag the runner respects.
-
----
+Single-writer rule (atlas CLAUDE.md §Deployment topology): all commits in the dev repo,
+runtime pulls only. Jobs and skills must never git-commit in projects/atlas; a fix found
+on the Mini is committed in dev and deployed via atlas-redeploy. The atlas-redeploy skill
+now emits the divergence evidence automatically.
 
 ## Adding entries to this file
 

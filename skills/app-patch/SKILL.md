@@ -23,6 +23,22 @@ You are patching an existing project to fix a bug or add a feature. The project
 lives at `projects/<slug>/` and is its own git repo (separate from the
 ai-server repo).
 
+## STEP 0 — check the project's write topology (do this FIRST)
+
+Read `projects/<slug>/CLAUDE.md`. If it declares a **deployment topology /
+single-writer rule** (a dev repo elsewhere on this machine, with the
+`projects/<slug>` checkout as a pull-only deploy target — e.g. **atlas**, dev
+repo `~/Documents/repos/atlas`):
+
+- Make ALL edits and commits in the **dev repo**, never in `projects/<slug>`.
+- Deploy by enqueuing the project's deploy skill (e.g. `atlas-redeploy`), which
+  pulls, gates, builds, restarts. Do not `git push` from the runtime clone.
+- A commit created inside `projects/<slug>` for such a project is a defect that
+  blocks all future deploys (ff-only pull refuses; incident 2026-07-09).
+
+Only when no such topology is declared does the default flow below
+(work + commit + push inside `projects/<slug>`) apply.
+
 ## Multi-turn task protocol
 
 This skill runs inside a multi-turn task. The user interacts via a Telegram

@@ -39,30 +39,6 @@ your reasoning.
 
 ## Procedure
 
-### 0. Short-circuit on known synthetic sentinels
-
-Before doing anything else, check if the job description matches a known
-synthetic/test pattern. These fire from test fixtures or misfiring event
-triggers, not real production failures, and running the full procedure on them
-wastes an Opus call.
-
-Known sentinels:
-
-| Pattern (case-sensitive substring in description) | Source | Action |
-|---|---|---|
-| `Telegram handler 'handler' failed twice. Error: boom` | `tests/test_telegram_commands.py::test_exception_retries_then_replies` | No-op |
-
-If the description matches any sentinel:
-
-1. Do NOT gather evidence, do NOT delegate, do NOT restart anything.
-2. Write a one-paragraph summary: "Synthetic sentinel — no action. Description
-   matches `<pattern>`, which originates from `<source>`. See
-   `docs/Troubleshooting.md` → 'Symptom: self-diagnose fires for Telegram
-   handler with error \"boom\"' for context."
-3. Exit immediately.
-
-Do NOT skip step 0. If the pattern list grows, append rows above.
-
 ### 1. Gather evidence
 
 Collect information systematically. Read at least 3 of these sources:
@@ -135,6 +111,12 @@ Classify the fix into one of these risk tiers:
   )
   ```
 - `app-patch` will push the fix directly (no PR gate, per user decision)
+- **Single-writer projects** (project CLAUDE.md declares a dev-repo topology —
+  e.g. atlas, dev repo `~/Documents/repos/atlas`): the fix must be committed in
+  the DEV repo and deployed via the project's deploy skill (`atlas-redeploy`).
+  Neither this skill nor app-patch may ever `git commit` inside
+  `projects/<slug>` for such projects — runtime-born commits block all future
+  ff-only deploys (incident 2026-07-09, see Troubleshooting.md).
 
 **Medium risk (server code) — diagnosis only:**
 - Output a clear diagnosis with the proposed fix

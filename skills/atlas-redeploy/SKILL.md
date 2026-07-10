@@ -36,6 +36,23 @@ git log --oneline "$BEFORE..$AFTER"
 If `BEFORE == AFTER`: report "already up to date" and stop (nothing to deploy). Never
 `git reset`/`checkout --force`; a dirty tree or divergence is a finding, not an obstacle.
 
+**If the pull refuses (divergence or dirty tree), the report MUST include the evidence**
+so the human can decide in one round-trip:
+
+```bash
+git status --short
+git remote -v
+git fetch origin && git log --oneline origin/master..HEAD   # commits only the runtime has
+git log --oneline HEAD..origin/master                        # commits only the dev repo has
+```
+
+Include the standard resolution in the report (human runs it, not this skill):
+backup branch (`git branch backup-<date>`) → verify origin points at
+`~/Documents/repos/atlas` → `reset --hard` to the last common commit → redeploy.
+Root-cause context: commits must only ever be born in the dev repo (single-writer rule,
+atlas CLAUDE.md §Deployment topology); runtime-only commits are a process violation —
+name the offending commits and their author identity in the summary.
+
 ### 2. Environment + migrations
 
 ```bash
@@ -85,31 +102,10 @@ Any service NOT RUNNING or a non-200 → tail its err log
 (`~/Library/Application Support/ai-server/volumes/logs/project.atlas*.err.log`), include the
 tail in the summary, and flag the deploy DEGRADED.
 
-### 6. Summary + task_complete
+### 6. Summary
 
 One paragraph: BEFORE→AFTER commits deployed, gates run + results, services restarted,
 healthcheck code. If stopped at a gate: what failed and where to look.
-
-**Always emit `task_complete` at the end** — this is a single-shot skill; it must signal
-completion so the runner doesn't auto-continue to a next phase. After writing your summary,
-run this Bash command (replacing `<ONE_LINE_SUMMARY>` with your actual result sentence):
-
-```bash
-LOGDIR="$HOME/Library/Application Support/ai-server/volumes/audit_log"
-# Find this job's audit log (most recent file with this skill's job_started event)
-LOG=$(ls -t "$LOGDIR"/*.jsonl 2>/dev/null | while read f; do
-  grep -ql '"skill": *"atlas-redeploy"' "$f" 2>/dev/null && echo "$f" && break
-done)
-if [ -n "$LOG" ]; then
-  JOB_ID=$(basename "$LOG" .jsonl)
-  TS=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
-  printf '{"ts":"%s","job_id":"%s","kind":"task_complete","summary":"%s"}\n' \
-    "$TS" "$JOB_ID" "<ONE_LINE_SUMMARY>" >> "$LOG"
-  echo "task_complete emitted for job $JOB_ID"
-else
-  echo "WARNING: could not find atlas-redeploy audit log to emit task_complete"
-fi
-```
 
 ## Hard rules
 
@@ -118,17 +114,3 @@ fi
 - `--ff-only` always. Divergence between dev repo and runtime clone is a human decision.
 - Red tests never reach production. No exceptions, including "it's just a docs change"
   (docs-only ranges will pass the gates anyway, so run them).
-
-## Gotchas
-
-- **Three launchd services, not one**: `com.assistant.project.atlas` (Next.js web),
-  `com.assistant.project.atlas-dash-scheduler` (Python scheduler), and
-  `com.assistant.project.atlas-pm-edge` (PM-Edge scanner). Restart only what changed;
-  when in doubt restart all three.
-- **Logs are in the server log dir**, not the project: check
-  `~/Library/Application Support/ai-server/volumes/logs/project.atlas*.err.log` for
-  crash output after a restart.
-- **Build is optional**: only re-run `npm run build` when `web/` files changed in the deploy
-  range. Unnecessary builds are slow (~90s) and block the scheduler from picking up new data.
-- **`ff-only` pull can fail if the runtime clone has local commits** (shouldn't happen, but if
-  it does: do NOT force-push or reset — stop, report, let the human resolve).
