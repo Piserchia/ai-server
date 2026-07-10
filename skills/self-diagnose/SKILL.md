@@ -111,6 +111,12 @@ Classify the fix into one of these risk tiers:
   )
   ```
 - `app-patch` will push the fix directly (no PR gate, per user decision)
+- **Single-writer projects** (project CLAUDE.md declares a dev-repo topology —
+  e.g. atlas, dev repo `~/Documents/repos/atlas`): the fix must be committed in
+  the DEV repo and deployed via the project's deploy skill (`atlas-redeploy`).
+  Neither this skill nor app-patch may ever `git commit` inside
+  `projects/<slug>` for such projects — runtime-born commits block all future
+  ff-only deploys (incident 2026-07-09, see Troubleshooting.md).
 
 **Medium risk (server code) — diagnosis only:**
 - Output a clear diagnosis with the proposed fix
