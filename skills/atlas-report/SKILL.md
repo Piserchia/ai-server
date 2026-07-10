@@ -61,7 +61,7 @@ exactly in that form.
   "horizon_days": 90,
   "key_levels": {"support": "...", "invalidation": "..."},
   "indicators_cited": {"<key from packet>": "<value copied verbatim>"},
-  "body_md": "markdown >=400 chars with sections: Thesis, Technical evidence, Levels, Risks (>=2), Suggestion, Limitations",
+  "body_md": "markdown >=400 chars with sections: Thesis, Technical evidence, Levels, Risks (>=2), Suggestion, Limitations. EMPHASIS RULE: **bold** exactly the ONE load-bearing sentence or number per section — the UI color-codes your bold as the report's highlighted takeaways; bolding everything highlights nothing.",
   "dashboard_gaps": ["data the charter wanted but the packet lacked"]
 }
 ```
