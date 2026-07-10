@@ -77,11 +77,19 @@ cd "$ATLAS/pmedge" && .venv/bin/python -m pytest -q        # must be green
 **Any failure → STOP. Do not build, do not restart.** Summary = the failing output + the
 commit range, so the fix lands in the dev repo first.
 
-### 4. Build web (only if web/ changed in the range)
+### 4. Build web — DETERMINISTIC check, not judgment
 
 ```bash
-cd "$ATLAS/web" && npm run build    # a build failure also stops the deploy
+if git -C "$ATLAS" diff --name-only "$BEFORE..$AFTER" | grep -q '^web/'; then
+  cd "$ATLAS/web" && npm run build    # a build failure also stops the deploy
+else
+  echo "no web/ changes in range — build skipped"
+fi
 ```
+
+Run the grep EXACTLY as written and paste its outcome in the summary. Skipping a
+needed build ships a stale UI with a green healthcheck (incident 2026-07-10: the
+/indicators page deployed code-wise but the old bundle kept serving).
 
 ### 5. Restart + verify
 
