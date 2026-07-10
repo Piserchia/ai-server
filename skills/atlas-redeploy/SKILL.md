@@ -114,3 +114,18 @@ healthcheck code. If stopped at a gate: what failed and where to look.
 - `--ff-only` always. Divergence between dev repo and runtime clone is a human decision.
 - Red tests never reach production. No exceptions, including "it's just a docs change"
   (docs-only ranges will pass the gates anyway, so run them).
+
+## Gotchas
+
+- **Three launchd services, not one**: `com.assistant.project.atlas` (Next.js web),
+  `com.assistant.project.atlas-dash-scheduler` (Python scheduler), and
+  `com.assistant.project.atlas-pm-edge` (PM-Edge scanner). Restart only what changed;
+  when unsure restart all three.
+- **Logs are in the server log dir**, not the project: check
+  `~/Library/Application Support/ai-server/volumes/logs/project.atlas*.err.log`.
+- **Build is optional**: only re-run `npm run build` when `web/` files changed in the deploy
+  range. Unnecessary builds are slow (~90s).
+- **Runtime-born commits block deploys**: any `git commit` made inside `projects/atlas`
+  (not the dev repo at `~/Documents/repos/atlas`) will cause the next `--ff-only` pull to
+  refuse. This is a process violation — see `docs/TROUBLESHOOTING.md` § "atlas redeploy
+  reports diverged".
