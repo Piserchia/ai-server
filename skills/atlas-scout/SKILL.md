@@ -88,3 +88,12 @@ One line per pick: SYMBOL — combo — thesis gist. Note candidates that almost
 
 **Global-protocol exemption**: do NOT update `CHANGELOG.md` (or any tracked file)
 inside `projects/atlas` — changelog entries for atlas belong in the DEV repo.
+
+## Gotchas
+
+- **The 2% citation gate is exact-key**: cite snapshot keys verbatim (`SYMBOL.rsi_14`);
+  paraphrased or rounded values fail validation and nothing persists.
+- **≤8 picks is a hard cap** — a 9th pick invalidates the whole run (save-scout is
+  all-or-nothing by design).
+- **price_at_suggestion comes from the snapshot**, never from memory or the web; a pick
+  without it can't be outcome-scored later and wastes the run.

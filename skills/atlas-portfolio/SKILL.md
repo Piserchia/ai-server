@@ -95,3 +95,16 @@ teach the concepts (glossary), never bluff.
   suggestion discipline (invalidation levels, sizing notes), decisions are the owner's.
 - This skill runs against the runtime clone: no code edits, no CHANGELOG updates
   (pull-only clone, single-writer rule).
+
+## Gotchas
+
+- **Trigger by job kind, not description prefix** (incident 2026-07-10): a
+  description-routed job ran generic, read the atlas feature plan, and executed the
+  plan's pending work package instead of the owner's sale. Web enqueues
+  `kind: atlas_portfolio`; if `resolved_skill` is empty on your job, that's the bug.
+- **cost_basis on lots is PER-UNIT**, not total — `add-holding` takes price paid per
+  share/coin. Passing the total silently corrupts P&L.
+- **`sell` deletes fully-consumed lots**; a sold-out asset returns to the watchlist
+  (zero-holding) rather than showing a 0-qty row.
+- **Every sell/set-position refreshes today's portfolio snapshot** — no manual
+  `snapshot-portfolio` needed after transactions.

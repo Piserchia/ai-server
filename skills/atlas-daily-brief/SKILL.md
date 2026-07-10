@@ -68,3 +68,12 @@ Telegram — that's the delivery channel; don't wrap it in meta-commentary).
 
 **Global-protocol exemption**: do NOT update `CHANGELOG.md` (or any tracked file)
 inside `projects/atlas` — changelog entries for atlas belong in the DEV repo.
+
+## Gotchas
+
+- **The summary IS the deliverable** — the Telegram DM sends your final message verbatim;
+  meta-commentary ("Here's the brief:") reads as noise on a phone at 7am.
+- **Market chat pinning uses `chat-save --market`** — forgetting it means the brief exists
+  only in Telegram and the /indicators page shows a stale morning read.
+- **Weekend/holiday data**: equities series won't have fresh closes; say "as of Friday's
+  close" rather than presenting stale numbers as current.

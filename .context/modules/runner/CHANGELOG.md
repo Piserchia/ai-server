@@ -2,6 +2,49 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-09 — Narrow sentinel-only loop guard (code-review fix)
+
+**Files changed**:
+- `src/runner/main.py` — Removed `_is_auto_continued` from the loop guard condition.
+  The guard now fires only when the job description IS the sentinel string exactly.
+  The previous check (`created_by.startswith("auto-continue:")`) was too broad: any
+  auto-continued job that did genuine work and emitted no signal would be stopped at
+  `pending_approval`, preventing tasks with 3+ phases from ever reaching phase 3.
+  Sentinel-only detection is sufficient because the sentinel job never emits task signals.
+- `tests/test_pure_functions.py` — Added `TestAutoContineGuard` (7 cases) and 6
+  atlas-redeploy router test parametrize entries.
+
+**Why**: Code review of PR #2 identified the over-broad guard as a BLOCKER.
+528 tests pass.
+
+**Side effects**: Multi-phase tasks with 3+ phases now work correctly. Any job whose
+description matches the sentinel exactly is still stopped. Any job auto-continued from
+the sentinel but doing real work is no longer stopped.
+
+**Gotchas discovered**: None new.
+
+## 2026-07-09 — Auto-continue loop guard in _update_task_after_job
+
+**Files changed**:
+- `src/runner/main.py` — `_update_task_after_job` now checks before spawning a
+  continuation job: if the finishing job's description IS the auto-continue sentinel
+  (`"Continue to the next phase of the plan."`) OR the job was itself created by
+  `auto-continue:*`, it stops and moves the task to `pending_approval` instead of
+  spawning another continuation. This breaks the infinite loop that occurred when
+  single-shot skills (e.g. `atlas-redeploy`) completed without emitting `task_complete`.
+- `src/runner/router.py` — Added `atlas-redeploy` routing rules: patterns
+  `\bredeploy atlas\b` and `\batlas[- ](redeploy|deploy|restart|update)\b` now resolve
+  to the `atlas-redeploy` skill so its system prompt (including `task_complete`
+  instructions) is loaded.
+
+**Why**: `/task redeploy atlas` had no router rule → `atlas-redeploy` skill never loaded
+→ no `task_complete` signal → auto-continue loop spawned jobs forever. Eight stuck
+`active` tasks and three looping sentinel jobs observed in production on 2026-07-09.
+See `docs/TROUBLESHOOTING.md` §"web dashboard active task list shows completed jobs"
+for the full diagnosis and fix procedure.
+
+**How to verify**: `python3.12 -m pytest tests/ -q` — 515 pass.
+
 ## 2026-07-06 — Runner liveness heartbeat
 
 **Files changed**:

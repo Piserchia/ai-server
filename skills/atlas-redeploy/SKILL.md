@@ -132,11 +132,13 @@ edit blocks every future deploy. Changelog entries for atlas belong in the DEV r
 - **Three launchd services, not one**: `com.assistant.project.atlas` (Next.js web),
   `com.assistant.project.atlas-dash-scheduler` (Python scheduler), and
   `com.assistant.project.atlas-pm-edge` (PM-Edge scanner). Restart only what changed;
-  when in doubt restart all three.
+  when unsure restart all three.
 - **Logs are in the server log dir**, not the project: check
   `~/Library/Application Support/ai-server/volumes/logs/project.atlas*.err.log` for
   crash output after a restart.
 - **Build is deterministic, not judgment** (step 4): run the exact `grep '^web/'` check on
   the range; skipping a needed build ships a stale UI (incident 2026-07-10).
-- **`ff-only` pull can fail if the runtime clone has local commits** (shouldn't happen, but if
-  it does: do NOT force-push or reset — stop, report, let the human resolve).
+- **Runtime-born commits block deploys**: any `git commit` made inside `projects/atlas`
+  (not the dev repo at `~/Documents/repos/atlas`) will cause the next `--ff-only` pull to
+  refuse — a process violation; do NOT force-push or reset — stop, report, let the human
+  resolve (see `docs/TROUBLESHOOTING.md` § "atlas redeploy reports diverged").

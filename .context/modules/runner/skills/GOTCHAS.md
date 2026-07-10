@@ -14,6 +14,18 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-07-09 — Missing task_complete signal causes silent auto-continue loop
+
+When a job finishes its work but never emits a `task_complete` signal, the runner does not mark the job as done and instead re-enters the auto-continue handler on each polling cycle. This produces a silent loop that consumes turns without any visible error. Always ensure every code path in a skill or job handler reaches a `task_complete` (or equivalent terminal signal) before returning, and check the audit log for repeated `auto-continue` entries if a job appears to hang or spin.
+
+_Evidence: job `426cfc49`_
+
+## 2026-07-09 — Unmatched job descriptions trigger silent auto-continue chains
+
+When a dispatched sub-agent's description string does not match any expected pattern in the runner's routing logic, the job may silently fall through to an auto-continue handler instead of failing loudly. This produces a chain of continuation turns that consume quota without making progress. Always verify that Agent tool `description` values match a known routing key, and check the audit log for repeated `auto-continue` entries if a job seems to loop without resolution.
+
+_Evidence: job `5045d25b`_
+
 ## 2026-04-20 — System Python dependencies are not inherited by scripts
 
 Scripts invoked as `python3 <script>` use the system Python 3.9 on this machine, which does **not** include user-level pip packages. The server has no `.venv/`; all runtime dependencies are installed into the user's pip path (`pip3 install`). When a script fails with `ModuleNotFoundError` for a package you know is installed, verify which Python is resolving the import (`which python3` vs the Python that owns the package). The fix is either `pip3 install <package>` under system python, or run the script with the correct interpreter explicitly.
