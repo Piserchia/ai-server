@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-07-10 — Python launchd services silently buffer stdout — set PYTHONUNBUFFERED
+
+When a Python service runs under launchd, stdout is block-buffered by default, so log lines never appear in `volumes/logs/*.log` until the buffer fills or the process exits. This makes the service look silent or broken even when it is functioning. Fix by adding `PYTHONUNBUFFERED=1` (or `-u` flag) to the launchd plist `EnvironmentVariables` dict so output is line-buffered from startup. Confirm the fix by tailing the log immediately after a restart and verifying lines appear in real time.
+
+_Evidence: job `87782ecf`_
+
 ## 2026-04-20 — Runner keeps restarting (launchd throttling)
 
 Check `launchctl list | grep com.assistant` for non-zero exit status, then `tail -100 volumes/logs/runner.err.log`.
