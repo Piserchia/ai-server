@@ -22,21 +22,21 @@ Task IDs reference the remediation plan.
 
 | Task | Priority | Title | Status | Commit | Date |
 |------|----------|-------|--------|--------|------|
-| T1 | P0 | Unstrand the 2 phantom `queued` jobs | PROPOSED | — | — |
-| T2 | P0 | Fix backups (launchd PATH) + untrack committed tarball | PROPOSED | — | — |
-| T3 | P0 | Finish R2 + heartbeat-worker human setup steps | PROPOSED | — | — |
-| T4 | P1 | Fix stale-Job bug: post-review + escalation never fire | PROPOSED | — | — |
-| T5 | P1 | Fix `review.py` SDK API + review-the-whole-session diff | PROPOSED | — | — |
-| T6 | P1 | Startup reconciliation for stranded `queued` jobs | PROPOSED | — | — |
-| T7 | P1 | Router rules for the atlas skill family + trigger-contract test | PROPOSED | — | — |
-| T8 | P1 | Model tier map; retire hardcoded `claude-opus-4-7` pins | PROPOSED | — | — |
-| T9 | P1 | Silence INFO log spam (bot 25 MB, runner SDK lines) | PROPOSED | — | — |
-| T10 | P1 | Loop-liveness checks in `server-upkeep` | PROPOSED | — | — |
+| T1 | P0 | Unstrand the 2 phantom `queued` jobs | DONE (DB-only) | — | 2026-07-11 |
+| T2 | P0 | Fix backups (launchd PATH) + untrack committed tarball | DONE | 9c4f1fb | 2026-07-11 |
+| T3 | P0 | Finish R2 + heartbeat-worker human setup steps | PROPOSED (human) | — | — |
+| T4 | P1 | Fix stale-Job bug: post-review + escalation never fire | IN PR #3 | 15289c7 | 2026-07-11 |
+| T5 | P1 | Fix `review.py` SDK API + review-the-whole-session diff | IN PR #3 | 15289c7 | 2026-07-11 |
+| T6 | P1 | Startup reconciliation for stranded `queued` jobs | IN PR #3 | 15289c7 | 2026-07-11 |
+| T7 | P1 | Router rules for the atlas skill family + trigger-contract test | IN PR #3 | 15289c7 | 2026-07-11 |
+| T8 | P1 | Model tier map; retire hardcoded `claude-opus-4-7` pins | IN PR #3 | 15289c7 | 2026-07-11 |
+| T9 | P1 | Silence INFO log spam (bot 25 MB, runner SDK lines) | IN PR #3 | 15289c7 | 2026-07-11 |
+| T10 | P1 | Loop-liveness checks in `server-upkeep` | DONE | 3c2e3f1 | 2026-07-11 |
 | T11 | P2 | Atlas web app: enqueue by `kind`, not description prefix | PROPOSED | — | — |
-| T12 | P2 | Repo & docs cleanup batch (see § 4 table) | PROPOSED | — | — |
-| T13 | P2 | Decide + seed missing schedules (research / ideas) | PROPOSED | — | — |
+| T12 | P2 | Repo & docs cleanup batch (see § 4 table) | DONE | 01e6e36 | 2026-07-11 |
+| T13 | P2 | Decide + seed missing schedules (research / ideas) | PROPOSED (owner decision) | — | — |
 | T14 | P2 | Run eval harness baseline; add atlas + self-diagnose cases | PROPOSED | — | — |
-| T15 | P2 | Decide plugin exposure for SDK job sessions | PROPOSED | — | — |
+| T15 | P2 | Decide plugin exposure for SDK job sessions | PROPOSED (owner decision) | — | — |
 | T16 | P3 | Atlas project remediation items (§ 5) | PROPOSED | — | — |
 | T17 | P3 | Backlog: bingo audit, quality-signal automation, sudo decision | PROPOSED | — | — |
 
