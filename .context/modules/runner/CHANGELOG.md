@@ -2,6 +2,66 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-11 — L2 self-diagnose false positive for cancelled sentinel (5ef4d36d)
+
+**Files changed**:
+- `docs/TROUBLESHOOTING.md` — New symptom section
+  "self-diagnose fires for a god sentinel job that died with exit code 143
+  (SIGTERM)" with diagnostic queries and prevention notes.
+
+**Why**: L2 escalation `5f7d8f62` fired for job `5ef4d36d` with
+`Error: unknown`. Root cause traced to two-race compound:
+(a) Cancel race — the parallel god session `184b480f` (see entry below)
+executed `UPDATE jobs SET status='cancelled'` then killed the sentinel PID.
+The sentinel's SIGTERM handler in the runner then wrote `job_failed` and
+`UPDATE jobs SET status='failed'`, overwriting the cancel. So the DB row
+shows `failed` and the escalation logic couldn't tell it was intentional.
+(b) Escalation blindness — the L2 spawn path in `main.py` around
+L494-L500 doesn't check whether the failure was a user/system cancellation
+(exit 143 from `created_by LIKE 'auto-continue:%'` is a strong signal it was).
+
+**Diagnosis only** (medium-server risk, needs server-patch):
+1. In the SIGTERM handler, use `UPDATE ... WHERE status != 'cancelled'` so a
+   prior cancel is preserved.
+2. In the escalation spawn, suppress self-diagnose when the failed job was
+   an auto-continue sentinel and died with exit 143.
+
+**Side effects**: None — this session only appended docs.
+
+_Evidence: jobs `5ef4d36d` (sentinel), `184b480f` (killer god), `5f7d8f62`
+(this self-diagnose)._
+
+## 2026-07-11 — Live cleanup: killed rogue auto-continue caught in the act
+
+**Files changed**: None (runtime state only).
+
+**Why**: While investigating "check on my last task" (job `184b480f`), I discovered the exact defect documented in the previous entry firing in real time. Job `0651defb` (the diagnostic session) ended with an A/B/C question to the user but emitted no `task_question` event. The runner's `_update_task_after_job` fell through to auto-continue and enqueued job `5ef4d36d` with description `"Continue to the next phase of the plan."` on task `20daab34` ("why are these changes for these last tasks not deploying"). By the time I looked at its audit log, `5ef4d36d` had already `ls`'d `docs/superpowers/plans/`, read `2026-07-10-eval-remediation.md`, checked PR #3, and was preparing to work on Wave 2 of the eval remediation — **on a task that literally asks "why aren't my changes deploying"**. Perfect reproduction of the hijack in the wild.
+
+**Action taken**: `UPDATE jobs SET status='cancelled'` on `5ef4d36d`; killed PID `94785`; `UPDATE tasks SET status='failed'` on `20daab34`. Documenting this reproduction as additional evidence for the fix work (patch `superpowers:brainstorming` to emit `task_question`; patch `_update_task_after_job` sentinel to carry task context).
+
+**Side effects**: One rogue god session cancelled mid-flight before it could commit unrelated code.
+
+## 2026-07-11 — Diagnosis: task-hijack defect (brainstorming + auto-continue)
+
+**Files changed**:
+- `.context/modules/runner/skills/GOTCHAS.md` — Added detailed entry
+  "Brainstorming clarifying questions get 'Continue to next phase' hijacked"
+  documenting a two-part defect discovered while debugging the 2026-07-11
+  baseball-bingo redeploy tasks.
+
+**Why**: Investigation of user question "why are these changes for these last
+tasks not deploying" traced back to two combined failures:
+(1) `superpowers:brainstorming` asks clarifying questions but never emits a
+`task_question` audit event, so the runner never enters `awaiting_user`;
+(2) the auto-continue sentinel `"Continue to the next phase of the plan."`
+carries no task context, so the next job reads `MEMORY.md` and continues
+whatever plan it finds there — silently swapping the user's actual task for
+an unrelated one. Evidence: tasks `b59375a8`, `3bfb65aa`; jobs `137c27eb`,
+`1681307a`, `2867bcd7`. No code changes made in this session — this is a
+diagnosis-only writeup documenting the defect for a follow-up fix.
+
+**Side effects**: None (documentation only).
+
 ## 2026-07-11 — T12 cleanup: remove stale "route skill fallback" claim from router.py docstring
 
 **Files changed**:

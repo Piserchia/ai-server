@@ -346,6 +346,78 @@ Audit sibling handlers (`cmd_status`, `cmd_tasks`, callback renderers) for the s
 
 ---
 
+## Symptom: self-diagnose fires for a god sentinel job that died with exit code 143 (SIGTERM)
+
+### Diagnostic
+
+Escalation L2 self-diagnose runs with description
+`Self-diagnose: job <id> (god) failed. Error: unknown`. The failed job's audit
+log ends with `job_failed` carrying
+`Command failed with exit code 143 (exit code: 143)` and runner.err.log shows
+`claude_agent_sdk._internal.query:Fatal error in message reader: Command failed
+with exit code 143`. The job's `description` is the fixed literal
+`Continue to the next phase of the plan.` and `created_by` starts with
+`auto-continue:<parent-job-id>` — i.e. this was an auto-continue sentinel.
+
+Then check whether a competing user-created job exists for the same task:
+
+```bash
+psql assistant -c "SELECT id, kind, status, created_by, LEFT(description,60), started_at
+                   FROM jobs WHERE task_id = '<task-id-of-failed-job>'
+                   ORDER BY created_at;"
+```
+
+If a `god` job with `created_by='telegram:*'` was enqueued in the same minute
+(likely a few seconds *before* the sentinel started) and is now `running`, that
+job's arrival is almost certainly why the sentinel was killed.
+
+### Root cause
+
+Two defects compose:
+
+1. The **task-hijack sentinel** is the very defect documented in
+   `.context/modules/runner/skills/GOTCHAS.md` (2026-07-11 entry
+   "Brainstorming clarifying questions get 'Continue to next phase' hijacked").
+   The sentinel should never have been enqueued — brainstorming failed to emit
+   `task_question`, the runner fell through to auto-continue, and the resulting
+   job has no task context.
+2. When the sentinel is killed (SIGTERM from the runner because a fresher user
+   job arrived, or a manual `/cancel`), the failure path in `main.py`
+   unconditionally spawns an L2 self-diagnose child even though the "failure"
+   is an intentional cancellation of a hijack job. Self-diagnose then wastes
+   turns diagnosing a false positive.
+
+### Fix
+
+**None at the moment.** The sentinel job's death is the desired outcome. The
+user's concurrent job (usually a fresh `god` request that explicitly asks about
+the same task) is already running and will produce the real answer. Close this
+diagnose job with a note. Do **not** attempt to fix the sentinel — it was
+correctly euthanised.
+
+### Prevention (requires server-patch)
+
+1. In `_update_task_after_job` (src/runner/main.py, auto-continue branch,
+   L676-L709): before enqueuing a sentinel, check whether the task already has
+   a queued or running job created by a human channel (`created_by LIKE
+   'telegram:%'` or `'web:%'`). If so, skip the sentinel — the user's job will
+   drive the task forward.
+2. In the L2 escalation path (main.py around L494-L500): skip self-diagnose
+   spawn when the failed job's `error_message` starts with
+   `Command failed with exit code 143` **and** `created_by LIKE
+   'auto-continue:%'`. A SIGTERM'd sentinel is not a defect worth escalating.
+3. Longer-term: fix the upstream brainstorming/auto-continue defect so
+   sentinels are never enqueued for tasks that were waiting on a clarifying
+   question (see the 2026-07-11 GOTCHAS entry for the full plan).
+
+_First occurrence 2026-07-11: job `5ef4d36d` (sentinel for task
+`20daab34`), killed 3 minutes into a session where it had correctly
+self-identified as the hijack case and was about to fix the defect. User job
+`184b480f` (enqueued 36s earlier from Telegram) is the real work; the
+escalation into `5f7d8f62` was a false positive._
+
+---
+
 ## Symptom: self-diagnose fires for Telegram handler with error "boom"
 
 **Diagnostic**: incoming self-diagnose job description looks like
