@@ -115,12 +115,12 @@ _FLAG_RE = re.compile(r"--(\w+)=(\S+)")
 
 # Model alias expansion — accepts short names on the command line
 _MODEL_ALIASES = {
-    "opus": "claude-opus-4-7",
+    "opus": settings.model_deep,
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-6",
+    "sonnet": settings.default_model,
     "sonnet-4-6": "claude-sonnet-4-6",
-    "haiku": "claude-haiku-4-5-20251001",
+    "haiku": settings.model_fast,
     "haiku-4-5": "claude-haiku-4-5-20251001",
 }
 
@@ -1087,6 +1087,8 @@ async def _post_init(app: Application) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    # httpx logs every getUpdates poll at INFO — with the bot token in the URL.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     if not settings.telegram_bot_token:
         raise SystemExit("TELEGRAM_BOT_TOKEN is not set. See .env.example.")
 

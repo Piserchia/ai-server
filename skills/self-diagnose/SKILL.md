@@ -1,14 +1,14 @@
 ---
 name: self-diagnose
 description: Investigate failures and propose or apply fixes based on risk classification
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: high
 permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
 max_turns: 30
 escalation:
   on_failure:
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: xhigh
 context_files: ["docs/TROUBLESHOOTING.md"]
 tags: [meta, recovery, event-triggered, needs-projects-mcp, needs-dispatch-mcp]

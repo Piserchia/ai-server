@@ -1,14 +1,14 @@
 ---
 name: research-deep
 description: Deep-dive research with more sources, synthesis, and treatment of conflicting evidence
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: high
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion]
 max_turns: 80
 escalation:
   on_failure:
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: xhigh
 context_files: ["skills/research-report/SKILL.md"]
 tags: [research, writing, high-quality]

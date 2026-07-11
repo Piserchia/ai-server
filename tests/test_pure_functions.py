@@ -70,6 +70,21 @@ class TestRouter:
         assert router.route("RESEARCH THE NBA TRADE DEADLINE") == "research-report"
 
 
+@pytest.mark.parametrize("desc,expected", [
+    ("atlas-report: asset CRDO", "atlas-report"),
+    ("atlas report on NVDA", "atlas-report"),
+    ("atlas-chat: report 6d3a8bde-54fa", "atlas-chat"),
+    ("scout stocks", "atlas-scout"),
+    ("atlas-scout: run stock scout", "atlas-scout"),
+    ("atlas-portfolio: I sold 4 shares of ZZAGENT", "atlas-portfolio"),
+    ("daily brief", "atlas-daily-brief"),
+    ("redeploy atlas", "atlas-redeploy"),
+])
+def test_router_atlas_family(desc, expected):
+    from src.runner import router
+    assert router.route(desc) == expected
+
+
 # ── Auto-continue loop guard ─────────────────────────────────────────────────
 
 class TestAutoContineGuard:
@@ -121,7 +136,7 @@ class TestFlagParser:
     def test_single_flag(self) -> None:
         desc, flags = parse_flags("--model=opus fix the bug")
         assert desc == "fix the bug"
-        assert flags == {"model": "claude-opus-4-7"}
+        assert flags == {"model": "claude-opus-4-8"}
 
     def test_multiple_flags(self) -> None:
         desc, flags = parse_flags("--model=sonnet --effort=high do the thing")
@@ -130,7 +145,7 @@ class TestFlagParser:
         assert flags["effort"] == "high"
 
     def test_model_alias_expansion(self) -> None:
-        assert parse_flags("--model=opus x")[1]["model"] == "claude-opus-4-7"
+        assert parse_flags("--model=opus x")[1]["model"] == "claude-opus-4-8"
         assert parse_flags("--model=sonnet x")[1]["model"] == "claude-sonnet-4-6"
         assert parse_flags("--model=haiku x")[1]["model"] == "claude-haiku-4-5-20251001"
         assert parse_flags("--model=opus-4-6 x")[1]["model"] == "claude-opus-4-6"
@@ -152,7 +167,7 @@ class TestFlagParser:
     def test_flags_only_no_description(self) -> None:
         desc, flags = parse_flags("--model=opus")
         assert desc == ""
-        assert flags["model"] == "claude-opus-4-7"
+        assert flags["model"] == "claude-opus-4-8"
 
 
 # ── Writeback classifier tests ──────────────────────────────────────────────

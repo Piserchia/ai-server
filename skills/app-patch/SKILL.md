@@ -1,18 +1,18 @@
 ---
 name: app-patch
 description: Patch an existing project to fix bugs or add features
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: high
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 60
 post_review:
   trigger: always
-  reviewer_model: claude-opus-4-7
+  reviewer_model: claude-opus-4-8
   reviewer_effort: high
 escalation:
   on_failure:
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: xhigh
 tags: [projects, maintenance]
 ---

@@ -475,9 +475,9 @@ _INDEX_HTML = """<!DOCTYPE html>
     <input type="text" name="description" placeholder="describe a task..." required>
     <select name="model">
       <option value="">default</option>
-      <option value="claude-sonnet-4-6">sonnet 4.6</option>
-      <option value="claude-opus-4-7">opus 4.7</option>
-      <option value="claude-haiku-4-5-20251001">haiku 4.5</option>
+      <option value="{model_sonnet}">sonnet (default)</option>
+      <option value="{model_opus}">opus (deep)</option>
+      <option value="{model_haiku}">haiku (fast)</option>
     </select>
     <select name="effort">
       <option value="">default</option>
@@ -602,4 +602,9 @@ _INDEX_HTML = """<!DOCTYPE html>
 
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(_check_auth)])
 async def index() -> str:
-    return _INDEX_HTML
+    return (
+        _INDEX_HTML
+        .replace("{model_sonnet}", settings.default_model)
+        .replace("{model_opus}", settings.model_deep)
+        .replace("{model_haiku}", settings.model_fast)
+    )

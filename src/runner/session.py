@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,16 @@ logger = logging.getLogger(__name__)
 
 # In-process registry of running sessions for /cancel.
 _running_sessions: dict[str, ClaudeSDKClient] = {}
+
+
+def _git_head(cwd: Path) -> str | None:
+    """Pre-session HEAD so post-review can diff the whole session's work."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(cwd),
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or None
+    except Exception:
+        return None
 
 
 async def interrupt(job_id: str | uuid.UUID) -> bool:
@@ -363,7 +374,8 @@ async def _fetch_task_turns(task_id) -> list[dict]:
 _MODEL_BUDGETS: dict[str, int] = {
     "claude-haiku-4-5-20251001": 200_000,
     "claude-sonnet-4-6": 200_000,
-    "claude-opus-4-7": 200_000,
+    "claude-opus-4-7": 200_000,  # kept for audit-log compatibility
+    "claude-opus-4-8": 200_000,
 }
 _DEFAULT_BUDGET = 200_000
 
@@ -536,6 +548,7 @@ async def run_session(job: Job) -> dict[str, Any]:
         parent_job_id=str(job.parent_job_id) if job.parent_job_id else None,
     )
 
+    git_head_before = _git_head(cwd)
     started_at = datetime.now(timezone.utc)
     final_text_chunks: list[str] = []
     usage: dict[str, Any] = {}
@@ -578,6 +591,8 @@ async def run_session(job: Job) -> dict[str, Any]:
             "duration_seconds": duration,
             "usage": usage,
             "skill": skill_name,
+            "cwd": str(cwd),
+            "git_head_before": git_head_before,
         }
     finally:
         _running_sessions.pop(job_id, None)

@@ -51,6 +51,63 @@ _TERMINAL_EVENT_STATUS = {
 }
 
 
+STRANDED_REQUEUE_MAX_AGE_HOURS = 24
+
+
+def stranded_queued_ids(rows: Iterable[tuple], redis_members: set[str]) -> list:
+    """Pure. rows = (job_id, status) pairs; return ids stuck in 'queued' with
+    no matching entry in the Redis queue (crash between BLPOP and
+    status=running, or a Redis restart that dropped the list)."""
+    return [
+        jid for jid, status in rows
+        if status == JobStatus.queued.value and str(jid) not in redis_members
+    ]
+
+
+async def reconcile_stranded_queued() -> int:
+    """Re-push stranded queued rows younger than STRANDED_REQUEUE_MAX_AGE_HOURS;
+    fail older ones (their moment passed — schedules re-fire on their own).
+    Runs at startup after reconcile_orphaned_jobs. Returns count handled."""
+    from src.db import QUEUE_JOBS, redis
+
+    async with session_scope() as s:
+        result = await s.execute(
+            select(Job.id, Job.status, Job.created_at)
+            .where(Job.status == JobStatus.queued.value)
+        )
+        rows = list(result.all())
+    if not rows:
+        return 0
+
+    members = {str(m) for m in await redis.lrange(QUEUE_JOBS, 0, -1)}
+    stranded = set(stranded_queued_ids([(r[0], r[1]) for r in rows], members))
+    if not stranded:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    handled = 0
+    for job_id, _, created_at in rows:
+        if job_id not in stranded:
+            continue
+        age_h = (now - created_at).total_seconds() / 3600
+        if age_h <= STRANDED_REQUEUE_MAX_AGE_HOURS:
+            await redis.rpush(QUEUE_JOBS, str(job_id))
+            logger.warning("re-queued stranded job", job_id=str(job_id))
+        else:
+            audit_log.append(str(job_id), "job_failed",
+                             error="stranded: queued row with no Redis entry",
+                             error_category="stranded")
+            async with session_scope() as s:
+                await s.execute(update(Job).where(Job.id == job_id).values(
+                    status=JobStatus.failed.value,
+                    error_message="stranded queued job (startup reconciliation)",
+                    completed_at=now,
+                ))
+            append_to_index(settings.audit_log_dir, str(job_id))
+        handled += 1
+    return handled
+
+
 def orphaned_job_ids(rows: Iterable[tuple]) -> list:
     """Pure. Given ``(job_id, status)`` pairs, return the job_ids stranded in
     ``running``.

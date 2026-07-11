@@ -11,6 +11,8 @@ Run: pipenv run pytest tests/test_skill_contracts.py -v
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from src.config import settings
@@ -20,6 +22,7 @@ from src.gateway.telegram_bot import (
     _VALID_PERMISSIONS,
 )
 from src.registry.skills import SkillConfig, list_all
+from src.runner import router
 
 VALID_MODELS = set(_MODEL_ALIASES.values())
 
@@ -84,3 +87,33 @@ class TestSkillContracts:
     def test_body_nonempty(self, skill: SkillConfig):
         # The body is the system prompt; an empty one means a broken/omitted skill.
         assert skill.body.strip(), f"{skill.name}: SKILL.md body is empty"
+
+
+# Skills reached by kind (web app / schedules / runner-internal spawns) rather
+# than by router rule. Adding a skill? Either give it a router rule or list it
+# here with a comment naming its dispatcher. This is the contract that killed
+# the "SKILL.md advertises a trigger nobody implements" class of bug
+# (EVALUATION_2026-07-10 §3.6).
+KIND_DISPATCHED = {
+    "chat": "telegram /chat + JobKind.chat",
+    "code-review": "runner post-review sub-agent (review.py)",
+    "server-upkeep": "schedule server-upkeep-daily",
+    "review-and-improve": "events.py idle-queue trigger",
+    "project-update-poll": "per-project schedules",
+    "atlas-report-sweep": "schedule atlas-weekly-reports",
+    "god": "owner-only, explicit kind",
+    "restore": "owner-only, explicit kind",
+}
+
+
+def test_every_skill_is_reachable():
+    targets = {skill for _, skill in router._RULES}
+    skills_dir = Path(settings.server_root) / "skills"
+    for d in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+        name = d.name
+        if name.startswith("_"):
+            continue  # internal: runner-spawned
+        assert name in targets or name in KIND_DISPATCHED, (
+            f"skill '{name}' is unreachable: no router rule and not declared "
+            f"in KIND_DISPATCHED"
+        )

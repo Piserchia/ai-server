@@ -1,7 +1,7 @@
 ---
 name: code-review
 description: Review a code diff for correctness, security, style, and completeness
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: high
 permission_mode: plan
 required_tools: [Read, Glob, Grep]

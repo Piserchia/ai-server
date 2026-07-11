@@ -231,7 +231,7 @@ async def extract_learning(
     options = ClaudeAgentOptions(
         cwd=str(settings.server_root),
         system_prompt=CLASSIFIER_SYSTEM_PROMPT,
-        model="claude-haiku-4-5-20251001",
+        model=settings.model_fast,
         effort="low",
         permission_mode="plan",  # read-only; classifier does not need to act
         allowed_tools=[],

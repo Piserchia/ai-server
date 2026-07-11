@@ -46,7 +46,7 @@ class TestParseFlags:
     def test_model_flag(self):
         desc, flags = parse_flags("--model=opus fix the bug")
         assert desc == "fix the bug"
-        assert flags["model"] == "claude-opus-4-7"
+        assert flags["model"] == "claude-opus-4-8"
 
     def test_effort_flag(self):
         desc, flags = parse_flags("--effort=high fix the bug")
@@ -62,7 +62,7 @@ class TestParseFlags:
     def test_flags_only(self):
         desc, flags = parse_flags("--model=opus")
         assert desc == ""
-        assert flags["model"] == "claude-opus-4-7"
+        assert flags["model"] == "claude-opus-4-8"
 
 
 class TestParseCallback:

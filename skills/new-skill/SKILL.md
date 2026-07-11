@@ -1,18 +1,18 @@
 ---
 name: new-skill
 description: Author a new skill (SKILL.md + support files) from a natural-language description
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: high
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 30
 post_review:
   trigger: always
-  reviewer_model: claude-opus-4-7
+  reviewer_model: claude-opus-4-8
   reviewer_effort: high
 escalation:
   on_failure:
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: max
 context_files: [".context/SKILLS_REGISTRY.md", "skills/README.md"]
 tags: [meta, skill-creation]

@@ -1,7 +1,7 @@
 ---
 name: god
 description: Full-context, full-permission session. Equivalent to a human at the Claude Code terminal.
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: max
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch]

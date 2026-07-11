@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Models
     default_model: str = "claude-sonnet-4-6"
 
+    # Model tiers — the single place a model-generation bump happens.
+    # default_model (sonnet tier) already exists above.
+    model_fast: str = "claude-haiku-4-5-20251001"
+    model_deep: str = "claude-opus-4-8"
+
     # Database
     postgres_dsn: str
 

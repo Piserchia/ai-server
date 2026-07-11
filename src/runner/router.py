@@ -48,6 +48,15 @@ _RULES: list[tuple[str, str]] = [
     (r"\bnew skill[:\s]", "new-skill"),
     (r"\badd a skill\b", "new-skill"),
 
+    # ── Atlas family (dispatch safety net — canonical path is enqueue-by-kind;
+    #    see docs/TROUBLESHOOTING.md "skill jobs must enqueue by kind") ──
+    (r"^atlas[-_]report\b|\batlas report\b", "atlas-report"),
+    (r"^atlas[-_]chat\b|\batlas chat\b", "atlas-chat"),
+    (r"^atlas[-_]scout\b|\bscout stocks?\b", "atlas-scout"),
+    (r"^atlas[-_]portfolio\b", "atlas-portfolio"),
+    (r"^atlas[-_]daily[-_]brief\b|\bdaily brief\b", "atlas-daily-brief"),
+    (r"\bredeploy atlas\b|\batlas[- ](redeploy|deploy|restart|update)\b", "atlas-redeploy"),
+
     # ── Research ──
     (r"\bdeep (research|dive|analysis)\b", "research-deep"),
     (r"\b(research|summarize|summary|report on|weekly update on|market summary)\b",
@@ -62,10 +71,6 @@ _RULES: list[tuple[str, str]] = [
 
     # ── Ideas ──
     (r"\b(brainstorm|ideas for|generate ideas|idea generation)\b", "idea-generation"),
-
-    # ── Atlas operations ──
-    (r"\bredeploy atlas\b", "atlas-redeploy"),
-    (r"\batlas[- ](redeploy|deploy|restart|update)\b", "atlas-redeploy"),
 
     # ── Retrospective ──
     (r"\b(retrospective|audit the system|review (my|the) (system|server|projects))\b",

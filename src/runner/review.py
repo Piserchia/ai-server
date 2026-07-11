@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, TextBlock
 
 from src import audit_log
 from src.config import settings
@@ -117,6 +117,12 @@ def _parse_outcome(text: str) -> ReviewOutcome:
     return ReviewOutcome.changes_requested
 
 
+def pick_diff_ref(result: dict | None) -> str:
+    """Diff base for post-review: the pre-session HEAD when known (covers all
+    commits the session made + working tree), else last commit. Pure."""
+    return (result or {}).get("git_head_before") or "HEAD~1"
+
+
 def get_git_diff(cwd: Path, ref: str = "HEAD~1") -> str:
     """Get git diff output from a directory. Returns empty string on any error."""
     try:
@@ -167,7 +173,7 @@ async def run_code_review(
     options = ClaudeAgentOptions(
         cwd=str(cwd),
         system_prompt=REVIEW_SYSTEM_PROMPT,
-        model="claude-opus-4-7",
+        model=settings.model_deep,
         effort="high",
         permission_mode="plan",  # read-only
         allowed_tools=["Read", "Glob", "Grep"],
@@ -177,14 +183,13 @@ async def run_code_review(
     try:
         client = ClaudeSDKClient(options=options)
         final_text = ""
-
-        async for message in client.process_message(prompt):
-            from claude_agent_sdk import AssistantMessage, TextBlock
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        final_text += block.text
-
+        async with client:
+            await client.query(prompt)
+            async for message in client.receive_response():
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            final_text += block.text
         outcome = _parse_outcome(final_text)
 
     except Exception as exc:
