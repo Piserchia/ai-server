@@ -2,6 +2,64 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-11 — Task-hijack guards: competing-job check, task-context sentinel, SIGTERM escalation guard
+
+**Files changed**:
+- `src/runner/main.py` — Added three pure module-level helpers
+  (`is_human_channel`, `should_skip_escalation_for_sigterm_sentinel`,
+  `build_continuation_description`, `is_sentinel_description`) plus the
+  `AUTO_CONTINUE_SENTINEL` constant. Wired them into `_maybe_escalate`
+  (skip SIGTERM'd auto-continue sentinels) and `_update_task_after_job`
+  (skip auto-continue when a competing human-initiated job is queued or
+  running on the same task; enrich sentinel description with task
+  context so the continuation session doesn't hijack onto MEMORY.md's
+  most-recent plan; loop guard now also catches the enriched form).
+- `tests/test_pure_functions.py` — `TestTaskHijackGuards` (17 new tests).
+- `.context/modules/runner/CONTEXT.md` — public interface entry.
+
+**Why**: Fixes the 2026-07-11 auto-continue hijack failure mode
+(evidence: entries below, plus GOTCHAS.md 2026-07-11 "Brainstorming
+clarifying questions get 'Continue to next phase' hijacked"). The fix is
+three independent guards, each addressing one leg of the incident:
+
+1. **Competing-job guard** (highest leverage). Before enqueuing a
+   sentinel, we now check whether the task already has a queued or
+   running job with `created_by` starting `telegram:` or `web:`. If so,
+   the sentinel is not enqueued — the user's job drives. This alone
+   would have prevented the 2026-07-11 hijack: job `184b480f` (the god
+   session investigating) was queued 4 seconds before `5ef4d36d` (the
+   sentinel) began, on the same task.
+
+2. **Task-context sentinel**. The continuation description is now
+   `"<sentinel> Original task: <task.description>"` instead of the bare
+   fixed literal. Reduces hijack damage even when a sentinel does fire:
+   the next session can see what it's actually continuing.
+
+3. **SIGTERM escalation guard**. `_maybe_escalate` now early-returns
+   when `created_by` starts with `auto-continue:` AND `error_message`
+   contains `exit code 143`. Prevents the L2 self-diagnose false
+   positive documented in `docs/TROUBLESHOOTING.md` §SIGTERM-143.
+
+The infinite-loop guard was extended (`is_sentinel_description`) to
+catch the enriched form so leg-2 doesn't re-open the loop bug the
+guard closed originally.
+
+**Test coverage**: 17 new pure-function tests exercise all four helpers
+across positive, negative, whitespace, None, and truncation cases. Full
+suite: 578 passing (up from 573).
+
+**Side effects**:
+- Legitimate multi-phase auto-continues are preserved — the sentinel
+  loop guard still fires when the enriched-sentinel description is
+  detected on a follow-up job.
+- Escalation still fires normally for real user failures (SIGTERM alone
+  isn't enough — must also be an auto-continue sentinel).
+- One additional DB roundtrip per non-signal job completion (SELECT
+  task description; SELECT competing-jobs). Negligible.
+
+_Evidence: tasks `c2e579db`, `20daab34`; jobs `184b480f`, `5ef4d36d`,
+`21c216be` (this session), `5f7d8f62` (false-positive L2)._
+
 ## 2026-07-11 — L2 self-diagnose false positive for cancelled sentinel (5ef4d36d)
 
 **Files changed**:

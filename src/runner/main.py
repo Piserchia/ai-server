@@ -53,6 +53,74 @@ logger = structlog.get_logger()
 _shutdown = asyncio.Event()
 
 
+# ── Pure helpers (unit-tested in tests/test_pure_functions.py) ──────────────
+
+
+AUTO_CONTINUE_SENTINEL = "Continue to the next phase of the plan."
+"""The fixed literal a runner enqueues when a job ends without emitting
+task_complete / task_question / task_choices, but the task itself isn't
+finished. See _update_task_after_job."""
+
+
+def is_human_channel(created_by: str | None) -> bool:
+    """Pure. True if this job was enqueued by a human channel (Telegram or web
+    UI), not by an internal auto-continue / schedule / escalation flow.
+
+    Used to detect competing user work on a task, which must not be hijacked
+    by an auto-continue sentinel (see the 2026-07-11 task-hijack incident in
+    docs/TROUBLESHOOTING.md and .context/modules/runner/skills/GOTCHAS.md).
+    """
+    if not created_by:
+        return False
+    return created_by.startswith("telegram:") or created_by.startswith("web:")
+
+
+def should_skip_escalation_for_sigterm_sentinel(
+    created_by: str | None, error_message: str | None
+) -> bool:
+    """Pure. True when a job was an auto-continue sentinel that got SIGTERM'd
+    (usually because a fresher user job arrived for the same task). Escalating
+    it into a self-diagnose child is a false positive — the sentinel was
+    intentionally euthanised. See docs/TROUBLESHOOTING.md §"self-diagnose
+    fires for a god sentinel job that died with exit code 143 (SIGTERM)".
+    """
+    return (
+        (created_by or "").startswith("auto-continue:")
+        and "exit code 143" in (error_message or "")
+    )
+
+
+def build_continuation_description(
+    sentinel: str, task_description: str | None, max_len: int = 500
+) -> str:
+    """Pure. Build the auto-continue sentinel description, embedding the
+    parent task's original description so the next session actually knows
+    which task it's continuing (instead of reading MEMORY.md and picking a
+    plausible-looking plan — the 2026-07-11 task-hijack failure mode).
+    """
+    if not task_description:
+        return sentinel
+    trimmed = task_description.strip()
+    if len(trimmed) > max_len:
+        trimmed = trimmed[:max_len].rstrip() + "…"
+    return f"{sentinel} Original task: {trimmed}"
+
+
+def is_sentinel_description(description: str | None) -> bool:
+    """Pure. True if a job description is an auto-continue sentinel — either
+    the bare sentinel string, or the enriched form
+    "<sentinel> Original task: <desc>" that build_continuation_description
+    now produces. Used by the auto-continue loop guard in
+    _update_task_after_job to break infinite loops.
+    """
+    if not description:
+        return False
+    stripped = description.strip()
+    return stripped == AUTO_CONTINUE_SENTINEL or stripped.startswith(
+        AUTO_CONTINUE_SENTINEL + " Original task:"
+    )
+
+
 # ── Startup checks ──────────────────────────────────────────────────────────
 
 
@@ -397,7 +465,21 @@ async def _maybe_escalate(job: Job) -> None:
     - Level 1 → 2: Self-diagnose with full context (audit log + task turns + error)
     - Level 2 → 3: Full-context max-effort debug (last resort)
     - Level 3: Give up, notify user
+
+    Skips escalation entirely for SIGTERM'd auto-continue sentinels — the
+    sentinel was intentionally euthanised (usually by a fresher user job on
+    the same task) and escalating wastes turns on a false positive. See
+    docs/TROUBLESHOOTING.md §"self-diagnose fires for a god sentinel job that
+    died with exit code 143 (SIGTERM)".
     """
+    if should_skip_escalation_for_sigterm_sentinel(job.created_by, job.error_message):
+        logger.info(
+            "skipping escalation for SIGTERM'd auto-continue sentinel (expected)",
+            job_id=str(job.id)[:8],
+            created_by=job.created_by,
+        )
+        return
+
     payload = job.payload or {}
     current_level = payload.get("escalation_level", 0)
 
@@ -633,8 +715,40 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
         # necessary and sufficient to break the loop without cutting off
         # legitimate 3+ phase tasks (whose auto-continued jobs do real work
         # and may need further continuations).
-        _SENTINEL = "Continue to the next phase of the plan."
-        _is_sentinel = (job.description or "").strip() == _SENTINEL
+        _SENTINEL = AUTO_CONTINUE_SENTINEL
+        _is_sentinel = is_sentinel_description(job.description)
+
+        # Guard against auto-continue hijacking a task that the user has
+        # concurrently moved forward with a fresh Telegram/web job. Without
+        # this, an auto-continue sentinel would race the user's real job
+        # for the same task (2026-07-11 hijack incident).
+        competing_job_id: str | None = None
+        async with session_scope() as s:
+            result = await s.execute(
+                select(Job.id, Job.created_by)
+                .where(
+                    Job.task_id == job.task_id,
+                    Job.id != job.id,
+                    Job.status.in_([
+                        JobStatus.queued.value,
+                        JobStatus.running.value,
+                    ]),
+                )
+            )
+            for row_id, row_created_by in result.all():
+                if is_human_channel(row_created_by):
+                    competing_job_id = str(row_id)
+                    break
+
+        if competing_job_id:
+            logger.warning(
+                "skipping auto-continue: competing human-initiated job in flight",
+                task_id=str(job.task_id)[:8],
+                competing_job=competing_job_id[:8],
+                this_job=str(job.id)[:8],
+            )
+            # Leave task status untouched — the human job will drive it.
+            return
 
         if _is_sentinel:
             logger.warning(
@@ -679,7 +793,23 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                         task_id=str(job.task_id)[:8], job_id=str(job.id)[:8])
 
             continuation_kind = job.resolved_skill or job.kind or "task"
-            continuation_desc = _SENTINEL
+
+            # Embed original task description so the continuation session
+            # knows which task it's continuing. Without this, the sentinel
+            # description carries no context and the next session reads
+            # MEMORY.md/plan docs and hijacks the task onto an unrelated
+            # plan (2026-07-11 task-hijack incident).
+            task_desc_for_continuation: str | None = None
+            async with session_scope() as s:
+                task_row = await s.execute(
+                    select(Task.description).where(Task.id == job.task_id)
+                )
+                _r = task_row.first()
+                if _r:
+                    task_desc_for_continuation = _r[0]
+            continuation_desc = build_continuation_description(
+                _SENTINEL, task_desc_for_continuation
+            )
 
             child = await enqueue_job(
                 continuation_desc,

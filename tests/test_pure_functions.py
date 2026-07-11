@@ -109,6 +109,153 @@ class TestAutoContineGuard:
         assert self._is_sentinel("Continue to the next phase") is False
 
 
+# ── Task-hijack guard tests (2026-07-11 incident) ───────────────────────────
+
+
+class TestTaskHijackGuards:
+    """Pure-function coverage for the three defensive helpers wired into
+    src/runner/main.py after the 2026-07-11 auto-continue hijack incident.
+
+    Context — the failure they prevent:
+    - A god session runs, ends without emitting task_complete (or
+      task_question — the brainstorming defect).
+    - Runner enqueues sentinel "Continue to the next phase of the plan."
+    - Sentinel session reads MEMORY.md, picks the most recent plan doc,
+      and does completely unrelated work while the user's real task
+      silently dies.
+    Full evidence in .context/modules/runner/skills/GOTCHAS.md 2026-07-11.
+    """
+
+    def test_is_human_channel_telegram(self) -> None:
+        from src.runner.main import is_human_channel
+
+        assert is_human_channel("telegram:6632944089") is True
+
+    def test_is_human_channel_web(self) -> None:
+        from src.runner.main import is_human_channel
+
+        assert is_human_channel("web:session-abc") is True
+
+    def test_is_human_channel_auto_continue_is_not(self) -> None:
+        from src.runner.main import is_human_channel
+
+        assert is_human_channel("auto-continue:0651defb") is False
+
+    def test_is_human_channel_schedule_is_not(self) -> None:
+        from src.runner.main import is_human_channel
+
+        assert is_human_channel("schedule:atlas-daily-brief") is False
+
+    def test_is_human_channel_escalation_is_not(self) -> None:
+        from src.runner.main import is_human_channel
+
+        assert is_human_channel("escalation-L2:5ef4d36d") is False
+
+    def test_is_human_channel_none(self) -> None:
+        from src.runner.main import is_human_channel
+
+        assert is_human_channel(None) is False
+        assert is_human_channel("") is False
+
+    def test_sigterm_sentinel_guard_matches(self) -> None:
+        from src.runner.main import should_skip_escalation_for_sigterm_sentinel
+
+        # Live-incident shape: sentinel killed by fresher user job.
+        assert should_skip_escalation_for_sigterm_sentinel(
+            "auto-continue:0651defb",
+            "Command failed with exit code 143 (exit code: 143)",
+        ) is True
+
+    def test_sigterm_sentinel_guard_ignores_non_sentinel(self) -> None:
+        from src.runner.main import should_skip_escalation_for_sigterm_sentinel
+
+        # Real user job SIGTERM'd → still escalate, that's a real failure.
+        assert should_skip_escalation_for_sigterm_sentinel(
+            "telegram:6632944089",
+            "Command failed with exit code 143",
+        ) is False
+
+    def test_sigterm_sentinel_guard_ignores_non_sigterm(self) -> None:
+        from src.runner.main import should_skip_escalation_for_sigterm_sentinel
+
+        # Sentinel that failed for a real reason → still escalate.
+        assert should_skip_escalation_for_sigterm_sentinel(
+            "auto-continue:0651defb",
+            "TypeError: 'NoneType' is not iterable",
+        ) is False
+
+    def test_sigterm_sentinel_guard_handles_none(self) -> None:
+        from src.runner.main import should_skip_escalation_for_sigterm_sentinel
+
+        assert should_skip_escalation_for_sigterm_sentinel(None, None) is False
+        assert should_skip_escalation_for_sigterm_sentinel(
+            "auto-continue:x", None
+        ) is False
+
+    def test_build_continuation_description_embeds_task(self) -> None:
+        from src.runner.main import AUTO_CONTINUE_SENTINEL, build_continuation_description
+
+        out = build_continuation_description(
+            AUTO_CONTINUE_SENTINEL, "fix the login bug in market-tracker"
+        )
+        assert out.startswith(AUTO_CONTINUE_SENTINEL)
+        assert "fix the login bug in market-tracker" in out
+
+    def test_build_continuation_description_none_task(self) -> None:
+        from src.runner.main import AUTO_CONTINUE_SENTINEL, build_continuation_description
+
+        # No task description → bare sentinel (backward-compatible).
+        assert (
+            build_continuation_description(AUTO_CONTINUE_SENTINEL, None)
+            == AUTO_CONTINUE_SENTINEL
+        )
+        assert (
+            build_continuation_description(AUTO_CONTINUE_SENTINEL, "")
+            == AUTO_CONTINUE_SENTINEL
+        )
+
+    def test_build_continuation_description_truncates_long(self) -> None:
+        from src.runner.main import AUTO_CONTINUE_SENTINEL, build_continuation_description
+
+        long_desc = "a" * 2000
+        out = build_continuation_description(AUTO_CONTINUE_SENTINEL, long_desc, max_len=100)
+        # Ellipsis added when truncated.
+        assert "…" in out
+        assert len(out) < 200
+
+    def test_is_sentinel_description_bare(self) -> None:
+        from src.runner.main import AUTO_CONTINUE_SENTINEL, is_sentinel_description
+
+        assert is_sentinel_description(AUTO_CONTINUE_SENTINEL) is True
+
+    def test_is_sentinel_description_enriched(self) -> None:
+        from src.runner.main import AUTO_CONTINUE_SENTINEL, is_sentinel_description
+
+        # Loop-guard must catch the enriched form too — otherwise adding task
+        # context re-opens the infinite-loop bug the sentinel guard closed.
+        enriched = f"{AUTO_CONTINUE_SENTINEL} Original task: fix the login bug"
+        assert is_sentinel_description(enriched) is True
+
+    def test_is_sentinel_description_leading_whitespace(self) -> None:
+        from src.runner.main import AUTO_CONTINUE_SENTINEL, is_sentinel_description
+
+        assert is_sentinel_description("  " + AUTO_CONTINUE_SENTINEL) is True
+
+    def test_is_sentinel_description_normal_work(self) -> None:
+        from src.runner.main import is_sentinel_description
+
+        assert is_sentinel_description("redeploy atlas") is False
+        assert is_sentinel_description(
+            "Fix the login bug in market-tracker"
+        ) is False
+
+    def test_is_sentinel_description_none_and_empty(self) -> None:
+        from src.runner.main import is_sentinel_description
+
+        assert is_sentinel_description(None) is False
+        assert is_sentinel_description("") is False
+
+
 # ── Flag parser tests ───────────────────────────────────────────────────────
 
 
