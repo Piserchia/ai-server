@@ -44,6 +44,11 @@ Four async tasks running in one process:
 - `proposals.list_pending_proposals(...)` / `proposals.list_recent_proposals(...)` / `proposals.get_proposal_by_id_prefix(...)` — query helpers for the /proposals command.
 - `reconcile.reconcile_orphaned_jobs() -> int` — startup hook (called from `main.main()` before the loops). Brings every job left in `running` by a previous process to a terminal state: synthesises a `job_failed` event (`error_category='orphaned'`) + fails the row when the audit log has no terminal event, else adopts the existing terminal outcome without writing a duplicate (idempotent across restarts). Updates the incremental audit index for each. Returns the count.
 - `reconcile.orphaned_job_ids(rows)` — pure helper: given `(job_id, status)` pairs, returns ids stranded in `running`.
+- `main.AUTO_CONTINUE_SENTINEL` — constant. The fixed literal used as the `description` for auto-continued jobs when a task has more phases.
+- `main.is_human_channel(created_by)` — pure. True iff `created_by` starts with `telegram:` or `web:`. Used to detect competing user work on a task.
+- `main.should_skip_escalation_for_sigterm_sentinel(created_by, error_message)` — pure. True iff the job was an auto-continue sentinel that was SIGTERM'd (exit 143). Used by `_maybe_escalate` to skip false-positive self-diagnose escalations.
+- `main.build_continuation_description(sentinel, task_description, max_len=500)` — pure. Enriches the sentinel with the parent task's description to prevent MEMORY.md hijack.
+- `main.is_sentinel_description(description)` — pure. Loop guard; true for both the bare sentinel and the enriched `"<sentinel> Original task: …"` form.
 
 ## Dependencies
 
