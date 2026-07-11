@@ -160,6 +160,11 @@ Things the system is **explicitly prohibited from doing** autonomously:
 - Cannot send emails from your account
 - Cannot publish to your public social accounts
 
+`god` skill: the deliberate, owner-invoked exception to every ceiling above
+(bypassPermissions, direct commit+push, 200 turns). Exists so "human at the
+terminal" work can run through the same job/audit machinery; never
+router-reachable, never scheduled.
+
 ## Non-goals (explicit scope ceilings)
 
 - Not a general-purpose agent framework
