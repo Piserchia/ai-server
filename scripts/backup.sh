@@ -4,6 +4,11 @@
 # No retention cap — 2TB SSD has plenty of space.
 set -euo pipefail
 
+# launchd provides a minimal PATH; Homebrew tools (pg_dump, tar helpers, rclone)
+# live outside it. Explicit PATH so the 04:00 timer works (exit-127 incident,
+# broken since 2026-04; see EVALUATION_2026-07-10 §3.7).
+export PATH="/opt/homebrew/opt/postgresql@15/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BACKUP_DIR="$PROJECT_DIR/volumes/backups"

@@ -20,13 +20,8 @@ Pipfile.lock
 .ruff_cache/
 .mypy_cache/
 
-# Runtime state
-volumes/audit_log/*.jsonl
-volumes/audit_log/*.summary.md
-volumes/audit_log/archive/
-volumes/logs/*.log
-volumes/logs/*.log.*
-volumes/pids/
+# Runtime state (all of volumes/ is runtime-only; no committed files)
+volumes/
 
 # Projects are separate repos
 projects/*/
@@ -45,4 +40,3 @@ projects/*/
 
 # OS
 Thumbs.db
-volumes/jobs.db

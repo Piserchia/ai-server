@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-11 — Fix nightly backup: launchd PATH; stop tracking volumes/ artifacts
+
+**Files changed**:
+- `scripts/backup.sh` — Added explicit `PATH` export after `set -euo pipefail` so launchd sessions find `/opt/homebrew/opt/postgresql@15/bin/pg_dump`. Backup was silently failing with exit 127 since 2026-04 (EVALUATION_2026-07-10 §3.7).
+- `.gitignore` — Replaced narrow per-file `volumes/` entries with a single `volumes/` blanket ignore. Removed `volumes/jobs.db` entry.
+- `volumes/backups/backup-2026-04-17.tar.gz` — Untracked from git (was committed by accident; runtime artifact).
+
+**Why**: Nightly pg_dump failed for ~3 months because launchd starts with `/usr/bin:/bin:/usr/sbin:/sbin` only. The old tarball sitting in git was discovered during the July eval.
+**Verified**: Kicked `com.assistant.backup` after the fix; `backup-2026-07-11.tar.gz` (1.5 MB) created, `LastExitStatus=0`.
+
 ## 2026-07-10 — Next.js ISR gotcha documented
 
 **Agent task**: Write-back for job bfcab76c — atlas skill suite refactor and new skills
