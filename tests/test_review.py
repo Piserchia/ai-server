@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from src.runner.review import ReviewOutcome, _parse_outcome, get_git_diff
+from src.runner.review import ReviewOutcome, _parse_outcome, get_git_diff, pick_diff_ref
 
 
 class TestParseOutcome:
@@ -59,3 +59,13 @@ class TestGetGitDiff:
 
     def test_nonexistent_directory_returns_empty(self):
         assert get_git_diff(Path("/nonexistent/path/abc123")) == ""
+
+
+def test_pick_diff_ref_prefers_presession_head():
+    assert pick_diff_ref({"git_head_before": "abc123"}) == "abc123"
+
+
+def test_pick_diff_ref_falls_back():
+    assert pick_diff_ref({}) == "HEAD~1"
+    assert pick_diff_ref(None) == "HEAD~1"
+    assert pick_diff_ref({"git_head_before": None}) == "HEAD~1"

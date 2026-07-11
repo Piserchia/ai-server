@@ -45,8 +45,8 @@ from src.models import Job, JobStatus, Project, Schedule
 from src.registry.skills import load as load_skill
 from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
-from src.runner.reconcile import reconcile_orphaned_jobs
-from src.runner.review import ReviewOutcome, get_git_diff, run_code_review
+from src.runner.reconcile import reconcile_orphaned_jobs, reconcile_stranded_queued
+from src.runner.review import ReviewOutcome, get_git_diff, pick_diff_ref, run_code_review
 from src.runner import quota, session as session_mod, writeback
 
 logger = structlog.get_logger()
@@ -215,6 +215,14 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.completed, result=result)
         log.info("job completed")
 
+        # run_session stamped resolved_skill/model/effort via a separate DB
+        # session; this detached instance still holds the pre-run NULLs.
+        # Re-fetch so the post-hooks (review, learning) see the real skill.
+        async with async_session() as s:
+            fresh = await s.get(Job, job_id)
+        if fresh is not None:
+            job = fresh
+
         # Code review — runs for skills that opt in via post_review.trigger
         if job.kind not in ("chat", "_writeback") and not (job.payload or {}).get("escalated_from"):
             try:
@@ -279,7 +287,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # Escalation: if the skill declares on_failure, enqueue a retry with
         # the escalated model/effort. One level only, guarded by a payload flag.
         try:
-            await _maybe_escalate(job)
+            async with async_session() as s:
+                fresh = await s.get(Job, job_id)
+            await _maybe_escalate(fresh if fresh is not None else job)
         except Exception:
             log.exception("escalation attempt failed (non-fatal)")
 
@@ -313,7 +323,7 @@ async def _maybe_review(job: Job, result: dict) -> None:
             else settings.server_root
         )
 
-    diff = get_git_diff(cwd)
+    diff = get_git_diff(cwd, ref=pick_diff_ref(result))
     if not diff:
         logger.debug("no diff for review, skipping", job_id=str(job.id)[:8])
         return
@@ -846,6 +856,8 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
 async def main() -> None:
     import logging
     logging.basicConfig(level=logging.INFO)
+    # The SDK transport logs "Using bundled Claude Code CLI" per session at INFO.
+    logging.getLogger("claude_agent_sdk").setLevel(logging.WARNING)
     _check_subscription_auth()
     logger.info(
         "runner starting",
@@ -864,6 +876,13 @@ async def main() -> None:
             logger.warning("startup: failed orphaned running jobs", count=n)
     except Exception:
         logger.exception("orphaned-job reconciliation failed (non-fatal)")
+
+    try:
+        nq = await reconcile_stranded_queued()
+        if nq:
+            logger.warning("startup: reconciled stranded queued jobs", count=nq)
+    except Exception:
+        logger.exception("stranded-queued reconciliation failed (non-fatal)")
 
     tasks = [
         asyncio.create_task(_job_loop(), name="job_loop"),

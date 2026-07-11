@@ -8,7 +8,7 @@ required_tools: [Read, Bash, Glob, Grep]
 max_turns: 12
 escalation:
   on_failure:
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: high
 tags: [atlas, finance, chat]
 ---

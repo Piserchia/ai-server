@@ -83,7 +83,7 @@ isn't served by anything in the table, we've drifted.
 
 | Element | How it serves the objective |
 |---|---|
-| `self-diagnose` skill (Phase 4) | Opus 4.7 / high reads audit logs + service logs, proposes or applies low-risk fixes |
+| `self-diagnose` skill (Phase 4) | the deep tier — see src/config.py / high reads audit logs + service logs, proposes or applies low-risk fixes |
 | Event trigger: 2 failures in same skill / 10 min | Auto-enqueues `self-diagnose` without user action |
 | `app-patch` / `server-patch` skills | Self-diagnose delegates the fix through the normal patching pathway |
 | Append-only audit logs at `volumes/audit_log/<job_id>.jsonl` | "What was Claude doing when it broke?" is grep-able |
@@ -95,7 +95,7 @@ isn't served by anything in the table, we've drifted.
 | `jobs.resolved_skill` / `resolved_model` / `resolved_effort` columns | Collected from day 1 — substrate for tuning |
 | `jobs.user_rating` (1-5) + `/rate` command in Telegram + web | Quality signal per job |
 | `jobs.review_outcome` (LGTM / changes_requested / blocker) | Quality signal from `code-review` sub-agent |
-| `review-and-improve` skill (Phase 5, monthly, Opus 4.7 / max in plan mode) | Analyzes patterns, proposes changes as PRs |
+| `review-and-improve` skill (Phase 5, monthly, the deep tier — see src/config.py / max in plan mode) | Analyzes patterns, proposes changes as PRs |
 | **PRs only, no silent edits** (INV-4, INV-13) | You see every change; skills auto-merge on `code-review` LGTM; server code always manual-merge |
 
 ### I. Self-expansion
@@ -112,7 +112,7 @@ isn't served by anything in the table, we've drifted.
 | Element | How it serves the objective |
 |---|---|
 | SKILL.md YAML frontmatter (`model`, `effort`, `permission_mode`) | Each skill declares its own optimal config |
-| `src/runner/router.py` rules (coding intent → `app-patch` → Opus 4.7 / high) | Coding reaches the right tier without thinking |
+| `src/runner/router.py` rules (coding intent → `app-patch` → the deep tier — see src/config.py / high) | Coding reaches the right tier without thinking |
 | `--model=` / `--effort=` flags in `/task` | User override |
 | Per-job `payload` precedence over skill frontmatter | Flags win when specified |
 | Escalation frontmatter (`on_failure`, `on_quality_gate_miss`) | Cheap models first; auto-promote on failure (catches the "simple task that turned out complex") |
@@ -179,7 +179,7 @@ router-reachable, never scheduled.
 | Phase | Status | Plan doc | What it proves |
 |---|---|---|---|
 | 1 — Skeleton | **SHIPPED** (commit `05ad5e7`) | — (in-repo) | Jobs flow; SDK integration; audit log; subscription auth; 3-process topology |
-| 2 — First real skill + write-back + escalation + tests | **SHIPPED** (commit `6e58fe3`) | — (in-repo) | `research-report` runs end-to-end; write-back hook enforces CHANGELOG updates; failure escalation promotes Sonnet → Opus 4.7 automatically; 52-test pure-function suite |
+| 2 — First real skill + write-back + escalation + tests | **SHIPPED** (commit `6e58fe3`) | — (in-repo) | `research-report` runs end-to-end; write-back hook enforces CHANGELOG updates; failure escalation promotes Sonnet → the deep tier — see src/config.py automatically; 52-test pure-function suite |
 | 3 — Domain + tunnel + Caddy + bingo + market-tracker | **SHIPPED** (commit `9f47681`) | [`docs/PHASE_3_PLAN.md`](docs/PHASE_3_PLAN.md) | Multi-project hosting works; `bingo.chrispiserchia.com` + `market-tracker.chrispiserchia.com` live |
 | 4 — Expansion skills + MCP servers + event triggers | **SHIPPED** | [`docs/PHASE_4_PLAN.md`](docs/PHASE_4_PLAN.md) | 7 skills (code-review, new-project, app-patch, new-skill, self-diagnose, project-evaluate) + 2 MCP servers + event-triggered auto-diagnose; 102-test suite |
 | 5 — Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** | [`docs/PHASE_5_PLAN.md`](docs/PHASE_5_PLAN.md) | Nightly backup, daily upkeep, PR-gated server patches, idle-queue retrospectives; 109-test suite |

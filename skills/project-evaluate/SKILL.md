@@ -1,14 +1,14 @@
 ---
 name: project-evaluate
 description: Evaluate an existing project and produce manifest.yml + .context/CONTEXT.md in the standard documentation format
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: high
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion]
 max_turns: 40
 post_review:
   trigger: always
-  reviewer_model: claude-opus-4-7
+  reviewer_model: claude-opus-4-8
   reviewer_effort: high
 context_files: [".context/PROJECTS_REGISTRY.md", ".context/modules/hosting/CONTEXT.md"]
 tags: [projects, documentation]

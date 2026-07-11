@@ -8,30 +8,30 @@
 | Skill | Model / Effort | Purpose | Phase |
 |---|---|---|---|
 | `chat` | Sonnet 4.6 / low | One-shot conversation, no tools | 1 |
-| `research-report` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Web research + dated markdown report under `projects/research/` | 2 |
+| `research-report` | Sonnet 4.6 / medium (→ Opus 4.8 (deep tier) / high on failure) | Web research + dated markdown report under `projects/research/` | 2 |
 | `_writeback` | Sonnet 4.6 / low | **Internal.** Follow-up session that updates CHANGELOGs when the primary session skipped the write-back. Not user-triggerable. | 2 |
-| `code-review` | Opus 4.7 / high (plan mode) | Review code diffs for correctness, security, style. Used as post-session sub-agent and standalone. | 4 |
-| `app-patch` | Opus 4.7 / high | Patch existing projects — direct commit + push to main | 4 |
-| `new-skill` | Opus 4.7 / high | Meta-skill: author new skills from natural-language descriptions | 4 |
-| `project-evaluate` | Opus 4.7 / high | Read a project codebase and produce manifest.yml + standard .context/CONTEXT.md | 4 |
-| `new-project` | Opus 4.7 / high (two-phase: plan arch then implement) | Scaffold, document, deploy, and register a new project | 4 |
-| `self-diagnose` | Opus 4.7 / high | Investigate failures + apply fixes based on risk classification | 4 |
+| `code-review` | Opus 4.8 (deep tier) / high (plan mode) | Review code diffs for correctness, security, style. Used as post-session sub-agent and standalone. | 4 |
+| `app-patch` | Opus 4.8 (deep tier) / high | Patch existing projects — direct commit + push to main | 4 |
+| `new-skill` | Opus 4.8 (deep tier) / high | Meta-skill: author new skills from natural-language descriptions | 4 |
+| `project-evaluate` | Opus 4.8 (deep tier) / high | Read a project codebase and produce manifest.yml + standard .context/CONTEXT.md | 4 |
+| `new-project` | Opus 4.8 (deep tier) / high (two-phase: plan arch then implement) | Scaffold, document, deploy, and register a new project | 4 |
+| `self-diagnose` | Opus 4.8 (deep tier) / high | Investigate failures + apply fixes based on risk classification | 4 |
 | `server-upkeep` | Sonnet 4.6 / low (→ Sonnet 4.6 / medium on failure) | Daily health audit: rotate logs, VACUUM DB, check project status, DM anomalies only | 5 |
-| `server-patch` | Opus 4.7 / xhigh (post-review always, manual merge) | Modify server code (src/, scripts/, alembic/). Always PR-gated, never auto-merged | 5 |
-| `review-and-improve` | Opus 4.7 / max (plan mode) | Analyze recent job data, propose tuning changes. Dispatches server-patch follow-up | 5 |
-| `research-deep` | Opus 4.7 / high (-> Opus 4.7 / xhigh on failure) | Deep-dive research: 10-20 sources, 2000-5000 words, conflicting-evidence treatment | 6 |
+| `server-patch` | Opus 4.8 (deep tier) / xhigh (post-review always, manual merge) | Modify server code (src/, scripts/, alembic/). Always PR-gated, never auto-merged | 5 |
+| `review-and-improve` | Opus 4.8 (deep tier) / max (plan mode) | Analyze recent job data, propose tuning changes. Dispatches server-patch follow-up | 5 |
+| `research-deep` | Opus 4.8 (deep tier) / high (-> Opus 4.8 (deep tier) / xhigh on failure) | Deep-dive research: 10-20 sources, 2000-5000 words, conflicting-evidence treatment | 6 |
 | `idea-generation` | Sonnet 4.6 / medium | Generate 3-5 novel ideas, deduped against prior ideas in history.jsonl | 6 |
 | `project-update-poll` | Haiku 4.5 / low | Run a project's configured `on_update` command. Cheap, fast, fail-silent | 6 |
 | `restore` | Sonnet 4.6 / medium | Restore from backup tarball. DESTRUCTIVE -- requires explicit user confirmation | 6 |
 | `_learning_apply` | Sonnet 4.6 / low | **Internal.** Appends learning proposals from the learning extractor hook to `.context/modules/<x>/skills/<CATEGORY>.md`. Not user-triggerable. | Rec 1 |
-| `god` | Opus 4.7 / max (bypassPermissions, 200 turns) | Full-context, full-permission admin session. Equivalent to a human at the terminal. | — |
-| `atlas-report` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Author one Atlas expert report (asset / sector / portfolio) on subscription auth; persisted + evaluated via `atlas-dash save-report`; evaluator lessons feed the expert's knowledge file (`atlas-dash learn`) | — |
-| `atlas-report-sweep` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Weekly full pass: refresh data, enumerate targets, one report per holding + sector + the portfolio (fan-out via enqueue_job, sequential fallback). Scheduled Sunday evenings | — |
-| `atlas-scout` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Screen stocks on technical+fundamental combos from a deterministic snapshot; validated picks (2% citation gate, thesis/combo/risk) land as watchlist suggestions with price-at-suggestion for future performance scoring. Trigger: `/task scout stocks` or the stocks page button | — |
-| `atlas-daily-brief` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Pre-open synthesis: market regime + book + signal flips + crypto cycle + on-deck items, ≤250 words; delivered via job summary (Telegram) and pinned into the /indicators market chat. Schedule: daily 12:00 UTC | — |
-| `atlas-chat` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Answer an owner question about one Atlas report, inline on the report page — as the authoring sector expert, grounded in the report's own packet/charter/knowledge/glossary; persists via `atlas-dash chat-save`. Trigger: web enqueues `atlas-chat: report <uuid>` | — |
-| `atlas-redeploy` | Sonnet 4.6 / low (→ Opus 4.7 / high on failure) | Deploy pipeline for projects/atlas: ff-only pull, migrate, test gates (red = no restart), build, restart, healthcheck. Trigger: `/task redeploy atlas` after dev-repo commits | — |
-| `atlas-portfolio` | Sonnet 4.6 / medium (→ Opus 4.7 / high on failure) | Portfolio manager: answers book questions AND records owner-stated transactions ("sold 0.5 BTC at 64k") via engine CLI sell/set-position/add-holding — idempotency check before writes, ambiguity asks instead of guessing, replies via `chat-save --portfolio`. Trigger: web enqueues `atlas-portfolio: <text>` | — |
+| `god` | Opus 4.8 (deep tier) / max (bypassPermissions, 200 turns) | Full-context, full-permission admin session. Equivalent to a human at the terminal. | — |
+| `atlas-report` | Sonnet 4.6 / medium (→ Opus 4.8 (deep tier) / high on failure) | Author one Atlas expert report (asset / sector / portfolio) on subscription auth; persisted + evaluated via `atlas-dash save-report`; evaluator lessons feed the expert's knowledge file (`atlas-dash learn`) | — |
+| `atlas-report-sweep` | Sonnet 4.6 / medium (→ Opus 4.8 (deep tier) / high on failure) | Weekly full pass: refresh data, enumerate targets, one report per holding + sector + the portfolio (fan-out via enqueue_job, sequential fallback). Scheduled Sunday evenings | — |
+| `atlas-scout` | Sonnet 4.6 / medium (→ Opus 4.8 (deep tier) / high on failure) | Screen stocks on technical+fundamental combos from a deterministic snapshot; validated picks (2% citation gate, thesis/combo/risk) land as watchlist suggestions with price-at-suggestion for future performance scoring. Trigger: `/task scout stocks` or the stocks page button | — |
+| `atlas-daily-brief` | Sonnet 4.6 / medium (→ Opus 4.8 (deep tier) / high on failure) | Pre-open synthesis: market regime + book + signal flips + crypto cycle + on-deck items, ≤250 words; delivered via job summary (Telegram) and pinned into the /indicators market chat. Schedule: daily 12:00 UTC | — |
+| `atlas-chat` | Sonnet 4.6 / medium (→ Opus 4.8 (deep tier) / high on failure) | Answer an owner question about one Atlas report, inline on the report page — as the authoring sector expert, grounded in the report's own packet/charter/knowledge/glossary; persists via `atlas-dash chat-save`. Trigger: web enqueues `atlas-chat: report <uuid>` | — |
+| `atlas-redeploy` | Sonnet 4.6 / low (→ Opus 4.8 (deep tier) / high on failure) | Deploy pipeline for projects/atlas: ff-only pull, migrate, test gates (red = no restart), build, restart, healthcheck. Trigger: `/task redeploy atlas` after dev-repo commits | — |
+| `atlas-portfolio` | Sonnet 4.6 / medium (→ Opus 4.8 (deep tier) / high on failure) | Portfolio manager: answers book questions AND records owner-stated transactions ("sold 0.5 BTC at 64k") via engine CLI sell/set-position/add-holding — idempotency check before writes, ambiguity asks instead of guessing, replies via `chat-save --portfolio`. Trigger: web enqueues `atlas-portfolio: <text>` | — |
 
 ## Deferred
 

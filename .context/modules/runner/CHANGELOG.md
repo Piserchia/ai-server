@@ -9,6 +9,14 @@
 
 **Why**: Documentation inconsistency found in T12 audit pass (EVALUATION_2026-07-10).
 
+## 2026-07-11 — T8: model tier map — consume settings.model_fast in learning.py; add opus-4-8 to _MODEL_BUDGETS
+
+**Files changed**:
+- `src/runner/learning.py` — Replaced hardcoded `"claude-haiku-4-5-20251001"` with `settings.model_fast`. `settings` was already imported.
+- `src/runner/session.py` — Added `"claude-opus-4-8": 200_000` entry to `_MODEL_BUDGETS`; kept `claude-opus-4-7` entry for audit-log compatibility with historical jobs.
+
+**Why**: T8 eval remediation — centralise model strings in `src/config.py` tiers so a generation bump requires one change.
+
 ## 2026-07-09 — Narrow sentinel-only loop guard (code-review fix)
 
 **Files changed**:

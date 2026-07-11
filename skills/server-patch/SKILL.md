@@ -1,14 +1,14 @@
 ---
 name: server-patch
 description: Modify server code (src/, scripts/, alembic/). Always PR-gated, never auto-merged.
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: xhigh
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 60
 post_review:
   trigger: always
-  reviewer_model: claude-opus-4-7
+  reviewer_model: claude-opus-4-8
   reviewer_effort: high
 context_files: [".context/SYSTEM.md", ".context/PROTOCOL.md"]
 tags: [server, maintenance, manual-merge-required, needs-projects-mcp]

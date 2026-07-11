@@ -14,6 +14,9 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## Stale Job ORM instances in _process_job (2026-07-11)
+Job instances loaded in `_process_job` are detached; any column stamped by a *different* session mid-job (e.g. `resolved_skill` from `run_session`) is invisible until re-fetched. Post-hooks must re-fetch. This bug killed post-review and escalation since Phase 4 — zero `code_review_started` events before 2026-07-10. Evidence: `review_outcome` NULL on all 192 jobs. Fix: re-fetch after `log.info("job completed")` and in the failure path before `_maybe_escalate`.
+
 ## 2026-07-09 — Missing task_complete signal causes silent auto-continue loop
 
 When a job finishes its work but never emits a `task_complete` signal, the runner does not mark the job as done and instead re-enters the auto-continue handler on each polling cycle. This produces a silent loop that consumes turns without any visible error. Always ensure every code path in a skill or job handler reaches a `task_complete` (or equivalent terminal signal) before returning, and check the audit log for repeated `auto-continue` entries if a job appears to hang or spin.

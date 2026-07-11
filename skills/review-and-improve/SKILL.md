@@ -1,7 +1,7 @@
 ---
 name: review-and-improve
 description: Analyze recent job data, propose tuning changes. Dispatches a server-patch follow-up.
-model: claude-opus-4-7
+model: claude-opus-4-8
 effort: max
 permission_mode: plan
 required_tools: [Read, Bash, Glob, Grep]

@@ -94,7 +94,7 @@ Bot's done_listener picks up → DMs the submitter
 | INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front | `runner/main.py:_process_job` |
 | INV-13 | `server-patch` always requires a passing `code-review` sub-agent | `server-patch` SKILL.md + runner post-hook |
 | INV-14 | Project slugs unique; port allocations never reused | `registry/manifest.py` + `projects/_ports.yml` |
-| INV-15 | On startup the runner reconciles orphaned `running` jobs (fail-only) before consuming the queue | `runner/reconcile.py` + `runner/main.py:main` |
+| INV-15 | On startup the runner reconciles orphaned `running` jobs and stranded `queued` jobs (fail-only for old ones, re-push for recent ones) before consuming the queue | `runner/reconcile.py` + `runner/main.py:main` |
 
 ## Environment & setup
 

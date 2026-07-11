@@ -16,6 +16,7 @@ from src.runner.reconcile import (
     ORPHAN_ERROR,
     _existing_terminal_status,
     orphaned_job_ids,
+    stranded_queued_ids,
 )
 
 
@@ -100,3 +101,12 @@ class TestExistingTerminalStatus:
         self._write(tmp_path, monkeypatch, jid,
                     ['not json', '', '{"kind": "job_cancelled"}'])
         assert _existing_terminal_status(jid) is JobStatus.cancelled
+
+
+def test_stranded_queued_ids_flags_missing_from_redis():
+    rows = [("a", "queued"), ("b", "queued"), ("c", "running")]
+    assert stranded_queued_ids(rows, {"b"}) == ["a"]
+
+
+def test_stranded_queued_ids_empty_when_all_in_redis():
+    assert stranded_queued_ids([("a", "queued")], {"a"}) == []

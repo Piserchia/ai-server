@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-11 — T8: model tier map — alias map and web dropdown use settings tiers
+
+**Files changed**:
+- `src/gateway/telegram_bot.py` — `_MODEL_ALIASES`: `"opus"` now resolves to `settings.model_deep`, `"sonnet"` to `settings.default_model`, `"haiku"` to `settings.model_fast`. Explicit versioned aliases (`opus-4-7`, `haiku-4-5`, etc.) kept as literal strings for backward compatibility.
+- `src/gateway/web.py` — Dashboard model dropdown now injects `settings.default_model`, `settings.model_deep`, `settings.model_fast` via `.replace()` substitution in the `index()` handler. Display labels updated to "sonnet (default)", "opus (deep)", "haiku (fast)".
+
+**Why**: T8 eval remediation — model strings centralised in `src/config.py` so a generation bump in one place propagates everywhere.
+
 ## 2026-07-06 — Meaningful /health for external dead-man's-switch
 
 **Files changed**:
