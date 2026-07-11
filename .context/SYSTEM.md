@@ -141,10 +141,12 @@ See `.context/modules/hosting/CONTEXT.md` for the full manifest schema and docum
 
 ## Active workstreams
 
-- Phase 1 ✓ (commit 05ad5e7): skeleton, 3 processes, Phase 1 smoke test verified locally
-- Phase 2 ✓ (commit 6e58fe3): `research-report` + `_writeback` skills, write-back verification hook, failure-escalation hook, 52-test pure-function suite
-- Phase 3 ✓: domain `chrispiserchia.com` + Cloudflare tunnel + Caddy + `baseball-bingo` (static) + `market-tracker` (3-service) + healthchecks
-- Phase 4 ✓: `code-review` sub-agent + MCP servers (projects, dispatch) + `new-project` (two-phase Opus) + `app-patch` (direct push) + `new-skill` + `project-evaluate` + `self-diagnose` + event triggers (4 async tasks now)
-- Phase 5 ✓: `server-upkeep` (daily at 03:00) + `backup` (nightly at 04:00, no retention cap) + `server-patch` (PR-gated, manual merge) + `review-and-improve` (idle-queue triggered, up to 1/day) + `retention.py` (audit log rotation)
-- Phase 6 ✓: `research-deep` + `idea-generation` + `project-update-poll` + `restore` + `/schedule` Telegram command + SSE streaming endpoint + `retrospective.py` auto-tuning queries. All 6 phases complete.
-- Atlas integration (2026-07-09): `atlas-report`, `atlas-report-sweep`, `atlas-redeploy` skills registered; `Caddyfile.d/atlas.conf` added; atlas port 8791 in `_ports.yml`; atlas registered as a hosted service (Tailscale-gated via Cloudflare Access).
+All 6 phases shipped. Current work tracked in `docs/EVALUATION_2026-07-10.md` (tasks T1–T17).
+
+- Phase 1 ✓ (commit 05ad5e7)
+- Phase 2 ✓ (commit 6e58fe3)
+- Phase 3 ✓
+- Phase 4 ✓
+- Phase 5 ✓
+- Phase 6 ✓
+- Atlas integration ✓ (2026-07-09)

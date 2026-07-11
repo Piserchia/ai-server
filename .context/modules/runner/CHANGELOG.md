@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-11 — T12 cleanup: remove stale "route skill fallback" claim from router.py docstring
+
+**Files changed**:
+- `src/runner/router.py` — Removed never-implemented "LLM fallback via route skill" claim from module docstring. Routing has always been rule-based; unmatched descriptions run as generic tasks. Docstring now matches reality.
+
+**Why**: Documentation inconsistency found in T12 audit pass (EVALUATION_2026-07-10).
+
 ## 2026-07-09 — Narrow sentinel-only loop guard (code-review fix)
 
 **Files changed**:

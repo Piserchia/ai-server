@@ -249,13 +249,13 @@ class TestSkillConfig:
         text = """---
 name: test-skill
 description: test
-context_files: ["docs/Troubleshooting.md", ".context/SYSTEM.md"]
+context_files: ["docs/TROUBLESHOOTING.md", ".context/SYSTEM.md"]
 ---
 
 Body here.
 """
         fm, body = _parse_frontmatter(text)
-        assert fm["context_files"] == ["docs/Troubleshooting.md", ".context/SYSTEM.md"]
+        assert fm["context_files"] == ["docs/TROUBLESHOOTING.md", ".context/SYSTEM.md"]
 
     def test_context_files_defaults_empty(self) -> None:
         from src.registry.skills import _parse_frontmatter
@@ -310,8 +310,8 @@ class TestServerDirective:
 
         cfg = SkillConfig(
             name="self-diagnose", body="",
-            context_files=["docs/Troubleshooting.md"],
+            context_files=["docs/TROUBLESHOOTING.md"],
         )
         result = _build_server_directive(cfg, settings.server_root)
-        assert "docs/Troubleshooting.md" in result
+        assert "docs/TROUBLESHOOTING.md" in result
         assert "Read these files first" in result

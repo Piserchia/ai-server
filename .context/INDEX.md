@@ -14,7 +14,7 @@
 | Add a new skill | `.context/SKILLS_REGISTRY.md`, `skills/new-skill/SKILL.md` |
 | Patch a project | `skills/app-patch/SKILL.md` (reads project's own CLAUDE.md) |
 | Patch server code | `skills/server-patch/SKILL.md` (always PR-gated) |
-| Debug a failure | `docs/Troubleshooting.md`, `volumes/audit_log/<job_id>.jsonl` |
+| Debug a failure | `docs/TROUBLESHOOTING.md`, `volumes/audit_log/<job_id>.jsonl` |
 | Understand a skill | `skills/<name>/SKILL.md` (frontmatter = config, body = system prompt) |
 | Check what's hosted | `.context/PROJECTS_REGISTRY.md` |
 | Check what skills exist | `.context/SKILLS_REGISTRY.md` |
@@ -52,7 +52,7 @@ docs/
   EVALUATION_2026-07-10-atlas.md    ← Atlas deep-dive (doc verdicts, contract check, ops)
   superpowers/plans/                ← Executable implementation plans (incl. 2026-07-10 remediation)
   superpowers/specs/                ← Specs behind shipped plans
-  Troubleshooting.md                ← Failure modes + fixes
+  TROUBLESHOOTING.md                ← Failure modes + fixes
   PHASE_3_PLAN.md through PHASE_6_PLAN.md  ← Historical (all shipped)
   README.md                         ← Reading order guide
 evals/

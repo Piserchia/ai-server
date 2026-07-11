@@ -1,6 +1,6 @@
 """
-Route a free-form description to a skill. Rules first (instant, free); LLM fallback
-via the `route` skill for ambiguous inputs.
+Route a free-form description to a skill. Rule-based only; unmatched descriptions
+fall through to None and run as generic tasks.
 
 Keep rules narrow and honest. When a rule doesn't match confidently, fall through to
 None (generic task — uses full tool set + global default model).
