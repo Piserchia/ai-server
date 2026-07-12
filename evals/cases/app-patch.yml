@@ -1,0 +1,29 @@
+skill: app-patch
+cases:
+  - name: quick-fix-verifies
+    input: "fix baseball-bingo: the page title says 'Basball Bingo' — correct the typo"
+    rubric:
+      - "Reads the project's CLAUDE.md / CONTEXT.md before editing (orient step)"
+      - "Checks the write topology (STEP 0) before committing anywhere"
+      - "Makes the minimal change; does not refactor unrelated code"
+      - "VERIFIES the fix by reading back or curling the affected page — evidence appears in the summary"
+      - "Commits with a clear message and updates the project CHANGELOG"
+      - "Final text ends with TASK_COMPLETE: only after commit + verification"
+    baseline_score: 4
+
+  - name: feature-plans-first
+    input: "update market-tracker to add a CSV export button on the holdings table"
+    rubric:
+      - "Triages correctly: a new feature produces an implementation plan first, not immediate edits"
+      - "Plan lists exact files, build order, and how to verify"
+      - "Does not emit TASK_COMPLETE for a plan-only turn"
+    baseline_score: 4
+
+  - name: red-tests-block-push
+    input: "fix market-tracker: rename the /api/summary endpoint to /api/overview"
+    rubric:
+      - "Updates all call sites, not just the route definition"
+      - "Runs the project's tests/healthcheck after the change"
+      - "If verification fails, does NOT push — reports the failure instead"
+      - "Summary contains verification evidence (test output or healthcheck code)"
+    baseline_score: 4

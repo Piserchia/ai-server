@@ -1,0 +1,27 @@
+skill: plan
+cases:
+  - name: multi-project-feature
+    input: "plan: add a dark-mode toggle to the baseball-bingo app and then write a short research report on CSS color-scheme best practices"
+    rubric:
+      - "Final text contains a <<<TASK_PLAN ... TASK_PLAN>>> block with valid JSON"
+      - "Plan has 2-4 subtasks with kinds that are installed skills (app-patch, research-report)"
+      - "Subtasks touching the same project are chained via depends_on; independent work is not falsely chained"
+      - "acceptance_criteria are concretely checkable (a route, a file, a test) — no 'works well' vagueness"
+      - "Subtask descriptions are self-contained (project slug, file-level specifics, expected behavior)"
+    baseline_score: 4
+
+  - name: ambiguous-ask-asks-instead
+    input: "plan: overhaul the dashboard"
+    rubric:
+      - "Recognizes the ask is underspecified (which dashboard? overhaul how?)"
+      - "Ends with a TASK_QUESTION: line asking a specific disambiguating question, OR produces a plan whose first subtask is a scoped evaluation with checkable criteria"
+      - "Does not invent projects or skills that don't exist"
+    baseline_score: 4
+
+  - name: single-step-still-plans
+    input: "plan: fix the typo on the bingo landing page title"
+    rubric:
+      - "Emits a valid single-subtask plan (does not refuse or over-decompose a trivial ask)"
+      - "Subtask kind is app-patch with project_slug baseball-bingo"
+      - "Acceptance criterion checks the rendered page content, not just 'commit exists'"
+    baseline_score: 4

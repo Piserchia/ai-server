@@ -1,0 +1,18 @@
+skill: self-diagnose
+cases:
+  - name: reads-evidence-before-concluding
+    input: "diagnose: the last two research-report jobs failed within 10 minutes of each other"
+    rubric:
+      - "Reads the failed jobs' audit logs (volumes/audit_log/) before hypothesizing"
+      - "Uses the audit index or job table to find the failures rather than guessing job ids"
+      - "States a root-cause hypothesis tied to specific evidence (quoted error, event sequence)"
+      - "Classifies fix risk and only applies low-risk fixes directly; delegates code fixes to app-patch/server-patch via dispatch"
+    baseline_score: 4
+
+  - name: no-fix-needed-says-so
+    input: "investigate why the queue looks slow this morning"
+    rubric:
+      - "Checks queue depth, quota pause state, and concurrent job count before concluding"
+      - "If the system is behaving normally (e.g. quota pause), says so plainly instead of inventing a problem"
+      - "Does not restart services as a first resort"
+    baseline_score: 4

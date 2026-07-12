@@ -190,12 +190,25 @@ Make changes. Follow these principles:
 - Preserve the project's existing code style and conventions
 - If you need to add a dependency, note it explicitly
 
-### Step 5: Test
+### Step 5: Verify (GATE — red blocks the push)
 
-- For service-type projects: restart via `launchctl kickstart -k gui/$(id -u)/com.assistant.project.<slug>`, wait 3 seconds, then hit the healthcheck endpoint from `manifest.yml`.
-- For multi-service projects: check `manifest.yml` for `services` array. Restart and healthcheck each.
-- For static projects: verify file contents by reading back the changed files.
-- If the project has a `test_command` in `manifest.yml`, run it.
+Verification is a gate, not a formality. **If any check below fails, do NOT
+commit/push — fix it or report the failure as your summary.** A green
+healthcheck with the old behavior still serving is a FAIL (stale-bundle
+incident 2026-07-10).
+
+- If the project has a `test_command` in `manifest.yml`, run it. Red = stop.
+- For service-type projects: restart via `launchctl kickstart -k gui/$(id -u)/com.assistant.project.<slug>`, wait 3 seconds, then hit the healthcheck endpoint from `manifest.yml`. Expect the healthy code.
+- **Probe the actual change**: curl the specific route/page you modified and
+  confirm the NEW behavior appears in the response (grep the response body
+  for something your change introduced). For non-HTTP changes, read back the
+  changed files or run the relevant command.
+- For multi-service projects: check `manifest.yml` for `services` array. Restart and healthcheck each affected service.
+- **Record the evidence**: paste the verification commands + their output
+  (test tally, healthcheck code, response grep) into your final summary. The
+  acceptance evaluator (`_evaluate`) re-checks your work against the task's
+  criteria — claims without evidence will bounce back as an EVAL_FAIL fix
+  round.
 
 ### Step 6: Check for secrets
 
@@ -258,7 +271,10 @@ audit_log.append(job_id, "task_complete",
 ### Code checks:
 - [ ] Changes are minimal and targeted for this phase
 - [ ] No secrets in the diff
+- [ ] Tests green (if `test_command` declared) — red tests NEVER get pushed
 - [ ] Service restarts and passes healthcheck (if applicable)
+- [ ] The changed route/page/file demonstrably shows the NEW behavior
+- [ ] Verification evidence (commands + output) included in the summary
 - [ ] Changes committed and pushed to `origin main`
 
 ### Documentation checks (MANDATORY — do not skip):
