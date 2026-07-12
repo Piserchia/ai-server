@@ -148,6 +148,43 @@ while rclone *is* configured), flag as an anomaly — off-site replication is
 broken even though local backups may be fine. `offsite-not-configured` is not an
 anomaly (the human hasn't set up R2 yet); note it once and move on.
 
+### 8c. Workspace hygiene (P1)
+
+Failed jobs keep their per-job workspace clones for debugging. Prune old ones:
+
+```bash
+PYTHONPATH=. python3 -c "
+from src.runner.workspaces import prune_old_workspaces
+from src.config import settings
+removed = prune_old_workspaces(settings.workspaces_dir, max_age_days=7)
+print(f'pruned {len(removed)}: {removed[:10]}')"
+du -sh volumes/workspaces/ 2>/dev/null || echo "no workspaces dir"
+```
+
+If `volumes/workspaces/` exceeds 5 GB after pruning, flag as anomaly (a
+runaway clone loop or giant repo).
+
+### 8d. Container lane health (P1 — skip cleanly if not configured)
+
+```bash
+if [ -n "$CONTAINER_RUNTIME" ] && command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1; then
+  $CONTAINER_RUNTIME info >/dev/null 2>&1 && echo "runtime-ok" || echo "RUNTIME-DOWN"
+  $CONTAINER_RUNTIME image inspect "${AGENT_IMAGE:-ai-server-agent:latest}" >/dev/null 2>&1 \
+    && echo "image-present" || echo "IMAGE-MISSING (docker build -f Dockerfile.agent -t ai-server-agent:latest .)"
+  # Leaked job containers (should be none — they run with --rm)
+  $CONTAINER_RUNTIME ps -a --filter "name=ai-job-" --format '{{.Names}} {{.Status}}' | head -5
+else
+  echo "container-lane-not-configured"
+fi
+```
+
+`RUNTIME-DOWN` or `IMAGE-MISSING` while CONTAINER_RUNTIME is set = anomaly
+(container-tier skills are silently downgrading to workspace isolation).
+Leaked `ai-job-*` containers = anomaly; include names. Also check the OAuth
+token age if recorded: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`
+is ~1-year-lived — if `.env`'s modification date is older than 11 months,
+flag a "token likely expiring" warning.
+
 ### 9. Summary decision
 
 Collect all findings and apply the reporting rules:

@@ -7,7 +7,7 @@ Usage:
     python scripts/lint-docs.py          # prints report, exit 0 if clean
     pipenv run pytest tests/test_doc_lint.py  # same checks as pytest tests
 
-Checks (8):
+Checks (9):
 1. Every skill directory has a row in SKILLS_REGISTRY.md
 2. Every project directory has a row in PROJECTS_REGISTRY.md
 3. Every src/runner/*.py file is mentioned in runner CONTEXT.md
@@ -16,6 +16,7 @@ Checks (8):
 6. Declared module graph deps match actual imports (AST-parsed)
 7. Every skill's context_files reference real files
 8. Non-internal skills have required body sections (Gotchas, min body length)
+9. Skill `isolation` frontmatter values are valid tiers (P1)
 """
 
 from __future__ import annotations
@@ -243,6 +244,42 @@ def check_context_files_exist() -> list[str]:
     return warnings
 
 
+def check_isolation_values() -> list[str]:
+    """Every skill's `isolation` frontmatter (if present) must be a valid tier.
+
+    Valid tiers live in runner/workspaces.py (none | workspace | container |
+    host). An invalid value silently degrades to 'none' at runtime — catch it
+    at lint time instead."""
+    warnings = []
+    skills_dir = REPO_ROOT / "skills"
+    if not skills_dir.exists():
+        return []
+
+    valid = {"none", "workspace", "container", "host"}
+    for child in sorted(skills_dir.iterdir()):
+        skill_md = child / "SKILL.md"
+        if not child.is_dir() or not skill_md.exists():
+            continue
+        text = skill_md.read_text()
+        if not text.startswith("---"):
+            continue
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            continue
+        try:
+            import yaml
+            fm = yaml.safe_load(parts[1]) or {}
+        except Exception:
+            continue
+        iso = fm.get("isolation")
+        if iso is not None and str(iso) not in valid:
+            warnings.append(
+                f"Skill `{child.name}` has invalid isolation `{iso}` "
+                f"(valid: {', '.join(sorted(valid))})"
+            )
+    return warnings
+
+
 def check_skill_sections() -> list[str]:
     """Validate that non-internal skills have required body sections.
 
@@ -301,6 +338,7 @@ def run_all() -> dict[str, list[str]]:
         "module_graph_imports": check_module_graph_imports(),
         "context_files_exist": check_context_files_exist(),
         "skill_sections": check_skill_sections(),
+        "isolation_values": check_isolation_values(),
     }
 
 

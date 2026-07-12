@@ -2,6 +2,15 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P4: hygiene — silent excepts now log
+
+**Files changed**: `src/runner/session.py` (`_publish_stream` debug-logs,
+`publish_done` warn-logs), `src/runner/main.py` (audit-index append failures
+debug-logged). No behavior change beyond observability — these paths
+previously swallowed every exception with `pass`.
+
+**Why**: a lost done-notification or stream drop was undiagnosable.
+
 ## 2026-07-12 — P2/P3: plan DAG orchestration, LLM router fallback, text-marker events, acceptance evaluator
 
 **Files changed**:

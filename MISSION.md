@@ -126,7 +126,7 @@ isn't served by anything in the table, we've drifted.
 | Bundled Claude Code CLI auth (no API key) | Uses your Max 5x subscription |
 | Runner startup check aborts if `ANTHROPIC_API_KEY` is set | Prevents accidental API billing |
 | `bootstrap.sh`, `run.sh`, `install-launchd.sh` all `unset ANTHROPIC_API_KEY` | Defense in depth |
-| `MAX_CONCURRENT_JOBS=2` default | Leaves subscription headroom for your direct Claude use |
+| `MAX_CONCURRENT_JOBS=4` default (raised from 2 with P1 workspace isolation) | Concurrency without checkout collisions; quota auto-pause still protects headroom for direct Claude use |
 | `src/runner/quota.py` detection + auto-pause | Quota exhaustion is a known state, not a failure |
 
 ### L. Documentation that compounds
@@ -179,6 +179,7 @@ Things the system is **explicitly prohibited from doing** autonomously:
 | 4 — Expansion skills + MCP servers + event triggers | **SHIPPED** | [`docs/PHASE_4_PLAN.md`](docs/PHASE_4_PLAN.md) | 7 skills (code-review, new-project, app-patch, new-skill, self-diagnose, project-evaluate) + 2 MCP servers + event-triggered auto-diagnose; 102-test suite |
 | 5 — Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** | [`docs/PHASE_5_PLAN.md`](docs/PHASE_5_PLAN.md) | Nightly backup, daily upkeep, PR-gated server patches, idle-queue retrospectives; 109-test suite |
 | 6 — Polish (research-deep, idea-generation, update-poll, restore, /schedule, SSE, retrospective) | **SHIPPED** | [`docs/PHASE_6_PLAN.md`](docs/PHASE_6_PLAN.md) | Full skill catalog; live job streaming; schedule management; auto-tuning data pipeline |
+| 7 — Autonomy & isolation (P0–P3: server-deploy + learning sync, workspace/container isolation, NL-first Telegram, plan DAG, acceptance evaluator) | **SHIPPED 2026-07-12** | audit report `docs/` + `.context/modules/runner/CHANGELOG.md` | A bare Telegram ask decomposes into a verified plan; sessions can't collide or hurt the host; dev→prod is one command; "done" means evidence-checked |
 
 **For debugging Phase 1/2 issues in Claude Code CLI:** [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 

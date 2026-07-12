@@ -8,6 +8,8 @@ session picking up work on this repo, or a human returning after a break.
 | Doc | Purpose | When to read |
 |---|---|---|
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Failure-mode-first debugging guide | **Always** when something's broken |
+| [`AUDIT_2026-07-12.md`](AUDIT_2026-07-12.md) | Full-system audit vs the four mission directives + P0–P4 remediation (implemented same day — see its status table) | Understanding why isolation/plan/evaluate exist |
+| [`CONTAINERS.md`](CONTAINERS.md) | Isolation tiers + container lane setup (colima, setup-token, agent image) | Enabling `isolation: container`; debugging executor downgrades |
 | [`PHASE_3_PLAN.md`](PHASE_3_PLAN.md) | Domain + tunnel + Caddy + bingo + market-tracker | **SHIPPED** — historical reference |
 | [`PHASE_4_PLAN.md`](PHASE_4_PLAN.md) | Expansion skills + MCP servers + event triggers | **SHIPPED** — historical reference |
 | [`PHASE_5_PLAN.md`](PHASE_5_PLAN.md) | Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** — historical reference |

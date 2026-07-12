@@ -80,3 +80,14 @@ user sees it in Telegram).
   restarts.
 - If the ask is genuinely ambiguous on a decision that changes the plan's
   shape, end with `TASK_QUESTION: <your question>` INSTEAD of a plan block.
+
+## Gotchas (living section — append when you learn something)
+
+- **The plan block must be valid JSON** — the runner rejects malformed plans
+  and the user gets an error card. No trailing commas, no comments, no
+  markdown inside the block.
+- **Subtask kinds are skill directory names** (dashes, e.g. `app-patch`),
+  not job-kind underscores (`app_patch`). Check SKILLS_REGISTRY.md spelling.
+- **Same-project subtasks MUST be chained.** Two concurrent workspace clones
+  of one project both push to origin main — the second push rebases or
+  fails. Sequential dependency avoids the race entirely.

@@ -67,11 +67,26 @@ projects/<slug>/
 
 ## Key conventions
 
-- **SKILL.md frontmatter is the machine contract** — model, effort, tools, post_review settings
+- **SKILL.md frontmatter is the machine contract** — model, effort, tools, post_review, isolation settings
 - **SKILL.md body is the system prompt** — instructions to Claude, not documentation
 - **CHANGELOG.md is institutional memory** — every code-touching session appends
 - **PROTOCOL.md is immutable** — never modify without explicit human request
 - **Phase plans are historical** — all 6 phases shipped; plans document what was planned vs what happened
+- **Single-writer topology** — code is born in the dev repo (`~/Documents/repos/ai-server`); production (`~/Library/Application Support/ai-server`) is a pull-only deploy target that births only runtime doc learnings (auto-published hourly by `scripts/sync-learnings.sh`). See CLAUDE.md.
+- **Isolation tiers** — skills declare `isolation: none|workspace|container|host`; code-writing skills run in per-job clones, `server-patch` optionally in containers, `god` is the only host-tier skill. See `docs/CONTAINERS.md`.
+
+## Additions 2026-07-12 (P0–P3)
+
+| I need to... | Read these |
+|---|---|
+| Deploy the server (dev → prod) | `skills/server-deploy/SKILL.md`, CLAUDE.md § Single-writer topology |
+| Understand runtime-learning sync | `scripts/sync-learnings.sh` (header comment) |
+| Set up / understand containers | `docs/CONTAINERS.md`, `Dockerfile.agent`, `.context/modules/runner/CONTEXT.md` |
+| Understand workspace isolation | `src/runner/workspaces.py` docstring, SYSTEM.md INV-16..18 |
+| Understand the plan → DAG → evaluate pipeline | `skills/plan/SKILL.md`, `skills/_evaluate/SKILL.md`, `src/runner/plans.py`, SYSTEM.md § Data flow |
+| Understand routing (rules + LLM fallback) | `src/runner/router.py`, `src/runner/llm_router.py` |
+| Check routing precision / task-event markers | audit events `routing_decision`, `task_plan`, `eval_pass`/`eval_fail` in `volumes/audit_log/` |
+| Read the audit that motivated all of this | `docs/AUDIT_2026-07-12.md` |
 
 ## Update this file
 

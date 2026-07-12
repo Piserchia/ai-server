@@ -863,13 +863,13 @@ def _preview_text(content: Any, limit: int = 500) -> str:
 async def _publish_stream(job_id: str, payload: dict[str, Any]) -> None:
     try:
         await redis.publish(f"{CHANNEL_JOB_STREAM}:{job_id}", json.dumps(payload))
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — streaming is best-effort, but never silent
+        logger.debug("stream publish failed for %s: %s", job_id[:8], exc)
 
 
 async def publish_done(job_id: str, status: str, payload: dict[str, Any] | None = None) -> None:
     body = json.dumps({"status": status, **(payload or {})}, default=str)
     try:
         await redis.publish(f"{CHANNEL_JOB_DONE}:{job_id}", body)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — a lost done-notification is worth a log line
+        logger.warning("done publish failed for %s: %s", job_id[:8], exc)

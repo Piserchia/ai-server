@@ -992,8 +992,9 @@ async def _finish_job(
     try:
         from src.runner.audit_index import append_to_index
         append_to_index(settings.audit_log_dir, str(job_id))
-    except Exception:
-        pass  # non-fatal; nightly rebuild catches anything missed
+    except Exception as exc:  # noqa: BLE001
+        # non-fatal; nightly rebuild catches anything missed — but log it
+        logger.debug("audit index append failed", job_id=str(job_id)[:8], error=str(exc))
 
 
 # ── Scheduler loop ──────────────────────────────────────────────────────────
