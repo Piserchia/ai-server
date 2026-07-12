@@ -12,6 +12,7 @@ post_review:
   reviewer_effort: high
 context_files: [".context/PROJECTS_REGISTRY.md", ".context/modules/hosting/CONTEXT.md"]
 tags: [projects, documentation]
+isolation: workspace
 ---
 
 # Project Evaluate

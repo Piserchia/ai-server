@@ -15,6 +15,7 @@ escalation:
     model: claude-opus-4-7
     effort: xhigh
 tags: [projects, maintenance]
+isolation: workspace
 ---
 
 # App Patch

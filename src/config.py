@@ -42,8 +42,22 @@ class Settings(BaseSettings):
     server_root: Path = Path.home() / "Library" / "Application Support" / "assistant"
 
     # Runner
-    max_concurrent_jobs: int = 2
+    # 4 is safe now that code-writing skills run in per-job workspace clones
+    # (P1) — no shared-checkout collisions. Quota auto-pause still guards the
+    # subscription budget.
+    max_concurrent_jobs: int = 4
     session_timeout_seconds: int = 1800
+
+    # Containers (P1) — the high-risk isolation lane. Empty = disabled
+    # (container-tier skills silently downgrade to workspace isolation).
+    # Runtime is the CLI name: "docker" works with colima / Docker Desktop /
+    # OrbStack. Token comes from `claude setup-token` (subscription auth —
+    # NEVER an API key).
+    container_runtime: str = ""
+    agent_image: str = "ai-server-agent:latest"
+    container_memory: str = "4g"
+    container_cpus: str = "2"
+    claude_code_oauth_token: str = ""
     # GET /health returns 503 if the runner heartbeat is older than this. The
     # runner writes it every loop (≤2s normally, ~30s during a quota pause), so
     # 90s tolerates a pause without false alarms.
@@ -76,6 +90,10 @@ class Settings(BaseSettings):
     @property
     def skills_dir(self) -> Path:
         return self.server_root / "skills"
+
+    @property
+    def workspaces_dir(self) -> Path:
+        return self.server_root / "volumes" / "workspaces"
 
     @property
     def context_dir(self) -> Path:

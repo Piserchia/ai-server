@@ -2,6 +2,54 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P1: per-job workspace isolation + container executor + concurrency 4
+
+**Files changed**:
+- `src/runner/workspaces.py` (new) — isolation tiers (`none|workspace|container|host`),
+  per-job git clones under `volumes/workspaces/`, canonical ff-sync after push,
+  cleanup (failed jobs keep theirs), prune helper for server-upkeep.
+- `src/runner/executors.py` (new) — container lane: `claude -p --output-format
+  stream-json` via docker CLI, mapped to the SAME audit events as the SDK lane;
+  runtime/token availability probe; `docker kill` cancel path; OAuth-token-only
+  env (ANTHROPIC_API_KEY actively stripped).
+- `src/runner/session.py` — run_session resolves isolation, creates workspaces,
+  picks the executor, syncs + cleans up after; `_build_server_directive` gained
+  workspace/container variants (`canonical_cwd`, `context_root` params);
+  `_build_task_context` event-loop hack REPLACED by async prefetch +
+  pure `build_task_context(turns, task_id)` — context-load failures now audit
+  as `task_context_load_failed` instead of silently losing the conversation;
+  `interrupt()` also kills containers.
+- `src/registry/skills.py` — `isolation` frontmatter field (default `none`).
+- `src/config.py` — `max_concurrent_jobs` 2→4; container settings
+  (`container_runtime`, `agent_image`, `container_memory`, `container_cpus`,
+  `claude_code_oauth_token`); `workspaces_dir` property.
+- Frontmatter: app-patch + project-evaluate → `isolation: workspace`;
+  server-patch → `isolation: container` (dead `needs-projects-mcp` tag removed —
+  body never used it); god → `isolation: host` (explicit break-glass lane).
+- `Dockerfile.agent` (new), `docs/CONTAINERS.md` (new), `.env.example` —
+  container lane setup.
+- `tests/test_workspaces.py` (new, 17 tests incl. real-git clone/push/sync/
+  collision cases), `tests/test_executors.py` (new, 15 tests for command
+  construction + stream-json parity parsing).
+
+**Why**: two concurrent jobs shared checkouts (single-writer incidents
+2026-07-09) and every session ran bare on the host. Now: code-writing skills
+get throwaway clones (collision-proof, blast-radius-contained), the riskiest
+automated skill (server-patch) additionally runs containerized when a runtime
+is configured, god remains host-native by explicit decision (phone break-glass),
+and concurrency rises to 4.
+
+**Side effects**: audit logs gain `workspace_created` / `workspace_synced` /
+`workspace_fallback` / `container_started` / `task_context_load_failed` events.
+Failed jobs leave their workspace on disk for debugging (pruned after 7 days).
+Container lane passes `--model` but not effort (no stable CLI flag) — documented
+in docs/CONTAINERS.md.
+
+**Gotchas discovered**: git refuses pushes to a checked-out branch, so
+workspaces re-point origin at the canonical's real remote and the canonical is
+ff-synced afterward; when a canonical has no remote, sync fetches from the
+workspace instead.
+
 ## 2026-07-12 — P0: server-deploy routing rules
 
 **Files changed**:

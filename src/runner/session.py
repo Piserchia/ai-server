@@ -1,13 +1,20 @@
 """
-One function: `run_session(job)`. Spins up a Claude Agent SDK session, streams its
-output to audit log + Redis, and returns a result dict or raises QuotaExhausted.
+One function: `run_session(job)`. Resolves the skill + isolation tier, prepares a
+per-job workspace when the tier calls for one, then executes via the right backend
+(in-process Agent SDK, or `claude -p` in a container — see runner/executors.py),
+streaming output to audit log + Redis. Returns a result dict or raises
+QuotaExhausted.
 
 Auth: subscription via bundled Claude Code CLI. The bootstrap script unsets
 ANTHROPIC_API_KEY before starting any process, so the SDK uses the CLI's stored
-credentials from `claude login`.
+credentials from `claude login`. Containers get CLAUDE_CODE_OAUTH_TOKEN instead
+(from `claude setup-token`) — never an API key.
 
 Skill-driven config: the runner calls registry.skills.load() and uses the skill's
-frontmatter for model/effort/permission_mode/required_tools.
+frontmatter for model/effort/permission_mode/required_tools/isolation.
+
+Isolation tiers (P1): none | workspace | container | host — see
+runner/workspaces.py for semantics.
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ from src.config import settings
 from src.db import CHANNEL_JOB_DONE, CHANNEL_JOB_STREAM, async_session, redis
 from src.models import Job, JobKind, Project
 from src.registry.skills import SkillConfig, load as load_skill
-from src.runner import quota, router
+from src.runner import executors, quota, router, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +54,15 @@ _running_sessions: dict[str, ClaudeSDKClient] = {}
 
 async def interrupt(job_id: str | uuid.UUID) -> bool:
     client = _running_sessions.get(str(job_id))
-    if not client:
-        return False
-    try:
-        await client.interrupt()
-        return True
-    except Exception as exc:
-        logger.warning("interrupt failed for %s: %s", job_id, exc)
-        return False
+    if client:
+        try:
+            await client.interrupt()
+            return True
+        except Exception as exc:
+            logger.warning("interrupt failed for %s: %s", job_id, exc)
+            return False
+    # Not in-process — maybe it's running in a container
+    return await executors.interrupt_container(str(job_id))
 
 
 # ── Skill resolution ────────────────────────────────────────────────────────
@@ -64,39 +72,67 @@ def _build_server_directive(
     skill_cfg: SkillConfig | None,
     cwd: Path,
     job_description: str = "",
+    *,
+    canonical_cwd: Path | None = None,
+    context_root: str = "",
 ) -> str:
     """Build a context-appropriate server preamble. Reduces token waste by
-    tailoring the directive to the task type."""
+    tailoring the directive to the task type.
+
+    canonical_cwd: the real checkout when cwd is an isolated workspace clone.
+    context_root: where the session can read the server's .context files
+    (host path normally; /ctx inside a container).
+    """
     base = "You are working inside the assistant server.\n\n"
+    ctx_root = context_root or str(settings.server_root / ".context")
+    is_workspace = canonical_cwd is not None and canonical_cwd != cwd
 
     # Chat: minimal directive
     if skill_cfg and skill_cfg.name == "chat":
         return base + "Respond directly. No tool use, no context reading needed.\n"
 
     # Project-scoped: point to project context + project protocol
-    if cwd != settings.server_root:
-        project_slug = cwd.name
+    scope_root = canonical_cwd if is_workspace else cwd
+    if scope_root != settings.server_root:
+        project_slug = scope_root.name
         directive = base + (
-            f"This job is scoped to the `{project_slug}` project at `{cwd}`.\n"
-            "Follow the project protocol at `.context/PROJECT_PROTOCOL.md` "
-            "(in the ai-server root).\n\n"
-            "Read that project's CLAUDE.md and .context/CONTEXT.md before acting.\n\n"
+            f"This job is scoped to the `{project_slug}` project.\n"
+            f"Follow the project protocol at `{ctx_root}/PROJECT_PROTOCOL.md`.\n\n"
+            "Read that project's CLAUDE.md and .context/CONTEXT.md (in your "
+            "working directory) before acting.\n\n"
             "While working: prefer small committed steps. When you learn something "
             "non-obvious, append to the project's skills/GOTCHAS.md.\n\n"
             "Before finishing: update the project's .context/CHANGELOG.md. "
             "Write a one-paragraph summary as your final text message.\n"
         )
+        if is_workspace:
+            directive += (
+                f"\n**Isolated workspace**: your working directory `{cwd}` is a "
+                "per-job clone of the project. Work, commit, and push exactly as "
+                "instructed (`git push origin <branch>` from your cwd) — the "
+                "canonical checkout is fast-forwarded automatically after your "
+                "push. Do NOT try to edit the canonical checkout directly.\n"
+            )
     else:
         # Server-scoped: full directive
         directive = base + (
             "Before acting:\n"
-            "1. Read .context/SYSTEM.md and the relevant module CONTEXT.md.\n"
+            f"1. Read `{ctx_root}/SYSTEM.md` and the relevant module CONTEXT.md.\n"
             "2. For debug/patch jobs, tail volumes/audit_log/*.jsonl for related work.\n\n"
             "While working: prefer small committed steps. When you learn something "
             "non-obvious, append to the relevant skill file (GOTCHAS.md / PATTERNS.md).\n\n"
             "Before finishing: update CHANGELOG.md for every module you touched. "
             "Write a one-paragraph summary as your final text message.\n"
         )
+        if is_workspace:
+            directive += (
+                f"\n**Isolated workspace**: your working directory `{cwd}` is a "
+                "per-job clone of the server repo. Commit your changes on a "
+                "branch and push to origin (`git push origin HEAD:<branch-name>`) "
+                "— server code lands via PR + deploy, never by editing the live "
+                "checkout. The server's context docs are readable at "
+                f"`{ctx_root}/`.\n"
+            )
 
         # Graph-walked context injection (Rec 4): if the job description
         # references known modules, append dependency context so the session
@@ -266,68 +302,47 @@ def format_task_turns(turns: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def _build_task_context(task_id) -> str:
-    """Load prior turns for a task and format as conversation context.
+def build_task_context(turns_data: list[dict], task_id) -> str:
+    """Format pre-fetched task turns as conversation context. Pure function.
 
     Returns a markdown section to prepend to the system prompt, or empty
-    string if no prior turns exist.
+    string if no prior turns exist. The turns are fetched asynchronously in
+    run_session (the old version ran a nested event loop in a thread pool
+    from sync code — fragile, and it silently dropped the task's memory on
+    any failure).
     """
-    try:
-        from src.models import TaskTurn
-        import uuid as _uuid
-
-        tid = task_id if isinstance(task_id, _uuid.UUID) else _uuid.UUID(str(task_id))
-
-        # Synchronous-safe: use a new event loop or run in the existing one.
-        # Since this is called from an async context (via _build_options which
-        # is sync but called from async _process_job), we use a sync query path.
-        # For simplicity, read from DB synchronously via a helper.
-        import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're inside an async context — schedule the coroutine
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                turns_data = pool.submit(
-                    lambda: asyncio.run(_fetch_task_turns(tid))
-                ).result(timeout=5)
-        else:
-            turns_data = asyncio.run(_fetch_task_turns(tid))
-
-        if not turns_data:
-            return ""
-
-        formatted = format_task_turns(turns_data)
-        task_id_short = str(tid)[:8]
-
-        # Find the last user turn to extract their latest instruction
-        last_user_msg = ""
-        for t in reversed(turns_data):
-            if t["role"] == "user":
-                last_user_msg = t["content"]
-                break
-
-        instructions = (
-            "---\n"
-            "## Your instructions for this turn\n\n"
-        )
-        if last_user_msg:
-            instructions += f"The user replied: \"{last_user_msg[:500]}\"\n\n"
-        instructions += (
-            "Implement the plan from the conversation above. "
-            "Work only within the project directory. "
-            "If you need more information from the user, emit a "
-            "`task_question` audit event and complete normally. "
-            "When you have committed and pushed working code, emit `task_complete`.\n"
-        )
-
-        return (
-            f"## Task conversation ({task_id_short})\n\n"
-            f"{formatted}\n\n"
-            f"{instructions}"
-        )
-    except Exception:
+    if not turns_data:
         return ""
+
+    formatted = format_task_turns(turns_data)
+    task_id_short = str(task_id)[:8]
+
+    # Find the last user turn to extract their latest instruction
+    last_user_msg = ""
+    for t in reversed(turns_data):
+        if t["role"] == "user":
+            last_user_msg = t["content"]
+            break
+
+    instructions = (
+        "---\n"
+        "## Your instructions for this turn\n\n"
+    )
+    if last_user_msg:
+        instructions += f"The user replied: \"{last_user_msg[:500]}\"\n\n"
+    instructions += (
+        "Implement the plan from the conversation above. "
+        "Work only within the project directory. "
+        "If you need more information from the user, emit a "
+        "`task_question` audit event and complete normally. "
+        "When you have committed and pushed working code, emit `task_complete`.\n"
+    )
+
+    return (
+        f"## Task conversation ({task_id_short})\n\n"
+        f"{formatted}\n\n"
+        f"{instructions}"
+    )
 
 
 async def _fetch_task_turns(task_id) -> list[dict]:
@@ -404,15 +419,26 @@ def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
     return skill_name, load_skill(skill_name)
 
 
-def _build_options(job: Job, cwd: Path, skill_cfg: SkillConfig | None) -> ClaudeAgentOptions:
+def _build_options(
+    job: Job,
+    cwd: Path,
+    skill_cfg: SkillConfig | None,
+    task_turns: list[dict] | None = None,
+    *,
+    canonical_cwd: Path | None = None,
+    context_root: str = "",
+) -> ClaudeAgentOptions:
     """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults."""
     # System prompt — context-aware preamble + skill body + task context
-    server_directive = _build_server_directive(skill_cfg, cwd, job.description)
+    server_directive = _build_server_directive(
+        skill_cfg, cwd, job.description,
+        canonical_cwd=canonical_cwd, context_root=context_root,
+    )
     system_prompt = server_directive
 
     # Multi-turn task context injection
-    if job.task_id:
-        task_ctx = _build_task_context(job.task_id)
+    if job.task_id and task_turns:
+        task_ctx = build_task_context(task_turns, job.task_id)
         if task_ctx:
             system_prompt += f"\n{task_ctx}\n"
 
@@ -491,8 +517,54 @@ async def _resolve_cwd(job: Job) -> Path:
 async def run_session(job: Job) -> dict[str, Any]:
     job_id = str(job.id)
     skill_name, skill_cfg = _resolve_skill(job)
-    cwd = await _resolve_cwd(job)
-    options = _build_options(job, cwd, skill_cfg)
+    canonical_cwd = await _resolve_cwd(job)
+
+    # Task turns for multi-turn context — fetched here (async) instead of the
+    # old nested-event-loop hack. A failure is logged loudly: losing the task
+    # conversation silently is the worst failure mode for a continuation job.
+    task_turns: list[dict] = []
+    if job.task_id:
+        try:
+            task_turns = await _fetch_task_turns(job.task_id)
+        except Exception:
+            logger.exception("task-turn fetch failed for job %s — continuing WITHOUT "
+                             "task context (continuation may lose the plan)", job_id[:8])
+            audit_log.append(job_id, "task_context_load_failed")
+
+    # ── Isolation tier resolution + workspace (P1) ──────────────────────
+    needs_mcp = bool(skill_cfg and any(t.startswith("needs-") and t.endswith("-mcp")
+                                       for t in (skill_cfg.tags or [])))
+    isolation = workspaces.resolve_isolation(
+        skill_cfg.isolation if skill_cfg else None,
+        (job.payload or {}).get("isolation"),
+        executors.container_runtime_available(),
+        needs_mcp,
+    )
+
+    ws: workspaces.Workspace | None = None
+    cwd = canonical_cwd
+    context_root = ""
+    if isolation in ("workspace", "container"):
+        try:
+            ws = workspaces.create_workspace(job_id, canonical_cwd, settings.workspaces_dir)
+            cwd = ws.path
+            audit_log.append(job_id, "workspace_created",
+                             workspace=str(ws.path), canonical=str(canonical_cwd),
+                             isolation=isolation)
+        except Exception as exc:
+            # Availability over purity — but loudly: the job runs un-isolated.
+            logger.error("workspace creation failed for %s — falling back to "
+                         "canonical cwd (NO isolation): %s", job_id[:8], exc)
+            audit_log.append(job_id, "workspace_fallback", error=str(exc)[:300])
+            isolation = "none"
+    if isolation == "container":
+        context_root = "/ctx"   # server .context is mounted read-only there
+
+    options = _build_options(
+        job, cwd, skill_cfg, task_turns,
+        canonical_cwd=canonical_cwd if ws else None,
+        context_root=context_root,
+    )
 
     # Log context budget usage (Rec 8)
     ctx_tokens, ctx_budget, ctx_fraction = context_budget_fraction(
@@ -532,36 +604,36 @@ async def run_session(job: Job) -> dict[str, Any]:
         cwd=str(cwd),
         model=options.model,
         effort=effort_used,
+        isolation=isolation,
         payload=job.payload,
         parent_job_id=str(job.parent_job_id) if job.parent_job_id else None,
     )
 
     started_at = datetime.now(timezone.utc)
-    final_text_chunks: list[str] = []
-    usage: dict[str, Any] = {}
-
-    client = ClaudeSDKClient(options=options)
-    _running_sessions[job_id] = client
+    session_failed = False
 
     try:
-        async with client:
-            await client.query(job.description)
+        if isolation == "container":
+            exec_result = await executors.run_in_container(
+                job_id=job_id,
+                prompt=job.description,
+                system_prompt=options.system_prompt or "",
+                model=options.model or "",
+                permission_mode=(
+                    (job.payload or {}).get("permission_mode")
+                    or (skill_cfg.permission_mode if skill_cfg else "acceptEdits")
+                ),
+                allowed_tools=list(options.allowed_tools or []),
+                max_turns=skill_cfg.max_turns if skill_cfg else None,
+                workspace=cwd,
+                publish_stream=_publish_stream,
+                truncate_for_log=_truncate_for_log,
+                preview_text=_preview_text,
+            )
+            final_summary, usage = exec_result.final_summary, exec_result.usage
+        else:
+            final_summary, usage = await _run_in_process(job_id, job.description, options)
 
-            async for message in client.receive_response():
-                # Check for quota/rate-limit error inside a message
-                err = getattr(message, "error", None)
-                if err:
-                    detected = quota.detect_quota_error(str(err))
-                    if detected is not None:
-                        reset_at = detected if isinstance(detected, datetime) else None
-                        raise quota.QuotaExhausted(reset_at, reason=str(err)[:500])
-
-                await _handle_message(job_id, message, final_text_chunks)
-
-                if isinstance(message, ResultMessage):
-                    usage = getattr(message, "usage", {}) or {}
-
-        final_summary = "\n".join(final_text_chunks).strip()
         if final_summary:
             audit_log.write_summary(job_id, final_summary)
 
@@ -578,7 +650,51 @@ async def run_session(job: Job) -> dict[str, Any]:
             "duration_seconds": duration,
             "usage": usage,
             "skill": skill_name,
+            "isolation": isolation,
         }
+    except BaseException:
+        session_failed = True
+        raise
+    finally:
+        if ws is not None:
+            if not session_failed:
+                ok, msg = workspaces.sync_canonical(ws)
+                audit_log.append(job_id, "workspace_synced", ok=ok, detail=msg)
+                if not ok:
+                    logger.warning("canonical sync failed for %s: %s", job_id[:8], msg)
+            # Keep failed-job workspaces for debugging; server-upkeep prunes.
+            workspaces.cleanup_workspace(ws, keep=session_failed)
+
+
+async def _run_in_process(
+    job_id: str, prompt: str, options: ClaudeAgentOptions
+) -> tuple[str, dict[str, Any]]:
+    """The original in-process Agent SDK execution path."""
+    final_text_chunks: list[str] = []
+    usage: dict[str, Any] = {}
+
+    client = ClaudeSDKClient(options=options)
+    _running_sessions[job_id] = client
+
+    try:
+        async with client:
+            await client.query(prompt)
+
+            async for message in client.receive_response():
+                # Check for quota/rate-limit error inside a message
+                err = getattr(message, "error", None)
+                if err:
+                    detected = quota.detect_quota_error(str(err))
+                    if detected is not None:
+                        reset_at = detected if isinstance(detected, datetime) else None
+                        raise quota.QuotaExhausted(reset_at, reason=str(err)[:500])
+
+                await _handle_message(job_id, message, final_text_chunks)
+
+                if isinstance(message, ResultMessage):
+                    usage = getattr(message, "usage", {}) or {}
+
+        return "\n".join(final_text_chunks).strip(), usage
     finally:
         _running_sessions.pop(job_id, None)
 

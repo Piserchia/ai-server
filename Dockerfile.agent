@@ -1,0 +1,41 @@
+# Dockerfile.agent — the containerized Claude session image (P1).
+#
+# Used by the `isolation: container` tier (server-patch, and any future
+# high-risk skill). The runner mounts a per-job workspace clone at /work
+# (the only writable volume) and the server's .context read-only at /ctx,
+# then runs `claude -p ... --output-format stream-json`.
+#
+# Auth: CLAUDE_CODE_OAUTH_TOKEN env at runtime (from `claude setup-token`,
+# subscription auth). NEVER bake a token or an API key into this image.
+#
+# Build:   docker build -f Dockerfile.agent -t ai-server-agent:latest .
+# Smoke:   docker run --rm -e CLAUDE_CODE_OAUTH_TOKEN ai-server-agent:latest \
+#            claude -p "say ok" --output-format stream-json --verbose
+# Setup guide: docs/CONTAINERS.md
+
+FROM node:20-slim
+
+# Python + git + build essentials for server/project toolchains
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv git curl ca-certificates jq ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+# Python deps the ai-server test gate needs (server-patch runs pytest in /work).
+# Kept minimal; project-specific deps install per-session as needed.
+RUN pip3 install --no-cache-dir --break-system-packages \
+        pytest pyyaml sqlalchemy pydantic pydantic-settings structlog croniter
+
+# Non-root user — the session should not even be root inside its sandbox
+RUN useradd -m -s /bin/bash agent
+USER agent
+WORKDIR /work
+
+# Git identity for in-container commits (overridable via -e)
+RUN git config --global user.name "ai-server-agent" \
+    && git config --global user.email "agent@ai-server.local" \
+    && git config --global --add safe.directory /work
+
+ENV HOME=/home/agent

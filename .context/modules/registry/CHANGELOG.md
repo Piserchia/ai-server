@@ -2,6 +2,15 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P1: `isolation` frontmatter field
+
+**Files changed**: `src/registry/skills.py` — `SkillConfig.isolation`
+(default `"none"`; valid: `none | workspace | container | host`), parsed from
+SKILL.md frontmatter. Consumed by `runner.workspaces.resolve_isolation`.
+
+**Why**: skills declare their own isolation tier the same way they declare
+model/effort — the frontmatter is the machine contract.
+
 ## 2026-04-18 — Seeded skills/ subdirectory per Rec 3 (§ 7 Seed module skills/ dirs)
 
 **Change**: This module now has `.context/modules/registry/skills/` containing stub `GOTCHAS.md`, `PATTERNS.md`, and `DEBUG.md` files. Stubs were created via `scripts/seed-module-skills.sh`; no source code modified.

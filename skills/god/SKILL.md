@@ -7,6 +7,7 @@ permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch]
 max_turns: 200
 tags: [admin, full-context, needs-projects-mcp, needs-dispatch-mcp]
+isolation: host
 context_files:
   - "CLAUDE.md"
   - ".context/SYSTEM.md"

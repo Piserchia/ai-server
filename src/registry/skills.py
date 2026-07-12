@@ -52,6 +52,7 @@ class SkillConfig:
     tags: list[str] = field(default_factory=list)
     context_files: list[str] = field(default_factory=list)  # files the session should read first
     no_llm: bool = False               # if True, skill is implemented as a script, runner skips SDK
+    isolation: str = "none"            # none | workspace | container | host (P1; see runner/workspaces.py)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -99,6 +100,7 @@ def load(name: str) -> SkillConfig | None:
         tags=fm.get("tags", []),
         context_files=fm.get("context_files", []),
         no_llm=bool(fm.get("no_llm", False)),
+        isolation=str(fm.get("isolation", "none")),
     )
 
 

@@ -1,6 +1,6 @@
 # Runner module
 
-**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`
+**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`, `src/runner/workspaces.py`, `src/runner/executors.py`
 
 ## Purpose
 
@@ -32,7 +32,10 @@ Four async tasks running in one process:
 - `retrospective.stale_context_warnings()` — synchronous. Checks for CONTEXT.md files >30d older than newest source file, and CHANGELOG.md with no updates in 60d despite git commits. Returns `list[StaleContextWarning]`.
 - `retrospective.context_budget_report(since)` — synchronous. Walks audit logs for `context_budget_used` events, aggregates by skill. Returns `list[ContextBudget]` with avg/max fraction of model budget used by static context.
 - `session.format_task_turns(turns)` — pure helper: formats task turn dicts into a compact conversation summary for system prompt injection.
-- `session._build_task_context(task_id)` — loads prior turns from DB, returns a "Task conversation" markdown section for continuation jobs.
+- `session.build_task_context(turns_data, task_id)` — pure: formats pre-fetched turns into the "Task conversation" markdown section. Turns are fetched async in `run_session` (replaced the old nested-event-loop `_build_task_context(task_id)` hack; load failures are now audited as `task_context_load_failed` instead of silently dropping the conversation).
+- `workspaces.resolve_isolation(skill_iso, payload_iso, container_available, needs_mcp)` — pure: effective isolation tier (`none | workspace | container | host`). Payload > frontmatter > none; `container` downgrades to `workspace` without a runtime/token or when the skill needs in-process MCP.
+- `workspaces.create_workspace(job_id, canonical, base_dir)` — per-job git clone under `volumes/workspaces/<job8>-<name>/` with origin re-pointed at the canonical's real remote; `sync_canonical(ws)` fast-forwards the canonical after the session pushes; `cleanup_workspace(ws, keep=)` removes it (failed jobs keep theirs for debugging); `prune_old_workspaces(base_dir, max_age_days)` is called by server-upkeep.
+- `executors.run_in_container(...)` — `claude -p --output-format stream-json` in a container (docker CLI; colima/OrbStack/Docker Desktop). Emits the SAME audit events as the in-process lane (parity contract, tested in `tests/test_executors.py`). `container_runtime_available()` gates it; `interrupt_container(job_id)` backs /cancel; `build_container_command(...)` and `parse_stream_json_line(...)` are pure and tested. Containers get `CLAUDE_CODE_OAUTH_TOKEN` only — the executor strips `ANTHROPIC_API_KEY` (INV-3).
 - `session.parse_skill_file_entries(text)` — pure helper: parses module skills file (GOTCHAS.md, DEBUG.md) into entry titles after the APPEND_ENTRIES_BELOW marker.
 - `session.estimate_context_tokens(text)` / `session.context_budget_fraction(prompt, model)` — pure helpers for token estimation (~4 chars/token) and budget fraction calculation.
 - `audit_index.rebuild_index(audit_log_dir)` — builds `INDEX.jsonl` from all audit logs. One line per job with skill, model, status, error, keywords. Called by server-upkeep.
@@ -54,10 +57,11 @@ Four async tasks running in one process:
 ## Configuration
 
 All via `src.config.settings`:
-- `MAX_CONCURRENT_JOBS` (default 2 on Max 5x plan)
+- `MAX_CONCURRENT_JOBS` (default 4 since P1 — workspace isolation removed the shared-checkout collision risk)
 - `SESSION_TIMEOUT_SECONDS` (default 1800)
 - `DEFAULT_MODEL` (global fallback when skill doesn't specify)
 - `QUOTA_PAUSE_MINUTES` (default 60 when reset time is unknown)
+- `CONTAINER_RUNTIME` / `AGENT_IMAGE` / `CONTAINER_MEMORY` / `CONTAINER_CPUS` / `CLAUDE_CODE_OAUTH_TOKEN` (container lane; empty runtime = disabled → container-tier skills run as workspace. See `docs/CONTAINERS.md`)
 
 ## Context injection
 
