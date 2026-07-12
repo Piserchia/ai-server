@@ -31,7 +31,7 @@ SERVICES=(
 
 uninstall() {
     echo "Uninstalling launchd services..."
-    for svc in "${SERVICES[@]}"; do
+    for svc in "${SERVICES[@]}" "com.assistant.sync-learnings|"; do
         label="${svc%%|*}"
         plist="$LAUNCH_DIR/${label}.plist"
         if [ -f "$plist" ]; then
@@ -105,6 +105,44 @@ PLIST
     launchctl load -w "$plist"
     echo "  ✓ $label"
 done
+
+# ── Timer: hourly runtime-learnings sync (P0.2) ────────────────────────────
+# Publishes runtime-written docs (GOTCHAS/CHANGELOG/Troubleshooting) to the
+# origin `runtime-learnings` branch so the dev repo can merge them. See
+# scripts/sync-learnings.sh for the single-writer rationale.
+SYNC_LABEL="com.assistant.sync-learnings"
+SYNC_PLIST="$LAUNCH_DIR/${SYNC_LABEL}.plist"
+cat > "$SYNC_PLIST" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${SYNC_LABEL}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd "${PROJECT_DIR}" && bash scripts/sync-learnings.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>${PROJECT_DIR}</string>
+
+  <key>StartInterval</key><integer>3600</integer>
+  <key>RunAtLoad</key><false/>
+
+  <key>StandardOutPath</key>
+  <string>${LOG_DIR}/sync-learnings.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_DIR}/sync-learnings.err.log</string>
+</dict>
+</plist>
+PLIST
+launchctl unload "$SYNC_PLIST" 2>/dev/null || true
+launchctl load -w "$SYNC_PLIST"
+echo "  ✓ $SYNC_LABEL (hourly timer)"
 
 echo ""
 echo "Done. Services will auto-start on login and auto-restart on crash."

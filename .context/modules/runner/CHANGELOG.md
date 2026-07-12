@@ -2,6 +2,25 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P0: server-deploy routing rules
+
+**Files changed**:
+- `src/runner/router.py` — Added `server-deploy` rules (`deploy the server`,
+  `server-deploy`, etc.) ABOVE the server-patch rules so a deploy request is a
+  pull+gate+restart, never a code-change session. Part of the P0 dev→prod
+  pipeline (new skill `skills/server-deploy/`, new `scripts/sync-learnings.sh`,
+  hourly `com.assistant.sync-learnings` launchd timer).
+
+**Why**: Production checkout drift was being hand-"rescued" (commits cbbdd02,
+8cfbfc6, 60e1e5c). Deploys and learning sync are now first-class, single-writer
+topology documented in CLAUDE.md.
+
+**Side effects**: "update the server to..." still routes to server-patch;
+"deploy the server" now routes to server-deploy.
+
+**Gotchas discovered**: The runner cannot restart itself synchronously —
+server-deploy uses a detached delayed `launchctl kickstart` (see SKILL.md).
+
 ## 2026-07-09 — Narrow sentinel-only loop guard (code-review fix)
 
 **Files changed**:

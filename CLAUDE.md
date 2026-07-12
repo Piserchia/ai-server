@@ -48,6 +48,26 @@ When you make a change, update the corresponding global docs:
 The `scripts/lint_docs.py` script (also in the pytest suite) validates that
 registries stay in sync. Run `python scripts/lint_docs.py` to check.
 
+## Single-writer topology (dev vs production)
+
+The repo exists in two places with strictly separated write rights:
+
+- **Dev repo** (`~/Documents/repos/ai-server`): the ONLY birthplace of code
+  and config commits. All `src/`, `scripts/`, `alembic/`, skill-frontmatter
+  work happens here and reaches production via `git push` + the
+  `server-deploy` skill.
+- **Production checkout** (`~/Library/Application Support/ai-server`): a
+  pull-only deploy target. The ONLY writes born here are runtime doc
+  learnings (GOTCHAS/CHANGELOG/Troubleshooting entries written by sessions).
+  Those are published automatically to the `runtime-learnings` branch by
+  `scripts/sync-learnings.sh` (hourly launchd timer) — never commit on main
+  in production, never hand-"rescue" doc drift again.
+
+Deploy path: dev commit → `origin/main` → `/task deploy server` (skill
+`server-deploy`: ff-only pull, migrate, pytest gate, restart). Learnings
+path: prod session writes docs → sync-learnings → `origin/runtime-learnings`
+→ merged into main from dev.
+
 ## Hard rules
 
 - **Never modify `.context/PROTOCOL.md`** without an explicit human request.

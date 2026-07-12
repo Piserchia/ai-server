@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P0: sync-learnings script + launchd timer, server-deploy skill
+
+**Files changed**:
+- `scripts/sync-learnings.sh` (new) — publishes runtime doc drift (allowlist:
+  `.context/**/*.md`, `skills/**/*.md`, `docs/Troubleshooting.md`) from the
+  production checkout to `origin/runtime-learnings` via git plumbing
+  (temp index + commit-tree) — HEAD, index, and working tree untouched, safe
+  while the runner is live.
+- `scripts/install-launchd.sh` — installs `com.assistant.sync-learnings`
+  hourly timer (+ uninstall support).
+- `skills/server-deploy/SKILL.md` (new) — the server's own deploy pipeline:
+  sync learnings → stash doc drift → ff-only pull → deps/migrations →
+  pytest gate → restart web/bot, runner restart detached (+20s).
+- `CLAUDE.md` — Single-writer topology section (dev repo = code writer,
+  production = learnings writer only).
+
+**Why**: kill the manual "rescue runtime-written docs" workflow and give the
+server the same gated deploy path atlas already had.
+
+**How to verify**: in production: `bash scripts/sync-learnings.sh --dry-run`;
+then `/task deploy server` after a dev commit.
+
 ## 2026-07-10 — Next.js ISR gotcha documented
 
 **Agent task**: Write-back for job bfcab76c — atlas skill suite refactor and new skills

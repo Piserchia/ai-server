@@ -56,6 +56,11 @@ _RULES: list[tuple[str, str]] = [
     # ── Restore ──
     (r"\brestore\b", "restore"),
 
+    # ── Server deploy (must come BEFORE server-patch rules — "deploy the
+    #    server" is a pull+restart, not a code change) ──
+    (r"\b(deploy|redeploy)\s+(the\s+)?server\b", "server-deploy"),
+    (r"\bserver[- ](deploy|redeploy)\b", "server-deploy"),
+
     # ── Server ──
     (r"\bserver:", "server-patch"),
     (r"\bupdate (the )?(server|runner|bot|web gateway)\b", "server-patch"),
