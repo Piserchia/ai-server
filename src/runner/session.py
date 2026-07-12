@@ -372,6 +372,64 @@ async def _fetch_task_turns(task_id) -> list[dict]:
         ]
 
 
+# ── Text-marker task events (P2) ────────────────────────────────────────────
+#
+# Sessions signal the task lifecycle by including markers in their FINAL text.
+# The runner parses them and synthesizes the corresponding audit events. This
+# is executor-agnostic (works identically in-process and inside containers,
+# where the host audit log isn't mounted) and race-free (no session ever has
+# to guess its own job id or audit file). The legacy python
+# `audit_log.append(job_id, "task_complete", ...)` path keeps working — the
+# job id is now injected into every task session's directive.
+
+_PLAN_START = "<<<TASK_PLAN"
+_PLAN_END = "TASK_PLAN>>>"
+
+_LINE_MARKERS: list[tuple[str, str, str]] = [
+    # (prefix, event kind, payload field)
+    ("TASK_COMPLETE:", "task_complete", "summary"),
+    ("TASK_QUESTION:", "task_question", "question"),
+    ("EVAL_PASS:", "eval_pass", "evidence"),
+    ("EVAL_FAIL:", "eval_fail", "feedback"),
+]
+
+
+def extract_text_events(final_text: str) -> list[dict[str, Any]]:
+    """Parse lifecycle markers out of a session's final text. Pure function.
+
+    Line markers: TASK_COMPLETE: / TASK_QUESTION: / EVAL_PASS: / EVAL_FAIL:
+    Block marker (multi-line JSON plan):
+        <<<TASK_PLAN
+        { ...plan json... }
+        TASK_PLAN>>>
+    Malformed plan JSON is skipped (defensive), never raises.
+    """
+    if not final_text:
+        return []
+    events: list[dict[str, Any]] = []
+
+    # Plan block
+    start = final_text.find(_PLAN_START)
+    end = final_text.find(_PLAN_END)
+    if start != -1 and end > start:
+        raw = final_text[start + len(_PLAN_START):end].strip()
+        try:
+            plan_obj = json.loads(raw)
+            if isinstance(plan_obj, dict):
+                events.append({"kind": "task_plan", "plan": plan_obj})
+        except json.JSONDecodeError:
+            logger.warning("TASK_PLAN block present but JSON is malformed — ignored")
+
+    for line in final_text.splitlines():
+        s = line.strip()
+        for prefix, kind, field in _LINE_MARKERS:
+            if s.startswith(prefix):
+                value = s[len(prefix):].strip()
+                events.append({"kind": kind, field: value})
+                break
+    return events
+
+
 # ── Budget accounting (Rec 8) ──────────────────────────────────────────────
 
 # Approximate context windows by model family (input tokens).
@@ -398,18 +456,40 @@ def context_budget_fraction(
     return tokens, budget, tokens / budget if budget > 0 else 0.0
 
 
-def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
+async def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
     """
     Determine the skill for this job:
       - explicit kind (not "task" / "chat") → that skill
       - kind = "chat" → chat skill
-      - kind = "task" → rule-based router on description; None means "generic task"
+      - kind = "task" → rule-based router; on no match, LLM fallback
+        (llm_router.llm_route); "" means generic task.
+    Every routing decision is audited (`routing_decision`) so retrospective
+    can measure routing precision.
     Returns (skill_name_or_empty, SkillConfig_or_None).
     """
     if job.kind == JobKind.task.value:
         matched = router.route(job.description)
         if matched:
+            audit_log.append(str(job.id), "routing_decision",
+                             method="rule", skill=matched)
             return matched, load_skill(matched)
+
+        # LLM fallback (P2) — the router docstring promised this since Phase 4
+        try:
+            from src.runner.llm_router import llm_route
+            llm_skill, confidence = await llm_route(job.description)
+        except Exception as exc:
+            logger.warning("llm route failed for %s: %s", str(job.id)[:8], exc)
+            llm_skill, confidence = "", 0.0
+
+        if llm_skill:
+            audit_log.append(str(job.id), "routing_decision",
+                             method="llm", skill=llm_skill,
+                             confidence=round(confidence, 3))
+            return llm_skill, load_skill(llm_skill)
+
+        audit_log.append(str(job.id), "routing_decision",
+                         method="fallback", skill="")
         return "", None   # generic task, use defaults + full tool set
     # Any other kind maps directly to a skill of the same name.
     # Underscores become dashes EXCEPT a leading underscore (marks internal skills):
@@ -435,6 +515,20 @@ def _build_options(
         canonical_cwd=canonical_cwd, context_root=context_root,
     )
     system_prompt = server_directive
+
+    # Job identity + task-event protocol (P2). Applies to every non-chat job
+    # so sessions never have to guess their own job id, and so lifecycle
+    # markers work identically in-process and inside containers.
+    if not (skill_cfg and skill_cfg.name == "chat"):
+        system_prompt += (
+            f"\n**Job id**: `{job.id}`.\n"
+            "**Task events**: signal the task lifecycle by putting a marker in "
+            "your FINAL text message (the runner parses it): "
+            "`TASK_COMPLETE: <one-line summary>` when ALL work is committed/done; "
+            "`TASK_QUESTION: <question>` to ask the user and pause. "
+            "These replace (and are more reliable than) the audit_log.append "
+            "python snippet.\n"
+        )
 
     # Multi-turn task context injection
     if job.task_id and task_turns:
@@ -488,7 +582,8 @@ def _build_options(
 
     if "needs-dispatch-mcp" in skill_tags:
         from src.runner.mcp_dispatch import create_server as create_dispatch_mcp
-        mcp_servers["dispatch"] = create_dispatch_mcp()
+        # Pass the job so dispatched children inherit task_id/parent_job_id
+        mcp_servers["dispatch"] = create_dispatch_mcp(job)
 
     if mcp_servers:
         kwargs["mcp_servers"] = mcp_servers
@@ -516,7 +611,7 @@ async def _resolve_cwd(job: Job) -> Path:
 
 async def run_session(job: Job) -> dict[str, Any]:
     job_id = str(job.id)
-    skill_name, skill_cfg = _resolve_skill(job)
+    skill_name, skill_cfg = await _resolve_skill(job)
     canonical_cwd = await _resolve_cwd(job)
 
     # Task turns for multi-turn context — fetched here (async) instead of the
@@ -636,6 +731,17 @@ async def run_session(job: Job) -> dict[str, Any]:
 
         if final_summary:
             audit_log.write_summary(job_id, final_summary)
+            # Synthesize lifecycle events from text markers (P2) — executor-
+            # agnostic replacement for sessions appending to the audit log
+            # themselves. Deduped against events the session already wrote.
+            try:
+                existing_kinds = {e.get("kind") for e in audit_log.read(job_id)}
+                for evt in extract_text_events(final_summary):
+                    kind = evt.pop("kind")
+                    if kind not in existing_kinds:
+                        audit_log.append(job_id, kind, **evt)
+            except Exception:
+                logger.exception("text-event extraction failed (non-fatal)")
 
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
         audit_log.append(

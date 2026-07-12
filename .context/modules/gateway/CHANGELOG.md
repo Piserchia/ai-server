@@ -2,6 +2,33 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P2: NL-first ingestion + plan/eval notify types + DAG-aware cancel
+
+**Files changed**:
+- `src/gateway/telegram_bot.py` —
+  - Bare messages (no /command, not a reply) are now first-class asks:
+    `_handle_plain_text` + pure `triage_plain_text` (short questions → chat;
+    everything else → task; router-matched text is always a task). Restores +
+    upgrades the NL routing the legacy repo had.
+  - Task creation factored into `_create_task_with_job` (used by /task and
+    plain text) — task_id now set at enqueue time (no post-enqueue UPDATE race).
+  - New notify types: `plan` (auto-approved, Cancel-gated), `plan_approval`
+    (manual mode: Approve/Cancel), `completed` (evaluator-verified auto-close
+    with evidence + Reopen + rating buttons).
+  - New button actions: `approve_plan` (spawns the stored plan's DAG),
+    `reopen` (overrule the evaluator). `cancel` now also cancels queued AND
+    deferred sibling jobs so a cancelled plan can't keep spawning.
+  - /help rewritten around "just text me".
+- `src/gateway/jobs.py` — `enqueue_job` accepts `task_id` / `parent_job_id`
+  at creation.
+
+**Why**: the mission's "single Telegram ask" flow required a /task prefix and
+had no decompose→execute→verify pipeline behind it.
+
+**How to verify**: text the bot "update the bingo app to show a version
+footer" with no command — expect an "On it..." thread; multi-step asks show a
+plan card first; completion arrives as "completed and verified" with evidence.
+
 ## 2026-07-06 — Meaningful /health for external dead-man's-switch
 
 **Files changed**:

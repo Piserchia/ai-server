@@ -45,6 +45,7 @@ class Base(DeclarativeBase):
 
 class JobStatus(str, Enum):
     queued = "queued"
+    deferred = "deferred"   # waiting on depends_on jobs (P2 plan DAG); promoted to queued by the runner
     running = "running"
     awaiting_user = "awaiting_user"
     completed = "completed"
@@ -275,6 +276,10 @@ class Task(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=TaskStatus.active.value, index=True
     )
+    plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # ^ P2: structured plan from the `plan` skill — {goal, acceptance_criteria,
+    #   subtasks: [{id, kind, description, project_slug?, depends_on}], verification}.
+    #   The _evaluate skill checks acceptance_criteria after task_complete.
     created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
     chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # ^ Telegram chat_id — persisted so bot restarts don't lose the mapping

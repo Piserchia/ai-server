@@ -171,8 +171,12 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if await _guard(update) is None:
         return
     await update.message.reply_text(
-        "*Commands:*\n\n"
-        "/task <description> — start a new task\n"
+        "*Just text me what you want* — no command needed.\n"
+        "_\"update the bingo app to support dark mode\" works as-is. "
+        "Multi-step asks get decomposed into a plan, executed, and verified. "
+        "Questions get a direct answer._\n\n"
+        "*Commands (still work):*\n\n"
+        "/task <description> — start a new task explicitly\n"
         "  _Reply in the thread to continue. Buttons for actions._\n\n"
         "/status — see active tasks\n"
         "/jobs — see recent job runs\n"
@@ -180,6 +184,81 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "_Admin: /god, /chat, /resume, /clear, /schedule_",
         parse_mode="Markdown",
     )
+
+
+def triage_plain_text(text: str) -> str:
+    """Classify a bare (non-command) message: 'chat' or 'task'. Pure function.
+
+    Conservative: anything the rule router recognizes is a task; otherwise
+    short interrogative messages are chat, and everything else is a task
+    (the runner's LLM routing fallback handles ambiguity from there).
+    """
+    from src.runner.router import route as _route
+
+    stripped = text.strip()
+    if _route(stripped):
+        return "task"
+    lowered = stripped.lower()
+    question_starts = ("what", "who", "when", "where", "how", "why", "is ",
+                       "are ", "can ", "could ", "should ", "do ", "does ",
+                       "did ", "will ", "would ")
+    if len(stripped) <= 240 and (
+        stripped.endswith("?") or lowered.startswith(question_starts)
+    ):
+        return "chat"
+    return "task"
+
+
+async def _create_task_with_job(
+    update: Update,
+    chat_id: int,
+    description: str,
+    *,
+    kind: str,
+    flags: dict | None,
+    banner: str,
+) -> None:
+    """Shared task+job creation used by /task, /god, and plain-text asks."""
+    task = Task(
+        description=description,
+        created_by=f"telegram:{chat_id}",
+        chat_id=chat_id,
+    )
+    async with async_session() as s:
+        s.add(task)
+        await s.commit()
+        await s.refresh(task)
+
+    async with async_session() as s:
+        s.add(TaskTurn(
+            task_id=task.id,
+            turn_number=1,
+            role="user",
+            content=description,
+        ))
+        await s.commit()
+
+    job = await enqueue_job(
+        description,
+        kind=kind,
+        payload=flags or None,
+        created_by=f"telegram:{chat_id}",
+        task_id=task.id,
+    )
+    _job_to_chat[str(job.id)] = chat_id
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Cancel", callback_data=f"cancel:{str(task.id)[:8]}"),
+    ]])
+    reply = await update.message.reply_text(
+        f"{banner} ({_esc_md(description[:60])})",
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
+    async with async_session() as s:
+        await s.execute(sql_update(Task).where(Task.id == task.id).values(
+            thread_message_id=reply.message_id))
+        await s.commit()
 
 
 @_error_safe
@@ -201,57 +280,41 @@ async def cmd_task(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Optional kind override from flags (e.g., --kind=research_deep)
     kind = flags.pop("kind_override", JobKind.task.value)
-
-    # Create a Task to wrap this job (enables multi-turn interaction)
-    task = Task(
-        description=description,
-        created_by=f"telegram:{chat_id}",
-        chat_id=chat_id,
+    await _create_task_with_job(
+        update, chat_id, description,
+        kind=kind, flags=flags,
+        banner="\U0001f504 Working on it...",
     )
-    async with async_session() as s:
-        s.add(task)
-        await s.commit()
-        await s.refresh(task)
 
-    # Record the initial user turn
-    async with async_session() as s:
-        s.add(TaskTurn(
-            task_id=task.id,
-            turn_number=1,
-            role="user",
-            content=description,
-        ))
-        await s.commit()
 
-    job = await enqueue_job(
-        description,
-        kind=kind,
-        payload=flags or None,
-        created_by=f"telegram:{chat_id}",
-    )
-    # Link job to task
-    async with async_session() as s:
-        await s.execute(
-            sql_update(Job).where(Job.id == job.id).values(task_id=task.id)
+@_error_safe
+async def _handle_plain_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """NL-first ingestion (P2): a bare message — no /command, not a thread
+    reply — is a first-class ask. Short questions become chat jobs; anything
+    else becomes a task (router + LLM fallback pick the skill, `plan`
+    decomposes multi-step asks)."""
+    chat_id = await _guard(update)
+    if chat_id is None:
+        return
+    text = (update.message.text or "").strip()
+    if not text:
+        return
+
+    if triage_plain_text(text) == "chat":
+        job = await enqueue_job(
+            text,
+            kind=JobKind.chat.value,
+            created_by=f"telegram:{chat_id}",
         )
-        await s.commit()
+        _job_to_chat[str(job.id)] = chat_id
+        await update.message.reply_text(f"Thinking... ({str(job.id)[:8]})")
+        return
 
-    _job_to_chat[str(job.id)] = chat_id
-
-    # Reply in thread with [Cancel] button
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("Cancel", callback_data=f"cancel:{str(task.id)[:8]}"),
-    ]])
-    reply = await update.message.reply_text(
-        f"\U0001f504 Working on it... ({_esc_md(description[:60])})",
-        parse_mode="Markdown",
-        reply_markup=keyboard,
+    await _create_task_with_job(
+        update, chat_id, text,
+        kind=JobKind.task.value, flags=None,
+        banner="\U0001f504 On it...",
     )
-    # Save thread_message_id
-    async with async_session() as s:
-        await s.execute(sql_update(Task).where(Task.id == task.id).values(
-            thread_message_id=reply.message_id))
-        await s.commit()
 
 
 @_error_safe
@@ -784,18 +847,31 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await query.message.reply_text(f"\u2705 Task `{prefix}` approved.", parse_mode="Markdown")
 
     elif action == "cancel":
-        # Find running job for this task and cancel it
+        # Cancel the running job, and fail any queued/deferred siblings
+        # (a cancelled plan must not keep spawning its DAG).
         async with async_session() as s:
             result = await s.execute(
                 select(Job).where(
                     Job.task_id == task.id,
-                    Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
-                ).order_by(Job.created_at.desc()).limit(1)
+                    Job.status.in_([
+                        JobStatus.queued.value,
+                        JobStatus.deferred.value,
+                        JobStatus.running.value,
+                    ]),
+                ).order_by(Job.created_at.desc())
             )
-            job = result.scalar_one_or_none()
-        if job:
-            await cancel_job(job.id)
+            open_jobs = list(result.scalars())
+        for job in open_jobs:
+            if job.status == JobStatus.running.value:
+                await cancel_job(job.id)
         async with async_session() as s:
+            await s.execute(
+                sql_update(Job).where(
+                    Job.task_id == task.id,
+                    Job.status.in_([JobStatus.queued.value, JobStatus.deferred.value]),
+                ).values(status=JobStatus.cancelled.value,
+                         error_message="task cancelled by user")
+            )
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
                     status=TaskStatus.failed.value,
@@ -804,6 +880,42 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             await s.commit()
         await query.edit_message_reply_markup(reply_markup=None)
         await query.message.reply_text(f"\U0001f6ab Task `{prefix}` cancelled.", parse_mode="Markdown")
+
+    elif action == "approve_plan":
+        # Manual plan approval (PLAN_AUTO_APPROVE=false): spawn the DAG now
+        if not task.plan:
+            await query.message.reply_text("No stored plan on this task.")
+            return
+        from src.runner import plans as plans_mod
+        await plans_mod.spawn_plan_jobs(task.id, task.plan, created_by=f"telegram:{chat_id}")
+        async with async_session() as s:
+            from sqlalchemy import func as sqlfunc
+            max_turn = await s.execute(
+                select(sqlfunc.max(TaskTurn.turn_number)).where(TaskTurn.task_id == task.id)
+            )
+            last = max_turn.scalar() or 0
+            s.add(TaskTurn(task_id=task.id, turn_number=last + 1, role="system",
+                           content="User approved the plan; spawning subtasks."))
+            await s.execute(
+                sql_update(Task).where(Task.id == task.id).values(
+                    status=TaskStatus.active.value)
+            )
+            await s.commit()
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(f"▶️ Plan approved — executing ({prefix}).")
+
+    elif action == "reopen":
+        # Re-open an auto-closed task: user disagrees with the evaluator
+        async with async_session() as s:
+            await s.execute(
+                sql_update(Task).where(Task.id == task.id).values(
+                    status=TaskStatus.awaiting_user.value)
+            )
+            await s.commit()
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(
+            f"\U0001f513 Task `{prefix}` reopened — reply to this thread with "
+            "what's wrong and I'll continue.", parse_mode="Markdown")
 
     elif action == "feedback":
         await query.message.reply_text("Send your feedback as a reply to this message.")
@@ -1053,6 +1165,58 @@ async def _task_notifier(app: Application) -> None:
                         send_kwargs["reply_to_message_id"] = task.thread_message_id
                     await app.bot.send_message(**send_kwargs)
 
+                elif notify_type == "plan":
+                    # Auto-approved plan (informational) — Cancel is the only gate
+                    keyboard = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Cancel plan", callback_data=f"cancel:{prefix}"),
+                    ]])
+                    send_kwargs = dict(
+                        chat_id=task.chat_id,
+                        text=f"📋 Plan for task {prefix} (executing now):\n\n{text_content[:3200]}",
+                        reply_markup=keyboard,
+                    )
+                    if task.thread_message_id:
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
+
+                elif notify_type == "plan_approval":
+                    # Manual mode (PLAN_AUTO_APPROVE=false): explicit gate
+                    keyboard = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Approve plan", callback_data=f"approve_plan:{prefix}"),
+                        InlineKeyboardButton("Cancel", callback_data=f"cancel:{prefix}"),
+                    ]])
+                    send_kwargs = dict(
+                        chat_id=task.chat_id,
+                        text=f"📋 Plan for task {prefix} — needs your approval:\n\n{text_content[:3200]}",
+                        reply_markup=keyboard,
+                    )
+                    if task.thread_message_id:
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
+
+                elif notify_type == "completed":
+                    # Evaluator passed → task auto-closed with evidence.
+                    # Reopen lets the human overrule the machine's verdict.
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Reopen", callback_data=f"reopen:{prefix}"),
+                         InlineKeyboardButton("View Details", callback_data=f"details:{prefix}")],
+                        [
+                            InlineKeyboardButton("1", callback_data=f"rate:{prefix}:1"),
+                            InlineKeyboardButton("2", callback_data=f"rate:{prefix}:2"),
+                            InlineKeyboardButton("3", callback_data=f"rate:{prefix}:3"),
+                            InlineKeyboardButton("4", callback_data=f"rate:{prefix}:4"),
+                            InlineKeyboardButton("5", callback_data=f"rate:{prefix}:5"),
+                        ],
+                    ])
+                    send_kwargs = dict(
+                        chat_id=task.chat_id,
+                        text=f"✅ Task {prefix} completed and verified:\n\n{text_content[:3200]}",
+                        reply_markup=keyboard,
+                    )
+                    if task.thread_message_id:
+                        send_kwargs["reply_to_message_id"] = task.thread_message_id
+                    await app.bot.send_message(**send_kwargs)
+
                 elif notify_type == "progress":
                     # Informational update — no buttons, just a note in the thread
                     send_kwargs = dict(
@@ -1112,6 +1276,8 @@ def main() -> None:
     app.add_handler(CommandHandler("projects", cmd_projects))
     # Thread reply + inline button handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.REPLY, _handle_thread_reply))
+    # NL-first (P2): bare messages are asks — no /task prefix needed
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.REPLY, _handle_plain_text))
     app.add_handler(CallbackQueryHandler(_handle_button))
 
     logger.info("telegram bot starting")

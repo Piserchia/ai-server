@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P2: tasks.plan column + deferred job status
+
+**Files changed**:
+- `src/models.py` — `Task.plan` (JSON, nullable): the structured plan from the
+  `plan` skill. `JobStatus.deferred`: a job waiting on `payload.depends_on`
+  job ids; promoted to `queued` by `runner.plans.promote_deferred_for` (no
+  Redis entry until promotion).
+- `alembic/versions/005_task_plan.py` — migration for `tasks.plan`.
+
+**Why**: plans and their dependency DAGs need first-class storage; deferred
+status lets the queue express "after that one".
+
+**How to verify**: `pipenv run alembic upgrade head`; then
+`psql assistant -c "\\d tasks"` shows the `plan` column.
+
 ## 2026-07-06 — Runner heartbeat key + health staleness setting
 
 **Files changed**:

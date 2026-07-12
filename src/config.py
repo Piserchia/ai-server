@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     # Quota
     quota_pause_minutes: int = 60
 
+    # Intent pipeline (P2/P3)
+    # LLM routing fallback for asks the regex rules don't match (Haiku, 1 turn).
+    llm_router_enabled: bool = True
+    # Plans auto-approve: the plan is posted to Telegram with a Cancel button
+    # and execution starts immediately. Set false to require explicit approval.
+    plan_auto_approve: bool = True
+    # After task_complete, run the _evaluate acceptance check; pass auto-closes
+    # the task (evidence DM'd, Reopen button), fail re-opens with feedback.
+    auto_evaluate: bool = True
+    # Max evaluate→fix rounds before falling back to awaiting_user.
+    max_eval_rounds: int = 2
+
     # Domain (Phase 3+)
     server_domain: str = ""
 

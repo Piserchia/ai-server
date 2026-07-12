@@ -20,7 +20,15 @@ async def enqueue_job(
     payload: dict[str, Any] | None = None,
     project_id: uuid.UUID | None = None,
     created_by: str = "unknown",
+    task_id: uuid.UUID | None = None,
+    parent_job_id: uuid.UUID | None = None,
 ) -> Job:
+    """Create a Job row and push it onto the queue.
+
+    task_id / parent_job_id are set at creation (P2) — previously every call
+    site did a separate UPDATE after enqueue, which left a small window where
+    the runner could pick up a task job before its task linkage existed.
+    """
     job = Job(
         kind=kind,
         description=description,
@@ -28,6 +36,8 @@ async def enqueue_job(
         project_id=project_id,
         status=JobStatus.queued.value,
         created_by=created_by,
+        task_id=task_id,
+        parent_job_id=parent_job_id,
     )
     async with async_session() as s:
         s.add(job)

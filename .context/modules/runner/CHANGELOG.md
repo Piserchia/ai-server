@@ -2,6 +2,54 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — P2/P3: plan DAG orchestration, LLM router fallback, text-marker events, acceptance evaluator
+
+**Files changed**:
+- `src/runner/plans.py` (new) — plan validation (`validate_plan`, `topo_order`,
+  `deps_satisfied` — all pure), DAG spawn (`spawn_plan_jobs`: roots queued,
+  dependents deferred), promotion (`promote_deferred_for` — a completed
+  escalation retry satisfies its failed original), failure cascade
+  (`fail_dependents_of`), drain check (`plan_jobs_remaining`).
+- `src/runner/llm_router.py` (new) — the LLM routing fallback the router
+  docstring promised since Phase 4: one-turn Haiku pick from the skill catalog
+  (may return `plan`); `parse_route_response` is pure + fail-open to generic.
+- `src/runner/session.py` — `_resolve_skill` is async and audits every
+  `routing_decision` (method=rule|llm|fallback + confidence);
+  `extract_text_events` (pure): TASK_COMPLETE / TASK_QUESTION / EVAL_PASS /
+  EVAL_FAIL line markers + `<<<TASK_PLAN` JSON block in a session's final text
+  are synthesized into audit events runner-side — executor-agnostic (works in
+  containers where the host audit log isn't mounted) and race-free (job id is
+  also now injected into every non-chat directive).
+- `src/runner/main.py` — task lifecycle rework: `task_plan` → validate → store
+  on Task → auto-approve (default) spawns the DAG (`plan`/`plan_approval`
+  notifies); plan subtasks never auto-continue (DAG drain detection instead);
+  `task_complete` → `_evaluate` acceptance job (auto_evaluate default) instead
+  of pending_approval; `_evaluate` outcomes: EVAL_PASS auto-closes with
+  evidence (`completed` notify + Reopen), EVAL_FAIL spawns a fix round
+  (max_eval_rounds=2) then hands to the user; deferred promotion after each
+  completion; terminal escalation cascades failure to dependents; review/
+  writeback/learning skip all `_`-prefixed internal kinds.
+- `src/runner/mcp_dispatch.py` — `create_server(job)`: dispatched children
+  inherit task_id/parent_job_id; `depends_on` arg creates deferred jobs.
+- `src/config.py` — `llm_router_enabled`, `plan_auto_approve` (true),
+  `auto_evaluate` (true), `max_eval_rounds` (2).
+- `skills/plan/SKILL.md` (new), `skills/_evaluate/SKILL.md` (new).
+- `tests/test_plans.py` (new, 30 tests: plan validation/topo/deps, marker
+  extraction, route parsing, triage).
+
+**Why**: "single Telegram ask → decompose → execute → evaluate" was the
+mission's core promise; before this, /task mapped to exactly one skill job
+and "done" was self-reported.
+
+**Side effects**: tasks now auto-close on evaluator pass (user overrules via
+Reopen button); pending_approval remains for auto_evaluate=false and for
+evaluator no-verdict edge cases. New audit events: routing_decision,
+plan_stored, evaluator_spawned, eval_fix_spawned, job_promoted.
+
+**Gotchas discovered**: dispatch MCP tools must be built per-session (closure)
+— a module-level job context would be shared mutable state across concurrent
+sessions.
+
 ## 2026-07-12 — P1: per-job workspace isolation + container executor + concurrency 4
 
 **Files changed**:

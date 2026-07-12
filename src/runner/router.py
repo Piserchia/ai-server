@@ -1,9 +1,15 @@
 """
-Route a free-form description to a skill. Rules first (instant, free); LLM fallback
-via the `route` skill for ambiguous inputs.
+Route a free-form description to a skill. Rules first (instant, free); LLM
+fallback via `runner.llm_router.llm_route` (Haiku, 1 turn) for ambiguous
+inputs — wired in `session._resolve_skill` (P2; the fallback this docstring
+promised since Phase 4 now actually exists).
 
-Keep rules narrow and honest. When a rule doesn't match confidently, fall through to
-None (generic task — uses full tool set + global default model).
+Keep rules narrow and honest. When a rule doesn't match confidently, fall
+through to None; the caller then tries the LLM fallback and finally runs a
+generic task (full tool set + global default model).
+
+Multi-step asks route to `plan` (the decomposer agent) — it produces a
+structured plan whose subtasks are spawned as a dependency-ordered job DAG.
 
 Coding intent → `app-patch` → Opus 4.7 / high via skill frontmatter.
 """
@@ -16,6 +22,13 @@ import re
 # Rule format: (pattern, skill_name). First match wins.
 # Patterns are lowercased regex fragments run against the lowercased description.
 _RULES: list[tuple[str, str]] = [
+    # ── Multi-step asks → the plan decomposer (checked FIRST: an ask that
+    #    needs decomposition should never be swallowed by a single-skill rule).
+    #    Kept deliberately narrow; the LLM fallback also returns "plan" for
+    #    complex asks that these regexes miss. ──
+    (r"\bplan[:\s]", "plan"),
+    (r"\b(and then|then also|after that)\b", "plan"),
+    (r"\bmulti[- ]step\b", "plan"),
     # ── Coding intent (routes to app-patch which defaults to Opus 4.7 / high) ──
     (r"\b(write|implement|build|refactor|fix|debug|optimize|add|update|patch|rewrite)\s+"
      r".*\b(function|class|method|module|script|endpoint|test|tests|bug|feature|"

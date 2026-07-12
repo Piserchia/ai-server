@@ -215,15 +215,27 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.completed, result=result)
         log.info("job completed")
 
-        # Code review — runs for skills that opt in via post_review.trigger
-        if job.kind not in ("chat", "_writeback") and not (job.payload or {}).get("escalated_from"):
+        # Plan DAG: promote deferred siblings whose dependencies are now met (P2)
+        if job.task_id:
+            try:
+                from src.runner import plans as plans_mod
+                promoted = await plans_mod.promote_deferred_for(job)
+                if promoted:
+                    log.info("promoted deferred jobs", count=promoted)
+            except Exception:
+                log.exception("deferred promotion failed (non-fatal)")
+
+        # Code review — runs for skills that opt in via post_review.trigger.
+        # Internal skills (leading _, e.g. _evaluate/_writeback) are exempt.
+        _is_internal_kind = job.kind == "chat" or job.kind.startswith("_")
+        if not _is_internal_kind and not (job.payload or {}).get("escalated_from"):
             try:
                 await _maybe_review(job, result)
             except Exception:
                 log.exception("code review failed (non-fatal)")
 
-        # Write-back verification — skip for chat and the _writeback skill itself
-        if job.kind not in ("chat", "_writeback") and job.resolved_skill != "_writeback":
+        # Write-back verification — skip for chat and internal skills
+        if not _is_internal_kind and not (job.resolved_skill or "").startswith("_"):
             try:
                 await _verify_writeback(job, result)
             except Exception:
@@ -402,9 +414,17 @@ async def _maybe_escalate(job: Job) -> None:
     current_level = payload.get("escalation_level", 0)
 
     if current_level >= 3:
-        # Terminal — notify user of failure
+        # Terminal — cascade failure to any deferred dependents, notify user
         if job.task_id:
             from src.models import Task, TaskStatus
+            try:
+                from src.runner import plans as plans_mod
+                cascaded = await plans_mod.fail_dependents_of(job)
+                if cascaded:
+                    logger.warning("failed deferred dependents", count=cascaded,
+                                   job_id=str(job.id)[:8])
+            except Exception:
+                logger.exception("dependency cascade failed (non-fatal)")
             async with session_scope() as s:
                 await s.execute(
                     update(Task).where(Task.id == job.task_id).values(
@@ -534,11 +554,210 @@ async def _maybe_escalate(job: Job) -> None:
         return
 
 
+async def _record_task_turn(task_id, role: str, content: str, job_id=None) -> None:
+    """Append one turn to a task's conversation."""
+    from src.models import TaskTurn
+    from sqlalchemy import func as sqlfunc
+
+    async with session_scope() as s:
+        max_turn = await s.execute(
+            select(sqlfunc.max(TaskTurn.turn_number))
+            .where(TaskTurn.task_id == task_id)
+        )
+        last = max_turn.scalar() or 0
+        s.add(TaskTurn(
+            task_id=task_id,
+            turn_number=last + 1,
+            role=role,
+            content=content,
+            job_id=job_id,
+        ))
+
+
+async def _set_task_status(task_id, status: str) -> None:
+    from src.models import Task
+    async with session_scope() as s:
+        await s.execute(
+            update(Task).where(Task.id == task_id).values(
+                status=status, updated_at=datetime.now(timezone.utc))
+        )
+
+
+async def _notify_task(task_id, notify_type: str, **fields) -> None:
+    await redis.publish("tasks:notify", json.dumps({
+        "task_id": str(task_id), "type": notify_type, **fields,
+    }))
+
+
+async def _handle_plan_event(job: Job, plan: dict) -> None:
+    """A `plan` session emitted a task_plan event: validate, store, and
+    (auto-approve default) spawn the subtask DAG."""
+    from src.models import Task, TaskStatus
+    from src.registry.skills import list_all
+    from src.runner import plans
+
+    known_kinds = {cfg.name for cfg in list_all()} | {"task"}
+    errors = plans.validate_plan(plan, known_kinds)
+    if errors:
+        logger.warning("plan validation failed for task %s: %s",
+                       str(job.task_id)[:8], errors)
+        await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
+        await _notify_task(
+            job.task_id, "question",
+            text=("The planner produced an invalid plan "
+                  f"({'; '.join(errors[:5])}). Reply to rephrase the ask, "
+                  "or /clear to abandon."),
+        )
+        return
+
+    async with session_scope() as s:
+        await s.execute(
+            update(Task).where(Task.id == job.task_id).values(
+                plan=plan, updated_at=datetime.now(timezone.utc))
+        )
+    audit_log.append(str(job.id), "plan_stored",
+                     subtasks=len(plan.get("subtasks", [])))
+
+    plan_text = _format_plan_for_chat(plan)
+
+    if settings.plan_auto_approve:
+        await plans.spawn_plan_jobs(job.task_id, plan, created_by=f"plan:{str(job.id)[:8]}")
+        await _record_task_turn(job.task_id, "system",
+                                f"Plan approved automatically; spawning subtasks.\n{plan_text}")
+        await _set_task_status(job.task_id, "active")
+        await _notify_task(job.task_id, "plan", text=plan_text)
+    else:
+        await _set_task_status(job.task_id, TaskStatus.pending_approval.value)
+        await _notify_task(job.task_id, "plan_approval", text=plan_text)
+
+
+def _format_plan_for_chat(plan: dict) -> str:
+    """Compact human-readable plan rendering for Telegram. Pure function."""
+    lines = [f"Goal: {plan.get('goal', '')}"]
+    lines.append("Steps:")
+    for st in plan.get("subtasks", []):
+        deps = st.get("depends_on") or []
+        dep_note = f" (after {', '.join(map(str, deps))})" if deps else ""
+        lines.append(f"  {st.get('id')}: [{st.get('kind')}] {st.get('description', '')[:120]}{dep_note}")
+    criteria = plan.get("acceptance_criteria", [])
+    if criteria:
+        lines.append("Done when:")
+        lines.extend(f"  - {c[:120]}" for c in criteria[:6])
+    return "\n".join(lines)
+
+
+async def _enqueue_evaluator(job: Job, summary: str, eval_round: int) -> None:
+    """Spawn the _evaluate acceptance-check job for this task (P3)."""
+    from src.models import Task
+
+    plan = None
+    task_description = ""
+    async with async_session() as s:
+        task = await s.get(Task, job.task_id)
+        if task:
+            plan = task.plan
+            task_description = task.description
+
+    payload = {
+        "eval_round": eval_round,
+        "task_description": task_description,
+        "origin_kind": job.resolved_skill or job.kind,
+        "origin_summary": summary[:2000],
+    }
+    if plan:
+        payload["plan"] = plan
+    slug = (job.payload or {}).get("project_slug")
+    if slug:
+        payload["project_slug"] = slug
+
+    child = await enqueue_job(
+        f"Evaluate task {str(job.task_id)[:8]} against its acceptance criteria "
+        f"(round {eval_round}).",
+        kind="_evaluate",
+        payload=payload,
+        project_id=job.project_id,
+        created_by=f"evaluator:{str(job.id)[:8]}",
+        task_id=job.task_id,
+        parent_job_id=job.id,
+    )
+    audit_log.append(str(job.id), "evaluator_spawned",
+                     child_job_id=str(child.id), eval_round=eval_round)
+    await _notify_task(job.task_id, "progress",
+                       text=f"Work complete — verifying against acceptance criteria (round {eval_round})...")
+
+
+async def _handle_evaluator_result(job: Job, summary: str, events: list[dict]) -> None:
+    """Process an _evaluate job's outcome: pass → auto-close with evidence;
+    fail → spawn a fix round or hand to the user after max rounds."""
+    from src.models import TaskStatus
+
+    eval_pass = None
+    eval_fail = None
+    for evt in events:
+        if evt.get("kind") == "eval_pass":
+            eval_pass = evt
+        elif evt.get("kind") == "eval_fail":
+            eval_fail = evt
+
+    payload = job.payload or {}
+    eval_round = int(payload.get("eval_round", 1))
+
+    if eval_pass:
+        evidence = eval_pass.get("evidence", "") or summary
+        await _record_task_turn(job.task_id, "system",
+                                f"Evaluation passed (round {eval_round}). Evidence: {evidence[:1500]}",
+                                job_id=job.id)
+        await _set_task_status(job.task_id, TaskStatus.completed.value)
+        await _notify_task(job.task_id, "completed",
+                           text=f"{evidence[:3000]}")
+        return
+
+    if eval_fail:
+        feedback = eval_fail.get("feedback", "") or summary or "Evaluation failed without details."
+        await _record_task_turn(job.task_id, "system",
+                                f"Evaluation FAILED (round {eval_round}): {feedback[:1500]}",
+                                job_id=job.id)
+        if eval_round < settings.max_eval_rounds:
+            # Spawn a fix continuation with the evaluator's feedback
+            origin_kind = payload.get("origin_kind") or "task"
+            fix_payload = {"eval_round": eval_round}
+            if payload.get("project_slug"):
+                fix_payload["project_slug"] = payload["project_slug"]
+            child = await enqueue_job(
+                f"The acceptance evaluation failed. Fix the following and complete "
+                f"the task: {feedback[:1500]}",
+                kind=origin_kind,
+                payload=fix_payload,
+                project_id=job.project_id,
+                created_by=f"eval-fix:{str(job.id)[:8]}",
+                task_id=job.task_id,
+                parent_job_id=job.id,
+            )
+            audit_log.append(str(job.id), "eval_fix_spawned",
+                             child_job_id=str(child.id), eval_round=eval_round)
+            await _set_task_status(job.task_id, "active")
+            await _notify_task(job.task_id, "progress",
+                               text=f"Evaluation found issues — fixing (round {eval_round}): {feedback[:400]}")
+        else:
+            await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
+            await _notify_task(job.task_id, "question",
+                               text=(f"Evaluation still failing after {eval_round} rounds:\n"
+                                     f"{feedback[:2000]}\n\nReply with guidance, or /clear to abandon."))
+        return
+
+    # Evaluator emitted neither event — defensive: hand to the user with its text
+    await _set_task_status(job.task_id, TaskStatus.pending_approval.value)
+    await _notify_task(job.task_id, "approval_request",
+                       text=summary or "Evaluator finished without a verdict.")
+
+
 async def _update_task_after_job(job: Job, result: dict | None) -> None:
     """After a job completes, update its parent task's state.
 
-    Scans the audit log for task_question or task_complete events to
-    determine whether the task needs user input, approval, or is done.
+    Scans the audit log for lifecycle events (task_plan / task_question /
+    task_choices / task_complete / eval_pass / eval_fail) to determine
+    whether the task needs planning fan-out, user input, evaluation, or is
+    done.
     """
     from src.models import Task, TaskTurn, TaskStatus
 
@@ -547,27 +766,13 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
     if not summary:
         summary = f"Job {str(job.id)[:8]} completed."
 
-    async with session_scope() as s:
-        # Get next turn number
-        from sqlalchemy import func as sqlfunc
-        max_turn = await s.execute(
-            select(sqlfunc.max(TaskTurn.turn_number))
-            .where(TaskTurn.task_id == job.task_id)
-        )
-        last = max_turn.scalar() or 0
+    await _record_task_turn(job.task_id, "assistant", summary, job_id=job.id)
 
-        s.add(TaskTurn(
-            task_id=job.task_id,
-            turn_number=last + 1,
-            role="assistant",
-            content=summary,
-            job_id=job.id,
-        ))
-
-    # Check audit log for task_question, task_choices, or task_complete events
+    # Scan audit log for lifecycle events
     events = audit_log.read(job.id)
     question = None
     choices_event = None
+    plan_event = None
     is_complete = False
     for evt in events:
         if evt.get("kind") == "task_choices":
@@ -576,6 +781,25 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             question = evt.get("question", "")
         elif evt.get("kind") == "task_complete":
             is_complete = True
+        elif evt.get("kind") == "task_plan":
+            plan_event = evt
+
+    payload = job.payload or {}
+    resolved = job.resolved_skill or job.kind or ""
+    is_plan_subtask = bool(payload.get("plan_subtask"))
+
+    # ── Planner output (P2) ─────────────────────────────────────────────
+    if plan_event is not None and resolved == "plan":
+        plan = plan_event.get("plan")
+        if isinstance(plan, dict):
+            await _handle_plan_event(job, plan)
+            return
+        # Malformed event → fall through to normal handling (summary shows it)
+
+    # ── Evaluator output (P3) ───────────────────────────────────────────
+    if resolved == "_evaluate":
+        await _handle_evaluator_result(job, summary, events)
+        return
 
     # Update task status
     if choices_event:
@@ -611,21 +835,45 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             }),
         )
     elif is_complete:
-        # task_complete = ALL work done. Go to pending_approval.
-        async with session_scope() as s:
-            await s.execute(
-                update(Task)
-                .where(Task.id == job.task_id)
-                .values(status=TaskStatus.pending_approval.value, updated_at=datetime.now(timezone.utc))
+        # task_complete = this job's work is done.
+        from src.runner import plans as plans_mod
+
+        # Plan subtasks: completion of ONE subtask isn't completion of the
+        # task — the DAG drains first (promotion happens in _process_job).
+        if is_plan_subtask:
+            remaining = await plans_mod.plan_jobs_remaining(job.task_id, exclude_job_id=job.id)
+            if remaining > 0:
+                await _notify_task(
+                    job.task_id, "progress",
+                    text=f"Subtask {payload.get('plan_subtask')} done — {remaining} still in flight.",
+                )
+                return
+
+        # All work done → acceptance evaluation (P3) or manual approval
+        already_eval_round = int(payload.get("eval_round", 0))
+        if settings.auto_evaluate:
+            await _enqueue_evaluator(job, summary, eval_round=already_eval_round + 1)
+        else:
+            await _set_task_status(job.task_id, TaskStatus.pending_approval.value)
+            await _notify_task(job.task_id, "approval_request", text=summary)
+    elif is_plan_subtask:
+        # Subtask ended without an explicit signal: never auto-continue these —
+        # their successors are already queued in the DAG. If the DAG drained,
+        # run the same completion path as task_complete.
+        from src.runner import plans as plans_mod
+        remaining = await plans_mod.plan_jobs_remaining(job.task_id, exclude_job_id=job.id)
+        if remaining > 0:
+            await _notify_task(
+                job.task_id, "progress",
+                text=f"Subtask {payload.get('plan_subtask')} finished — {remaining} still in flight.",
             )
-        await redis.publish(
-            "tasks:notify",
-            json.dumps({
-                "task_id": str(job.task_id),
-                "type": "approval_request",
-                "text": summary,
-            }),
-        )
+            return
+        already_eval_round = int(payload.get("eval_round", 0))
+        if settings.auto_evaluate:
+            await _enqueue_evaluator(job, summary, eval_round=already_eval_round + 1)
+        else:
+            await _set_task_status(job.task_id, TaskStatus.pending_approval.value)
+            await _notify_task(job.task_id, "approval_request", text=summary)
     else:
         # No explicit event emitted. Guard against infinite auto-continue loops:
         # Only stop when the job IS the sentinel message itself — the sentinel
