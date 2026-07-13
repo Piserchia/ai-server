@@ -418,6 +418,74 @@ escalation into `5f7d8f62` was a false positive._
 
 ---
 
+## Symptom: self-diagnose fires for `_evaluate` child of a successful `server-deploy` (exit 143)
+
+### Diagnostic
+
+Escalation L2 self-diagnose runs with description
+`Self-diagnose: job <id> (_evaluate) failed. Error: unknown`. The failed
+job's `kind` is `_evaluate`, `parent_job_id` points to a `god`/`task` job
+whose skill was `server-deploy` and whose summary contains phrases like
+"Runner restart is scheduled detached in ~20s". The audit log ends with 1–3
+tool_uses (typically reading SYSTEM.md and a `git log`) and then
+`job_failed` carrying `Command failed with exit code 143 (exit code: 143)`
+within 5–15 seconds of `job_started`. runner.err.log around the same
+timestamp shows
+`claude_agent_sdk._internal.query:Fatal error in message reader: Command
+failed with exit code 143` plus SQLAlchemy pool teardown errors ("attached
+to a different loop", "unknown protocol state 3") — the signature of an
+in-flight event loop being torn down by a process restart.
+
+### Root cause
+
+`server-deploy` schedules a detached self-restart (~20s after it returns)
+so the runner reloads new code. The runner marks the deploy task
+successful, then the acceptance evaluator (`_evaluate`) is enqueued as a
+child. The evaluator's Claude Agent SDK CLI subprocess is a grandchild of
+the runner. When the scheduled restart fires, the runner's process group
+is SIGTERM'd — killing the evaluator's CLI subprocess with exit 143. The
+failure path in `main.py` unconditionally spawns an L2 self-diagnose on
+the "failed" evaluator, producing this false positive.
+
+The parent deploy actually succeeded. No user-visible work was lost.
+
+### Fix
+
+**None required.** Close this diagnose job with a note. Verify the deploy
+worked (last commit SHA + healthcheck):
+
+```bash
+cd "/Users/alfredbot.ai.butler/Library/Application Support/ai-server" \
+  && git log --oneline -3 && curl -sf http://localhost:8081/health
+```
+
+If both look right, the deploy succeeded despite the evaluator's death.
+
+### Prevention (requires server-patch)
+
+1. In the L2 escalation path in `src/runner/main.py` (around L494–L500):
+   skip self-diagnose spawn when the failed job satisfies all of
+   (a) `kind == '_evaluate'`,
+   (b) `error_message` starts with `Command failed with exit code 143`,
+   (c) the parent job's skill is `server-deploy` (or any skill whose
+   post-hook triggers a runner restart).
+2. In `server-deploy`: delay the detached restart until after the
+   acceptance evaluator has drained, or run the deploy's restart in a
+   process group not shared with in-flight child evaluators. The clean
+   fix is to make `_evaluate` for `server-deploy` synchronous (run before
+   the restart schedule fires) rather than a post-hoc child.
+3. Longer-term: `_evaluate` for `server-deploy` is nearly redundant with
+   the pytest gate that `server-deploy` itself runs. Consider skipping
+   `_evaluate` when the parent skill already declared verified success in
+   its summary.
+
+_First occurrence 2026-07-13: job `1719a807` (_evaluate for parent
+`a07f46d7`, task "Deploy server"). Parent completed at 18:29:20; evaluator
+started same second, died 8s later at 18:29:28 — the runner's own
+scheduled restart landed inside the evaluator's session._
+
+---
+
 ## Symptom: self-diagnose fires for Telegram handler with error "boom"
 
 **Diagnostic**: incoming self-diagnose job description looks like
