@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-07-12 — launchd -15 exit codes with active PIDs are normal
+
+When `launchctl list` shows a last-exit code of `-15` (SIGTERM) alongside an active PID, this is **not** an anomaly. It means launchd sent SIGTERM to gracefully stop the previous instance before restarting it; the current process is running normally. Only treat a non-zero exit code as a crash indicator when column 1 (the PID) is `-`, meaning the process is not currently running. Flagging `-15` exits with active PIDs as anomalies during upkeep audits produces false positives.
+
+_Evidence: job `ace12d10`_
+
 ## 2026-07-10 — Next.js ISR routes need `dynamic='force-dynamic'` to avoid build-time pre-rendering
 
 Next.js will attempt to pre-render routes at build time by default, which fails for routes that depend on runtime data (e.g., database queries, environment-specific URLs). Adding `export const dynamic = 'force-dynamic'` at the top of the route file opts it out of static generation and ensures it renders on each request. This is especially common for API routes or pages that fetch from a database or external service. Without this export, the build may succeed but the deployed page will serve stale or broken HTML.
