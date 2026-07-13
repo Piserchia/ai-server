@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-07-11 — Runner auto-continue hijacks session without task_complete
+
+When the runner's auto-continue feature is enabled, it will resume a session by injecting a follow-up prompt ("Continue to the next phase of the plan.") even when the previous job never emitted a `task_complete` event. This causes the agent to re-enter an earlier plan phase, duplicate work, or make conflicting changes. The symptom is a job whose description is "Continue to the next phase of the plan." but whose audit log shows no `task_complete` in the preceding job. Fix: ensure every job that auto-continue may follow emits an explicit `task_complete` (or `task_stop`) before finishing; alternatively, gate auto-continue on the presence of that event in the prior job's audit log.
+
+_Evidence: job `21c216be`_
+
 ## 2026-07-11 — Runner silently skips task execution during rapid redeploy cycles
 
 When a new deployment lands while a task is already queued or in early execution, the runner may silently skip the task body — returning success with no output or side-effects. This happens because the runner's task dispatcher checks a "current deploy" version token at pickup time; if the token changed since enqueue, the task is dropped rather than retried. The symptom is a job that completes in under 5 seconds with no audit log entries beyond `task_start` and `task_end`. Fix: check `volumes/audit_log/<job_id>.jsonl` for missing intermediate events; if the gap between `task_start` and `task_end` is suspiciously short, a redeploy race is likely — re-submit the task after the deploy stabilises.

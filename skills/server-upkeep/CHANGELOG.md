@@ -1,3 +1,10 @@
+## 2026-07-12 — Routine upkeep run (anomalies: stale projects + review-and-improve never run)
+
+**Agent task**: daily server upkeep audit
+**Result**: 3 projects stale >24h (market-tracker ~3d, baseball-bingo ~2d, atlas ~2d). review-and-improve skill has never run. launchd -15 exit codes present but all processes have active PIDs — this is normal SIGTERM-from-prior-restart behavior, not a crash. Logs: nothing rotated/compressed/deleted. Audit index rebuilt (145 jobs). DB vacuum OK. Tunnel active (version outdated: 2026.3.0 → 2026.7.1). Disk 42%. Local backup fresh (19h). Off-site not configured. Writebacks 8/7d (normal). Restarts: false positives only (Vite startup lines in atlas log).
+
+---
+
 ## 2026-05-23 — Routine upkeep run (all clear)
 
 **Agent task**: daily server upkeep audit

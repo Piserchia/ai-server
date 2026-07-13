@@ -288,3 +288,4 @@ Logs rotated/compressed/deleted: N/N/N
 
 - `projects` table has no `status` column — the skill template query that selects `status` will fail. Use only `slug` and `last_healthy_at`.
 - Restart grep pattern ('Starting\|Restarting\|restarted') produces false positives: Telegram error messages contain "restarted" inline, and project startup logs contain "Starting". Count > 3 is not reliable; inspect actual matched lines before flagging.
+- launchd last-exit code -15 (SIGTERM) with an active PID is **not** an anomaly. It means the process was gracefully stopped and restarted by launchd; the current run is healthy. Only flag if there is no PID (column 1 = "-") AND a non-zero exit, which indicates a crash loop.
