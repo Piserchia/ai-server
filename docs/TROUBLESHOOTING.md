@@ -561,6 +561,54 @@ migrate them to `kind` whenever touched. Vague descriptions ("the pending
 instruction(s)") are prompt-injection surface for generic sessions: keep the actual
 instruction in the description.
 
+## Symptom: chrispiserchia.com landing page shows "Failed to load projects." (public API 502)
+
+### Diagnostic
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://chrispiserchia.com/api/projects/public   # 502
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/projects/public       # 000 → gateway down
+launchctl list | grep -E 'com.assistant.(web|runner|bot)$'   # PID column "-", status 0 → stopped, clean exit
+tail "/Users/alfredbot.ai.butler/Library/Application Support/ai-server/volumes/logs/runner.out.log"
+# → "shutdown signal received" as the last line, no startup after
+```
+
+The landing page's JS fetches `/api/projects/public`; any fetch failure renders the
+"Failed to load projects." tile. Caddy serving the static page (200) while `/api/*`
+502s means Caddy and the tunnel are fine and only the FastAPI gateway on :8080 is down.
+
+### Root cause
+
+The service plists use `KeepAlive: {SuccessfulExit: false, Crashed: true}` — launchd
+only restarts crashes. uvicorn, the runner, and the bot all trap SIGTERM and exit **0**,
+so anything that stops them gracefully (`launchctl unload`/`stop`, e.g. a re-run of
+`scripts/install-launchd.sh` whose subsequent `load -w` didn't relaunch the jobs)
+leaves them down permanently with a clean-looking status. First occurrence 2026-07-13
+09:30: an incident-cleanup session re-ran `install-launchd.sh`; all three core services
+stopped at 09:30:49 and stayed down ~4.5h until manually kickstarted.
+
+### Fix
+
+```bash
+UID_N=$(id -u)
+launchctl kickstart gui/$UID_N/com.assistant.web
+launchctl kickstart gui/$UID_N/com.assistant.runner
+launchctl kickstart gui/$UID_N/com.assistant.bot
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/health   # expect 200
+```
+
+(Safe synchronously from a dev-machine shell; from **inside** a runner job the runner
+kickstart must be detached — see `skills/server-deploy/SKILL.md`.)
+
+### Prevention
+
+After any `install-launchd.sh` run or manual unload/stop, verify with
+`launchctl list | grep com.assistant` that web/runner/bot have PIDs, and hit
+`http://localhost:8080/health`. Prefer `launchctl kickstart -k` for restarts —
+it never leaves the job in the stopped-but-loaded state. The external heartbeat
+worker (`ops/heartbeat-worker/`) alerts on `/health` going dark; if you got that
+alert plus a "Failed to load projects" page, start here.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
