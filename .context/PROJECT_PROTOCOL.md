@@ -125,6 +125,44 @@ and leave it for a `server-patch` job.
 
 ---
 
+## Phase 4: Commit and push (gated)
+
+Every project push follows the same gates as the server repo (CLAUDE.md
+§ Git push gates). Project-scoped specifics:
+
+### 4.0 Topology check (BEFORE any git command)
+
+Re-check the project's CLAUDE.md for a deployment-topology/single-writer
+rule. Dev-repo projects (e.g. atlas): commits are born in the dev repo
+elsewhere on the machine — NEVER commit or push in `projects/<slug>`
+(a runtime-born commit blocks every future deploy; incident 2026-07-09).
+
+### 4.1 Gates before commit
+
+- Skill verify steps green: tests (if `test_command` declared), healthcheck,
+  and a probe showing the NEW behavior (a green healthcheck serving the old
+  behavior is a FAIL — stale-bundle incident 2026-07-10)
+- No secrets in the diff
+- Phase 3 write-back done (CHANGELOG at minimum)
+
+### 4.2 Commit and push
+
+```bash
+cd <project root>          # your cwd — never the ai-server root
+git add -A
+git commit -m "<concise subject>"
+git fetch origin && git pull --rebase origin main
+git push origin main
+```
+
+### 4.3 If the push is rejected
+
+Rebase once, re-run the quick verify, retry once. Still rejected → STOP:
+report `git log --oneline origin/main..HEAD` and `HEAD..origin/main` in
+your summary and do NOT force-push. Divergence is a human decision.
+
+---
+
 ## Quality standards
 
 ### CHANGELOG entries must include:

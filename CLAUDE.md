@@ -76,6 +76,31 @@ mandatory). sync-learnings also auto-publishes any stray prod commits to
 merge origin/main` before starting server work and before pushing** — god
 sessions and the learning sync land commits on GitHub between your pushes.
 
+## Git push gates (every session, every push)
+
+Run this procedure for ANY push from ANY checkout. No step is optional.
+
+1. **Gate before commit**: the skill's verify steps are green (tests,
+   healthcheck, behavior probe — red never gets committed), no secrets in
+   the diff (`git diff | grep -iE 'api[_-]?key|token|secret|password'`),
+   CHANGELOG updated (the pre-commit hook enforces this for `src/`).
+2. **Sync before push**: `git fetch origin` and merge/rebase onto the
+   target branch BEFORE pushing. Remote main moves between your pushes
+   (god sessions, sync-learnings, other jobs).
+3. **Rejected push**: fetch, integrate (`git pull --rebase origin <branch>`
+   in projects; `git merge origin/main` in the server repo), re-run the
+   gates, retry ONCE. Still failing → STOP and report the divergence with
+   `git log --oneline origin/<branch>..HEAD` and the reverse. Divergence is
+   a finding for a human, never an obstacle to bulldoze.
+4. **Never**: force-push, rewrite pushed history, `git reset --hard`
+   without first parking HEAD on a rescue branch, or push to a checkout's
+   main from PRODUCTION (pre-commit guard enforces; god break-glass
+   bypass requires same-session push — see `skills/god/SKILL.md`).
+5. **Where pushes go**: dev server repo → `origin main` after gates.
+   Workspace clones → exactly what the skill instructs (the canonical is
+   ff-synced automatically after your push). Dev-repo-topology projects
+   (e.g. atlas) → their dev repo only, never the runtime clone.
+
 ## Hard rules
 
 - **Never modify `.context/PROTOCOL.md`** without an explicit human request.

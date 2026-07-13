@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — Push gates injected into workspace directives
+
+**Files changed**: `src/runner/session.py` — both workspace directive
+variants (project + server) now carry the push-gate procedure inline:
+verify-before-commit, fetch+rebase-before-push, retry-once-then-report,
+never force-push. Needed because isolated project sessions load the
+PROJECT's CLAUDE.md (not the server's), so the gates must arrive via the
+injected directive. Companion doc changes: CLAUDE.md § Git push gates
+(server sessions) and PROJECT_PROTOCOL.md Phase 4 (project sessions).
+
+**Why**: today's incidents were both push-procedure failures (unpushed prod
+commit; dev push without pull). Convention → enforced procedure in every
+surface a session reads.
+
 ## 2026-07-12 — P4: hygiene — silent excepts now log
 
 **Files changed**: `src/runner/session.py` (`_publish_stream` debug-logs,

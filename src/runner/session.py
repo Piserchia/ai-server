@@ -112,6 +112,12 @@ def _build_server_directive(
                 "instructed (`git push origin <branch>` from your cwd) — the "
                 "canonical checkout is fast-forwarded automatically after your "
                 "push. Do NOT try to edit the canonical checkout directly.\n"
+                "**Push gates**: verify before committing (tests/healthcheck/"
+                "behavior probe green, no secrets in the diff, CHANGELOG "
+                "updated); `git fetch origin && git pull --rebase origin "
+                "<branch>` before pushing. Rejected push → rebase, re-verify, "
+                "retry ONCE; still failing → report the divergence in your "
+                "summary. NEVER force-push.\n"
             )
     else:
         # Server-scoped: full directive
@@ -132,6 +138,10 @@ def _build_server_directive(
                 "— server code lands via PR + deploy, never by editing the live "
                 "checkout. The server's context docs are readable at "
                 f"`{ctx_root}/`.\n"
+                "**Push gates**: pytest green before committing (red never gets "
+                "pushed), no secrets in the diff, CHANGELOG updated. Rejected "
+                "push → fetch + rebase your branch, retry ONCE; still failing → "
+                "report. NEVER force-push, never push to main from here.\n"
             )
 
         # Graph-walked context injection (Rec 4): if the job description
