@@ -41,6 +41,26 @@ ALLOWLIST=(
     "docs/TROUBLESHOOTING.md"
 )
 
+# ── Stray-commit safety net ─────────────────────────────────────────────
+# A session that COMMITS on prod main (instead of leaving doc drift
+# uncommitted) would break the next ff-only deploy. Detect commits ahead
+# of origin/main and publish them to a rescue branch so nothing is ever
+# stranded and deploys keep working after a reset. (Failure class of
+# 2026-07-12, commit 7e22db9.)
+git fetch origin main 2>/dev/null || true
+ahead=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+if [ "$ahead" -gt 0 ]; then
+    RESCUE="runtime-rescue-auto"
+    echo "sync-learnings: WARNING — $ahead unpushed commit(s) on prod main:"
+    git log --oneline origin/main..HEAD | sed 's/^/  /'
+    if [ "$DRY_RUN" != "--dry-run" ]; then
+        git push origin "HEAD:refs/heads/$RESCUE" --force-with-lease 2>/dev/null \
+          || git push origin "HEAD:refs/heads/$RESCUE" 2>/dev/null || true
+        echo "sync-learnings: published to origin/$RESCUE — merge from dev, then"
+        echo "  reset prod: git reset --hard origin/main (after the merge deploys)."
+    fi
+fi
+
 # Collect changed tracked files matching the allowlist (modified only —
 # untracked skill dirs come through new-skill's own commit path).
 changed=$(git diff --name-only -- "${ALLOWLIST[@]}" || true)

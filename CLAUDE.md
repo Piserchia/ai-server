@@ -68,6 +68,14 @@ Deploy path: dev commit → `origin/main` → `/task deploy server` (skill
 path: prod session writes docs → sync-learnings → `origin/runtime-learnings`
 → merged into main from dev.
 
+Enforcement (2026-07-12): production has a pre-commit guard blocking main
+commits (`scripts/install-prod-hooks.sh`, re-armed on every deploy; god
+break-glass bypass documented in its SKILL.md — push-in-same-session
+mandatory). sync-learnings also auto-publishes any stray prod commits to
+`origin/runtime-rescue-auto`. Dev-side rule: **`git fetch origin && git
+merge origin/main` before starting server work and before pushing** — god
+sessions and the learning sync land commits on GitHub between your pushes.
+
 ## Hard rules
 
 - **Never modify `.context/PROTOCOL.md`** without an explicit human request.

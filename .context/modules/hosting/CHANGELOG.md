@@ -2,6 +2,31 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-12 — Commit-topology enforcement (post-incident hardening)
+
+**Files changed**:
+- `scripts/install-prod-hooks.sh` (new) — installs a pre-commit guard in the
+  PRODUCTION checkout that blocks commits on main (path-gated so dev/copies
+  are never affected). Bypass: `AI_SERVER_ALLOW_MAIN_COMMIT=1` (god
+  break-glass; push-in-same-session mandatory per god SKILL.md).
+- `scripts/sync-learnings.sh` — stray-commit safety net: unpushed commits on
+  prod main are auto-published to `origin/runtime-rescue-auto` with loud
+  guidance, so a stray commit can never strand work or block deploys again.
+- `skills/server-deploy/SKILL.md` — step 2 re-arms the hooks every deploy
+  (hooks are untracked, so this keeps them self-healing).
+- `skills/god/SKILL.md` — "Committing from the host lane" section: doc
+  learnings stay uncommitted; emergency code commits require immediate push.
+- `CLAUDE.md` — enforcement paragraph + dev-side fetch-before-work rule.
+
+**Why**: same-day incident — prod held one unpushed commit (`7e22db9`),
+blocking the first ff-only deploy; separately dev's push was rejected because
+GitHub main had moved (07-10 remediation wave). Both failure classes now have
+structural enforcement, not just convention.
+
+**How to verify**: in prod, `git commit` on main → blocked with guidance;
+`bash scripts/sync-learnings.sh --dry-run` with a synthetic local commit
+reports it; dev `git fetch && git merge origin/main` before push.
+
 ## 2026-07-12 — P0: sync-learnings script + launchd timer, server-deploy skill
 
 **Files changed**:

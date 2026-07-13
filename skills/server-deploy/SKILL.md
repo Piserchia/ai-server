@@ -61,14 +61,15 @@ git log --oneline "$BEFORE..$AFTER"
   copy was already published to `runtime-learnings` in step 0, so nothing
   is lost. Note it in the summary.
 
-### 2. Dependencies + migrations
+### 2. Dependencies + migrations + hooks
 
 ```bash
 cd "$SRV"
 if git diff --name-only "$BEFORE..$AFTER" | grep -q '^Pipfile'; then
   pipenv install --deploy
 fi
-pipenv run alembic upgrade head    # idempotent
+pipenv run alembic upgrade head            # idempotent
+bash scripts/install-prod-hooks.sh          # re-arm the main-commit guard (hooks are untracked)
 ```
 
 ### 3. Test gate (the deploy gate)

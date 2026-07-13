@@ -88,6 +88,22 @@ But be aware: restarting the runner kills your own session if you ARE
 the runner. If you need to restart the runner, make it your LAST action
 and emit `task_complete` first.
 
+## Committing from the host lane (single-writer rule)
+
+You run in the PRODUCTION checkout, which is a pull-only deploy target. A
+pre-commit guard blocks commits on main here. The rules:
+
+- **Doc learnings** (GOTCHAS/CHANGELOG/Troubleshooting entries): write the
+  file and LEAVE IT UNCOMMITTED. The hourly sync-learnings timer publishes
+  it to `origin/runtime-learnings`. Never commit these.
+- **Emergency server-code fix** (the reason your lane exists): bypass the
+  guard with `AI_SERVER_ALLOW_MAIN_COMMIT=1 git commit ...` — and then
+  **`git push origin main` in the SAME session, no exceptions**. An
+  unpushed prod commit blocks every future deploy (incident 2026-07-12,
+  commit 7e22db9). If the push fails, say so loudly in your summary.
+- Prefer the dev repo (`~/Documents/repos/ai-server`) + `server-deploy`
+  for anything that can wait ten minutes.
+
 ## Gotchas
 
 - You ARE running inside the runner process. Restarting it kills you.
@@ -95,4 +111,5 @@ and emit `task_complete` first.
 - `projects/` directories are separate git repos. Don't run git from
   ai-server root for project changes.
 - `ANTHROPIC_API_KEY` must never be set in the environment.
-- The pre-commit hook requires CHANGELOG updates when `src/` changes.
+- The pre-commit hook requires CHANGELOG updates when `src/` changes (dev),
+  and blocks main commits outright in production (see above).
