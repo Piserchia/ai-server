@@ -2,7 +2,8 @@
 Route a free-form description to a skill. Rules first (instant, free); LLM
 fallback via `runner.llm_router.llm_route` (Haiku, 1 turn) for ambiguous
 inputs — wired in `session._resolve_skill` (P2; the fallback this docstring
-promised since Phase 4 now actually exists).
+promised since Phase 4 now actually exists — origin's 07-10 docstring fix
+documented its absence, superseded by this implementation).
 
 Keep rules narrow and honest. When a rule doesn't match confidently, fall
 through to None; the caller then tries the LLM fallback and finally runs a

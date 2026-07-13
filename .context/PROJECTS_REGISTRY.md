@@ -14,7 +14,7 @@
 | `baseball-bingo` | service | `bingo.chrispiserchia.com` (:8790) | iOS | native-web | `github.com/Piserchia/baseball-bingo` | 3 |
 | `market-tracker` | **RETIRED** | ~~`market-tracker.chrispiserchia.com`~~ | — | — | `github.com/Piserchia/market-tracker` (archived) | — |
 | `atlas` | service | `atlas.chrispiserchia.com` (:8791, CF Access gated) | web | native-web | `~/Documents/repos/atlas` (local, GitHub pending) | — |
-| `research` | content | (not hosted) | — | — | this repo (`projects/research/`) | 2 |
+| `research` | content | (not hosted) | — | — | this repo (`projects/research/`) | 2 | (not yet bootstrapped — no schedule; see T13 in remediation plan) |
 | `research-deep` | content | (not hosted) | — | — | this repo (`projects/research-deep/`) | 6 |
 | `ideas` | content | (not hosted) | — | — | this repo (`projects/ideas/`) | 6 |
 

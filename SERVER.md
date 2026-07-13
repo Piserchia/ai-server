@@ -36,7 +36,7 @@ Subscription only. `claude login` once, bundled CLI handles the rest. `ANTHROPIC
 - Global default: **Sonnet 4.6**.
 - Skills override per-skill via YAML frontmatter in `SKILL.md`.
 - Escalation rules (in frontmatter) promote to **Opus 4.7** on failure.
-- Routing uses rule-based matcher first (`src/runner/router.py`), Haiku-based `route` skill only as fallback.
+- Routing is rule-based (`src/runner/router.py`); unmatched descriptions run as generic tasks.
 
 ## Concurrency
 

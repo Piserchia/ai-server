@@ -21,7 +21,7 @@ context_files:
   - ".context/modules/db/CONTEXT.md"
   - ".context/modules/hosting/CONTEXT.md"
   - ".context/modules/registry/CONTEXT.md"
-  - "docs/Troubleshooting.md"
+  - "docs/TROUBLESHOOTING.md"
 ---
 
 # God Mode

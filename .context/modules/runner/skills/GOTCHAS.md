@@ -14,6 +14,70 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-07-11 — Runner silently skips task execution during rapid redeploy cycles
+
+When a new deployment lands while a task is already queued or in early execution, the runner may silently skip the task body — returning success with no output or side-effects. This happens because the runner's task dispatcher checks a "current deploy" version token at pickup time; if the token changed since enqueue, the task is dropped rather than retried. The symptom is a job that completes in under 5 seconds with no audit log entries beyond `task_start` and `task_end`. Fix: check `volumes/audit_log/<job_id>.jsonl` for missing intermediate events; if the gap between `task_start` and `task_end` is suspiciously short, a redeploy race is likely — re-submit the task after the deploy stabilises.
+
+_Evidence: job `0651defb`_
+
+## 2026-07-11 — Brainstorming clarifying questions get "Continue to next phase" hijacked
+
+**Symptom**: User submits a task ("update baseball bingo to use lineup agent"), it
+completes in ~51 seconds with no actual code changes, then a follow-up
+auto-continued job silently works on a **completely unrelated plan** — usually
+whatever plan is referenced in `MEMORY.md`. The task lands in `pending_approval`
+with a summary that reads plausible but is about the wrong project. User
+approves it. Nothing shipped.
+
+**Root cause (two-part defect)**:
+
+1. **`superpowers:brainstorming` skill asks a clarifying question and ends the
+   turn without emitting a `task_question` audit event.** The runner's
+   `_update_task_after_job` scans for `task_question | task_choices |
+   task_complete` — sees none — and falls through to the *auto-continue* branch
+   (main.py L676-L709). The task never enters `awaiting_user`, so the user
+   never gets prompted to answer the clarifying question.
+
+2. **The auto-continue sentinel is a fixed literal string** ("Continue to the
+   next phase of the plan.") with no task context attached. When the next job
+   fires, it reads `MEMORY.md`, `.context/INDEX.md`, and any plan documents,
+   picks the most recently-touched plan (e.g. `docs/superpowers/plans/2026-07-10-eval-remediation.md`),
+   and continues *that*. The bingo task, atlas task, or whatever the user
+   actually asked for is silently swapped out.
+
+**Evidence — 2026-07-11 baseball bingo**:
+- Task `b59375a8` — user: "update and redeploy the baseball bingo generator to
+  use an agent to pull lineup data".
+- Job `137c27eb` — ran brainstorming, asked "Claude AI agent vs. data-fetching
+  agent?", ended at 51s. Zero `task_question` events in audit log.
+- Auto-continue `1681307a` — description "Continue to the next phase of the
+  plan." — worked on the **eval-remediation Wave 1 PR (T4–T9)** instead. The
+  bingo `.py` files were never opened, no commit on `projects/baseball-bingo`.
+- Task marked `pending_approval`, user approved thinking bingo shipped, but
+  `git log projects/baseball-bingo` stops at commit `699f427` (an earlier
+  session's expand-event-pool work).
+
+**Fix** (both required):
+
+1. In `superpowers:brainstorming`, emit `task_question` (or `task_choices`)
+   via the audit log immediately before asking a clarifying question. Then the
+   task hits `awaiting_user` and the user's follow-up message routes back as a
+   turn in the same task, not a fresh one.
+
+2. In `_update_task_after_job` (runner/main.py L676), when auto-continuing,
+   append the original task description to the sentinel (e.g. `"Continue to
+   the next phase of the plan. Original task: <task.description>"`) — or
+   better, pull the task's turn history into the continuation job's payload so
+   the next session actually has the context.
+
+**Sibling entry** — see the two `2026-07-09` entries below. Those are earlier
+manifestations of the same defect family ("silent auto-continue loop"); this
+2026-07-11 entry is the **task-hijack** variant where the loop *does* make
+progress, just on the wrong plan.
+
+_Evidence: tasks `b59375a8` (bingo) and `3bfb65aa` (bingo); jobs `137c27eb`,
+`1681307a`, `2867bcd7`._
+
 ## 2026-07-09 — Missing task_complete signal causes silent auto-continue loop
 
 When a job finishes its work but never emits a `task_complete` signal, the runner does not mark the job as done and instead re-enters the auto-continue handler on each polling cycle. This produces a silent loop that consumes turns without any visible error. Always ensure every code path in a skill or job handler reaches a `task_complete` (or equivalent terminal signal) before returning, and check the audit log for repeated `auto-continue` entries if a job appears to hang or spin.

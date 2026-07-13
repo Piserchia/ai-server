@@ -10,7 +10,7 @@ escalation:
   on_failure:
     model: claude-opus-4-7
     effort: xhigh
-context_files: ["docs/Troubleshooting.md"]
+context_files: ["docs/TROUBLESHOOTING.md"]
 tags: [meta, recovery, event-triggered, needs-projects-mcp, needs-dispatch-mcp]
 ---
 
@@ -65,7 +65,7 @@ Collect information systematically. Read at least 3 of these sources:
 - Check process status: `launchctl list | grep com.assistant`
 - Check DB connectivity: `psql assistant -c "SELECT 1;"`
 - Check Redis: `redis-cli ping`
-- Read `docs/Troubleshooting.md` for known failure patterns
+- Read `docs/TROUBLESHOOTING.md` for known failure patterns
 
 ### 2. Identify root cause
 
@@ -131,7 +131,7 @@ Classify the fix into one of these risk tiers:
 ### 5. Record findings
 
 If you discovered something non-obvious, append to the relevant file:
-- Server issues → `docs/Troubleshooting.md` (new symptom section)
+- Server issues → `docs/TROUBLESHOOTING.md` (new symptom section)
 - Project issues → `projects/<slug>/.context/skills/GOTCHAS.md` (create if needed)
 - Skill issues → `skills/<name>/SKILL.md` Gotchas section (append)
 

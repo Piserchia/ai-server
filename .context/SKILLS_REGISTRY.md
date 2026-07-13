@@ -15,7 +15,6 @@
 | `new-skill` | Opus 4.7 / high | Meta-skill: author new skills from natural-language descriptions | 4 |
 | `project-evaluate` | Opus 4.7 / high | Read a project codebase and produce manifest.yml + standard .context/CONTEXT.md | 4 |
 | `new-project` | Opus 4.7 / high (two-phase: plan arch then implement) | Scaffold, document, deploy, and register a new project | 4 |
-
 | `self-diagnose` | Opus 4.7 / high | Investigate failures + apply fixes based on risk classification | 4 |
 | `server-upkeep` | Sonnet 4.6 / low (→ Sonnet 4.6 / medium on failure) | Daily health audit: rotate logs, VACUUM DB, check project status, DM anomalies only | 5 |
 | `server-patch` | Opus 4.7 / xhigh (post-review always, manual merge) | Modify server code (src/, scripts/, alembic/). Always PR-gated, never auto-merged | 5 |

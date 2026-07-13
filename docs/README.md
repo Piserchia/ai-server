@@ -10,6 +10,11 @@ session picking up work on this repo, or a human returning after a break.
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Failure-mode-first debugging guide | **Always** when something's broken |
 | [`AUDIT_2026-07-12.md`](AUDIT_2026-07-12.md) | Full-system audit vs the four mission directives + P0–P4 remediation (implemented same day — see its status table) | Understanding why isolation/plan/evaluate exist |
 | [`CONTAINERS.md`](CONTAINERS.md) | Isolation tiers + container lane setup (colima, setup-token, agent image) | Enabling `isolation: container`; debugging executor downgrades |
+| [`EVALUATION_2026-04-18.md`](EVALUATION_2026-04-18.md) | Architecture evaluation (April 2026) | Planning improvement work |
+| [`EVALUATION_2026-07-10.md`](EVALUATION_2026-07-10.md) | Runtime audit: loop defects, cleanup, subagent suite + task table (July 2026) | Before any reliability/cleanup work |
+| [`EVALUATION_2026-07-10-atlas.md`](EVALUATION_2026-07-10-atlas.md) | Atlas deep-dive: doc verdicts, contract check, ops (July 2026) | Working on atlas |
+| [`superpowers/plans/2026-07-10-eval-remediation.md`](superpowers/plans/2026-07-10-eval-remediation.md) | Executable remediation plan T1–T17 (July 2026) | Executing planned work |
+| [`superpowers/plans/`](superpowers/plans/) | All executable task-by-task implementation plans | Executing planned work |
 | [`PHASE_3_PLAN.md`](PHASE_3_PLAN.md) | Domain + tunnel + Caddy + bingo + market-tracker | **SHIPPED** — historical reference |
 | [`PHASE_4_PLAN.md`](PHASE_4_PLAN.md) | Expansion skills + MCP servers + event triggers | **SHIPPED** — historical reference |
 | [`PHASE_5_PLAN.md`](PHASE_5_PLAN.md) | Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** — historical reference |
@@ -29,7 +34,9 @@ session picking up work on this repo, or a human returning after a break.
 **If you're working on system improvements (post-phase era):**
 
 All 6 phases are shipped. Improvements are now tracked in
-`docs/EVALUATION_2026-04-18.md` (15 recommendations, 14 shipped, 1 deferred).
+`docs/EVALUATION_2026-04-18.md` (15 recommendations, 14 shipped, 1 deferred)
+and `docs/EVALUATION_2026-07-10.md` (runtime audit, tasks T1–T17; executable
+plan in `docs/superpowers/plans/2026-07-10-eval-remediation.md`).
 
 1. Read `../MISSION.md` — stay oriented on objectives
 2. Read `../CLAUDE.md` and `../SERVER.md` — current state of the repo

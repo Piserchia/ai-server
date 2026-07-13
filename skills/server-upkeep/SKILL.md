@@ -148,7 +148,41 @@ while rclone *is* configured), flag as an anomaly — off-site replication is
 broken even though local backups may be fine. `offsite-not-configured` is not an
 anomaly (the human hasn't set up R2 yet); note it once and move on.
 
-### 8c. Workspace hygiene (P1)
+### 8c. Local backup freshness
+
+```bash
+newest=$(ls -t volumes/backups/backup-*.tar.gz 2>/dev/null | head -1)
+if [ -z "$newest" ]; then echo "NO LOCAL BACKUPS"; else
+  echo "$newest age_hours=$(( ($(date +%s) - $(stat -f %m "$newest")) / 3600 ))"
+fi
+```
+
+Anomaly if no backup exists or the newest is older than 26 hours. (The 04:00
+timer failed silently with exit 127 for three months once — this check is the
+reason that can't recur. EVALUATION_2026-07-10 §3.7.)
+
+### 8d. launchd last-exit sweep
+
+```bash
+launchctl list | awk '$3 ~ /^com\.assistant\./ && $2 != 0 && $2 != "-" {print $3, "last_exit=" $2}'
+```
+
+Any output = anomaly (a supervised job is failing between healthchecks).
+
+### 8e. Feedback-loop liveness
+
+```bash
+psql assistant -c "SELECT max(completed_at) FROM jobs WHERE resolved_skill='review-and-improve' AND status='completed';"
+psql assistant -c "SELECT count(*) FILTER (WHERE review_outcome IS NOT NULL) AS reviewed, count(*) AS total
+  FROM jobs WHERE resolved_skill IN ('app-patch','new-project','server-patch','new-skill')
+  AND status='completed' AND created_at > now() - interval '7 days';"
+```
+
+Anomalies: last review-and-improve completion > 7 days ago (or never);
+`total > 0` with `reviewed = 0` (post-review not stamping — the §3.3 failure
+mode). A broken loop cannot report itself; this step is its external monitor.
+
+### 8f. Workspace hygiene (P1)
 
 Failed jobs keep their per-job workspace clones for debugging. Prune old ones:
 
@@ -164,7 +198,7 @@ du -sh volumes/workspaces/ 2>/dev/null || echo "no workspaces dir"
 If `volumes/workspaces/` exceeds 5 GB after pruning, flag as anomaly (a
 runaway clone loop or giant repo).
 
-### 8d. Container lane health (P1 — skip cleanly if not configured)
+### 8g. Container lane health (P1 — skip cleanly if not configured)
 
 ```bash
 if [ -n "$CONTAINER_RUNTIME" ] && command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1; then
@@ -199,6 +233,10 @@ these conditions is true:
 - Tunnel is down or unhealthy (from step 4)
 - DB maintenance failed (from step 3)
 - Off-site backup stale > 48h while rclone is configured (from step 8b)
+- Local backup missing or older than 26 hours (from step 8c)
+- Any launchd com.assistant.* job with non-zero last exit (from step 8d)
+- review-and-improve last ran > 7 days ago (or never) (from step 8e)
+- Productive skill jobs (app-patch/new-project/server-patch/new-skill) completed with zero post-reviews in last 7 days (from step 8e)
 - Any other genuinely unexpected error during the audit
 
 **Sunday override**: If today is Sunday, always produce a summary even if
@@ -224,6 +262,9 @@ Disk: XX% used
 Tunnel: healthy | DOWN
 DB vacuum: OK | FAILED
 Off-site backup: fresh (<age>) | STALE >48h | not configured
+Local backup: fresh (<age>h) | MISSING/STALE
+launchd: clean | <labels with non-zero exits>
+Loops: review-and-improve <age since last run>, post-review <reviewed>/<total> last 7d
 Projects stale >24h: none | <list>
 Restarts today: N
 Writebacks (7d): N (N/day avg)
