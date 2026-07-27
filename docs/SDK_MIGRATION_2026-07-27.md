@@ -87,6 +87,12 @@ tracked in SYSTEM.md § technical debt.
   (`effort/agents/hooks/sandbox/output_format/RateLimitEvent`) → pytest →
   live smoke.
 - **Seatbelt sandbox per-skill** (see trade-off above).
-- **Pipfile.lock refresh** beyond the SDK (April-era lock; unrelated pins).
+- **Pipfile.lock is untracked by design** (.gitignore) — each checkout
+  resolves its own. The deploy skill's dependency step now triggers on
+  `pyproject.toml` changes too and does `pipenv lock && pipenv sync`
+  (previously it watched only `Pipfile`, so pyproject dep bumps never
+  installed on prod — this change's SDK floor would have crash-looped the
+  runner on an old SDK missing `RateLimitEvent`). Whether to start tracking
+  the lock belongs to the upcoming deployment-process discussion.
 - **Deployment/update process for sub-projects** — next conversation per the
   owner.

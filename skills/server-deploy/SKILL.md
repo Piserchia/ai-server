@@ -65,8 +65,14 @@ git log --oneline "$BEFORE..$AFTER"
 
 ```bash
 cd "$SRV"
-if git diff --name-only "$BEFORE..$AFTER" | grep -q '^Pipfile'; then
-  pipenv install --deploy
+if git diff --name-only "$BEFORE..$AFTER" | grep -qE '^(Pipfile|pyproject\.toml)'; then
+  pipenv lock     # Pipfile.lock is untracked and per-checkout; server deps
+  pipenv sync     # live in pyproject (behind the editable install), which
+                  # Pipfile's hash never sees — so re-resolve, then install
+                  # exactly the fresh lock. The pytest gate below catches a
+                  # bad resolve before anything restarts. (2026-07-27: this
+                  # previously watched only Pipfile, so pyproject dep bumps —
+                  # e.g. the claude-agent-sdk floor — silently never installed.)
 fi
 pipenv run alembic upgrade head            # idempotent
 bash scripts/install-prod-hooks.sh          # re-arm the main-commit guard (hooks are untracked)
