@@ -7,7 +7,7 @@ Usage:
     python scripts/lint-docs.py          # prints report, exit 0 if clean
     pipenv run pytest tests/test_doc_lint.py  # same checks as pytest tests
 
-Checks (9):
+Checks (10):
 1. Every skill directory has a row in SKILLS_REGISTRY.md
 2. Every project directory has a row in PROJECTS_REGISTRY.md
 3. Every src/runner/*.py file is mentioned in runner CONTEXT.md
@@ -16,7 +16,8 @@ Checks (9):
 6. Declared module graph deps match actual imports (AST-parsed)
 7. Every skill's context_files reference real files
 8. Non-internal skills have required body sections (Gotchas, min body length)
-9. Skill `isolation` frontmatter values are valid tiers (P1)
+9. Skill `isolation` frontmatter values are valid tiers
+10. Every project manifest's delivery contract parses + validates
 """
 
 from __future__ import annotations
@@ -294,6 +295,32 @@ def check_isolation_values() -> list[str]:
     return warnings
 
 
+def check_delivery_contracts() -> list[str]:
+    """Every project manifest.yml must parse AND its delivery contract must be
+    internally valid (topology/autonomy enums, dev-repo requires dev_repo +
+    pull-only, deployable requires gates). Catches a broken delivery block at
+    lint time instead of when the runner tries to scope/deploy the project.
+
+    Filesystem existence of a dev_repo is intentionally NOT checked — that is
+    machine-specific (a fresh checkout has no dev repos) and belongs to the
+    runtime, not doc-lint."""
+    from src.registry.manifest import ManifestError, load
+
+    warnings: list[str] = []
+    projects_dir = REPO_ROOT / "projects"
+    if not projects_dir.exists():
+        return warnings
+    for child in sorted(projects_dir.iterdir()):
+        manifest = child / "manifest.yml"
+        if not manifest.exists():
+            continue
+        try:
+            load(manifest)
+        except (ManifestError, TypeError, ValueError) as exc:
+            warnings.append(f"Project `{child.name}` manifest invalid: {exc}")
+    return warnings
+
+
 def check_skill_sections() -> list[str]:
     """Validate that non-internal skills have required body sections.
 
@@ -353,6 +380,7 @@ def run_all() -> dict[str, list[str]]:
         "context_files_exist": check_context_files_exist(),
         "skill_sections": check_skill_sections(),
         "isolation_values": check_isolation_values(),
+        "delivery_contracts": check_delivery_contracts(),
     }
 
 

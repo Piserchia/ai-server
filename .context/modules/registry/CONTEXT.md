@@ -28,10 +28,25 @@ Parsers for the two pieces of external declarative configuration:
 
 ### manifest
 
-- `load(path) -> Manifest` — load + validate; raises `ManifestError` on invalid
+- `load(path) -> Manifest` — load + validate; raises `ManifestError` on invalid.
+  `Manifest.from_dict` tolerates unknown top-level keys (mission, platforms,
+  web_strategy, env_required, services …) — before 2026-07-27 the loader did
+  `Manifest(**data)` and TypeError'd on every live manifest (all carry extras),
+  so the Python loader was dead; `load_all` now also catches TypeError.
 - `load_all() -> list[Manifest]` — all projects, malformed ones skipped with a warning
 - `Manifest` dataclass — slug, name, type, subdomain, port, healthcheck,
-  start_command, env, on_update, git, dependencies
+  start_command, env, on_update, git, **delivery**, dependencies
+- `Delivery` / `DeployPolicy` / `DeployGate` dataclasses — the machine-readable
+  delivery contract (2026-07-27). `topology` (dev-repo|in-place|content),
+  `dev_repo`, `runtime_clone` (pull-only|writable), `deployable`, and
+  `deploy` (skill, autonomy gated-auto|human-approval|manual-only, ordered
+  gates, services, migrate). A manifest with no `delivery` block DERIVES a
+  legacy-preserving default (in-place/writable; deployable only if a
+  healthcheck exists to serve as the implicit gate) so runner enforcement is
+  strictly opt-in per project. `Delivery.validate` enforces: dev-repo requires
+  `dev_repo` + pull-only; content can't be deployable; deployable requires a
+  gate. Consumed by `runner.session` (cwd scoping), the project guard
+  (pull-only writes), the deploy-authority gate, and `project-redeploy`.
 
 ## Dependencies
 

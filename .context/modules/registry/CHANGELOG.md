@@ -2,6 +2,31 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-27 — Delivery contract in manifest.yml (project segregation Phase A)
+
+**Files changed**: `src/registry/manifest.py` — new `Delivery` / `DeployPolicy`
+/ `DeployGate` dataclasses + enums (topology, runtime_clone, autonomy, gate
+kinds); `Manifest.delivery` field; `Manifest.from_dict` classmethod that
+FILTERS unknown top-level keys instead of passing them to `__init__`.
+`scripts/lint_docs.py` — `check_delivery_contracts()` (10th check).
+`tests/test_manifest.py` (new, 15), `tests/test_doc_lint.py` (+1).
+
+**Why**: project delivery was prose-only (atlas's single-writer rule lived in
+its CLAUDE.md; `app-patch` STEP 0 asked an LLM to notice it). The delivery
+block is the machine-readable contract the runner will enforce structurally
+(Phase B). See `docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`.
+
+**Bug fixed**: the Python `Manifest.load` TypeError'd on every live manifest
+(they carry `mission`/`platforms`/`services`/… keys the dataclass didn't
+accept) and `load_all` only caught `ManifestError`, so the whole Python loader
+was dead — only the yq-based shell tooling worked. Now tolerant.
+
+**Side effects**: none at runtime yet — a manifest with no `delivery` block
+derives the legacy in-place default, so enforcement is opt-in per project.
+
+**Gotchas discovered**: `load_all` must also catch `TypeError`/`YAMLError`,
+not just `ManifestError`, or one malformed manifest aborts the whole registry.
+
 ## 2026-07-27 — `description` + `subagents` frontmatter fields
 
 **Files changed**: `src/registry/skills.py` — `SkillConfig.description`

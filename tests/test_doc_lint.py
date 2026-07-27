@@ -15,6 +15,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_module_graph_imports,
     check_context_files_exist,
     check_skill_sections,
+    check_delivery_contracts,
 )
 
 
@@ -56,3 +57,8 @@ def test_context_files_exist():
 def test_skill_sections():
     warnings = check_skill_sections()
     assert warnings == [], f"Skill section issues: {warnings}"
+
+
+def test_delivery_contracts_valid():
+    warnings = check_delivery_contracts()
+    assert warnings == [], f"Invalid project delivery contracts: {warnings}"
