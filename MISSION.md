@@ -123,7 +123,7 @@ isn't served by anything in the table, we've drifted.
 
 | Element | How it serves the objective |
 |---|---|
-| Bundled Claude Code CLI auth (no API key) | Uses your Max 5x subscription |
+| Agent SDK on subscription auth (CLI bundled inside the SDK package; no API key) | Uses your Max 5x subscription |
 | Runner startup check aborts if `ANTHROPIC_API_KEY` is set | Prevents accidental API billing |
 | `bootstrap.sh`, `run.sh`, `install-launchd.sh` all `unset ANTHROPIC_API_KEY` | Defense in depth |
 | `MAX_CONCURRENT_JOBS=4` default (raised from 2 with P1 workspace isolation) | Concurrency without checkout collisions; quota auto-pause still protects headroom for direct Claude use |
@@ -185,6 +185,7 @@ router-reachable, never scheduled.
 | 5 — Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** | [`docs/PHASE_5_PLAN.md`](docs/PHASE_5_PLAN.md) | Nightly backup, daily upkeep, PR-gated server patches, idle-queue retrospectives; 109-test suite |
 | 6 — Polish (research-deep, idea-generation, update-poll, restore, /schedule, SSE, retrospective) | **SHIPPED** | [`docs/PHASE_6_PLAN.md`](docs/PHASE_6_PLAN.md) | Full skill catalog; live job streaming; schedule management; auto-tuning data pipeline |
 | 7 — Autonomy & isolation (P0–P3: server-deploy + learning sync, workspace/container isolation, NL-first Telegram, plan DAG, acceptance evaluator) | **SHIPPED 2026-07-12** | audit report `docs/` + `.context/modules/runner/CHANGELOG.md` | A bare Telegram ask decomposes into a verified plan; sessions can't collide or hurt the host; dev→prod is one command; "done" means evidence-checked |
+| 8 — SDK-native overhaul (docker/`claude -p` lane removed; guard hooks enforce isolation in-process; SKILL.md → SDK subagents; structured outputs for router/review/learning; typed rate limits; review-bug fix) | **SHIPPED 2026-07-27** | [`docs/SDK_MIGRATION_2026-07-27.md`](docs/SDK_MIGRATION_2026-07-27.md) | Every LLM call in the system runs through the Agent SDK on subscription auth — no self-managed CLI subprocesses, no container runtime dependency |
 
 **For debugging Phase 1/2 issues in Claude Code CLI:** [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 

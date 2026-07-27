@@ -2,6 +2,66 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-27 — SDK-native overhaul: container lane removed, guard hooks + subagents + structured outputs
+
+**Files created**: `src/runner/guards.py` (PreToolUse guard hooks — the
+container lane's containment duty, now enforced in-process and binding even
+under bypassPermissions), `src/runner/agents.py` (SKILL.md → SDK
+AgentDefinition compilation; frontmatter `subagents:` → in-session Task-tool
+delegation), `tests/test_guards.py`, `tests/test_agents.py`.
+
+**Files removed**: `src/runner/executors.py`, `tests/test_executors.py`,
+`Dockerfile.agent` — the `claude -p`-in-docker lane and its image.
+
+**Files changed**:
+- `src/runner/session.py` — single execution path (in-process SDK only);
+  wires guard hooks for workspace-tier sessions + `agents=` subagents +
+  effort normalization (`xhigh`→`max`; SDK ladder has no xhigh); typed
+  rate-limit handling (`RateLimitEvent` → QuotaExhausted, audited as
+  `rate_limit_status`); ResultMessage.is_error now fails the job when no
+  usable text was produced (parity with the removed container lane).
+- `src/runner/workspaces.py` — `resolve_isolation(skill, payload)` (2-arg);
+  tiers are `none | workspace | host`; retired `container` maps to workspace.
+- `src/runner/quota.py` — `detect_from_rate_limit(info)`: typed detection
+  from RateLimitInfo (status/resets_at); string heuristic kept as fallback.
+  Retires the "quota detection is heuristic" debt item.
+- `src/runner/review.py` — **bug fix**: the reviewer called the nonexistent
+  `ClaudeSDKClient.process_message()`; the blanket except turned EVERY review
+  into `changes_requested` silently (no LGTM/blocker verdict was ever real).
+  Rewritten on `query()` + `output_format` json_schema (verdict enum enforced
+  by the SDK; `outcome_from_structured` pure, text parse kept as fallback).
+- `src/runner/llm_router.py` / `src/runner/learning.py` — structured outputs
+  via `output_format` (+ `route_from_structured` / `proposal_from_obj` pure
+  validators); text parsers kept as fallback; router catalog now reads
+  `SkillConfig.description` instead of re-parsing YAML per skill.
+- `src/runner/main.py` — startup check no longer shells out to
+  `claude --version`; verifies no ANTHROPIC_API_KEY + SDK import + bundled
+  (or system) CLI presence.
+- `src/config.py` — container settings removed (CONTAINER_RUNTIME,
+  AGENT_IMAGE, CONTAINER_MEMORY, CONTAINER_CPUS, CLAUDE_CODE_OAUTH_TOKEN);
+  stale env vars are ignored (`extra="ignore"`).
+- `evals/run.py` — judge ported from `claude -p` subprocess to an SDK
+  `query()` call (last CLI shell-out in the codebase).
+- `pyproject.toml` — `claude-agent-sdk>=0.1.63,<0.2` (0.2.x exists; upgrade
+  is a deliberate follow-up with its own test pass).
+
+**Why**: the mission is Agent-SDK-native on subscription auth. The docker
+lane was our only self-managed CLI execution path, was disabled by default
+(empty CONTAINER_RUNTIME), and duplicated the SDK lane's audit plumbing.
+The SDK's own surface (hooks, agents, output_format, RateLimitEvent,
+bundled CLI) now covers everything the lane did, with enforcement instead
+of convention. Full rationale: `docs/SDK_MIGRATION_2026-07-27.md`.
+
+**Side effects**: INV-17 redefined (guard hooks instead of containers);
+`isolation: container` frontmatter is lint-flagged (runtime still maps it);
+sessions that error with no output now FAIL instead of completing empty.
+
+**Gotchas discovered**: `ClaudeAgentOptions.effort` accepts only
+low|medium|high|max — the repo's `xhigh` was passing through unvalidated;
+hook input keys are snake_case (`tool_name`, `tool_input`); workspace clones
+live UNDER server_root, so guard path scans must mask the workspace path
+before matching protected roots.
+
 ## 2026-07-12 — Push gates injected into workspace directives
 
 **Files changed**: `src/runner/session.py` — both workspace directive

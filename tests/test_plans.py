@@ -13,7 +13,7 @@ from src.runner.plans import (
     validate_plan,
 )
 from src.runner.session import extract_text_events
-from src.runner.llm_router import parse_route_response
+from src.runner.llm_router import parse_route_response, route_from_structured
 
 
 def _plan(**overrides):
@@ -194,6 +194,29 @@ class TestParseRouteResponse:
     def test_confidence_clamped(self):
         _, conf = parse_route_response('{"skill": "a", "confidence": 7}', {"a"})
         assert conf == 1.0
+
+
+class TestRouteFromStructured:
+    """Structured-output routing path (SDK output_format, 2026-07-27)."""
+
+    def test_valid_object(self):
+        assert route_from_structured(
+            {"skill": "app-patch", "confidence": 0.9}, {"app-patch"}
+        ) == ("app-patch", 0.9)
+
+    def test_unknown_skill_fails_open_to_generic(self):
+        assert route_from_structured(
+            {"skill": "made-up", "confidence": 0.99}, {"app-patch"}
+        ) == ("", 0.0)
+
+    def test_unusable_object_returns_none_for_text_fallback(self):
+        assert route_from_structured(None, {"a"}) is None
+        assert route_from_structured("prose", {"a"}) is None
+        assert route_from_structured({"confidence": 0.5}, {"a"}) is None
+
+    def test_confidence_clamped_and_coerced(self):
+        assert route_from_structured({"skill": "", "confidence": 7}, {"a"}) == ("", 1.0)
+        assert route_from_structured({"skill": "", "confidence": "x"}, {"a"}) == ("", 0.0)
 
 
 class TestTriagePlainText:

@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-27 — `description` + `subagents` frontmatter fields
+
+**Files changed**: `src/registry/skills.py` — `SkillConfig.description`
+(parsed from frontmatter; consumed by the LLM router catalog and by
+`runner.agents` as the subagent card) and `SkillConfig.subagents`
+(list of skill names to expose as in-session SDK subagents via
+`ClaudeAgentOptions(agents=...)`). Isolation comment updated: valid tiers
+are `none | workspace | host`; retired `container` parses → workspace.
+
+**Why**: SDK-native agent authoring (docs/SDK_MIGRATION_2026-07-27.md) —
+skills stay the single source of truth and now compile into SDK
+AgentDefinitions instead of only being system-prompt bodies.
+
+**Side effects**: `runner.llm_router` no longer re-parses SKILL.md YAML for
+descriptions (uses the registry field).
+
 ## 2026-07-12 — P1: `isolation` frontmatter field
 
 **Files changed**: `src/registry/skills.py` — `SkillConfig.isolation`

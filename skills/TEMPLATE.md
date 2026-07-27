@@ -28,8 +28,19 @@ escalation:
     effort: <effort>
 context_files: ["path/relative/to/server/root"]
 tags: [<category>, <needs-projects-mcp>, <needs-dispatch-mcp>]
+isolation: <none | workspace | host>   # default none; workspace = per-job clone
+                                       # + enforced guard hooks; host = god only
+subagents: [<skill-name>, ...]         # skills exposed as in-session SDK
+                                       # subagents (Task-tool delegation);
+                                       # god/host/internal/no_llm never allowed
 ---
 ```
+
+Notes:
+- `effort: xhigh` is accepted but normalizes to `max` at the SDK boundary
+  (the Agent SDK ladder is low | medium | high | max).
+- The retired `isolation: container` value still parses and runs as
+  `workspace` (docker lane removed 2026-07-27 — docs/SDK_MIGRATION_2026-07-27.md).
 
 ## Body sections
 

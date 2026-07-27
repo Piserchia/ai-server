@@ -16,6 +16,7 @@ escalation:
     effort: xhigh
 tags: [projects, maintenance]
 isolation: workspace
+subagents: [code-review]
 ---
 
 # App Patch
@@ -311,6 +312,12 @@ or emit `task_complete`. Just end your turn with your analysis/plan as text.
 
 ## Gotchas (living section — append when you learn something)
 
+- **Guard rails are enforced** (2026-07-27): PreToolUse hooks deny writes
+  outside your workspace clone and dangerous host commands (sudo, launchctl,
+  force-push, keychain, kills). A `guard_denied` error means rethink the
+  action, not retry it.
+- **You have a `code-review` subagent** — delegate a review of your diff via
+  the Task tool before pushing when the change is non-trivial.
 - **Separate git repo.** `projects/<slug>/` is its OWN git repo. Always `cd`
   into it before git operations. Never run `git` from ai-server root.
 - **launchctl label format.** `gui/$(id -u)/com.assistant.project.<slug>`.

@@ -3,7 +3,37 @@
 import tempfile
 from pathlib import Path
 
-from src.runner.review import ReviewOutcome, _parse_outcome, get_git_diff
+from src.runner.review import (
+    ReviewOutcome,
+    _parse_outcome,
+    format_structured_review,
+    get_git_diff,
+    outcome_from_structured,
+)
+
+
+class TestOutcomeFromStructured:
+    """Structured-output verdict path (SDK output_format, 2026-07-27)."""
+
+    def test_verdicts_map(self):
+        assert outcome_from_structured({"verdict": "LGTM", "review": "r"}) == ReviewOutcome.lgtm
+        assert outcome_from_structured({"verdict": "BLOCKER"}) == ReviewOutcome.blocker
+        assert outcome_from_structured({"verdict": "CHANGES"}) == ReviewOutcome.changes_requested
+
+    def test_case_insensitive(self):
+        assert outcome_from_structured({"verdict": "lgtm"}) == ReviewOutcome.lgtm
+
+    def test_unusable_returns_none_for_text_fallback(self):
+        assert outcome_from_structured(None) is None
+        assert outcome_from_structured("LGTM") is None
+        assert outcome_from_structured({"verdict": "MAYBE"}) is None
+        assert outcome_from_structured({}) is None
+
+    def test_format_renders_sections(self):
+        text = format_structured_review(
+            {"verdict": "CHANGES", "review": "fix x", "approach": "read first"})
+        assert text.startswith("CHANGES")
+        assert "Review: fix x" in text and "Approach: read first" in text
 
 
 class TestParseOutcome:

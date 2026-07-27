@@ -29,6 +29,26 @@ class QuotaExhausted(Exception):
         super().__init__(f"Claude subscription quota exhausted; reset at {reset_at}")
 
 
+def detect_from_rate_limit(info) -> datetime | None | bool:
+    """Typed detection from an SDK RateLimitInfo (preferred over the text
+    heuristic below; the CLI emits RateLimitEvent on status transitions).
+
+    Returns:
+      - datetime: limit hit, reset time known (unix `resets_at`)
+      - True: limit hit, reset time unknown (use default pause)
+      - None: not exhausted (allowed / allowed_warning)
+    """
+    if getattr(info, "status", "") != "rejected":
+        return None
+    resets_at = getattr(info, "resets_at", None)
+    if resets_at:
+        try:
+            return datetime.fromtimestamp(float(resets_at), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            pass
+    return True
+
+
 def detect_quota_error(text: str) -> datetime | None | bool:
     """
     Heuristic parser for rate_limit / quota_exceeded text.

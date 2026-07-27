@@ -1,7 +1,7 @@
 # Documentation Index
 
 > For any new Claude session: read this file to know what exists and where to look.
-> Last updated: 2026-07-10
+> Last updated: 2026-07-27
 
 ## Quick navigation
 
@@ -79,7 +79,8 @@ projects/<slug>/
 - **PROTOCOL.md is immutable** — never modify without explicit human request
 - **Phase plans are historical** — all 6 phases shipped; plans document what was planned vs what happened
 - **Single-writer topology** — code is born in the dev repo (`~/Documents/repos/ai-server`); production (`~/Library/Application Support/ai-server`) is a pull-only deploy target that births only runtime doc learnings (auto-published hourly by `scripts/sync-learnings.sh`). See CLAUDE.md.
-- **Isolation tiers** — skills declare `isolation: none|workspace|container|host`; code-writing skills run in per-job clones, `server-patch` optionally in containers, `god` is the only host-tier skill. See `docs/CONTAINERS.md`.
+- **Isolation tiers** — skills declare `isolation: none|workspace|host`; code-writing skills run in per-job clones with enforced PreToolUse guard hooks (`src/runner/guards.py`), `god` is the only host-tier skill. The docker `container` tier was retired 2026-07-27 (`docs/SDK_MIGRATION_2026-07-27.md`; `docs/CONTAINERS.md` is historical).
+- **In-session subagents** — skills declare `subagents: [code-review, ...]` in frontmatter; the runner compiles those skills into SDK AgentDefinitions (`src/runner/agents.py`) for Task-tool delegation inside the session.
 
 ## Additions 2026-07-12 (P0–P3)
 
@@ -87,12 +88,20 @@ projects/<slug>/
 |---|---|
 | Deploy the server (dev → prod) | `skills/server-deploy/SKILL.md`, CLAUDE.md § Single-writer topology |
 | Understand runtime-learning sync | `scripts/sync-learnings.sh` (header comment) |
-| Set up / understand containers | `docs/CONTAINERS.md`, `Dockerfile.agent`, `.context/modules/runner/CONTEXT.md` |
-| Understand workspace isolation | `src/runner/workspaces.py` docstring, SYSTEM.md INV-16..18 |
+| Understand workspace isolation + guard hooks | `src/runner/workspaces.py` + `src/runner/guards.py` docstrings, SYSTEM.md INV-16..18 |
 | Understand the plan → DAG → evaluate pipeline | `skills/plan/SKILL.md`, `skills/_evaluate/SKILL.md`, `src/runner/plans.py`, SYSTEM.md § Data flow |
 | Understand routing (rules + LLM fallback) | `src/runner/router.py`, `src/runner/llm_router.py` |
 | Check routing precision / task-event markers | audit events `routing_decision`, `task_plan`, `eval_pass`/`eval_fail` in `volumes/audit_log/` |
 | Read the audit that motivated all of this | `docs/AUDIT_2026-07-12.md` |
+
+## Additions 2026-07-27 (SDK-native overhaul)
+
+| I need to... | Read these |
+|---|---|
+| Understand the SDK migration (why containers left, what replaced them) | `docs/SDK_MIGRATION_2026-07-27.md` |
+| Understand guard hooks (INV-17 enforcement) | `src/runner/guards.py` docstring, `tests/test_guards.py` |
+| Expose a skill as an in-session subagent | `skills/TEMPLATE.md` (frontmatter `subagents:`), `src/runner/agents.py` |
+| See why `docs/CONTAINERS.md` is historical | its header note + git history |
 
 ## Update this file
 

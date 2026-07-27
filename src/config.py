@@ -48,16 +48,6 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = 4
     session_timeout_seconds: int = 1800
 
-    # Containers (P1) — the high-risk isolation lane. Empty = disabled
-    # (container-tier skills silently downgrade to workspace isolation).
-    # Runtime is the CLI name: "docker" works with colima / Docker Desktop /
-    # OrbStack. Token comes from `claude setup-token` (subscription auth —
-    # NEVER an API key).
-    container_runtime: str = ""
-    agent_image: str = "ai-server-agent:latest"
-    container_memory: str = "4g"
-    container_cpus: str = "2"
-    claude_code_oauth_token: str = ""
     # GET /health returns 503 if the runner heartbeat is older than this. The
     # runner writes it every loop (≤2s normally, ~30s during a quota pause), so
     # 90s tolerates a pause without false alarms.

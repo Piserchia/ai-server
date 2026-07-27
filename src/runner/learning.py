@@ -30,8 +30,9 @@ from pathlib import Path
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
-    ClaudeSDKClient,
+    ResultMessage,
     TextBlock,
+    query,
 )
 
 from src import audit_log
@@ -103,7 +104,13 @@ def parse_learning_response(text: str) -> LearningProposal:
     except json.JSONDecodeError:
         return LearningProposal(had_learning=False)
 
-    if not obj.get("had_learning"):
+    return proposal_from_obj(obj)
+
+
+def proposal_from_obj(obj) -> LearningProposal:
+    """Validate a classifier output object (structured output or parsed text)
+    into a LearningProposal. Pure function."""
+    if not isinstance(obj, dict) or not obj.get("had_learning"):
         return LearningProposal(had_learning=False)
 
     category = str(obj.get("category", "")).strip().upper()
@@ -206,6 +213,23 @@ Negative case (most jobs):
 {"had_learning": false}
 """
 
+LEARNING_OUTPUT_FORMAT: dict = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "had_learning": {"type": "boolean"},
+            "module": {"type": "string"},
+            "category": {"type": "string"},
+            "title": {"type": "string"},
+            "content": {"type": "string"},
+            "evidence_job_id": {"type": "string"},
+        },
+        "required": ["had_learning"],
+        "additionalProperties": False,
+    },
+}
+
 
 async def extract_learning(
     parent_job_id: str,
@@ -235,24 +259,26 @@ async def extract_learning(
         effort="low",
         permission_mode="plan",  # read-only; classifier does not need to act
         allowed_tools=[],
-        max_turns=1,
+        max_turns=2,
+        output_format=LEARNING_OUTPUT_FORMAT,
     )
 
     final_text = ""
+    structured = None
     try:
-        client = ClaudeSDKClient(options=options)
-        async with client:
-            await client.query(user_prompt)
-            async for message in client.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            final_text += block.text
+        async for message in query(prompt=user_prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        final_text += block.text
+            elif isinstance(message, ResultMessage):
+                structured = message.structured_output
     except Exception as exc:
         logger.warning("learning extractor SDK error: %s", exc)
         return LearningProposal(had_learning=False)
 
-    proposal = parse_learning_response(final_text)
+    proposal = (proposal_from_obj(structured) if structured is not None
+                else parse_learning_response(final_text))
 
     if proposal.had_learning:
         # Validate module is in the allowed list (plus 'project' / 'none')

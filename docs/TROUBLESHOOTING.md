@@ -677,6 +677,41 @@ it never leaves the job in the stopped-but-loaded state. The external heartbeat
 worker (`ops/heartbeat-worker/`) alerts on `/health` going dark; if you got that
 alert plus a "Failed to load projects" page, start here.
 
+## Symptom: a job's audit log shows `guard_denied` events / a session complains a tool call was "denied by hook"
+
+### Diagnostic
+
+```bash
+cd "$HOME/Library/Application Support/ai-server"
+JOB_ID=<uuid>
+grep guard_denied "volumes/audit_log/${JOB_ID}.jsonl" | python3 -m json.tool
+```
+
+### Root cause
+
+Working as designed (2026-07-27, INV-17): workspace-tier sessions run under
+PreToolUse guard hooks (`src/runner/guards.py`) that deny (a) file writes
+outside the per-job workspace clone and (b) dangerous Bash — `sudo`,
+`launchctl`, keychain reads, force-push, `killall`/`pkill`, `crontab`,
+`ANTHROPIC_API_KEY` injection, and destructive commands referencing protected
+roots (live checkouts, `~/.claude`, `~/.ssh`, LaunchAgents). These replaced
+the docker container lane and bind even under `bypassPermissions`.
+
+### Fix
+
+Usually none — the denial is the isolation model doing its job, and the
+session should adapt (work inside its clone; ship via `git push`). It's a
+real defect only when a legitimately in-workspace action was denied
+(e.g. an over-broad denylist regex): reproduce with
+`pipenv run python -c "from src.runner.guards import bash_violation; ..."`,
+fix the predicate in `src/runner/guards.py`, and extend
+`tests/test_guards.py` with the false-positive case.
+
+### Prevention
+
+Keep guard predicates pure and covered by tests — `tests/test_guards.py` is
+the enforcement contract for INV-17.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:

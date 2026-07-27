@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import re
-import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -72,22 +71,34 @@ def _read_output(job: Job) -> str:
     return job.error_message or ""
 
 
-def _run_judge(prompt: str, timeout_s: int = 120) -> str:
-    """Invoke the LLM judge via the subscription-auth `claude` CLI (headless).
-
-    The prompt is piped on stdin, not passed as an argv element — skill outputs
-    (e.g. full research reports) can exceed the OS argv length limit.
-    """
-    proc = subprocess.run(
-        ["claude", "-p", "--model", JUDGE_MODEL],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=timeout_s,
+async def _run_judge(prompt: str, timeout_s: int = 120) -> str:
+    """Invoke the LLM judge via the Agent SDK (same subscription auth as the
+    runner; no CLI subprocess, no argv length limits — the SDK streams the
+    prompt over stdio to its bundled Claude Code)."""
+    from claude_agent_sdk import (
+        AssistantMessage, ClaudeAgentOptions, TextBlock, query,
     )
-    if proc.returncode != 0:
-        raise RuntimeError(f"judge CLI failed: {proc.stderr[:300]}")
-    return proc.stdout
+
+    options = ClaudeAgentOptions(
+        model=JUDGE_MODEL,
+        permission_mode="plan",
+        allowed_tools=[],
+        max_turns=1,
+    )
+
+    async def _collect() -> str:
+        text = ""
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        text += block.text
+        return text
+
+    out = await asyncio.wait_for(_collect(), timeout=timeout_s)
+    if not out.strip():
+        raise RuntimeError("judge returned no text")
+    return out
 
 
 async def _run_case(case: EvalCase, job_timeout_s: int) -> CaseResult:
@@ -95,7 +106,7 @@ async def _run_case(case: EvalCase, job_timeout_s: int) -> CaseResult:
         job = await enqueue_job(case.input, kind=case.skill, created_by="eval")
         finished = await _wait_for_job(job.id, job_timeout_s)
         output = _read_output(finished)
-        judged = parse_judge_response(_run_judge(build_judge_prompt(case, output)))
+        judged = parse_judge_response(await _run_judge(build_judge_prompt(case, output)))
         return CaseResult(
             skill=case.skill,
             case=case.name,

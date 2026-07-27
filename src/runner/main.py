@@ -11,8 +11,9 @@ in 'running' by a previous process that died mid-job (see runner/reconcile.py).
 Run: `python -m src.runner.main`
 Stop: SIGTERM. In-flight jobs finish within session_timeout_seconds.
 
-Auth check on startup: verifies `claude` CLI exists and is logged in. Refuses to start
-if not, printing the exact command to fix it.
+Auth check on startup: refuses to start if ANTHROPIC_API_KEY is set (INV-3) or if
+the Agent SDK cannot resolve a Claude Code CLI (bundled inside the SDK package,
+with the system install as fallback).
 """
 
 from __future__ import annotations
@@ -20,11 +21,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import signal
-import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import structlog
 from croniter import croniter
@@ -57,7 +59,12 @@ _shutdown = asyncio.Event()
 
 
 def _check_subscription_auth() -> None:
-    """Verify claude CLI is installed and logged in. Exits with explanation if not."""
+    """Verify subscription-only auth posture and SDK runnability. Exits if broken.
+
+    The Agent SDK spawns the Claude Code CLI bundled inside its own package
+    (falling back to a system install), so the check mirrors the SDK's
+    resolution instead of shelling out to `claude --version`.
+    """
     if os.environ.get("ANTHROPIC_API_KEY"):
         print(
             "ERROR: ANTHROPIC_API_KEY is set in the environment. This server is "
@@ -68,14 +75,21 @@ def _check_subscription_auth() -> None:
         sys.exit(1)
 
     try:
-        # `claude --version` succeeds even without login
-        subprocess.run(["claude", "--version"], check=True, capture_output=True, timeout=10)
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        import claude_agent_sdk
+    except ImportError:
         print(
-            "ERROR: Claude Code CLI not found or not working. Install:\n"
-            "  curl -fsSL https://claude.ai/install.sh | bash\n"
-            "Then log in:\n"
-            "  claude login",
+            "ERROR: claude-agent-sdk is not installed in this environment.\n"
+            "  pipenv install",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    bundled = Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
+    if not bundled.exists() and not shutil.which("claude"):
+        print(
+            "ERROR: no Claude Code CLI available. The SDK package is missing its "
+            "bundled CLI and no system `claude` was found. Reinstall the SDK:\n"
+            "  pipenv run pip install --force-reinstall 'claude-agent-sdk>=0.1.63,<0.2'",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -28,29 +28,26 @@ from src.runner.workspaces import (
 
 class TestResolveIsolation:
     def test_default_is_none(self):
-        assert resolve_isolation(None, None, False, False) == "none"
+        assert resolve_isolation(None, None) == "none"
 
     def test_skill_frontmatter_wins_over_default(self):
-        assert resolve_isolation("workspace", None, False, False) == "workspace"
+        assert resolve_isolation("workspace", None) == "workspace"
 
     def test_payload_override_wins_over_skill(self):
-        assert resolve_isolation("workspace", "none", False, False) == "none"
-        assert resolve_isolation("none", "workspace", False, False) == "workspace"
+        assert resolve_isolation("workspace", "none") == "none"
+        assert resolve_isolation("none", "workspace") == "workspace"
 
-    def test_container_downgrades_without_runtime(self):
-        assert resolve_isolation("container", None, False, False) == "workspace"
-
-    def test_container_downgrades_with_in_process_mcp(self):
-        assert resolve_isolation("container", None, True, True) == "workspace"
-
-    def test_container_sticks_when_available(self):
-        assert resolve_isolation("container", None, True, False) == "container"
+    def test_retired_container_tier_maps_to_workspace(self):
+        # The docker lane was removed 2026-07-27; old frontmatter/payloads
+        # must keep working and land on the guarded workspace tier.
+        assert resolve_isolation("container", None) == "workspace"
+        assert resolve_isolation(None, "container") == "workspace"
 
     def test_host_never_downgrades(self):
-        assert resolve_isolation("host", None, False, False) == "host"
+        assert resolve_isolation("host", None) == "host"
 
     def test_unknown_tier_treated_as_none(self):
-        assert resolve_isolation("vmware", None, True, False) == "none"
+        assert resolve_isolation("vmware", None) == "none"
 
 
 def test_workspace_dir_name():

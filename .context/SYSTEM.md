@@ -1,8 +1,9 @@
 # System context
 
 > Source of truth for the server's architecture. Update when modules change.
-> Last updated: 2026-07-12 (P0–P3: deploy pipeline, workspace/container isolation,
-> plan DAG + NL-first Telegram + acceptance evaluator)
+> Last updated: 2026-07-27 (SDK-native overhaul: docker/`claude -p` lane removed;
+> guard hooks, in-session subagents, structured outputs, typed rate limits —
+> docs/SDK_MIGRATION_2026-07-27.md)
 
 ## Tech stack
 
@@ -16,7 +17,7 @@
 - **Reverse proxy**: Caddy (per-project routing)
 - **Tunnel**: cloudflared (named tunnel to Cloudflare edge)
 - **Supervision**: macOS launchd
-- **Session isolation**: per-job git workspace clones (`volumes/workspaces/`); optional container lane via docker CLI (colima/OrbStack/Docker Desktop) for `isolation: container` skills — see `docs/CONTAINERS.md`
+- **Session isolation**: per-job git workspace clones (`volumes/workspaces/`) + PreToolUse guard hooks (`runner/guards.py`) that deny out-of-workspace writes and dangerous host commands in-process — even under bypassPermissions. (The docker container lane was removed 2026-07-27 — `docs/SDK_MIGRATION_2026-07-27.md`.)
 - **Testing**: pytest, fakeredis (future)
 
 ## Module graph
@@ -27,12 +28,13 @@
 | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
 | `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
-| `src/runner/session.py` | Skill/isolation resolution + one session per job (in-process SDK or container executor) | config, db, models, audit_log, registry.skills, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.executors, runner.mcp_projects, runner.mcp_dispatch, context.module_graph | runner.main |
+| `src/runner/session.py` | Skill/isolation resolution + one in-process SDK session per job (guard hooks + subagents wired here) | config, db, models, audit_log, registry.skills, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.mcp_projects, runner.mcp_dispatch, context.module_graph | runner.main |
 | `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, gateway.jobs, registry.skills, audit_log | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher (incl. `plan` for multi-step asks) | — | runner.session, gateway.telegram_bot (triage) |
 | `src/runner/llm_router.py` | Haiku routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
 | `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution | — | runner.session, server-upkeep skill |
-| `src/runner/executors.py` | Container execution lane (`claude -p` stream-json parity with SDK lane) | config, audit_log, runner.quota | runner.session |
+| `src/runner/guards.py` | PreToolUse guard hooks: workspace write containment + Bash denylist (INV-17) | config, audit_log, claude_agent_sdk | runner.session |
+| `src/runner/agents.py` | SKILL.md → SDK AgentDefinition compilation (frontmatter `subagents:` → in-session delegation) | registry.skills, claude_agent_sdk | runner.session |
 | `src/runner/plans.py` | Plan validation + subtask DAG spawn/promotion/cascade | config, db, models, audit_log | runner.main, gateway.telegram_bot (manual approve) |
 | `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
@@ -68,8 +70,8 @@ Telegram message (bare text or /task) → bot (validates chat_id; triage:
                                                         ↓
 Runner: BLPOP → Job row → resolve skill (rule → LLM fallback → generic;
   multi-step asks → `plan`) → resolve cwd → resolve isolation tier
-  (none | workspace | container | host) → per-job workspace clone if tiered →
-  execute (in-process SDK  or  `claude -p` in container — same audit events) →
+  (none | workspace | host) → per-job workspace clone + guard hooks if
+  workspace-tier → in-process Agent SDK session (subagents from frontmatter) →
   audit_log.append(...) per event + Redis publish jobs:stream:<id>
                                                         ↓
 Session ends → final-text markers parsed (TASK_COMPLETE / TASK_QUESTION /
@@ -114,8 +116,8 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | INV-13 | `server-patch` always requires a passing `code-review` sub-agent | `server-patch` SKILL.md + runner post-hook |
 | INV-14 | Project slugs unique; port allocations never reused | `registry/manifest.py` + `projects/_ports.yml` |
 | INV-15 | On startup the runner reconciles orphaned `running` jobs (fail-only) before consuming the queue | `runner/reconcile.py` + `runner/main.py:main` |
-| INV-16 | Code-writing skills (`isolation: workspace|container`) never run in a shared checkout — one throwaway clone per job; work leaves only via git push | `runner/workspaces.py` + `runner/session.py:run_session` |
-| INV-17 | Containers receive `CLAUDE_CODE_OAUTH_TOKEN` only; `ANTHROPIC_API_KEY` is stripped from their env (INV-3 extended) | `runner/executors.py:run_in_container` |
+| INV-16 | Code-writing skills (`isolation: workspace`) never run in a shared checkout — one throwaway clone per job; work leaves only via git push | `runner/workspaces.py` + `runner/session.py:run_session` |
+| INV-17 | Workspace-tier sessions are guard-hooked: file writes outside the per-job clone and dangerous host commands (sudo, launchctl, keychain, force-push, kills, API-key injection, destructive ops on protected roots) are DENIED at PreToolUse — hooks fire before permission evaluation, so this binds even under bypassPermissions. Denials are audited (`guard_denied`). (Redefined 2026-07-27; formerly the container-env rule.) | `runner/guards.py` + `runner/session.py:_build_options` |
 | INV-18 | `god` is the ONLY host-tier skill — the deliberate break-glass lane for phone-initiated server fixes | `skills/god/SKILL.md` frontmatter + `scripts/lint_docs.py:check_isolation_values` |
 | INV-19 | A task auto-closes only on an `_evaluate` EVAL_PASS backed by evidence; the user can always overrule via Reopen | `runner/main.py:_handle_evaluator_result` + bot `reopen` action |
 
@@ -123,7 +125,8 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 
 ```bash
 # Once, during bootstrap:
-claude login                                    # subscription auth
+claude login          # subscription auth (SDK sessions use these credentials;
+                      # the SDK ships its own bundled CLI for execution)
 cp .env.example .env && vi .env                 # fill in secrets
 brew services start postgresql@15 redis
 pipenv install
@@ -143,8 +146,15 @@ bash scripts/run.sh stop
   write-back instructions.
 - **Escalation via `on_failure` frontmatter works** (Phase 2); one level only,
   guarded by `escalated_from` payload flag to prevent loops.
-- **Quota detection is heuristic** — string-match on error messages. Once the SDK
-  surfaces structured rate_limit errors, switch to typed detection.
+- **Quota detection is typed-first** (2026-07-27): `RateLimitEvent` from the SDK
+  drives pause/requeue (`quota.detect_from_rate_limit`); the string heuristic
+  remains as fallback for error text that arrives outside the typed channel.
+- **SDK pinned to 0.1.x** (`>=0.1.63,<0.2`). The 0.2.x line exists on PyPI —
+  upgrading is a deliberate follow-up with its own verification pass, never a
+  side effect of other work.
+- **SDK sandbox (macOS Seatbelt) not yet enabled** — `ClaudeAgentOptions.sandbox`
+  is available and would add OS-level Bash confinement on top of guard hooks;
+  needs per-skill tuning (git/network flows) before turning on.
 - **Dashboard has SSE streaming** — `/api/jobs/{id}/stream` provides live job
   tailing via EventSourceResponse (shipped Phase 6).
 - **Pure-function unit tests only** (289+). Integration tests with SDK mocks

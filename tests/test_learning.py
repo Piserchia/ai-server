@@ -17,8 +17,45 @@ from src.runner.learning import (
     format_audit_excerpt,
     list_installed_modules,
     parse_learning_response,
+    proposal_from_obj,
     should_extract,
 )
+
+
+class TestProposalFromObj:
+    """Structured-output classifier path (SDK output_format, 2026-07-27).
+    parse_learning_response delegates here after extracting JSON from text."""
+
+    def test_valid_positive(self):
+        p = proposal_from_obj({
+            "had_learning": True, "module": "runner", "category": "GOTCHA",
+            "title": "T", "content": "C", "evidence_job_id": "abc",
+        })
+        assert p.had_learning and p.module == "runner" and p.category == "GOTCHA"
+
+    def test_category_normalized_to_upper(self):
+        p = proposal_from_obj({
+            "had_learning": True, "module": "db", "category": "pattern",
+            "title": "T", "content": "C",
+        })
+        assert p.category == "PATTERN"
+
+    def test_negative_and_garbage(self):
+        assert not proposal_from_obj({"had_learning": False}).had_learning
+        assert not proposal_from_obj(None).had_learning
+        assert not proposal_from_obj("prose").had_learning
+
+    def test_invalid_category_rejected(self):
+        assert not proposal_from_obj({
+            "had_learning": True, "module": "runner", "category": "OPINION",
+            "title": "T", "content": "C",
+        }).had_learning
+
+    def test_missing_title_or_content_rejected(self):
+        assert not proposal_from_obj({
+            "had_learning": True, "module": "runner", "category": "DEBUG",
+            "title": "", "content": "C",
+        }).had_learning
 
 
 # ── should_extract ──────────────────────────────────────────────────────────

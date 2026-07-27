@@ -245,17 +245,19 @@ def check_context_files_exist() -> list[str]:
 
 
 def check_isolation_values() -> list[str]:
-    """Every skill's `isolation` frontmatter (if present) must be a valid tier.
+    """Every skill's `isolation` frontmatter (if present) must be a valid tier,
+    and `host` is reserved for `god` alone (INV-18).
 
-    Valid tiers live in runner/workspaces.py (none | workspace | container |
-    host). An invalid value silently degrades to 'none' at runtime — catch it
-    at lint time instead."""
+    Valid tiers live in runner/workspaces.py (none | workspace | host).
+    `container` was retired 2026-07-27 (docker lane removed — the runtime maps
+    it to workspace, but frontmatter should be migrated). An invalid value
+    silently degrades to 'none' at runtime — catch it at lint time instead."""
     warnings = []
     skills_dir = REPO_ROOT / "skills"
     if not skills_dir.exists():
         return []
 
-    valid = {"none", "workspace", "container", "host"}
+    valid = {"none", "workspace", "host"}
     for child in sorted(skills_dir.iterdir()):
         skill_md = child / "SKILL.md"
         if not child.is_dir() or not skill_md.exists():
@@ -272,10 +274,22 @@ def check_isolation_values() -> list[str]:
         except Exception:
             continue
         iso = fm.get("isolation")
-        if iso is not None and str(iso) not in valid:
+        if iso is None:
+            continue
+        if str(iso) == "container":
+            warnings.append(
+                f"Skill `{child.name}` uses retired isolation `container` "
+                f"(docker lane removed 2026-07-27) — change to `workspace`"
+            )
+        elif str(iso) not in valid:
             warnings.append(
                 f"Skill `{child.name}` has invalid isolation `{iso}` "
                 f"(valid: {', '.join(sorted(valid))})"
+            )
+        elif str(iso) == "host" and child.name != "god":
+            warnings.append(
+                f"Skill `{child.name}` declares isolation `host` but only "
+                f"`god` may run host-tier (INV-18)"
             )
     return warnings
 

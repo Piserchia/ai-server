@@ -39,8 +39,9 @@ logger = logging.getLogger(__name__)
 class SkillConfig:
     name: str
     body: str                          # everything after the closing ---
+    description: str = ""              # frontmatter description (router + subagent card)
     model: str = ""                    # "" means "use settings.default_model"
-    effort: str = "medium"             # low | medium | high | xhigh | max
+    effort: str = "medium"             # low | medium | high | xhigh | max (xhigh→max at SDK boundary)
     permission_mode: str = "acceptEdits"
     required_tools: list[str] = field(default_factory=lambda: [
         "Read", "Write", "Edit", "Bash", "Glob", "Grep",
@@ -52,7 +53,8 @@ class SkillConfig:
     tags: list[str] = field(default_factory=list)
     context_files: list[str] = field(default_factory=list)  # files the session should read first
     no_llm: bool = False               # if True, skill is implemented as a script, runner skips SDK
-    isolation: str = "none"            # none | workspace | container | host (P1; see runner/workspaces.py)
+    isolation: str = "none"            # none | workspace | host ("container" parses → workspace; see runner/workspaces.py)
+    subagents: list[str] = field(default_factory=list)  # skills exposed as in-session SDK subagents
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -88,6 +90,7 @@ def load(name: str) -> SkillConfig | None:
     return SkillConfig(
         name=fm.get("name", name),
         body=body,
+        description=str(fm.get("description", "") or ""),
         model=fm.get("model", ""),
         effort=fm.get("effort", "medium"),
         permission_mode=fm.get("permission_mode", "acceptEdits"),
@@ -101,6 +104,7 @@ def load(name: str) -> SkillConfig | None:
         context_files=fm.get("context_files", []),
         no_llm=bool(fm.get("no_llm", False)),
         isolation=str(fm.get("isolation", "none")),
+        subagents=list(fm.get("subagents", []) or []),
     )
 
 

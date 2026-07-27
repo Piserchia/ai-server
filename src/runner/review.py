@@ -13,7 +13,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    TextBlock,
+    query,
+)
 
 from src import audit_log
 from src.config import settings
@@ -40,21 +46,60 @@ Evaluate the diff for:
 3. **Style**: Does it follow the existing codebase patterns?
 4. **Completeness**: Are there missing error handlers, untested edge cases, or TODOs?
 
-Your response MUST start with exactly one of these words on the first line:
-- `LGTM` — the changes look good, no blocking issues
-- `CHANGES` — minor issues that should be fixed but aren't blocking
-- `BLOCKER` — serious issues (security, data loss, broken functionality) that must be fixed
+Deliver your verdict through the structured output schema:
 
-After the verdict line, include two sections:
-
-**Review**: Your assessment of the code changes. Be specific — reference file names
-and line numbers when pointing out issues.
-
-**Approach**: If a tool-use summary was provided, comment on the session's methodology.
-Did it read enough context before writing? Did it grep before editing? Did it test after
-changing? Note any process concerns (e.g., "wrote 3 files without reading any first").
-If no tool-use summary was provided, skip this section.
+- `verdict`: exactly one of
+  - `LGTM` — the changes look good, no blocking issues
+  - `CHANGES` — minor issues that should be fixed but aren't blocking
+  - `BLOCKER` — serious issues (security, data loss, broken functionality) that must be fixed
+- `review`: your assessment of the code changes. Be specific — reference file
+  names and line numbers when pointing out issues.
+- `approach`: if a tool-use summary was provided, comment on the session's
+  methodology. Did it read enough context before writing? Did it grep before
+  editing? Did it test after changing? Note any process concerns (e.g., "wrote
+  3 files without reading any first"). Empty string if no summary was provided.
 """
+
+# Enforced via ClaudeAgentOptions(output_format=...) — the SDK retries until
+# the final output validates, so the verdict can't get lost in prose.
+REVIEW_OUTPUT_FORMAT: dict = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["LGTM", "CHANGES", "BLOCKER"]},
+            "review": {"type": "string"},
+            "approach": {"type": "string"},
+        },
+        "required": ["verdict", "review"],
+        "additionalProperties": False,
+    },
+}
+
+
+def outcome_from_structured(obj: Any) -> ReviewOutcome | None:
+    """Map a structured-output object to a ReviewOutcome. Pure function.
+    None = not usable (caller falls back to text parsing)."""
+    if not isinstance(obj, dict):
+        return None
+    verdict = str(obj.get("verdict", "")).strip().upper()
+    if verdict == "LGTM":
+        return ReviewOutcome.lgtm
+    if verdict == "BLOCKER":
+        return ReviewOutcome.blocker
+    if verdict == "CHANGES":
+        return ReviewOutcome.changes_requested
+    return None
+
+
+def format_structured_review(obj: dict) -> str:
+    """Human-readable rendering for the audit log. Pure function."""
+    parts = [str(obj.get("verdict", "")).strip().upper()]
+    if obj.get("review"):
+        parts.append(f"Review: {obj['review']}")
+    if obj.get("approach"):
+        parts.append(f"Approach: {obj['approach']}")
+    return "\n\n".join(p for p in parts if p)
 
 
 def _summarize_tool_usage(parent_job_id: str, max_lines: int = 30) -> str:
@@ -171,21 +216,30 @@ async def run_code_review(
         effort="high",
         permission_mode="plan",  # read-only
         allowed_tools=["Read", "Glob", "Grep"],
-        max_turns=3,
+        max_turns=6,
+        output_format=REVIEW_OUTPUT_FORMAT,
     )
 
+    final_text = ""
+    structured: Any = None
     try:
-        client = ClaudeSDKClient(options=options)
-        final_text = ""
-
-        async for message in client.process_message(prompt):
-            from claude_agent_sdk import AssistantMessage, TextBlock
+        async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         final_text += block.text
+            elif isinstance(message, ResultMessage):
+                structured = message.structured_output
 
-        outcome = _parse_outcome(final_text)
+        outcome = outcome_from_structured(structured)
+        if outcome is not None:
+            final_text = format_structured_review(structured)
+        else:
+            # Structured output missing/malformed — fall back to text parsing
+            # (conservative default inside _parse_outcome).
+            logger.warning("review returned no usable structured output — "
+                           "falling back to text verdict")
+            outcome = _parse_outcome(final_text)
 
     except Exception as exc:
         logger.warning("code review failed: %s (defaulting to changes_requested)", exc)

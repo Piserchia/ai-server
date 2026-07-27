@@ -29,7 +29,17 @@ Managed by launchd, all under `~/Library/Application Support/ai-server/`:
 
 ## Auth
 
-Subscription only. `claude login` once, bundled CLI handles the rest. `ANTHROPIC_API_KEY` is explicitly unset in every process's environment.
+Subscription only. `claude login` once; the Agent SDK executes sessions via the
+CLI bundled inside its own Python package using those stored credentials.
+`ANTHROPIC_API_KEY` is explicitly unset in every process's environment.
+
+## Session isolation
+
+Code-writing skills run in per-job git clones (`volumes/workspaces/`) with
+PreToolUse guard hooks that hard-deny writes outside the clone and dangerous
+host commands — enforced in-process, even under bypassPermissions. `god` is
+the only host-tier skill. (The docker lane was removed 2026-07-27 —
+`docs/SDK_MIGRATION_2026-07-27.md`.)
 
 ## Model defaults
 

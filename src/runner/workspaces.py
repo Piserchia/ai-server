@@ -20,10 +20,14 @@ prunes anything older than WORKSPACE_RETENTION_DAYS).
 
 Isolation tiers (skill frontmatter `isolation:`):
   none      — cwd = canonical path (legacy behavior; read-only-ish skills)
-  workspace — cwd = per-job clone (code-writing skills)
-  container — workspace + execution inside a container (see executors.py);
-              falls back to `workspace` when no container runtime configured
-  host      — explicit full-host access (god; break-glass lane)
+  workspace — cwd = per-job clone (code-writing skills) + PreToolUse guard
+              hooks (runner/guards.py) that deny writes outside the clone
+              and dangerous host commands
+  host      — explicit full-host access (god; break-glass lane, INV-18)
+
+`container` is a retired tier (docker lane removed 2026-07-27, see
+docs/SDK_MIGRATION_2026-07-27.md); frontmatter still declaring it resolves
+to `workspace`.
 """
 
 from __future__ import annotations
@@ -36,7 +40,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-VALID_ISOLATION = ("none", "workspace", "container", "host")
+VALID_ISOLATION = ("none", "workspace", "host")
+# Retired tiers that still parse (mapped in resolve_isolation).
+_RETIRED_ISOLATION = {"container": "workspace"}
 
 
 @dataclass
@@ -57,24 +63,21 @@ def workspace_dir_name(job_id: str, canonical: Path) -> str:
 def resolve_isolation(
     skill_isolation: str | None,
     payload_isolation: str | None,
-    container_available: bool,
-    needs_in_process_mcp: bool,
 ) -> str:
     """Resolve the effective isolation tier for a job. Pure function.
 
     Precedence: payload override > skill frontmatter > "none".
-    Downgrades:
-      container → workspace when no container runtime is available
-      container → workspace when the skill needs in-process MCP servers
-        (SDK MCP servers live in the runner process and can't cross a
-        container boundary)
+    Retired tiers map to their successor (`container` → `workspace`, whose
+    guard hooks now carry the containment duty — INV-17).
     """
     tier = payload_isolation or skill_isolation or "none"
+    if tier in _RETIRED_ISOLATION:
+        mapped = _RETIRED_ISOLATION[tier]
+        logger.info("isolation tier %r is retired — running as %r", tier, mapped)
+        return mapped
     if tier not in VALID_ISOLATION:
         logger.warning("unknown isolation tier %r — treating as 'none'", tier)
         return "none"
-    if tier == "container" and (not container_available or needs_in_process_mcp):
-        return "workspace"
     return tier
 
 

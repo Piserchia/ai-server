@@ -20,7 +20,11 @@ Parsers for the two pieces of external declarative configuration:
 
 - `load(name) -> SkillConfig | None` — load one skill by directory name
 - `list_all() -> list[SkillConfig]` — all skills, for SKILLS_REGISTRY.md generation
-- `SkillConfig` dataclass — fields mirror frontmatter schema, with sensible defaults
+- `SkillConfig` dataclass — fields mirror frontmatter schema, with sensible
+  defaults. Notable: `description` (router catalog + subagent card),
+  `subagents` (skills exposed as in-session SDK subagents — compiled by
+  `runner.agents.build_subagents`), `isolation` (`none | workspace | host`;
+  retired `container` parses and runs as workspace)
 
 ### manifest
 

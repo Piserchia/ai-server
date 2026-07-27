@@ -12,7 +12,8 @@ post_review:
   reviewer_effort: high
 context_files: [".context/SYSTEM.md", ".context/PROTOCOL.md"]
 tags: [server, maintenance, manual-merge-required]
-isolation: container
+isolation: workspace
+subagents: [code-review]
 ---
 
 # Server Patch
@@ -199,6 +200,15 @@ same change because the dedup query will see the merged row and skip.
 
 ## Gotchas (living section — append when you learn something)
 
+- **Guard rails are enforced, not advisory** (2026-07-27, replaced the docker
+  container lane): PreToolUse hooks DENY file writes outside your workspace
+  clone and dangerous host commands (`sudo`, `launchctl`, keychain reads,
+  force-push, `rm` on the live checkout, API-key injection) — even under
+  bypassPermissions. A denial is not an obstacle to route around; it means
+  that action is out of scope for this skill.
+- **You have a `code-review` subagent** — delegate a pre-push review of your
+  own diff to it (Task tool) before opening the PR; the runner still runs the
+  independent post-session review (INV-13).
 - `pipenv run pytest` must be run from the repo root, not from `src/`.
 - The server uses subscription auth, not API keys. Never reference
   `ANTHROPIC_API_KEY` in code or tests.

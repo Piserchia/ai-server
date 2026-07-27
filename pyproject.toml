@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "Personal assistant server for Mac Mini: Telegram + web + cron → Claude Agent SDK."
 requires-python = ">=3.12"
 dependencies = [
-    # Claude Agent SDK — the brain
-    "claude-agent-sdk>=0.1.60",
+    # Claude Agent SDK — the brain. Pinned to the 0.1.x line: the runner's
+    # options surface (agents/hooks/effort/output_format/RateLimitEvent) is
+    # verified against it. The 0.2.x line exists — upgrade deliberately, with
+    # its own test pass, never as a side effect (docs/SDK_MIGRATION_2026-07-27.md).
+    "claude-agent-sdk>=0.1.63,<0.2",
 
     # Database
     "sqlalchemy[asyncio]>=2.0.29",

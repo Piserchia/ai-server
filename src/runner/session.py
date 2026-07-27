@@ -1,20 +1,22 @@
 """
 One function: `run_session(job)`. Resolves the skill + isolation tier, prepares a
-per-job workspace when the tier calls for one, then executes via the right backend
-(in-process Agent SDK, or `claude -p` in a container — see runner/executors.py),
-streaming output to audit log + Redis. Returns a result dict or raises
+per-job workspace when the tier calls for one, then runs an in-process Agent SDK
+session, streaming output to audit log + Redis. Returns a result dict or raises
 QuotaExhausted.
 
-Auth: subscription via bundled Claude Code CLI. The bootstrap script unsets
-ANTHROPIC_API_KEY before starting any process, so the SDK uses the CLI's stored
-credentials from `claude login`. Containers get CLAUDE_CODE_OAUTH_TOKEN instead
-(from `claude setup-token`) — never an API key.
+Auth: subscription via the Claude Code CLI bundled inside the SDK package. The
+bootstrap script unsets ANTHROPIC_API_KEY before starting any process, so the
+SDK uses the stored credentials from `claude login`. There is no API-key path
+anywhere (INV-3).
 
 Skill-driven config: the runner calls registry.skills.load() and uses the skill's
-frontmatter for model/effort/permission_mode/required_tools/isolation.
+frontmatter for model/effort/permission_mode/required_tools/isolation/subagents.
 
-Isolation tiers (P1): none | workspace | container | host — see
-runner/workspaces.py for semantics.
+Isolation tiers: none | workspace | host — see runner/workspaces.py. Workspace-
+tier sessions additionally get PreToolUse guard hooks (runner/guards.py) that
+hard-deny writes outside the clone and dangerous host commands, even under
+permission_mode=bypassPermissions. This replaced the docker container lane on
+2026-07-27 (docs/SDK_MIGRATION_2026-07-27.md).
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    RateLimitEvent,
     ResultMessage,
     TextBlock,
     ThinkingBlock,
@@ -44,7 +47,8 @@ from src.config import settings
 from src.db import CHANNEL_JOB_DONE, CHANNEL_JOB_STREAM, async_session, redis
 from src.models import Job, JobKind, Project
 from src.registry.skills import SkillConfig, load as load_skill
-from src.runner import executors, quota, router, workspaces
+from src.runner import agents as agents_mod
+from src.runner import guards, quota, router, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +58,14 @@ _running_sessions: dict[str, ClaudeSDKClient] = {}
 
 async def interrupt(job_id: str | uuid.UUID) -> bool:
     client = _running_sessions.get(str(job_id))
-    if client:
-        try:
-            await client.interrupt()
-            return True
-        except Exception as exc:
-            logger.warning("interrupt failed for %s: %s", job_id, exc)
-            return False
-    # Not in-process — maybe it's running in a container
-    return await executors.interrupt_container(str(job_id))
+    if client is None:
+        return False
+    try:
+        await client.interrupt()
+        return True
+    except Exception as exc:
+        logger.warning("interrupt failed for %s: %s", job_id, exc)
+        return False
 
 
 # ── Skill resolution ────────────────────────────────────────────────────────
@@ -74,17 +77,14 @@ def _build_server_directive(
     job_description: str = "",
     *,
     canonical_cwd: Path | None = None,
-    context_root: str = "",
 ) -> str:
     """Build a context-appropriate server preamble. Reduces token waste by
     tailoring the directive to the task type.
 
     canonical_cwd: the real checkout when cwd is an isolated workspace clone.
-    context_root: where the session can read the server's .context files
-    (host path normally; /ctx inside a container).
     """
     base = "You are working inside the assistant server.\n\n"
-    ctx_root = context_root or str(settings.server_root / ".context")
+    ctx_root = str(settings.server_root / ".context")
     is_workspace = canonical_cwd is not None and canonical_cwd != cwd
 
     # Chat: minimal directive
@@ -516,13 +516,17 @@ def _build_options(
     task_turns: list[dict] | None = None,
     *,
     canonical_cwd: Path | None = None,
-    context_root: str = "",
+    guard_workspace: Path | None = None,
 ) -> ClaudeAgentOptions:
-    """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults."""
+    """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults.
+
+    guard_workspace: when set (workspace-tier), PreToolUse guard hooks are
+    attached that contain the session to this path (INV-17).
+    """
     # System prompt — context-aware preamble + skill body + task context
     server_directive = _build_server_directive(
         skill_cfg, cwd, job.description,
-        canonical_cwd=canonical_cwd, context_root=context_root,
+        canonical_cwd=canonical_cwd,
     )
     system_prompt = server_directive
 
@@ -575,10 +579,22 @@ def _build_options(
         session_id=str(job.id),
         model=model,
     )
-    if effort and effort != "medium":
-        kwargs["effort"] = effort  # low | medium | high | xhigh | max
+    effort_norm = agents_mod.normalize_effort(effort)
+    if effort_norm and effort_norm != "medium":
+        kwargs["effort"] = effort_norm  # SDK ladder: low | medium | high | max
     if skill_cfg and skill_cfg.max_turns:
         kwargs["max_turns"] = skill_cfg.max_turns
+
+    # In-session subagents (frontmatter `subagents:` → SDK agents=)
+    if skill_cfg and skill_cfg.subagents:
+        subs = agents_mod.build_subagents(skill_cfg, settings.default_model)
+        if subs:
+            kwargs["agents"] = subs
+
+    # Guard hooks for workspace-tier sessions (INV-17): deny writes outside
+    # the clone + dangerous host commands, even under bypassPermissions.
+    if guard_workspace is not None:
+        kwargs["hooks"] = guards.make_guard_hooks(str(job.id), guard_workspace)
 
     # ── MCP server injection ──────────────────────────────────────────
     # Skills opt in via "needs-projects-mcp" / "needs-dispatch-mcp" tags
@@ -636,20 +652,15 @@ async def run_session(job: Job) -> dict[str, Any]:
                              "task context (continuation may lose the plan)", job_id[:8])
             audit_log.append(job_id, "task_context_load_failed")
 
-    # ── Isolation tier resolution + workspace (P1) ──────────────────────
-    needs_mcp = bool(skill_cfg and any(t.startswith("needs-") and t.endswith("-mcp")
-                                       for t in (skill_cfg.tags or [])))
+    # ── Isolation tier resolution + workspace ───────────────────────────
     isolation = workspaces.resolve_isolation(
         skill_cfg.isolation if skill_cfg else None,
         (job.payload or {}).get("isolation"),
-        executors.container_runtime_available(),
-        needs_mcp,
     )
 
     ws: workspaces.Workspace | None = None
     cwd = canonical_cwd
-    context_root = ""
-    if isolation in ("workspace", "container"):
+    if isolation == "workspace":
         try:
             ws = workspaces.create_workspace(job_id, canonical_cwd, settings.workspaces_dir)
             cwd = ws.path
@@ -662,13 +673,11 @@ async def run_session(job: Job) -> dict[str, Any]:
                          "canonical cwd (NO isolation): %s", job_id[:8], exc)
             audit_log.append(job_id, "workspace_fallback", error=str(exc)[:300])
             isolation = "none"
-    if isolation == "container":
-        context_root = "/ctx"   # server .context is mounted read-only there
 
     options = _build_options(
         job, cwd, skill_cfg, task_turns,
         canonical_cwd=canonical_cwd if ws else None,
-        context_root=context_root,
+        guard_workspace=ws.path if ws else None,
     )
 
     # Log context budget usage (Rec 8)
@@ -718,26 +727,7 @@ async def run_session(job: Job) -> dict[str, Any]:
     session_failed = False
 
     try:
-        if isolation == "container":
-            exec_result = await executors.run_in_container(
-                job_id=job_id,
-                prompt=job.description,
-                system_prompt=options.system_prompt or "",
-                model=options.model or "",
-                permission_mode=(
-                    (job.payload or {}).get("permission_mode")
-                    or (skill_cfg.permission_mode if skill_cfg else "acceptEdits")
-                ),
-                allowed_tools=list(options.allowed_tools or []),
-                max_turns=skill_cfg.max_turns if skill_cfg else None,
-                workspace=cwd,
-                publish_stream=_publish_stream,
-                truncate_for_log=_truncate_for_log,
-                preview_text=_preview_text,
-            )
-            final_summary, usage = exec_result.final_summary, exec_result.usage
-        else:
-            final_summary, usage = await _run_in_process(job_id, job.description, options)
+        final_summary, usage = await _run_in_process(job_id, job.description, options)
 
         if final_summary:
             audit_log.write_summary(job_id, final_summary)
@@ -785,7 +775,7 @@ async def run_session(job: Job) -> dict[str, Any]:
 async def _run_in_process(
     job_id: str, prompt: str, options: ClaudeAgentOptions
 ) -> tuple[str, dict[str, Any]]:
-    """The original in-process Agent SDK execution path."""
+    """The in-process Agent SDK execution path (the only execution path)."""
     final_text_chunks: list[str] = []
     usage: dict[str, Any] = {}
 
@@ -797,7 +787,28 @@ async def _run_in_process(
             await client.query(prompt)
 
             async for message in client.receive_response():
-                # Check for quota/rate-limit error inside a message
+                # Typed rate-limit signal — the CLI emits these on status
+                # transitions; "rejected" means the current window is spent.
+                if isinstance(message, RateLimitEvent):
+                    info = message.rate_limit_info
+                    audit_log.append(
+                        job_id, "rate_limit_status",
+                        status=getattr(info, "status", ""),
+                        utilization=getattr(info, "utilization", None),
+                        resets_at=getattr(info, "resets_at", None),
+                        rate_limit_type=getattr(info, "rate_limit_type", None),
+                    )
+                    detected = quota.detect_from_rate_limit(info)
+                    if detected is not None:
+                        reset_at = detected if isinstance(detected, datetime) else None
+                        raise quota.QuotaExhausted(
+                            reset_at,
+                            reason=f"rate limit rejected "
+                                   f"(window={getattr(info, 'rate_limit_type', '?')})",
+                        )
+                    continue
+
+                # Heuristic fallback: error text in any message shape
                 err = getattr(message, "error", None)
                 if err:
                     detected = quota.detect_quota_error(str(err))
@@ -809,6 +820,20 @@ async def _run_in_process(
 
                 if isinstance(message, ResultMessage):
                     usage = getattr(message, "usage", {}) or {}
+                    if message.is_error:
+                        err_text = (message.result or "") or "; ".join(
+                            getattr(message, "errors", None) or [])
+                        detected = quota.detect_quota_error(err_text)
+                        if detected is not None:
+                            reset_at = detected if isinstance(detected, datetime) else None
+                            raise quota.QuotaExhausted(reset_at, reason=err_text[:500])
+                        # Fail loudly when the session errored AND produced no
+                        # usable text (parity with the removed container lane).
+                        if not final_text_chunks:
+                            raise RuntimeError(
+                                f"session error ({message.subtype}): "
+                                f"{err_text[:500] or 'no output'}"
+                            )
 
         return "\n".join(final_text_chunks).strip(), usage
     finally:

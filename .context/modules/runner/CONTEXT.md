@@ -1,6 +1,6 @@
 # Runner module
 
-**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`, `src/runner/workspaces.py`, `src/runner/executors.py`, `src/runner/plans.py`, `src/runner/llm_router.py`
+**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`, `src/runner/workspaces.py`, `src/runner/guards.py`, `src/runner/agents.py`, `src/runner/plans.py`, `src/runner/llm_router.py`
 
 ## Purpose
 
@@ -33,9 +33,10 @@ Four async tasks running in one process:
 - `retrospective.context_budget_report(since)` — synchronous. Walks audit logs for `context_budget_used` events, aggregates by skill. Returns `list[ContextBudget]` with avg/max fraction of model budget used by static context.
 - `session.format_task_turns(turns)` — pure helper: formats task turn dicts into a compact conversation summary for system prompt injection.
 - `session.build_task_context(turns_data, task_id)` — pure: formats pre-fetched turns into the "Task conversation" markdown section. Turns are fetched async in `run_session` (replaced the old nested-event-loop `_build_task_context(task_id)` hack; load failures are now audited as `task_context_load_failed` instead of silently dropping the conversation).
-- `workspaces.resolve_isolation(skill_iso, payload_iso, container_available, needs_mcp)` — pure: effective isolation tier (`none | workspace | container | host`). Payload > frontmatter > none; `container` downgrades to `workspace` without a runtime/token or when the skill needs in-process MCP.
+- `workspaces.resolve_isolation(skill_iso, payload_iso)` — pure: effective isolation tier (`none | workspace | host`). Payload > frontmatter > none; the retired `container` value maps to `workspace` (docker lane removed 2026-07-27).
 - `workspaces.create_workspace(job_id, canonical, base_dir)` — per-job git clone under `volumes/workspaces/<job8>-<name>/` with origin re-pointed at the canonical's real remote; `sync_canonical(ws)` fast-forwards the canonical after the session pushes; `cleanup_workspace(ws, keep=)` removes it (failed jobs keep theirs for debugging); `prune_old_workspaces(base_dir, max_age_days)` is called by server-upkeep.
-- `executors.run_in_container(...)` — `claude -p --output-format stream-json` in a container (docker CLI; colima/OrbStack/Docker Desktop). Emits the SAME audit events as the in-process lane (parity contract, tested in `tests/test_executors.py`). `container_runtime_available()` gates it; `interrupt_container(job_id)` backs /cancel; `build_container_command(...)` and `parse_stream_json_line(...)` are pure and tested. Containers get `CLAUDE_CODE_OAUTH_TOKEN` only — the executor strips `ANTHROPIC_API_KEY` (INV-3).
+- `guards.make_guard_hooks(job_id, workspace)` — PreToolUse hook dict for `ClaudeAgentOptions(hooks=...)`: denies file writes outside the workspace clone (temp dirs excepted) and dangerous Bash (`sudo`, `launchctl`, keychain reads, force-push, kills, crontab, `ANTHROPIC_API_KEY` injection, destructive commands referencing protected roots). Fires BEFORE permission evaluation, so it binds under `bypassPermissions` (INV-17). Denials audited as `guard_denied`. Pure predicates: `write_target_violation(...)`, `bash_violation(...)`, `protected_roots()` — tested in `tests/test_guards.py`.
+- `agents.build_subagents(skill_cfg, fallback_model)` — compiles a skill's frontmatter `subagents:` list into SDK `AgentDefinition`s for `ClaudeAgentOptions(agents=...)` (in-session Task-tool delegation). Skips god/host/internal/no_llm/missing skills. `agents.normalize_effort(e)` maps the repo ladder onto the SDK's (`xhigh` → `max`); `agents.skill_to_agent_definition(cfg)` is the pure per-skill mapping — tested in `tests/test_agents.py`.
 - `plans.validate_plan(plan, known_kinds)` / `plans.topo_order(subtasks)` / `plans.deps_satisfied(deps, completed, escalation_map)` — pure plan/DAG helpers (P2).
 - `plans.spawn_plan_jobs(task_id, plan, created_by)` — one job per subtask: roots queued, dependents `deferred` (payload.depends_on = job uuids). `promote_deferred_for(job)` queues deferred siblings whose deps completed (a completed escalation retry satisfies its failed original); `fail_dependents_of(job)` cascades terminal failures; `plan_jobs_remaining(task_id, exclude_job_id)` is the DAG drain check.
 - `llm_router.llm_route(description)` — Haiku one-turn routing fallback when regex rules miss; returns `(skill|""|"plan", confidence)`; `parse_route_response` is pure, fail-open to generic. Every routing decision is audited (`routing_decision`: method=rule|llm|fallback).
@@ -65,7 +66,9 @@ All via `src.config.settings`:
 - `SESSION_TIMEOUT_SECONDS` (default 1800)
 - `DEFAULT_MODEL` (global fallback when skill doesn't specify)
 - `QUOTA_PAUSE_MINUTES` (default 60 when reset time is unknown)
-- `CONTAINER_RUNTIME` / `AGENT_IMAGE` / `CONTAINER_MEMORY` / `CONTAINER_CPUS` / `CLAUDE_CODE_OAUTH_TOKEN` (container lane; empty runtime = disabled → container-tier skills run as workspace. See `docs/CONTAINERS.md`)
+
+(Container settings removed 2026-07-27 with the docker lane — guard hooks
+carry the containment duty now; `docs/SDK_MIGRATION_2026-07-27.md`.)
 
 ## Context injection
 
@@ -86,10 +89,16 @@ MCP servers are injected based on skill name (`_NEEDS_PROJECTS_MCP`,
 ## Auth
 
 Subscription only. The runner calls `_check_subscription_auth()` on startup and
-refuses to start if `ANTHROPIC_API_KEY` is set or `claude` CLI is missing.
+refuses to start if `ANTHROPIC_API_KEY` is set or no Claude Code CLI is
+resolvable. The Agent SDK ships a bundled CLI inside its package
+(`claude_agent_sdk/_bundled/claude`) — a system `claude` install is a fallback,
+not a requirement. Rate limits are detected typed-first (`RateLimitEvent` →
+`quota.detect_from_rate_limit`) with the string heuristic as fallback.
 
 ## Testing
 
+- `tests/test_guards.py` — guard predicates + hook denial contract (INV-17 enforcement surface).
+- `tests/test_agents.py` — SKILL.md → AgentDefinition compilation, effort normalization, delegability rules.
 - `tests/test_pure_functions.py` — router, flag parser, writeback classifier (Phase 2).
 - `tests/test_mcp_tools.py` — pure-function tests for MCP tool helpers: `_format_project`, `_read_log_tail`, `_validate_enqueue_args` (Phase 4B). No DB/Redis/SDK. (21 tests)
 - `test_review.py` — code-review outcome parser, reviewer prompt construction (16 tests).
