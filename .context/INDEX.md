@@ -22,6 +22,7 @@
 | Regression-test a skill's behaviour | `evals/README.md`, `evals/run.py`, `evals/cases/<skill>.yml` |
 | See evaluation status | `docs/EVALUATION_2026-04-18.md` (architecture) and `docs/EVALUATION_2026-07-10.md` (runtime audit; status tables at top of each) |
 | Fix a defect found in the July audit | `docs/superpowers/plans/2026-07-10-eval-remediation.md` (task-by-task plan T1–T17) |
+| Segregate project delivery (dev-repo split + deploy contract) | `docs/superpowers/plans/2026-07-27-project-delivery-segregation.md` (Phases A–E) |
 | Understand the atlas project | `docs/EVALUATION_2026-07-10-atlas.md`, `projects/atlas/CLAUDE.md` |
 | Create a new skill | `skills/TEMPLATE.md` (structure reference), `skills/new-skill/SKILL.md` |
 | Read module institutional knowledge | `.context/modules/<x>/skills/GOTCHAS.md`, `DEBUG.md`, `PATTERNS.md` |
