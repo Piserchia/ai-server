@@ -14,9 +14,11 @@ Compilation rules:
   - never compile `god` or any host-isolation skill (break-glass is never
     delegable — INV-18), internal skills (leading `_`, runner-orchestrated),
     `no_llm` skills (scripts, not prompts), or self-references
-  - `effort` is normalized to the SDK ladder (low|medium|high|max);
-    the repo's historical `xhigh` rounds up to `max` (it was chosen for
-    crank-it skills; the SDK has no in-between value)
+  - `effort` is validated against the SDK ladder (low|medium|high|xhigh|max);
+    unrecognized values fall back to the SDK default. NOTE: `xhigh` IS a
+    native SDK value on the pinned line (0.1.81) — it passes through
+    unchanged. Do not silently promote it to `max`; server-patch/app-patch
+    picked xhigh deliberately to preserve subscription headroom.
   - `permission_mode` passes through when valid; the SDK may still clamp a
     subagent to the parent's mode (bypassPermissions is never widened)
 """
@@ -31,22 +33,23 @@ from src.registry.skills import SkillConfig, load as load_skill
 
 logger = logging.getLogger(__name__)
 
-_SDK_EFFORTS = {"low", "medium", "high", "max"}
+# The SDK effort ladder on the pinned line (0.1.63..<0.2). `xhigh` is native —
+# verified against ClaudeAgentOptions.effort / AgentDefinition.effort.
+_SDK_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 _SDK_PERMISSION_MODES = {"default", "acceptEdits", "plan", "bypassPermissions"}
 
 
 def normalize_effort(effort: str | None) -> str | None:
-    """Map a frontmatter/payload effort onto the SDK's accepted ladder.
+    """Validate a frontmatter/payload effort against the SDK's accepted ladder.
 
-    Returns None (SDK default) for empty or unrecognized values. Pure function.
+    Returns the value unchanged when valid, else None (SDK default) — never
+    promotes one level to another. Pure function.
     """
     if not effort:
         return None
     e = effort.strip().lower()
     if e in _SDK_EFFORTS:
         return e
-    if e == "xhigh":
-        return "max"
     logger.warning("unknown effort %r — letting the SDK default apply", effort)
     return None
 

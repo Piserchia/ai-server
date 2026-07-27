@@ -128,6 +128,50 @@ class TestBashViolation:
     def test_rm_on_protected_root_denied(self):
         assert guards.bash_violation("rm -rf /protected/root/src", WS, ROOTS)
 
+    def test_home_var_spelling_of_root_denied(self):
+        # $HOME / ${HOME} are the spellings a session actually emits for a
+        # home-relative root (regression: these bypassed the literal matcher).
+        home_root = Path.home() / ".ssh"
+        assert guards.bash_violation("rm -rf $HOME/.ssh", WS, [home_root])
+        assert guards.bash_violation("rm -rf ${HOME}/.ssh/id_rsa", WS, [home_root])
+
+    def test_spaced_root_all_spellings_denied(self):
+        # The production checkout path contains a space; a session may write
+        # it quoted-absolute, backslash-escaped, or via $HOME.
+        root = Path("/Users/x/Library/Application Support/ai-server")
+        roots = [root]
+        for cmd in (
+            'rm -rf "/Users/x/Library/Application Support/ai-server/src"',
+            r"rm -rf /Users/x/Library/Application\ Support/ai-server/src",
+        ):
+            assert guards.bash_violation(cmd, WS, roots), cmd
+
+    def test_git_reset_hard_on_protected_root_denied(self):
+        # The 2026-07-09 single-writer incident class.
+        assert guards.bash_violation("git -C /protected/root reset --hard origin/main", WS, ROOTS)
+        assert guards.bash_violation("git -C /protected/root checkout -- src/", WS, ROOTS)
+        assert guards.bash_violation("git -C /protected/root clean -fd", WS, ROOTS)
+
+    def test_in_workspace_git_reset_allowed(self):
+        # Same destructive git, but against the clone → fine (masked to «WS»).
+        assert guards.bash_violation(f"git -C {WS} reset --hard HEAD", WS, ROOTS) is None
+        assert guards.bash_violation("git reset --hard HEAD~1", WS, ROOTS) is None
+
+    def test_refspec_force_push_denied(self):
+        assert guards.bash_violation("git push origin +main:main", WS, ROOTS)
+
+    def test_bare_kill_denied(self):
+        assert guards.bash_violation("kill 8123", WS, ROOTS)
+        assert guards.bash_violation("kill $(pgrep -f runner)", WS, ROOTS)
+
+    def test_find_delete_on_protected_root_denied(self):
+        assert guards.bash_violation(
+            "find /protected/root -name '*.py' -delete", WS, ROOTS)
+
+    def test_skill_word_not_a_false_kill(self):
+        # "skill" contains "kill" — must not trip the process-kill guard.
+        assert guards.bash_violation("cat skills/app-patch/SKILL.md", WS, ROOTS) is None
+
     def test_redirect_into_protected_root_denied(self):
         assert guards.bash_violation("echo hacked > /protected/root/.env", WS, ROOTS)
 

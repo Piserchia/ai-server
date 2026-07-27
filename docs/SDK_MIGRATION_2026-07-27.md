@@ -42,7 +42,7 @@ dependencies were exactly three, plus one latent bug:
 | Evals judge | `claude -p` subprocess | SDK `query()` (no argv limits, same subscription auth) |
 | Startup check | `claude --version` subprocess | no-API-key assertion + SDK import + bundled/system CLI resolution |
 | Error handling | in-process lane completed "successfully" on `ResultMessage.is_error` | errors with no usable output now fail the job (escalation chain applies) |
-| Effort ladder | `xhigh` passed through unvalidated | normalized at the SDK boundary (`xhigh` → `max`; SDK accepts low/medium/high/max). Frontmatter/Telegram contract unchanged. |
+| Effort ladder | `xhigh` passed through unvalidated | validated against the SDK ladder low/medium/high/**xhigh**/max (all native on 0.1.81); unknown values fall back to the SDK default. `xhigh` is NOT remapped — server-patch/app-patch keep it. Frontmatter/Telegram contract unchanged. |
 
 Deleted: `src/runner/executors.py`, `tests/test_executors.py`,
 `Dockerfile.agent`, container settings (`CONTAINER_RUNTIME`, `AGENT_IMAGE`,
@@ -81,11 +81,12 @@ tracked in SYSTEM.md § technical debt.
 
 ## Follow-ups (deliberate, not drift)
 
-- **SDK 0.2.x upgrade**: PyPI is at 0.2.128; we pinned `<0.2` because the
-  entire options surface here was verified against 0.1.x (0.1.81 installed).
-  Upgrade in its own pass: bump pin → introspect
-  (`effort/agents/hooks/sandbox/output_format/RateLimitEvent`) → pytest →
-  live smoke.
+- **SDK 0.2.x upgrade**: PyPI is at 0.2.128; we pinned `>=0.1.81,<0.2` (the
+  verified version — the floor is deliberately the exact version so an older
+  resolve can't crash on the module-load `import RateLimitEvent` or regress
+  `AgentDefinition.effort=xhigh`). Upgrade in its own pass: bump pin →
+  introspect (`effort/agents/hooks/sandbox/output_format/RateLimitEvent`) →
+  pytest → live smoke.
 - **Seatbelt sandbox per-skill** (see trade-off above).
 - **Pipfile.lock is untracked by design** (.gitignore) — each checkout
   resolves its own. The deploy skill's dependency step now triggers on

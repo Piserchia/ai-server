@@ -10,12 +10,21 @@ Every workspace-tier session gets PreToolUse hooks that hard-deny:
 
 Why hooks and not prompt rules: hooks run in the runner process BEFORE the
 SDK's permission evaluation, so they bind even under
-permission_mode=bypassPermissions (server-patch). A session cannot talk its
-way past them. This is policy-level isolation — weaker than the removed
+permission_mode=bypassPermissions (server-patch). A session cannot *prompt*
+its way past them. This is policy-level isolation — weaker than the removed
 docker lane against a kernel-level escape, but *enforced* rather than
 requested, and it covers every workspace-tier session uniformly (the docker
 lane only ever covered `server-patch`, and only when a container runtime was
 configured — which by default it was not).
+
+Residual bypasses (accepted under the single-tenant threat model): the
+file-write guard is robust (paths are `.resolve()`d, defeating `~`, `..`,
+and symlinks), but the Bash guard is a command-text denylist, so a
+determined session could still mutate outside the clone via an interpreter
+(`python -c "shutil.rmtree(...)"`), a symlink-then-redirect chain, or any
+tool head not in the mutator set. These are inherent to text-level guarding;
+the OS-level closure is the SDK `sandbox` (Seatbelt) follow-up tracked in
+SYSTEM.md § technical debt.
 
 Layout: pure predicates at the top (unit-tested, no I/O); the hook factory
 at the bottom closes over the workspace path + job id and appends
@@ -121,9 +130,11 @@ _HARD_DENY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\blaunchctl\b"), "launchctl (service management is host-tier only)"),
     (re.compile(r"\bsecurity\s+(?:find|dump|export|delete|unlock)"),
      "keychain access via `security`"),
-    (re.compile(r"\bpush\b[^\n;|&]*\s(?:-f\b|--force\b|--force-with-lease\b)"),
+    # Force-push in any spelling: -f / --force / --force-with-lease, or a
+    # leading `+` on a refspec (`git push origin +main:main`).
+    (re.compile(r"\bpush\b[^\n;|&]*\s(?:-f\b|--force\b|--force-with-lease\b|\+\S)"),
      "force-push"),
-    (re.compile(r"\b(?:killall|pkill)\b"), "process kills"),
+    (re.compile(r"\b(?:killall|pkill|kill)\b"), "process kills"),
     (re.compile(r"\bcrontab\b"), "crontab"),
     (re.compile(r"\bANTHROPIC_API_KEY\s*="), "ANTHROPIC_API_KEY assignment (INV-3)"),
     (re.compile(r"\bexport\s+ANTHROPIC_API_KEY\b"), "ANTHROPIC_API_KEY export (INV-3)"),
@@ -131,23 +142,39 @@ _HARD_DENY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 # Command heads that mutate the filesystem: when one of these appears in a
 # command that also references a protected root, deny. Read-only commands
-# (grep/cat/git log on the canonical) stay allowed.
+# (grep/cat/git log on the canonical) stay allowed. Git history-rewriting
+# subcommands are included because `git -C <root> reset --hard` /
+# `cd <root> && git checkout -- .` is the 2026-07-09 single-writer incident
+# class — but only when a protected root is referenced, so in-workspace git
+# (cwd = the clone, masked to «WS» before matching) stays free.
 _MUTATOR_PATTERN = re.compile(
     r"(?:^|[;&|]\s*)\s*(?:rm|rmdir|mv|cp|dd|tee|truncate|chmod|chown|ln|rsync)\b"
     r"|\bsed\s+(?:-[a-zA-Z]*i[a-zA-Z]*\b|--in-place\b)"
+    r"|\bgit\b[^\n;|&]*\b(?:reset|checkout|clean|restore)\b"
+    r"|\bfind\b[^\n;|&]*\s-delete\b"
     r"|>{1,2}\s*\S"
 )
 
 
+def _spacify(literal: str) -> str:
+    """Escape a path literal so each space matches a plain OR backslash-escaped
+    space — sessions spell `Application Support` and `Application\\ Support`."""
+    return r"(?:\\ | )".join(re.escape(part) for part in literal.split(" "))
+
+
 def _root_ref_pattern(root: Path) -> re.Pattern[str]:
     # Match the root path only at a path boundary so /x/ai-server doesn't
-    # match /x/ai-server-backup. Roots under $HOME also match their ~/ form
-    # (shell commands often spell them that way).
+    # match /x/ai-server-backup. Roots under $HOME also match the spellings a
+    # shell command actually uses: ~/, $HOME/, ${HOME}/ (the production
+    # checkout path contains a space, so those are the realistic forms).
     boundary = r"(?=/|['\"\s]|$)"
-    alts = [re.escape(str(root))]
+    root_str = str(root)
+    alts = [_spacify(root_str)]
     home = str(Path.home())
-    if str(root).startswith(home + "/"):
-        alts.append(re.escape("~" + str(root)[len(home):]))
+    if root_str.startswith(home + "/"):
+        tail = _spacify(root_str[len(home):])   # keeps leading /
+        for prefix in (r"~", r"\$HOME", r"\$\{HOME\}"):
+            alts.append(prefix + tail)
     return re.compile("(?:" + "|".join(alts) + ")" + boundary)
 
 

@@ -16,14 +16,12 @@ def _cfg(**kw) -> SkillConfig:
 
 class TestNormalizeEffort:
     def test_valid_pass_through(self):
-        for e in ("low", "medium", "high", "max"):
+        # xhigh is a native SDK value on the pinned line — must NOT be remapped.
+        for e in ("low", "medium", "high", "xhigh", "max"):
             assert agents.normalize_effort(e) == e
 
-    def test_xhigh_rounds_up_to_max(self):
-        assert agents.normalize_effort("xhigh") == "max"
-
     def test_case_and_whitespace_tolerant(self):
-        assert agents.normalize_effort(" High ") == "high"
+        assert agents.normalize_effort(" xHigh ") == "xhigh"
 
     def test_unknown_and_empty_give_none(self):
         assert agents.normalize_effort("turbo") is None
@@ -42,7 +40,7 @@ class TestSkillToAgentDefinition:
         assert d.tools == ["Read", "Grep"]
         assert d.model == "claude-opus-4-7"
         assert d.maxTurns == 5
-        assert d.effort == "max"
+        assert d.effort == "xhigh"
         assert d.permissionMode == "plan"
 
     def test_fallback_model_and_description(self):

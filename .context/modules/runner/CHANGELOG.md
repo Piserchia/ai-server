@@ -16,7 +16,8 @@ delegation), `tests/test_guards.py`, `tests/test_agents.py`.
 **Files changed**:
 - `src/runner/session.py` — single execution path (in-process SDK only);
   wires guard hooks for workspace-tier sessions + `agents=` subagents +
-  effort normalization (`xhigh`→`max`; SDK ladder has no xhigh); typed
+  effort validation (`xhigh` is a native SDK value on 0.1.81 — passed
+  through, NOT remapped); typed
   rate-limit handling (`RateLimitEvent` → QuotaExhausted, audited as
   `rate_limit_status`); ResultMessage.is_error now fails the job when no
   usable text was produced (parity with the removed container lane).

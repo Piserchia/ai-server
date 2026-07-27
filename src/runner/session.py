@@ -581,15 +581,21 @@ def _build_options(
     )
     effort_norm = agents_mod.normalize_effort(effort)
     if effort_norm and effort_norm != "medium":
-        kwargs["effort"] = effort_norm  # SDK ladder: low | medium | high | max
+        kwargs["effort"] = effort_norm  # SDK ladder: low | medium | high | xhigh | max
     if skill_cfg and skill_cfg.max_turns:
         kwargs["max_turns"] = skill_cfg.max_turns
 
-    # In-session subagents (frontmatter `subagents:` → SDK agents=)
+    # In-session subagents (frontmatter `subagents:` → SDK agents=). The Task
+    # tool is what dispatches to a subagent, so ensure it's allowed whenever
+    # agents are present — otherwise a skill on a non-bypass permission mode
+    # would get its delegations silently denied.
     if skill_cfg and skill_cfg.subagents:
         subs = agents_mod.build_subagents(skill_cfg, settings.default_model)
         if subs:
             kwargs["agents"] = subs
+            if "Task" not in tools:
+                tools = [*tools, "Task"]
+                kwargs["allowed_tools"] = tools
 
     # Guard hooks for workspace-tier sessions (INV-17): deny writes outside
     # the clone + dangerous host commands, even under bypassPermissions.
@@ -668,11 +674,18 @@ async def run_session(job: Job) -> dict[str, Any]:
                              workspace=str(ws.path), canonical=str(canonical_cwd),
                              isolation=isolation)
         except Exception as exc:
-            # Availability over purity — but loudly: the job runs un-isolated.
-            logger.error("workspace creation failed for %s — falling back to "
-                         "canonical cwd (NO isolation): %s", job_id[:8], exc)
-            audit_log.append(job_id, "workspace_fallback", error=str(exc)[:300])
-            isolation = "none"
+            # Fail CLOSED. Guard hooks are keyed to the workspace path, so a
+            # workspace-tier skill that can't get its clone would otherwise run
+            # in the live canonical checkout with its own permission mode
+            # (bypassPermissions for the patch skills) and NO containment —
+            # the exact hole INV-17 exists to close. Failing the job hands it
+            # to the escalation chain instead of degrading silently.
+            logger.error("workspace creation failed for %s — FAILING the job "
+                         "(workspace-tier requires containment): %s", job_id[:8], exc)
+            audit_log.append(job_id, "workspace_failed", error=str(exc)[:300])
+            raise RuntimeError(
+                f"workspace creation failed for a workspace-tier job: {exc}"
+            ) from exc
 
     options = _build_options(
         job, cwd, skill_cfg, task_turns,
