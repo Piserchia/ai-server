@@ -33,6 +33,7 @@ class ReviewOutcome(enum.Enum):
     lgtm = "LGTM"
     changes_requested = "changes_requested"
     blocker = "blocker"
+    error = "error"   # the review could NOT run — gate like a blocker (fail closed, INV-13)
 
 
 REVIEW_SYSTEM_PROMPT = """\
@@ -242,9 +243,13 @@ async def run_code_review(
             outcome = _parse_outcome(final_text)
 
     except Exception as exc:
-        logger.warning("code review failed: %s (defaulting to changes_requested)", exc)
-        final_text = f"Review failed: {exc}"
-        outcome = ReviewOutcome.changes_requested
+        # The review could not run. Do NOT fall through to changes_requested —
+        # that does not gate the job, so an SDK hiccup would let an unreviewed
+        # diff ship (INV-13). Return `error`, which the caller gates like a
+        # blocker (→ awaiting_user for a human look).
+        logger.warning("code review could not run: %s (gating as error)", exc)
+        final_text = f"Review could not run: {exc}"
+        outcome = ReviewOutcome.error
 
     audit_log.append(
         parent_job_id,

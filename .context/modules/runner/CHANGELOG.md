@@ -2,6 +2,41 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-28 — Fail-open invariant fixes (EVALUATION_2026-07-28 Batch 2)
+
+Closed a cluster of silent-failure paths the 2026-07-28 audit found where a
+documented invariant wasn't actually enforced:
+
+- **`main._cancel_listener`** (INV-8): per-iteration try/except + UUID
+  validation. A malformed cancel payload (`uuid.UUID("garbage")`) or a
+  transient Redis error previously killed the listener permanently while
+  `/health` stayed green (only `_job_loop` heartbeats).
+- **`main._finish_job`** (INV-9): guards `WHERE status != 'cancelled'` +
+  rowcount check, so the cancel-race (cancel lands, then a trailing
+  `_finish_job(completed)` resurrects the job) can't overwrite a user cancel.
+  `completed→awaiting_user` (review blocker) is still allowed.
+- **`main._job_loop`** (M5): `is_paused` + `blpop` are now inside the Redis
+  try/except — a Redis blip no longer kills the loop and strands the runner.
+- **`main.main`** (M5): supervises the 4 async tasks — if any exits on its own
+  (dead scheduler/cancel-listener), it shuts the process down so launchd
+  restarts a clean one instead of limping invisibly.
+- **`review.run_code_review` + `main._maybe_review`** (INV-13): the review gate
+  fails CLOSED. A review that can't run now returns `ReviewOutcome.error` →
+  `awaiting_user`, instead of `changes_requested` (which doesn't gate) letting
+  an unreviewed diff ship.
+- **`plans.promote_deferred_for` / `fail_dependents_of`** (T4): per-item
+  isolation — one failed subtask promotion/cascade no longer aborts the loop
+  and strands ready siblings.
+- **`workspaces._run_git`** (M3): catches `TimeoutExpired` → returncode 124, so
+  a hung `git pull --ff-only` in `sync_canonical`'s finally can't turn an
+  already-pushed, successful job into a failure that re-runs done work.
+- **`config.server_root`** default corrected (`assistant` → `ai-server`) — the
+  wrong default silently repointed every volume path when SERVER_ROOT was unset.
+- **`audit_log.py`** docstring: `job_completed` writes `usage`+`duration_seconds`,
+  not the previously-documented `cost_usd` (none — subscription auth).
+
+Behavioral tests for these land with the fakeredis/DB harness (Batch 4).
+
 ## 2026-07-28 — Segregation code-review fixes (Phases A–E)
 
 Addressed the code-review sub-agent's should-fixes (all were latent — they bite

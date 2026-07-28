@@ -195,8 +195,15 @@ async def promote_deferred_for(job: Job) -> int:
         return 0
     try:
         completed, escalation_map, deferred = await _task_job_state(job.task_id)
-        promoted = 0
-        for d in deferred:
+    except Exception:
+        logger.exception("deferred promotion: could not load task state for %s "
+                         "— deferred siblings may be stranded", str(job.id)[:8])
+        return 0
+    promoted = 0
+    for d in deferred:
+        # Per-item isolation: a failure promoting ONE subtask must not abort the
+        # rest of the loop and strand siblings that are ready to run (T4).
+        try:
             deps = [str(x) for x in ((d.payload or {}).get("depends_on") or [])]
             if deps_satisfied(deps, completed, escalation_map):
                 async with session_scope() as s:
@@ -209,10 +216,10 @@ async def promote_deferred_for(job: Job) -> int:
                 audit_log.append(str(d.id), "job_promoted",
                                  satisfied_by=str(job.id))
                 promoted += 1
-        return promoted
-    except Exception:
-        logger.exception("deferred promotion failed for job %s", str(job.id)[:8])
-        return 0
+        except Exception:
+            logger.exception("promotion of subtask %s failed (continuing with siblings)",
+                             str(d.id)[:8])
+    return promoted
 
 
 async def fail_dependents_of(job: Job) -> int:
@@ -222,20 +229,27 @@ async def fail_dependents_of(job: Job) -> int:
         return 0
     try:
         _, _, deferred = await _task_job_state(job.task_id)
-        failed_ids = {str(job.id)}
-        changed = True
-        to_fail: list[Job] = []
-        while changed:
-            changed = False
-            for d in deferred:
-                if d in to_fail:
-                    continue
-                deps = {str(x) for x in ((d.payload or {}).get("depends_on") or [])}
-                if deps & failed_ids:
-                    to_fail.append(d)
-                    failed_ids.add(str(d.id))
-                    changed = True
-        for d in to_fail:
+    except Exception:
+        logger.exception("dependency cascade: could not load task state for %s",
+                         str(job.id)[:8])
+        return 0
+    failed_ids = {str(job.id)}
+    changed = True
+    to_fail: list[Job] = []
+    while changed:
+        changed = False
+        for d in deferred:
+            if d in to_fail:
+                continue
+            deps = {str(x) for x in ((d.payload or {}).get("depends_on") or [])}
+            if deps & failed_ids:
+                to_fail.append(d)
+                failed_ids.add(str(d.id))
+                changed = True
+    failed = 0
+    for d in to_fail:
+        # Per-item isolation (T4): one failed cascade write must not abort the rest.
+        try:
             async with session_scope() as s:
                 await s.execute(
                     update(Job).where(Job.id == d.id)
@@ -246,10 +260,10 @@ async def fail_dependents_of(job: Job) -> int:
             audit_log.append(str(d.id), "job_failed",
                              error=f"dependency {str(job.id)[:8]} failed",
                              error_category="dependency")
-        return len(to_fail)
-    except Exception:
-        logger.exception("dependency cascade failed for job %s", str(job.id)[:8])
-        return 0
+            failed += 1
+        except Exception:
+            logger.exception("cascade-fail of subtask %s failed (continuing)", str(d.id)[:8])
+    return failed
 
 
 async def plan_jobs_remaining(task_id, exclude_job_id=None) -> int:

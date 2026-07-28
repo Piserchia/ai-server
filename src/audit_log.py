@@ -9,7 +9,7 @@ Why JSONL files, not a DB table:
 
 Kinds used (keep this list honest — update when adding new kinds):
 - job_started:      {"kind", "ts", "job_id", "description", "payload"}
-- job_completed:    {"kind", "ts", "job_id", "result", "cost_usd", "duration_seconds"}
+- job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no cost (subscription auth)
 - job_failed:       {"kind", "ts", "job_id", "error"}
 - job_cancelled:    {"kind", "ts", "job_id"}
 - tool_use:         {"kind", "ts", "job_id", "tool_name", "tool_use_id", "input"}

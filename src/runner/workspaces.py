@@ -85,9 +85,19 @@ def resolve_isolation(
 
 
 def _run_git(args: list[str], cwd: Path, timeout: int = 120) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-    )
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        # Never raise on a hung git (network stall). Callers branch on
+        # returncode; `sync_canonical` promises "never raises", and letting a
+        # timeout escape from run_session's finally would turn an already-pushed,
+        # successful session into a failure that re-runs done work (M3).
+        return subprocess.CompletedProcess(
+            args=["git", *args], returncode=124, stdout="",
+            stderr=f"git timed out after {timeout}s: git {' '.join(args)}",
+        )
 
 
 def is_git_repo(path: Path) -> bool:

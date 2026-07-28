@@ -109,11 +109,11 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | INV-6 | Only whitelisted chat IDs can submit jobs via Telegram | `gateway/telegram_bot.py:_guard` |
 | INV-7 | Only auth'd web requests can submit jobs | `gateway/web.py:_check_auth` |
 | INV-8 | Cancel requests honored within 2s | `runner/main.py:_cancel_listener` |
-| INV-9 | Job status transitions are valid (queued→running→terminal only) | `models.py` + `_finish_job` |
+| INV-9 | Job status transitions are valid; a user `cancelled` is never overwritten by a trailing finish (the cancel-race) | `_finish_job` guards `WHERE status != 'cancelled'` + rowcount check |
 | INV-10 | Skills in `plan` mode cannot write files | SDK-level permission_mode |
 | INV-11 | Audit logs are append-only | filesystem O_APPEND in `audit_log.append` |
 | INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front | `runner/main.py:_process_job` |
-| INV-13 | `server-patch` always requires a passing `code-review` sub-agent | `server-patch` SKILL.md + runner post-hook |
+| INV-13 | `server-patch` always requires a passing `code-review` sub-agent; the gate fails CLOSED — a review that can't run returns `error` → `awaiting_user`, never silently completes | `server-patch` SKILL.md + `main._maybe_review` + `review.run_code_review` |
 | INV-14 | Project slugs unique; port allocations never reused | `registry/manifest.py` + `projects/_ports.yml` |
 | INV-15 | On startup the runner reconciles orphaned `running` jobs (fail-only) before consuming the queue | `runner/reconcile.py` + `runner/main.py:main` |
 | INV-16 | Code-writing skills (`isolation: workspace`) never run in a shared checkout — one throwaway clone per job; work leaves only via git push | `runner/workspaces.py` + `runner/session.py:run_session` |

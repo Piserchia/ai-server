@@ -106,16 +106,21 @@ async def _job_loop() -> None:
     in_flight: set[asyncio.Task] = set()
 
     while not _shutdown.is_set():
-        # Liveness heartbeat. The loop iterates at least every 2s (BLPOP timeout)
-        # and keeps ticking even while jobs run in the background, so a fresh
-        # value means the runner is alive. GET /health reads this; an external
-        # Cloudflare Worker reads /health so silence can't masquerade as health.
+        # Liveness heartbeat + quota check + queue poll are all Redis reads. A
+        # transient Redis error here must NOT kill the loop — a dead job loop
+        # strands the whole runner while the process stays "up" under launchd.
+        # (The heartbeat stops on a real death, so /health still catches that.)
         try:
             await redis.set(KEY_RUNNER_HEARTBEAT, datetime.now(timezone.utc).isoformat())
+            paused, reset_at, reason = await quota.is_paused()
         except Exception:
-            logger.warning("heartbeat write failed (non-fatal)")
+            logger.warning("heartbeat/quota check failed — retrying shortly")
+            try:
+                await asyncio.wait_for(_shutdown.wait(), timeout=2)
+                break
+            except asyncio.TimeoutError:
+                continue
 
-        paused, reset_at, reason = await quota.is_paused()
         if paused:
             logger.info("queue paused on quota", reset_at=reset_at.isoformat(), reason=reason[:80])
             try:
@@ -124,7 +129,15 @@ async def _job_loop() -> None:
             except asyncio.TimeoutError:
                 continue
 
-        popped = await redis.blpop([QUEUE_JOBS], timeout=2)
+        try:
+            popped = await redis.blpop([QUEUE_JOBS], timeout=2)
+        except Exception:
+            logger.warning("queue poll failed — retrying shortly")
+            try:
+                await asyncio.wait_for(_shutdown.wait(), timeout=2)
+                break
+            except asyncio.TimeoutError:
+                continue
         if popped is None:
             in_flight = {t for t in in_flight if not t.done()}
             continue
@@ -383,12 +396,14 @@ async def _maybe_review(job: Job, result: dict) -> None:
             )
         )
 
-    if outcome == ReviewOutcome.blocker:
-        logger.warning("code review BLOCKER", job_id=str(job.id)[:8])
-        await _finish_job(
-            job.id, JobStatus.awaiting_user,
-            error="Code review flagged a blocker. Check the audit log.",
-        )
+    if outcome in (ReviewOutcome.blocker, ReviewOutcome.error):
+        # blocker = review found a serious issue; error = review couldn't run
+        # (fail closed — INV-13: an unreviewable diff must not ship silently).
+        msg = ("Code review flagged a blocker. Check the audit log."
+               if outcome == ReviewOutcome.blocker
+               else "Code review could not run — manual review needed. Check the audit log.")
+        logger.warning("code review gate", job_id=str(job.id)[:8], outcome=outcome.value)
+        await _finish_job(job.id, JobStatus.awaiting_user, error=msg)
 
 
 async def _verify_writeback(job: Job, result: dict) -> None:
@@ -1009,9 +1024,15 @@ async def _finish_job(
     error: str | None = None,
 ) -> None:
     async with session_scope() as s:
-        await s.execute(
+        # INV-9: never overwrite a user cancellation. The cancel listener may set
+        # `cancelled` in the race window before a session finishes; without this
+        # guard the trailing _finish_job(completed) would silently resurrect the
+        # job as completed. (completed→awaiting_user, e.g. a review blocker, is
+        # still allowed — only `cancelled` is protected.)
+        result_proxy = await s.execute(
             update(Job)
             .where(Job.id == job_id)
+            .where(Job.status != JobStatus.cancelled.value)
             .values(
                 status=status.value,
                 result=result,
@@ -1019,6 +1040,10 @@ async def _finish_job(
                 completed_at=datetime.now(timezone.utc),
             )
         )
+        if result_proxy.rowcount == 0:
+            logger.info("finish suppressed — job already in a protected terminal state",
+                        job_id=str(job_id)[:8], attempted=status.value)
+            return
     payload = {"summary": (result or {}).get("summary", "")} if result else {}
     await session_mod.publish_done(str(job_id), status.value, payload=payload)
 
@@ -1093,23 +1118,36 @@ async def _cancel_listener() -> None:
     await pubsub.subscribe(CHANNEL_JOB_CANCEL)
     try:
         while not _shutdown.is_set():
-            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=2)
-            if msg is None:
-                continue
-            job_id = msg.get("data")
-            if not job_id:
-                continue
-            did = await session_mod.interrupt(job_id)
-            if did:
-                audit_log.append(str(job_id), "job_cancelled")
-                async with session_scope() as s:
-                    await s.execute(
-                        update(Job).where(Job.id == uuid.UUID(job_id)).values(
-                            status=JobStatus.cancelled.value,
-                            completed_at=datetime.now(timezone.utc),
+            # Per-iteration guard: a malformed payload (uuid.UUID("garbage") →
+            # ValueError) or a transient Redis/DB error must NOT permanently kill
+            # the listener. Only _job_loop writes the heartbeat, so a dead cancel
+            # listener is invisible to /health — INV-8 would fail silently.
+            try:
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=2)
+                if msg is None:
+                    continue
+                job_id = msg.get("data")
+                if not job_id:
+                    continue
+                try:
+                    job_uuid = uuid.UUID(job_id)
+                except (ValueError, TypeError, AttributeError):
+                    logger.warning("cancel: ignoring malformed job_id", raw=str(job_id)[:80])
+                    continue
+                did = await session_mod.interrupt(job_id)
+                if did:
+                    audit_log.append(str(job_id), "job_cancelled")
+                    async with session_scope() as s:
+                        await s.execute(
+                            update(Job).where(Job.id == job_uuid).values(
+                                status=JobStatus.cancelled.value,
+                                completed_at=datetime.now(timezone.utc),
+                            )
                         )
-                    )
-                logger.info("interrupted session", job_id=job_id)
+                    logger.info("interrupted session", job_id=job_id)
+            except Exception:
+                logger.exception("cancel listener iteration failed (continuing)")
+                await asyncio.sleep(0.5)
     finally:
         await pubsub.unsubscribe(CHANNEL_JOB_CANCEL)
 
@@ -1154,7 +1192,20 @@ async def main() -> None:
         asyncio.create_task(_cancel_listener(), name="cancel_listener"),
         asyncio.create_task(event_loop(_shutdown), name="event_loop"),
     ]
-    await asyncio.gather(*tasks, return_exceptions=True)
+    # Supervise: if ANY subsystem exits on its own (not via _shutdown), bring the
+    # whole process down so launchd KeepAlive restarts a clean one. A limping
+    # runner with a dead scheduler or cancel-listener is worse (and invisible —
+    # only _job_loop heartbeats) than a restart.
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    if not _shutdown.is_set():
+        for t in done:
+            exc = t.exception() if not t.cancelled() else None
+            logger.error("runner subsystem exited unexpectedly — shutting down for restart",
+                         task=t.get_name(), error=str(exc) if exc else "returned cleanly")
+        _shutdown.set()
+    for t in pending:
+        t.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
     logger.info("runner stopped")
 
 

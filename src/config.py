@@ -38,8 +38,11 @@ class Settings(BaseSettings):
     web_auth_token: str = ""
     web_port: int = 8080
 
-    # Paths
-    server_root: Path = Path.home() / "Library" / "Application Support" / "assistant"
+    # Paths. The default MUST match the real prod install dir name
+    # (`ai-server`); the previous `assistant` default was wrong and silently
+    # repointed every volume path (audit_log/logs/projects/workspaces) at a
+    # non-existent dir whenever SERVER_ROOT was unset (e.g. a subprocess env).
+    server_root: Path = Path.home() / "Library" / "Application Support" / "ai-server"
 
     # Runner
     # 4 is safe now that code-writing skills run in per-job workspace clones
