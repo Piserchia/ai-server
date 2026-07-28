@@ -157,6 +157,18 @@ class TestBashViolation:
         assert guards.bash_violation(f"git -C {WS} reset --hard HEAD", WS, ROOTS) is None
         assert guards.bash_violation("git reset --hard HEAD~1", WS, ROOTS) is None
 
+    def test_git_commit_in_protected_root_denied(self):
+        # Pull-only runtime clone lives under server_root (a protected root);
+        # committing there via absolute path is the single-writer violation.
+        assert guards.bash_violation("git -C /protected/root commit -m x", WS, ROOTS)
+        assert guards.bash_violation(
+            "cd /protected/root/projects/atlas && git add -A && git commit -m y", WS, ROOTS)
+
+    def test_in_workspace_git_commit_allowed(self):
+        # The normal workspace flow: commit with no protected-root reference.
+        assert guards.bash_violation("git add -A && git commit -m 'work'", WS, ROOTS) is None
+        assert guards.bash_violation(f"cd {WS} && git add -A && git commit -m z", WS, ROOTS) is None
+
     def test_refspec_force_push_denied(self):
         assert guards.bash_violation("git push origin +main:main", WS, ROOTS)
 

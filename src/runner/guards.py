@@ -142,15 +142,19 @@ _HARD_DENY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 # Command heads that mutate the filesystem: when one of these appears in a
 # command that also references a protected root, deny. Read-only commands
-# (grep/cat/git log on the canonical) stay allowed. Git history-rewriting
-# subcommands are included because `git -C <root> reset --hard` /
-# `cd <root> && git checkout -- .` is the 2026-07-09 single-writer incident
-# class — but only when a protected root is referenced, so in-workspace git
-# (cwd = the clone, masked to «WS» before matching) stays free.
+# (grep/cat/git log on the canonical) stay allowed. Git write subcommands
+# (reset/checkout/clean/restore/commit/add/rebase/merge) are included because
+# `git -C <root> reset --hard` / `cd <runtime-clone> && git add -A && git
+# commit` is the 2026-07-09 single-writer incident class AND the exact
+# violation the delivery contract's pull-only rule forbids — but ONLY when a
+# protected root is referenced, so in-workspace git (cwd = the clone, masked to
+# «WS» before matching) stays free. Note: guards bind workspace-tier sessions
+# only, so content projects that legitimately commit (isolation: none) are
+# never affected.
 _MUTATOR_PATTERN = re.compile(
     r"(?:^|[;&|]\s*)\s*(?:rm|rmdir|mv|cp|dd|tee|truncate|chmod|chown|ln|rsync)\b"
     r"|\bsed\s+(?:-[a-zA-Z]*i[a-zA-Z]*\b|--in-place\b)"
-    r"|\bgit\b[^\n;|&]*\b(?:reset|checkout|clean|restore)\b"
+    r"|\bgit\b[^\n;|&]*\b(?:reset|checkout|clean|restore|commit|add|rebase|merge)\b"
     r"|\bfind\b[^\n;|&]*\s-delete\b"
     r"|>{1,2}\s*\S"
 )

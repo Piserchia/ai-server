@@ -48,7 +48,7 @@ from src.db import CHANNEL_JOB_DONE, CHANNEL_JOB_STREAM, async_session, redis
 from src.models import Job, JobKind, Project
 from src.registry.skills import SkillConfig, load as load_skill
 from src.runner import agents as agents_mod
-from src.runner import guards, quota, router, workspaces
+from src.runner import delivery, guards, quota, router, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -623,19 +623,46 @@ def _build_options(
     return ClaudeAgentOptions(**kwargs)
 
 
-async def _resolve_cwd(job: Job) -> Path:
-    """Working directory for the session."""
+async def _project_slug(job: Job) -> str | None:
+    """The project slug this job is scoped to (from project_id or payload), or None."""
     if job.project_id:
         async with async_session() as s:
             project = await s.get(Project, job.project_id)
             if project:
-                p = settings.projects_dir / project.slug
-                if p.exists():
-                    return p
+                return project.slug
     slug = (job.payload or {}).get("project_slug")
-    if slug and (settings.projects_dir / slug).exists():
-        return settings.projects_dir / slug
-    return settings.server_root
+    return slug or None
+
+
+async def _resolve_project(
+    job: Job, skill_name: str | None = None,
+) -> tuple[Path, "Any", bool, str | None]:
+    """Resolve the session's working dir honoring the delivery contract.
+
+    Returns (cwd, delivery_or_None, is_deploy, slug). For `topology: dev-repo`,
+    a non-deploy session is scoped to the canonical dev repo (the separate git
+    thread) instead of the runtime clone. Deploy jobs, in-place, content, and
+    legacy (no delivery block) all resolve to the runtime clone / server root —
+    so this is behavior-preserving until a project opts in with a dev-repo block.
+    """
+    slug = await _project_slug(job)
+    if not slug:
+        return settings.server_root, None, False, None
+    runtime = settings.projects_dir / slug
+    if not runtime.exists():
+        return settings.server_root, None, False, slug
+    manifest = delivery.load_project_manifest(slug)
+    deliv = manifest.delivery if manifest else None
+    is_deploy = delivery.is_deploy_skill(
+        skill_name if skill_name is not None else job.kind, deliv)
+    cwd, _scoped = delivery.resolve_delivery_cwd(runtime, deliv, is_deploy)
+    return cwd, deliv, is_deploy, slug
+
+
+async def _resolve_cwd(job: Job, skill_name: str | None = None) -> Path:
+    """Working directory for the session (delivery-contract aware)."""
+    cwd, _deliv, _is_deploy, _slug = await _resolve_project(job, skill_name)
+    return cwd
 
 
 # ── Main entry ──────────────────────────────────────────────────────────────
@@ -644,7 +671,30 @@ async def _resolve_cwd(job: Job) -> Path:
 async def run_session(job: Job) -> dict[str, Any]:
     job_id = str(job.id)
     skill_name, skill_cfg = await _resolve_skill(job)
-    canonical_cwd = await _resolve_cwd(job)
+    canonical_cwd, deliv, is_deploy, slug = await _resolve_project(job, skill_name)
+
+    # Deploy-authority gate (delivery contract) — before any work, so a
+    # contract violation never spins up a session. Raised exceptions are
+    # handled in main._process_job (terminal; no escalation of a policy refusal).
+    if is_deploy and deliv is not None:
+        trigger = delivery.classify_trigger(job.created_by)
+        verdict = delivery.deploy_permitted(deliv, trigger)
+        audit_log.append(job_id, "deploy_authority",
+                         decision=verdict.decision.value, reason=verdict.reason,
+                         autonomy=deliv.deploy.autonomy, trigger=trigger, slug=slug)
+        if verdict.decision is delivery.DeployDecision.refuse:
+            raise delivery.DeployRefused(verdict.reason)
+        if verdict.decision is delivery.DeployDecision.needs_approval:
+            raise delivery.DeployNeedsApproval(verdict.reason)
+
+    if slug:
+        audit_log.append(job_id, "project_cwd_resolved", slug=slug,
+                         topology=(deliv.topology if deliv else "legacy"),
+                         cwd=str(canonical_cwd), is_deploy=is_deploy,
+                         scoped_to_dev_repo=(deliv is not None
+                                             and deliv.topology == "dev-repo"
+                                             and not is_deploy
+                                             and str(canonical_cwd) != str(settings.projects_dir / slug)))
 
     # Task turns for multi-turn context — fetched here (async) instead of the
     # old nested-event-loop hack. A failure is logged loudly: losing the task

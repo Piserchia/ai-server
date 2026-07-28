@@ -49,7 +49,7 @@ from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
 from src.runner.reconcile import reconcile_orphaned_jobs
 from src.runner.review import ReviewOutcome, get_git_diff, run_code_review
-from src.runner import quota, session as session_mod, writeback
+from src.runner import delivery, quota, session as session_mod, writeback
 
 logger = structlog.get_logger()
 _shutdown = asyncio.Event()
@@ -287,6 +287,35 @@ async def _process_job(job_id: uuid.UUID) -> None:
             )
         audit_log.append(str(job_id), "job_requeued_for_quota", reason=exc.reason[:200])
         log.warning("quota exhausted — queue paused, job requeued")
+
+    except delivery.DeployRefused as exc:
+        # Delivery-contract violation — terminal, NOT escalated (retrying a
+        # policy refusal would just re-violate it).
+        reason = str(exc)
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category="deploy_refused")
+        await _finish_job(job_id, JobStatus.failed, error=f"Deploy refused: {reason}")
+        log.warning("deploy refused by delivery contract", reason=reason)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed",
+                                   text=f"Deploy refused by policy: {reason}")
+            except Exception:
+                pass
+
+    except delivery.DeployNeedsApproval as exc:
+        # autonomy: human-approval + an autonomous trigger → park for a human.
+        reason = str(exc)
+        audit_log.append(str(job_id), "deploy_awaiting_approval", reason=reason)
+        await _finish_job(job_id, JobStatus.awaiting_user,
+                          error=f"Deploy needs human approval: {reason}")
+        log.info("deploy parked for human approval", reason=reason)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "approval_request",
+                                   text=f"This deploy needs your approval: {reason}")
+            except Exception:
+                pass
 
     except asyncio.TimeoutError:
         audit_log.append(str(job_id), "job_failed", error="session_timeout",

@@ -2,6 +2,46 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-27 — Project delivery enforcement (segregation Phase B)
+
+**Files created**: `src/runner/delivery.py` (contract enforcement: dev-repo
+cwd scoping + deploy-authority gate; pure decision fns + fail-open manifest
+loader), `tests/test_delivery.py` (24).
+
+**Files changed**:
+- `src/runner/session.py` — `_resolve_project(job, skill_name)` resolves the
+  session cwd from the project's delivery contract: `topology: dev-repo` scopes
+  a NON-deploy session to the canonical dev repo (the separate git thread),
+  audited as `project_cwd_resolved`. run_session runs the deploy-authority gate
+  BEFORE any work (raises `DeployRefused`/`DeployNeedsApproval`).
+- `src/runner/main.py` — `_process_job` catches `DeployRefused` (terminal fail,
+  NO escalation — a policy refusal must not retry) and `DeployNeedsApproval`
+  (→ awaiting_user + notify).
+- `src/runner/guards.py` — git write subcommands (commit/add/rebase/merge added
+  to reset/checkout/clean/restore) now count as mutators, so a workspace-tier
+  session that reaches into a runtime clone via absolute path
+  (`cd <runtime-clone> && git add -A && git commit`) is guard-denied. The
+  runtime clone lives under server_root (already a protected root), so no new
+  plumbing. Guards bind workspace-tier only → content projects (isolation:none)
+  that legitimately commit are unaffected.
+
+**Why**: make the single-writer / deployability rules structural instead of
+prose. Combined with dev-repo cwd scoping, the EXISTING workspace guard (denies
+writes outside the per-job clone) already prevents a dev-repo patch session from
+touching the runtime clone — the git-mutator addition is belt-and-suspenders for
+explicit-absolute-path reaches. See
+`docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`.
+
+**Side effects**: NONE until a project opts in with a `delivery` block —
+legacy/derived manifests resolve to the runtime clone exactly as before. A
+deploy job whose project is `deployable:false`/`manual-only` (autonomous) now
+fails with a clear contract reason instead of running.
+
+**Gotchas discovered**: the deploy gate raises before `job_started` is logged
+(like preflight failures already do) — the `deploy_authority` audit event is the
+record. Adding `git add`/`commit` to the mutator set is safe ONLY because it is
+gated on a protected-root reference AND guards bind workspace-tier sessions only.
+
 ## 2026-07-27 — SDK-native overhaul: container lane removed, guard hooks + subagents + structured outputs
 
 **Files created**: `src/runner/guards.py` (PreToolUse guard hooks — the
