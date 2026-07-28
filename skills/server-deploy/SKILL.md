@@ -74,9 +74,27 @@ if git diff --name-only "$BEFORE..$AFTER" | grep -qE '^(Pipfile|pyproject\.toml)
                   # previously watched only Pipfile, so pyproject dep bumps —
                   # e.g. the claude-agent-sdk floor — silently never installed.)
 fi
-pipenv run alembic upgrade head            # idempotent
 bash scripts/install-prod-hooks.sh          # re-arm the main-commit guard (hooks are untracked)
 ```
+
+**Migrations — validate + back up BEFORE touching the prod DB.** `alembic
+upgrade head` is applied to the LIVE `assistant` DB; a migration that fails or
+is non-backward-compatible corrupts prod while the old code still runs, with no
+downgrade (EVALUATION_2026-07-28 O1). So, only if a migration is in range
+(`git diff --name-only "$BEFORE..$AFTER" | grep -q '^alembic/'`):
+
+```bash
+# a) Prove the FULL chain applies to a throwaway DB first (catches a broken
+#    migration before it ever touches prod):
+cd "$SRV" && AI_SERVER_RUN_DB_TESTS=1 pipenv run pytest tests/test_migrations.py -q
+# b) Snapshot the DB so a bad upgrade is recoverable:
+pg_dump assistant > "volumes/backups/predeploy-$(date +%Y%m%dT%H%M%S).sql"
+# c) Only now apply to prod:
+cd "$SRV" && pipenv run alembic upgrade head
+```
+
+If (a) fails → STOP, do not migrate or restart; the migration is broken, fix it
+in the dev repo. If there is NO migration in range, skip a/b/c entirely.
 
 ### 3. Test gate (the deploy gate)
 
@@ -86,7 +104,8 @@ cd "$SRV" && pipenv run pytest -q
 
 **Any failure → STOP. Do not restart anything.** Summary = failing output +
 commit range, so the fix lands in the dev repo first. Red tests never reach
-the running services.
+the running services. (If a test failure appears only AFTER the migration
+applied, restore the pre-deploy snapshot from step 2b before investigating.)
 
 ### 4. Restart — bot and web directly, runner DETACHED
 
