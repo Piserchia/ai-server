@@ -1,6 +1,12 @@
 # Get started: ai-server
 
-Exact commands to stand up the new server on your Mac Mini. Run these *after*
+> **HISTORICAL — one-time migration doc (early 2026).** These are the original
+> Phase-1 commands for standing this server up from scratch (migrating off the
+> old `mac-mini-ai-server`). For the CURRENT setup + operation, see `README.md`
+> and `.context/INDEX.md`; for the current execution model, see
+> `docs/SDK_MIGRATION_2026-07-27.md`. Kept for provenance and bare-metal rebuilds.
+
+Exact commands to stand up the server on your Mac Mini. Run these *after*
 `TEARDOWN.md`.
 
 ## Prerequisites

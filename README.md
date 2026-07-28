@@ -10,15 +10,17 @@ Built to manage, diagnose, and extend itself with minimal intervention.
 
 | Path | What |
 |---|---|
-| `src/` | Python source (~1500 LOC target) — runner, gateway, registry |
-| `skills/` | Skill library. Each skill is a directory with a SKILL.md |
+| `src/` | Python source — runner, gateway, registry |
+| `skills/` | Skill library. Each skill is a directory with a SKILL.md (data, not code) |
 | `projects/` | Hosted projects. Each is its own git repo; gitignored here |
 | `.context/` | Server-level context: SYSTEM.md, PROTOCOL.md, module contexts |
-| `alembic/` | Database migrations (one: initial schema) |
+| `alembic/` | Database migrations |
 | `scripts/` | bootstrap.sh, run.sh, install-launchd.sh, register-project.sh |
-| `volumes/` | Runtime data: audit_log, logs, pids (gitignored) |
+| `volumes/` | Runtime data: audit_log, logs (gitignored) |
 | `CLAUDE.md` | Directive that every Claude session in this repo reads first |
 | `SERVER.md` | Architecture overview |
+| `MISSION.md` | Mission + objectives (the anchoring doc) |
+| `docs/` | Evaluations, plans, troubleshooting (see `docs/README.md`) |
 
 ## First-time setup
 
@@ -59,38 +61,39 @@ tail -f volumes/logs/runner.log            # what is it doing?
 tail -f volumes/audit_log/<job_id>.jsonl   # what did it do on one job?
 ```
 
-Telegram:
+Telegram (bare natural language works too — it's NL-first; commands are the explicit path):
 ```
 /task research the NBA trade deadline
 /task --model=opus --effort=high  write me a FastAPI endpoint for X
 /chat how do you think about Y
-/status abc12345
-/rate abc12345 5
-/projects
-/resume                                    # clear a quota pause
+/status abc12345          # job status
+/tasks                    # your open task threads
+/projects                 # what's hosted
+/schedule …               # manage recurrences
+/resume                   # clear a quota pause
+/help                     # full command list
 ```
 
 ## Design
 
-See `SERVER.md` for architecture, `.context/SYSTEM.md` for the module graph,
-and `docs/assistant-system-design.md` for the full design doc including skill
-catalog, model selection framework, self-evaluation mechanics, and phase plan.
+See `MISSION.md` for objectives, `SERVER.md` for architecture, `.context/SYSTEM.md`
+for the module graph + invariants, and `.context/INDEX.md` for the full doc map.
+Execution is **Claude Agent SDK, in-process, subscription auth** (no API key, no
+containers — see `docs/SDK_MIGRATION_2026-07-27.md`).
 
 ## Testing
 
 ```bash
-pipenv run pytest                  # runs all tests (Phase 2: 52 pure-function tests)
-pipenv run pytest tests/test_pure_functions.py -v
+pipenv run pytest                  # ~750 tests (pure-function + local-git integration)
+pipenv run python scripts/lint_docs.py   # doc/registry/contract sync checks
 ```
 
-## Phases
+## Status
 
-- **Phase 1** (commit `05ad5e7`): skeleton — runner + web + bot + `chat` skill
-- **Phase 2** (this commit): `research-report` skill, write-back verification hook, failure-escalation hook, 52 pure-function tests
-- **Phase 3**: domain + Cloudflare tunnel + Caddy + project hosting
-- **Phase 4**: expansion skills (`new-project`, `app-patch`, `new-skill`, `self-diagnose`, `code-review`)
-- **Phase 5**: operations skills (`server-upkeep`, `backup`, `server-patch`, `review-and-improve`)
-- **Phase 6**: polish
+All original phases (1–6) shipped, plus the SDK-native overhaul (Phase 8,
+`docs/SDK_MIGRATION_2026-07-27.md`) and the project-delivery-segregation contract
+(`docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`). Current
+state + open gaps: `docs/EVALUATION_2026-07-28.md`.
 
 ## License
 

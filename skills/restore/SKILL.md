@@ -15,6 +15,19 @@ You restore the ai-server's database and audit logs from a backup tarball.
 This is a **destructive** operation -- it overwrites the current database state.
 Use extreme caution and always confirm with the user before proceeding.
 
+## CRITICAL: run this as a `god`/terminal session, NOT a normal queued job
+
+Restore must **stop the runner, web, and bot** before touching the database.
+You are running inside the runner — if a normally-queued `/task restore …` job
+tries to stop the runner, it SIGTERMs **its own session** mid-restore (exit 143),
+leaving services down and the DB half-swapped. Therefore:
+
+- Restore is an **operator procedure**: run it from a terminal on the Mac Mini,
+  or via a `god` break-glass session that can survive the runner going down.
+- If you were dispatched as an ordinary job and detect you are the live runner's
+  child, STOP and report: "Restore cannot run as a queued job (it would kill the
+  runner mid-restore). Run it from a terminal or a god session." Do not proceed.
+
 ## Inputs you will receive
 
 Extract from the job description (and optionally `payload`):
@@ -61,12 +74,22 @@ Then use the local path as `tarball_path` below.
    ```
    If either check fails, abort with: "Tarball not found or corrupted: <path>"
 
-4. **Stop services.** Shut down the runner, web gateway, and bot:
+4. **Stop services.** Production is launchd-supervised — `run.sh stop` is a
+   no-op there (no `volumes/pids/`), and `KeepAlive` would relaunch anything you
+   kill. Bootout the launchd agents so they stay down:
    ```bash
-   bash scripts/run.sh stop
+   UID_N=$(id -u)
+   for svc in runner web bot; do
+     launchctl bootout "gui/$UID_N/com.assistant.$svc" 2>/dev/null || true
+   done
+   sleep 3
+   # Verify nothing is still bound to the DB:
+   pgrep -fl "src.runner.main|src.gateway" || echo "services down"
    ```
-   Verify processes have stopped. If they haven't after 10s, abort with:
-   "Services did not stop cleanly. Aborting restore -- manual intervention needed."
+   If services are NOT down after this, abort: "Services did not stop cleanly.
+   Aborting restore -- manual intervention needed." (They are restarted with
+   `launchctl bootstrap gui/$UID_N ~/Library/LaunchAgents/com.assistant.<svc>.plist`
+   in step 9.)
 
 5. **Extract to temp.** Create a temporary directory and extract the tarball:
    ```bash
@@ -74,14 +97,17 @@ Then use the local path as `tarball_path` below.
    tar xzf "<tarball_path>" -C "$RESTORE_TMP"
    ```
 
-6. **Restore database.** Look for a `pg_dump` file in the extracted contents
-   (typically `*.sql` or `*.dump`). Restore it:
+6. **Restore database.** The database is named **`assistant`** (confirm with
+   `grep POSTGRES_DSN .env` — it is `.../5432/assistant`). Look for a `pg_dump`
+   file in the extracted contents (typically `*.sql` or `*.dump`) and restore it:
    ```bash
-   dropdb --if-exists aiserver
-   createdb aiserver
-   psql aiserver < "$RESTORE_TMP/<dump_file>"
+   dropdb --if-exists assistant
+   createdb assistant
+   psql assistant < "$RESTORE_TMP/<dump_file>"
    ```
-   If the dump is in custom format (`.dump`), use `pg_restore` instead of `psql`.
+   If the dump is in custom format (`.dump`), use `pg_restore -d assistant` instead
+   of `psql`. NEVER use `aiserver` — that is a phantom name; loading into it would
+   silently leave the real `assistant` DB untouched.
 
 7. **Restore audit logs.** If the tarball contains an `audit_log/` directory,
    additively merge it into `volumes/audit_log/`:
@@ -98,9 +124,15 @@ Then use the local path as `tarball_path` below.
 
 9. **Restart services.**
    ```bash
-   bash scripts/run.sh start
+   UID_N=$(id -u)
+   for svc in runner web bot; do
+     launchctl bootstrap "gui/$UID_N" "$HOME/Library/LaunchAgents/com.assistant.$svc.plist" 2>/dev/null || \
+       launchctl kickstart -k "gui/$UID_N/com.assistant.$svc"
+   done
+   sleep 5
+   curl -so /dev/null -w '%{http_code}\n' --max-time 5 http://localhost:8080/health   # expect 200
    ```
-   Wait a few seconds and verify processes are running.
+   Verify `/health` returns 200 and the runner heartbeat is fresh.
 
 10. **Report.** Provide a summary:
     - Backup date restored from
@@ -130,8 +162,12 @@ Then use the local path as `tarball_path` below.
 
 - **Project repos aren't in backups**: the user may expect them to be. Always
   remind them in the final report.
-- **Database name**: the database is called `aiserver`. If this changes, update
-  the dropdb/createdb commands.
+- **Database name is `assistant`** (from `POSTGRES_DSN`), NOT `aiserver`. A
+  restore into `aiserver` is a silent no-op that reports success while the real
+  DB is untouched — the single worst failure mode of this skill. Always confirm
+  with `grep POSTGRES_DSN .env` before dropping/creating.
+- **Restore stops the runner** — never run it as an ordinary queued job (it
+  kills its own session). Terminal or `god` session only.
 - **Custom format dumps**: `.dump` files need `pg_restore`, not `psql`. Check
   the file extension before choosing the restore command.
 - **Partial tarballs**: if the tarball was created during an active write, it

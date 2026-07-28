@@ -86,13 +86,15 @@ Query for projects whose `last_healthy_at` is more than 24 hours old:
 
 ```bash
 psql assistant -c "
-  SELECT slug, last_healthy_at, status
+  SELECT slug, last_healthy_at
   FROM projects
   WHERE last_healthy_at < NOW() - INTERVAL '24 hours'
      OR last_healthy_at IS NULL
   ORDER BY last_healthy_at NULLS FIRST;
 "
 ```
+
+(There is no `status` column on `projects` — do not add it back to this query.)
 
 Any rows returned are stale projects. Record their slugs and staleness.
 
@@ -198,26 +200,19 @@ du -sh volumes/workspaces/ 2>/dev/null || echo "no workspaces dir"
 If `volumes/workspaces/` exceeds 5 GB after pruning, flag as anomaly (a
 runaway clone loop or giant repo).
 
-### 8g. Container lane health (P1 — skip cleanly if not configured)
+### 8g. Guard denials (isolation health)
+
+The docker container lane was removed 2026-07-27; isolation is now enforced by
+PreToolUse guard hooks (`src/runner/guards.py`). Scan recent audit logs for
+`guard_denied` events — a spike means a workspace-tier skill is repeatedly
+trying to escape its clone (a skill-body or routing bug worth investigating):
 
 ```bash
-if [ -n "$CONTAINER_RUNTIME" ] && command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1; then
-  $CONTAINER_RUNTIME info >/dev/null 2>&1 && echo "runtime-ok" || echo "RUNTIME-DOWN"
-  $CONTAINER_RUNTIME image inspect "${AGENT_IMAGE:-ai-server-agent:latest}" >/dev/null 2>&1 \
-    && echo "image-present" || echo "IMAGE-MISSING (docker build -f Dockerfile.agent -t ai-server-agent:latest .)"
-  # Leaked job containers (should be none — they run with --rm)
-  $CONTAINER_RUNTIME ps -a --filter "name=ai-job-" --format '{{.Names}} {{.Status}}' | head -5
-else
-  echo "container-lane-not-configured"
-fi
+grep -h guard_denied volumes/audit_log/*.jsonl 2>/dev/null | tail -20
 ```
 
-`RUNTIME-DOWN` or `IMAGE-MISSING` while CONTAINER_RUNTIME is set = anomaly
-(container-tier skills are silently downgrading to workspace isolation).
-Leaked `ai-job-*` containers = anomaly; include names. Also check the OAuth
-token age if recorded: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`
-is ~1-year-lived — if `.env`'s modification date is older than 11 months,
-flag a "token likely expiring" warning.
+A handful is normal (the guards doing their job); a sustained spike from one
+skill = anomaly, include the skill/reason.
 
 ### 9. Summary decision
 

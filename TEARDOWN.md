@@ -2,6 +2,10 @@
 
 Exact steps to shut down the old system on your Mac Mini. Run these *before*
 standing up the new `ai-server` server (so the Telegram bot token frees up and
+<!-- HISTORICAL: one-time teardown of the OLD mac-mini-ai-server (docker/ollama),
+     early 2026. Not a procedure for retiring an ai-server PROJECT — that gap is
+     tracked in docs/EVALUATION_2026-07-28.md (O/lifecycle). -->
+
 the Postgres port is available).
 
 **Don't delete the old repo's Docker volumes yet** — keep them for a week as
@@ -74,8 +78,9 @@ brew services stop ollama  # or: pkill ollama
 
 ## 5. Revoke the GitHub PAT
 
-You shared `ghp_v17JT…H9x` in plaintext during our earlier conversation.
-Regardless of what you do next, revoke it now:
+A GitHub PAT (value redacted — was previously pasted here in plaintext, since
+scrubbed and presumed revoked) was shared in an earlier conversation. If it was
+never revoked, revoke it now:
 
 1. Go to https://github.com/settings/tokens
 2. Find the token and click Delete
