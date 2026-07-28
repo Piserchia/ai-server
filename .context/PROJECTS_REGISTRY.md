@@ -36,6 +36,24 @@ not served publicly.
 markdown files + a dedup log (`history.jsonl`). No `manifest.yml`, not served
 publicly. The `idea-generation` skill bootstraps and writes to it.
 
+## Delivery topology + deployability (2026-07-27)
+
+Each project's `manifest.yml` carries a machine-readable `delivery` block that
+the runner enforces (dev-repo cwd scoping, pull-only guard, deploy-authority
+gate — see `docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`).
+A manifest with no block derives a legacy `in-place` default, so enforcement is
+**opt-in per project**. Rollout status:
+
+| Project | Target topology | Deployable | Delivery block added? |
+|---|---|---|---|
+| `atlas` | dev-repo (dev repo `~/Documents/repos/atlas`, runtime clone pull-only) | yes · gated-auto | **pending** — needs the block in the atlas DEV repo + a redeploy (live service; owner-gated) |
+| `baseball-bingo` | dev-repo (promote from in-place) | yes · gated-auto | **pending** — requires re-homing the canonical to `~/Documents/repos/baseball-bingo` (live site; owner-gated, backup-branch first) |
+| `research` / `research-deep` / `ideas` | content | no | pending (no manifest today; optional) |
+
+Until a block is added a project runs exactly as before. Adding atlas's/bingo's
+block activates dev-repo enforcement for that project — do it deliberately, with
+the live-service care their deploy runbooks describe.
+
 ## Documentation standard
 
 Every project's `.context/CONTEXT.md` includes:

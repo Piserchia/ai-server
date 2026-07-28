@@ -255,7 +255,8 @@ async def rate_job(job_id: str, req: RateRequest) -> dict:
 
 @app.get("/api/projects", dependencies=[Depends(_check_auth)])
 async def list_projects() -> list[dict]:
-    return await _get_projects()
+    # Authenticated view carries the delivery contract (topology, deployability).
+    return await _get_projects(include_delivery=True)
 
 
 @app.get("/api/projects/public")
@@ -264,19 +265,33 @@ async def list_projects_public() -> list[dict]:
     return await _get_projects()
 
 
-async def _get_projects() -> list[dict]:
+async def _get_projects(include_delivery: bool = False) -> list[dict]:
     async with async_session() as s:
         result = await s.execute(select(Project).order_by(Project.slug))
         out = []
         for p in result.scalars():
-            out.append({
+            row = {
                 "slug": p.slug,
                 "subdomain": p.subdomain,
                 "type": p.type,
                 "port": p.port,
                 "last_healthy_at": p.last_healthy_at.isoformat() if p.last_healthy_at else None,
                 "created_at": p.created_at.isoformat(),
-            })
+            }
+            if include_delivery:
+                # Manifest is the source of truth for the delivery contract; read
+                # it per project (fails open to None if missing/invalid).
+                from src.runner.delivery import load_project_manifest
+                m = load_project_manifest(p.slug)
+                if m is not None:
+                    row["topology"] = m.delivery.topology
+                    row["deployable"] = m.delivery.deployable
+                    row["deploy_autonomy"] = m.delivery.deploy.autonomy
+                else:
+                    row["topology"] = None
+                    row["deployable"] = None
+                    row["deploy_autonomy"] = None
+            out.append(row)
         return out
 
 
@@ -571,15 +586,22 @@ _INDEX_HTML = """<!DOCTYPE html>
     function renderProjects(rows) {
       if (!rows.length) return "<p>No projects yet. Try 'new project: <description>'.</p>";
       return `<table>
-        <tr><th>Slug</th><th>Type</th><th>URL</th><th>Port</th><th>Healthy</th></tr>
+        <tr><th>Slug</th><th>Type</th><th>Delivery</th><th>URL</th><th>Port</th><th>Healthy</th></tr>
         ${rows.map(r => `<tr>
           <td>${r.slug}</td>
           <td>${r.type}</td>
+          <td>${renderDelivery(r)}</td>
           <td><a href="https://${r.subdomain}" target="_blank">${r.subdomain}</a></td>
           <td>${r.port ?? '—'}</td>
           <td>${r.last_healthy_at?.slice(0, 19).replace('T', ' ') ?? '—'}</td>
         </tr>`).join("")}
       </table>`;
+    }
+
+    function renderDelivery(r) {
+      if (r.topology === undefined || r.topology === null) return '—';
+      const dep = r.deployable ? `deploy:${esc(r.deploy_autonomy || '?')}` : 'no-deploy';
+      return `${esc(r.topology)} · ${dep}`;
     }
 
     function renderQuota(data) {

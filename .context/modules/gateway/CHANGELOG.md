@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-27 — /api/projects surfaces the delivery contract (segregation Phase E)
+
+**Files changed**: `src/gateway/web.py` — `_get_projects(include_delivery=)`;
+the authenticated `/api/projects` now includes `topology`, `deployable`, and
+`deploy_autonomy` read from each project's manifest (the public landing-page
+endpoint stays minimal). Dashboard gains a "Delivery" column. Manifest remains
+the source of truth — no DB columns added (avoids contract/DB drift).
+
+**Why**: make each project's topology + deployability visible at a glance.
+Part of `docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`.
+
+**Side effects**: `gateway.web` now depends on `runner.delivery` (declared in
+SYSTEM.md module graph).
+
 ## 2026-07-12 — P2: NL-first ingestion + plan/eval notify types + DAG-aware cancel
 
 **Files changed**:

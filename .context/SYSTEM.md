@@ -52,7 +52,7 @@
 | `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
 | `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
-| `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes | config, db, models, gateway.jobs, audit_log, runner.retrospective | (entry point) |
+| `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes (+ per-project delivery contract on /api/projects) | config, db, models, gateway.jobs, audit_log, runner.retrospective, runner.delivery | (entry point) |
 | `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards | config, db, models, gateway.jobs, audit_log, runner.proposals, runner.router, runner.plans | (entry point) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
 | `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
