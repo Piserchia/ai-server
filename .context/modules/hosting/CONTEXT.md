@@ -43,7 +43,33 @@ services:               # (optional) additional sub-services
     healthcheck: <path>
     path_prefix: <string>   # Caddy handle_path prefix
     api_routes: [<glob>]    # Caddy handle rules (no path stripping)
+
+delivery:                 # (2026-07-27) machine-readable delivery contract —
+                          # the runner enforces this (cwd scoping, deploy gate).
+                          # Parsed by src/registry/manifest.py; a manifest with
+                          # NO delivery block derives a legacy in-place default.
+  topology: dev-repo|in-place|content
+  dev_repo: <path>        # required iff topology: dev-repo (e.g. ~/Documents/repos/<slug>)
+  runtime_clone: pull-only|writable   # dev-repo ⇒ pull-only (enforced)
+  branch: <string>
+  deployable: <bool>      # content ⇒ must be false; true ⇒ requires ≥1 gate
+  deploy:
+    skill: project-redeploy           # generic engine; or a bespoke skill
+    autonomy: gated-auto|human-approval|manual-only
+    gates:                            # ordered; red test/build STOPS the deploy
+      - kind: test        cmd: <string>
+      - kind: build       cmd: <string>   when_paths: [<glob>, ...]
+      - kind: healthcheck path: <path>    expect: <int>
+      - kind: command     cmd: <string>
+    services: [<launchd-suffix>, ...]
+    migrate: <string>                 # optional idempotent migrate command
 ```
+
+**Topology (2026-07-27):** dev-repo projects are worked in a canonical repo
+outside the ai-server tree (`~/Documents/repos/<slug>`) and deployed into a
+pull-only `projects/<slug>` runtime clone; the runner scopes code sessions to
+the dev repo and guard-denies runtime-clone writes. See
+`docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`.
 
 ## Project documentation standard
 

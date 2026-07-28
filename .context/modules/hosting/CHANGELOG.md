@@ -2,6 +2,15 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-27 — Manifest `delivery` block documented (segregation Phase D)
+
+**Files changed**: `.context/modules/hosting/CONTEXT.md` (manifest schema now
+documents the `delivery` contract); `skills/new-project/SKILL.md` (scaffolds
+dev-repo topology by default: canonical repo at `~/Documents/repos/<slug>`,
+GitHub backup, pull-only `projects/<slug>` runtime clone, writes the delivery
+block). No code change — the schema is parsed by `src/registry/manifest.py`
+(Phase A). See `docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`.
+
 ## 2026-07-12 — Commit-topology enforcement (post-incident hardening)
 
 **Files changed**:
