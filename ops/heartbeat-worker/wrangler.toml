@@ -25,7 +25,7 @@ FAILURES_BEFORE_ALERT = "2"
 # then paste the returned id below.
 [[kv_namespaces]]
 binding = "HEARTBEAT_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "f240ae21b4814769997bac3125859da5"
 
 # Secrets (NOT stored here — set with `wrangler secret put`):
 #   TELEGRAM_BOT_TOKEN   — the same bot token the server uses
