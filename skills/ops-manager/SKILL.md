@@ -9,6 +9,7 @@ max_turns: 25
 role: manager
 division: platform-ops
 privilege_class: read-only
+subagents: [gap-auditor]
 tags: [management, division-manager, read-only]
 context_files: [".context/org/divisions/platform-ops/CHARTER.md", "MISSION.md"]
 ---
@@ -53,6 +54,12 @@ grep -h escalation_spawned volumes/audit_log/*.jsonl 2>/dev/null | tail -20
 Also read: the latest `docs/EVALUATION_*.md` (open Ops items), recent
 `docs/TROUBLESHOOTING.md` additions, `server-upkeep`'s recent anomaly reports,
 and the ops skills themselves for drift vs the charter's standards.
+
+### 2b. Delegate the skillset-gap analysis to `gap-auditor`
+You have a `gap-auditor` subagent. Delegate to it (Task tool) with your scope —
+"audit the platform-ops division's skillset for missing capabilities" — and fold
+its ranked gaps into your report. It finds ABSENCE (skills/coverage your charter
+needs but lacks); you still own the tuning/enforcement findings below.
 
 ### 3. Diagnose across the four axes
 For each, name concrete gaps:

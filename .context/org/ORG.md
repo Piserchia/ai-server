@@ -22,6 +22,11 @@ self-modifying with full power (MISSION: "batched, proposed, reviewed").
   (filing proposals). Read-only; proposes only.
 - **Worker agents** — the skills that do the actual work, each owned by one
   division's charter.
+- **Auditor** — `gap-auditor` (Executive), read-only, finds what's MISSING:
+  capability gaps within a division (as a manager's subagent) and unowned
+  domains/seams org-wide (for the CEO). The complement to a manager (which
+  improves what it owns) and to `review-and-improve` (which tunes what exists) —
+  the auditor finds what *no one* owns. Independent of the managers it audits.
 - **Connectors** (P3) — agents that move information across divisions.
 - **Proposals → gated execution** — every manager change goes through the
   existing gates: `server-patch` (code-review LGTM + human merge, INV-4),

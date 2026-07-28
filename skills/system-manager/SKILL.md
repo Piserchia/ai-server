@@ -9,6 +9,7 @@ max_turns: 30
 role: ceo
 division: executive
 privilege_class: read-only
+subagents: [gap-auditor]
 tags: [management, ceo, read-only]
 context_files: [".context/org/ORG.md", "MISSION.md"]
 ---
@@ -50,6 +51,14 @@ cat volumes/audit_log/<job-id>.summary.md
 ```
 Also skim `runner.retrospective` output (system-wide skill performance) and the
 latest `docs/EVALUATION_*.md`.
+
+### 2b. Delegate the org-wide negative-space audit to `gap-auditor`
+You have a `gap-auditor` subagent. Delegate to it (Task tool) in ORG mode —
+"audit the whole system's negative space: domains and seams no division owns" —
+and treat its ranked unowned-domain findings as the primary input to your
+cross-division reconciliation below. This is the recurring version of the manual
+system evaluation; it is your main instrument for finding what the org is
+missing.
 
 ### 3. Reconcile against MISSION (the four axes, org-wide)
 - **Alignment** — does any division's activity drift from a MISSION objective?
