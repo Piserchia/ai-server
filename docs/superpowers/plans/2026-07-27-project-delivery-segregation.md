@@ -1,5 +1,13 @@
 # Project Delivery Segregation — Implementation Plan (2026-07-27)
 
+> **STATUS (2026-07-28): Phases A–E SHIPPED** on dev main (`636cf86..b5123b2`;
+> code-review fixes in `b5123b2`). The machinery is live but **dormant per
+> project** — enforcement is opt-in via a manifest `delivery` block and no
+> existing project has one yet, so everything runs legacy in-place until
+> migrated. The **live-project migrations remain PENDING (owner-gated)**:
+> atlas's `delivery` block + redeploy, and baseball-bingo's dev-repo re-homing,
+> touch production (see Phase E + Rollback).
+
 > **For agentic workers:** implement task-by-task; steps use checkbox (`- [ ]`) syntax.
 > This is a **server-code** change set → ships via `server-patch` PRs (INV-4, manual merge,
 > `code-review` LGTM required). Skills/docs may be committed directly.
