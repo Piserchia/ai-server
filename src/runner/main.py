@@ -1197,14 +1197,24 @@ async def main() -> None:
     # runner with a dead scheduler or cancel-listener is worse (and invisible —
     # only _job_loop heartbeats) than a restart.
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-    if not _shutdown.is_set():
-        for t in done:
-            exc = t.exception() if not t.cancelled() else None
+    # Retrieve every completed task's exception (both paths) so asyncio doesn't
+    # warn "exception never retrieved"; a subsystem that exited while _shutdown
+    # was still unset means it CRASHED.
+    crashed = not _shutdown.is_set()
+    for t in done:
+        exc = t.exception() if not t.cancelled() else None
+        if crashed:
             logger.error("runner subsystem exited unexpectedly — shutting down for restart",
                          task=t.get_name(), error=str(exc) if exc else "returned cleanly")
+    if crashed:
+        # Crash path: the runner is already broken. Force the survivors down for a
+        # clean launchd restart (in-flight jobs are recovered by reconcile).
         _shutdown.set()
-    for t in pending:
-        t.cancel()
+        for t in pending:
+            t.cancel()
+    # Graceful path (SIGTERM set _shutdown): do NOT cancel — `_job_loop` is
+    # draining its in-flight jobs (`gather(*in_flight)`); cancelling it here
+    # would abort those already-running sessions. Let the survivors finish.
     await asyncio.gather(*pending, return_exceptions=True)
     logger.info("runner stopped")
 

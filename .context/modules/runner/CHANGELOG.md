@@ -19,7 +19,9 @@ documented invariant wasn't actually enforced:
   try/except — a Redis blip no longer kills the loop and strands the runner.
 - **`main.main`** (M5): supervises the 4 async tasks — if any exits on its own
   (dead scheduler/cancel-listener), it shuts the process down so launchd
-  restarts a clean one instead of limping invisibly.
+  restarts a clean one instead of limping invisibly. (Code-review fix: cancel
+  survivors ONLY on the crash path — on graceful SIGTERM `_job_loop` is draining
+  in-flight jobs, so cancelling it there would abort running sessions.)
 - **`review.run_code_review` + `main._maybe_review`** (INV-13): the review gate
   fails CLOSED. A review that can't run now returns `ReviewOutcome.error` →
   `awaiting_user`, instead of `changes_requested` (which doesn't gate) letting
