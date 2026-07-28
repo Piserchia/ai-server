@@ -82,9 +82,15 @@ _RULES: list[tuple[str, str]] = [
     # ── Ideas ──
     (r"\b(brainstorm|ideas for|generate ideas|idea generation)\b", "idea-generation"),
 
-    # ── Atlas operations ──
+    # ── Atlas operations (specific — must precede the generic project-redeploy
+    #    rule below so atlas keeps its bespoke pipeline) ──
     (r"\bredeploy atlas\b", "atlas-redeploy"),
     (r"\batlas[- ](redeploy|deploy|restart|update)\b", "atlas-redeploy"),
+
+    # ── Generic project deploy (AFTER server-deploy + atlas rules; the skill
+    #    parses the slug from the description/payload). "deploy X" phrasings the
+    #    regex misses fall to the LLM router via the skill description. ──
+    (r"\bredeploy\b", "project-redeploy"),
 
     # ── Retrospective ──
     (r"\b(retrospective|audit the system|review (my|the) (system|server|projects))\b",

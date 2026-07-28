@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-27 — Generic project-redeploy router rule (segregation Phase C)
+
+**Files changed**: `src/runner/router.py` — added `\bredeploy\b` → `project-redeploy`
+AFTER the atlas + server-deploy rules (first-match-wins, so "redeploy atlas" →
+atlas-redeploy and "deploy the server" → server-deploy still win; "redeploy
+bingo" → the generic engine). "deploy X" phrasings the regex misses fall to the
+LLM router via the new skill's description.
+
+**Why**: `skills/project-redeploy/SKILL.md` (new) is the contract-driven deploy
+engine that reads a project's `delivery.deploy` block; it needs a routing entry.
+`atlas-redeploy` is kept (hard rule: never delete a skill) and remains atlas's
+path until atlas's manifest carries an explicit delivery block (Phase E).
+
 ## 2026-07-27 — Project delivery enforcement (segregation Phase B)
 
 **Files created**: `src/runner/delivery.py` (contract enforcement: dev-repo
