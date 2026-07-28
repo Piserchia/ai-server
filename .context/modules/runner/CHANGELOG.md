@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-28 — Segregation code-review fixes (Phases A–E)
+
+Addressed the code-review sub-agent's should-fixes (all were latent — they bite
+the first dev-repo project, not today's legacy ones):
+- **main.py `_maybe_review` / `_verify_writeback`** now resolve the diff cwd via
+  `session._resolve_cwd(job, resolved_skill)` (delivery-aware) instead of always
+  the runtime clone — otherwise a dev-repo project (which commits to the dev
+  repo) would show an empty diff and SILENTLY SKIP the code-review gate.
+- **main.py `DeployNeedsApproval`** now fails terminally with an actionable nudge
+  instead of parking in `awaiting_user` — there is no deploy-resume path (the
+  telegram Approve button completes a task, it does not re-enqueue a deploy), so
+  parking would hang forever.
+- **`skills/project-redeploy`** fails CLOSED when a project has no
+  `delivery.deploy` block or (service/api) empty `services` — a bare pull with no
+  restart ships stale code. Fixed the slug example (slug is the projects/ dir
+  name, may differ from subdomain — `baseball-bingo` not `bingo`).
+- **router.py** `\bredeploy\b.*\batlas\b` → atlas-redeploy so "redeploy the atlas
+  dashboard" keeps atlas's bespoke pipeline instead of the generic engine.
+- Doc nits: corrected the `_resolve_delivery` docstring (described a runtime
+  special-case that never existed) and noted the INV-2 pre-execution-rejection
+  exception in SYSTEM.md.
+
 ## 2026-07-27 — Generic project-redeploy router rule (segregation Phase C)
 
 **Files changed**: `src/runner/router.py` — added `\bredeploy\b` → `project-redeploy`

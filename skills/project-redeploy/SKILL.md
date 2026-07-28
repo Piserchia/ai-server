@@ -29,8 +29,11 @@ B). You do NOT re-check authority; you execute the deploy safely.
 ## Inputs
 
 - **project_slug** — from `payload.project_slug`, or parse it from the
-  description ("redeploy bingo" → `bingo`; "deploy market-tracker" →
-  `market-tracker`). If you cannot determine a slug, stop and report it.
+  description. The slug is the **directory name under `projects/`**, which can
+  differ from the subdomain (e.g. "redeploy the bingo app" → the slug is
+  `baseball-bingo`, not `bingo`; "deploy market-tracker" → `market-tracker`).
+  Confirm `projects/<slug>/` exists. If you cannot determine a valid slug, stop
+  and report it.
 
 Your working directory is already the project's **runtime clone**
 (`projects/<slug>/`) — the runner scopes deploy jobs there. Deploys are
@@ -44,6 +47,22 @@ blocks every future ff-only pull — incident 2026-07-09).
 
 Let `P="$(pwd)"` (the runtime clone). Read `"$P/manifest.yml"` first and hold
 its `delivery.deploy` block: `gates` (ordered), `services`, `migrate`, `branch`.
+
+### 0. Verify the delivery contract — FAIL CLOSED
+
+Before touching anything, confirm this project has a real deploy contract:
+
+- If `manifest.yml` has **no `delivery.deploy` block**, STOP and report:
+  "`<slug>` has not been migrated to the delivery contract — I won't guess how
+  to deploy it. Deploy it via its existing path instead (an in-place project
+  deploys through `app-patch`'s inline restart; atlas via `atlas-redeploy`), or
+  add a `delivery` block to its manifest."
+- If the project is `type: service`/`api` and `delivery.deploy.services` is
+  **empty**, STOP and report the same — a pull with no service restart ships
+  stale code behind a green healthcheck (the exact failure this skill exists to
+  prevent). Do **not** proceed with a bare pull.
+
+Only continue past this step when the contract tells you what to restart.
 
 ### 1. Pull + report the delta
 

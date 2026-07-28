@@ -102,7 +102,7 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | ID | Invariant | Enforced in |
 |---|---|---|
 | INV-1 | Every session has a resolved model, effort, permission_mode | `runner/session.py:_build_options` |
-| INV-2 | Every job writes `job_started` + one terminal event to audit log | `runner/main.py:_process_job` |
+| INV-2 | Every job writes `job_started` + one terminal event to audit log (exception: pre-execution rejections — preflight failures and the deploy-authority gate — write only the terminal event; reconcile keys off the terminal event, so no orphan) | `runner/main.py:_process_job` |
 | INV-3 | Server uses subscription auth; `ANTHROPIC_API_KEY` is never set | `runner/main.py:_check_subscription_auth` + `scripts/run.sh` |
 | INV-4 | Server code changes never auto-merge | `server-patch` SKILL.md + PR gate |
 | INV-5 | Write-back verification runs after every session that modified code | `runner/main.py` post-session hook (Phase 4+) |

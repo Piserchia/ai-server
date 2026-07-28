@@ -304,16 +304,23 @@ async def _process_job(job_id: uuid.UUID) -> None:
                 pass
 
     except delivery.DeployNeedsApproval as exc:
-        # autonomy: human-approval + an autonomous trigger → park for a human.
+        # autonomy: human-approval + an autonomous trigger. There is no
+        # deploy-resume path (the telegram Approve button completes a TASK, it
+        # does not re-enqueue a deploy job), so DO NOT park in awaiting_user —
+        # that would hang forever. Fail terminally with an actionable nudge; a
+        # human re-trigger ("redeploy <slug>") is a human trigger → allowed.
         reason = str(exc)
-        audit_log.append(str(job_id), "deploy_awaiting_approval", reason=reason)
-        await _finish_job(job_id, JobStatus.awaiting_user,
-                          error=f"Deploy needs human approval: {reason}")
-        log.info("deploy parked for human approval", reason=reason)
+        slug = (job.payload or {}).get("project_slug") or "<slug>"
+        guidance = (f"{reason}. This deploy needs you to trigger it — "
+                    f"reply `redeploy {slug}` to run it yourself.")
+        audit_log.append(str(job_id), "job_failed", error=guidance,
+                         error_category="deploy_needs_approval")
+        await _finish_job(job_id, JobStatus.failed, error=guidance)
+        log.info("auto-deploy declined (human-approval, autonomous trigger)", reason=reason)
         if job.task_id:
             try:
-                await _notify_task(job.task_id, "approval_request",
-                                   text=f"This deploy needs your approval: {reason}")
+                await _notify_task(job.task_id, "failed",
+                                   text=f"Auto-deploy declined — needs your trigger. {guidance}")
             except Exception:
                 pass
 
@@ -355,18 +362,11 @@ async def _maybe_review(job: Job, result: dict) -> None:
     if trigger == "never":
         return
 
-    # Resolve the cwd
-    if job.project_id:
-        async with async_session() as s:
-            proj = await s.get(Project, job.project_id)
-            cwd = settings.projects_dir / proj.slug if proj else settings.server_root
-    else:
-        slug = (job.payload or {}).get("project_slug")
-        cwd = (
-            settings.projects_dir / slug
-            if slug and (settings.projects_dir / slug).exists()
-            else settings.server_root
-        )
+    # Resolve the cwd the session actually worked in (delivery-aware): for a
+    # dev-repo project the code was committed to the dev repo, not the runtime
+    # clone — reviewing the clone would find an empty diff and silently skip
+    # the review gate.
+    cwd = await session_mod._resolve_cwd(job, job.resolved_skill)
 
     diff = get_git_diff(cwd)
     if not diff:
@@ -396,18 +396,9 @@ async def _verify_writeback(job: Job, result: dict) -> None:
     After a session completes, check if it modified non-doc files without
     updating any CHANGELOG. If so, enqueue a child `_writeback` job.
     """
-    # Resolve the cwd that the session ran in (same logic as session.py)
-    if job.project_id:
-        async with async_session() as s:
-            proj = await s.get(Project, job.project_id)
-            cwd = settings.projects_dir / proj.slug if proj else settings.server_root
-    else:
-        slug = (job.payload or {}).get("project_slug")
-        cwd = (
-            settings.projects_dir / slug
-            if slug and (settings.projects_dir / slug).exists()
-            else settings.server_root
-        )
+    # Resolve the cwd the session ran in (delivery-aware — dev-repo projects
+    # commit to the dev repo, not the runtime clone).
+    cwd = await session_mod._resolve_cwd(job, job.resolved_skill)
 
     needs, modified = writeback.needs_writeback(cwd)
     if not needs:

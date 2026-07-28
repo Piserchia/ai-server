@@ -86,10 +86,14 @@ _RULES: list[tuple[str, str]] = [
     #    rule below so atlas keeps its bespoke pipeline) ──
     (r"\bredeploy atlas\b", "atlas-redeploy"),
     (r"\batlas[- ](redeploy|deploy|restart|update)\b", "atlas-redeploy"),
+    # Any "redeploy ... atlas ..." phrasing (e.g. "redeploy the atlas dashboard")
+    # keeps atlas's bespoke pipeline rather than slipping to the generic engine.
+    (r"\bredeploy\b.*\batlas\b", "atlas-redeploy"),
 
     # ── Generic project deploy (AFTER server-deploy + atlas rules; the skill
-    #    parses the slug from the description/payload). "deploy X" phrasings the
-    #    regex misses fall to the LLM router via the skill description. ──
+    #    parses the slug from the description/payload and FAILS CLOSED if the
+    #    project has no delivery contract). "deploy X" phrasings the regex
+    #    misses fall to the LLM router via the skill description. ──
     (r"\bredeploy\b", "project-redeploy"),
 
     # ── Retrospective ──

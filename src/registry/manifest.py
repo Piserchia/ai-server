@@ -244,13 +244,16 @@ def _resolve_delivery(raw: dict[str, Any] | None, data: dict[str, Any]) -> Deliv
     Back-compat is the load-bearing property: a manifest with no `delivery`
     block must behave exactly as it did before this field existed, so the new
     runner enforcement is strictly opt-in per project. Derivation:
-      - type == static/service/api  → in-place, writable, deployable (legacy:
-        app-patch commits in the runtime clone and deploys inline)
-      - the derived default carries NO gates and deployable stays True but the
-        runner's deploy gate treats a gateless legacy default as
-        'gated-auto with an implicit healthcheck' — see runner. We keep the
-        parsed contract honest by only marking deployable when a healthcheck
-        exists to serve as the implicit gate.
+      - topology `in-place`, runtime_clone `writable`, deploy autonomy
+        `gated-auto` — i.e. the legacy model where app-patch commits in the
+        runtime clone and deploys inline.
+      - if the manifest declares a `healthcheck`, that becomes the single
+        derived gate and `deployable` is True; with no healthcheck there is no
+        gate and `deployable` is False (a deployable contract requires a gate).
+      NOTE: the generic `project-redeploy` skill fails closed on a derived
+      default (no explicit `delivery.deploy` / empty `services`) — a legacy
+      project is deployed via its EXISTING path (app-patch inline restart, or a
+      bespoke `<x>-redeploy` skill), not the generic engine, until it opts in.
     """
     if raw is not None:
         return Delivery.from_dict(raw)
