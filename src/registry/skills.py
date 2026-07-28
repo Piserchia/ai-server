@@ -55,6 +55,11 @@ class SkillConfig:
     no_llm: bool = False               # if True, skill is implemented as a script, runner skips SDK
     isolation: str = "none"            # none | workspace | host ("container" parses → workspace; see runner/workspaces.py)
     subagents: list[str] = field(default_factory=list)  # skills exposed as in-session SDK subagents
+    # Management-hierarchy taxonomy (.context/org/) — declarative; the division
+    # CHARTER.md is the lint-enforced source of truth for membership.
+    role: str = "worker"               # worker | manager | ceo | connector
+    division: str = ""                 # executive | delivery | platform-ops | knowledge | atlas
+    privilege_class: str = ""          # read-only | content | guarded-writer | prod-operator | break-glass
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -105,6 +110,9 @@ def load(name: str) -> SkillConfig | None:
         no_llm=bool(fm.get("no_llm", False)),
         isolation=str(fm.get("isolation", "none")),
         subagents=list(fm.get("subagents", []) or []),
+        role=str(fm.get("role", "worker") or "worker"),
+        division=str(fm.get("division", "") or ""),
+        privilege_class=str(fm.get("privilege_class", "") or ""),
     )
 
 

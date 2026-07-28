@@ -295,6 +295,51 @@ def check_isolation_values() -> list[str]:
     return warnings
 
 
+def check_org_charters() -> list[str]:
+    """Every skill must be claimed by exactly one division CHARTER.md
+    (`.context/org/`). This makes the management-hierarchy org chart
+    (ORG.md + divisions/*/CHARTER.md) a source of truth that can't drift from
+    the actual skill roster — the decentralized "each department owns its
+    agents" model. A skill in no charter is an unmanaged orphan; a skill in two
+    is an ownership conflict. Planned-but-not-yet-created managers (referenced
+    in a charter but with no skill dir) are allowed — they just aren't checked."""
+    warnings: list[str] = []
+    org_dir = REPO_ROOT / ".context" / "org" / "divisions"
+    skills_dir = REPO_ROOT / "skills"
+    if not org_dir.exists() or not skills_dir.exists():
+        return warnings   # org layer not present yet
+
+    row_re = re.compile(r"^\|\s*`([a-z0-9_-]+)`\s*\|")
+    mgr_re = re.compile(r"\*\*Manager:\*\*\s*`([a-z0-9_-]+)`")
+
+    claimed: dict[str, list[str]] = {}
+    for charter in sorted(org_dir.glob("*/CHARTER.md")):
+        div = charter.parent.name
+        text = _read(charter)
+        names: set[str] = set()
+        for line in text.splitlines():
+            m = row_re.match(line)
+            if m:
+                names.add(m.group(1))
+        mm = mgr_re.search(text)
+        if mm:
+            names.add(mm.group(1))
+        for n in names:
+            claimed.setdefault(n, []).append(div)
+
+    existing = {c.name for c in sorted(skills_dir.iterdir())
+                if c.is_dir() and (c / "SKILL.md").exists()}
+    for s in sorted(existing):
+        divs = claimed.get(s, [])
+        if not divs:
+            warnings.append(f"Skill `{s}` is not claimed by any division CHARTER.md "
+                            f"(add it to a `.context/org/divisions/<div>/CHARTER.md` roster)")
+        elif len(divs) > 1:
+            warnings.append(f"Skill `{s}` is claimed by multiple divisions {divs} "
+                            f"(a skill belongs to exactly one)")
+    return warnings
+
+
 def check_delivery_contracts() -> list[str]:
     """Every project manifest.yml must parse AND its delivery contract must be
     internally valid (topology/autonomy enums, dev-repo requires dev_repo +
@@ -381,6 +426,7 @@ def run_all() -> dict[str, list[str]]:
         "skill_sections": check_skill_sections(),
         "isolation_values": check_isolation_values(),
         "delivery_contracts": check_delivery_contracts(),
+        "org_charters": check_org_charters(),
     }
 
 

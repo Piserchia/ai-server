@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-28 — Management-hierarchy taxonomy fields on SkillConfig
+
+**Files changed**: `src/registry/skills.py` — `SkillConfig` gains `role`
+(worker|manager|ceo|connector), `division`, and `privilege_class` (read-only|
+content|guarded-writer|prod-operator|break-glass), parsed from frontmatter.
+`scripts/lint_docs.py` — `check_org_charters()` (11th check): every skill is
+claimed by exactly one `.context/org/divisions/<div>/CHARTER.md`.
+
+**Why**: the self-managing agent hierarchy (`.context/org/`, design doc
+`docs/superpowers/plans/2026-07-28-management-hierarchy.md`). Division CHARTER.md
+is the enforced source of truth for which department owns each agent; the
+frontmatter fields are the per-skill declaration.
+
+**Side effects**: none at runtime yet — the fields are declarative; the manager
+agents (`system-manager`, `ops-manager`) consume the charters, not these fields.
+
 ## 2026-07-27 — Delivery contract in manifest.yml (project segregation Phase A)
 
 **Files changed**: `src/registry/manifest.py` — new `Delivery` / `DeployPolicy`

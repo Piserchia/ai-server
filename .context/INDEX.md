@@ -94,6 +94,7 @@ projects/<slug>/
 | Understand routing (rules + LLM fallback) | `src/runner/router.py`, `src/runner/llm_router.py` |
 | Check routing precision / task-event markers | audit events `routing_decision`, `task_plan`, `eval_pass`/`eval_fail` in `volumes/audit_log/` |
 | Read the audit that motivated all of this | `docs/AUDIT_2026-07-12.md` |
+| Understand the management hierarchy (agents-as-org) | `.context/org/ORG.md` (chart + operating model), `.context/org/divisions/<div>/CHARTER.md` (per-division), `docs/superpowers/plans/2026-07-28-management-hierarchy.md` (design + rollout) |
 
 ## Additions 2026-07-27 (SDK-native overhaul)
 

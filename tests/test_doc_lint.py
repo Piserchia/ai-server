@@ -16,6 +16,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_context_files_exist,
     check_skill_sections,
     check_delivery_contracts,
+    check_org_charters,
 )
 
 
@@ -62,3 +63,8 @@ def test_skill_sections():
 def test_delivery_contracts_valid():
     warnings = check_delivery_contracts()
     assert warnings == [], f"Invalid project delivery contracts: {warnings}"
+
+
+def test_org_charters_claim_every_skill():
+    warnings = check_org_charters()
+    assert warnings == [], f"Org charter / skill-roster mismatches: {warnings}"

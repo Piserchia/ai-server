@@ -16,6 +16,13 @@ SQL
 
 upsert 'server-upkeep-daily' '0 3 * * *' 'server-upkeep' 'Daily server audit and upkeep'
 
+# ── Management hierarchy (.context/org/) ───────────────────────────────────
+# Department managers run weekly (read-only: evaluate their division → report
+# with recommendations). The CEO runs monthly (reconcile reports vs MISSION).
+# As more managers are authored (delivery/knowledge/atlas — P2), add them here.
+upsert 'ops-manager-weekly'    '0 6 * * 1'  'ops-manager'    'Weekly Platform Ops division review'
+upsert 'system-manager-monthly' '0 7 1 * *' 'system-manager' 'Monthly CEO org review vs MISSION'
+
 echo "Schedules seeded."
 echo ""
 echo "NOTE: review-and-improve runs via idle-queue trigger in events.py"
