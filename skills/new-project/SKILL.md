@@ -151,36 +151,18 @@ Customize the template docs to accurately reflect what you built:
 - `CLAUDE.md` — add project-specific instructions if needed
 - `.context/CHANGELOG.md` — already has bootstrap entry from template
 
-### 2.4b Write the delivery contract into the manifest
+### 2.4b Confirm the delivery contract in the manifest
 
-Add a `delivery` block to `$CANON/manifest.yml` (this is what makes the runner
-enforce the separation — see the registry docs). For a dev-repo service:
+The template `manifest.yml` **already carries a `delivery` block** (dev-repo
+topology, pull-only runtime clone, `project-redeploy` engine, sensible gates).
+Fill its `<SLUG>` placeholders and ADJUST the gates to what you actually built:
+- remove the `test` gate if the project has no tests;
+- set the build gate's `when_paths` to the real source dirs (react only);
+- keep `services: [<SLUG>]` for a service, `services: []` for a static site.
 
-```yaml
-delivery:
-  topology: dev-repo
-  dev_repo: ~/Documents/repos/<slug>
-  runtime_clone: pull-only
-  branch: main
-  deployable: true
-  deploy:
-    skill: project-redeploy
-    autonomy: gated-auto          # or human-approval / manual-only
-    gates:
-      - kind: test
-        cmd: "<the project's test command, e.g. .venv/bin/python -m pytest -q>"
-      - kind: build               # react-static / anything with a build step
-        cmd: "npm run build"
-        when_paths: ["web/", "src/"]
-      - kind: healthcheck
-        path: <healthcheck path, e.g. /health>
-        expect: 200
-    services: [<slug>]
-```
-
-Omit gates that don't apply (a static site needs only the healthcheck; a service
-with no build step omits the build gate). `deployable: true` REQUIRES at least
-one gate. A content project uses `topology: content` and `deployable: false`.
+`deployable: true` REQUIRES at least one gate. A content project (no hosting)
+uses `topology: content` + `deployable: false` and skips register/host steps.
+`python scripts/lint_docs.py` validates the block.
 
 ### 2.5 Initialize the canonical dev repo + GitHub backup
 
@@ -217,6 +199,28 @@ the project directory):
 ```yaml
 <PORT>: <slug>
 ```
+
+### 2.6b Prime the runtime clone (build + install) — REQUIRED before hosting
+
+The runtime clone is a fresh `git clone`, so gitignored build output (`dist/`)
+and virtualenvs (`.venv/`) are NOT in it. Register (2.7) immediately
+healthchecks, so build/install in the runtime clone FIRST or the first probe
+404s / crash-loops:
+
+```bash
+RUNTIME="$HOME/Library/Application Support/ai-server/projects/<slug>"
+# react-static: build the bundle Caddy serves from dist/
+[ -f "$RUNTIME/package.json" ] && (cd "$RUNTIME" && npm ci && npm run build)
+# fastapi-service: create the project venv the start_command uses and install deps
+[ -f "$RUNTIME/pyproject.toml" -o -f "$RUNTIME/requirements.txt" ] && (
+  cd "$RUNTIME" && python3 -m venv .venv && \
+  .venv/bin/pip install -e . 2>/dev/null || .venv/bin/pip install -r requirements.txt
+)
+# pure static: nothing to build.
+```
+
+This mirrors exactly what `project-redeploy` does on later deploys — the first
+hosting is just the first deploy.
 
 ### 2.7 Register with hosting
 

@@ -21,25 +21,30 @@ subagents: [code-review]
 
 # App Patch
 
-You are patching an existing project to fix a bug or add a feature. The project
-lives at `projects/<slug>/` and is its own git repo (separate from the
-ai-server repo).
+You are patching an existing project to fix a bug or add a feature.
 
-## STEP 0 — check the project's write topology (do this FIRST)
+## STEP 0 — you are already in the right repo (delivery contract)
 
-Read `projects/<slug>/CLAUDE.md`. If it declares a **deployment topology /
-single-writer rule** (a dev repo elsewhere on this machine, with the
-`projects/<slug>` checkout as a pull-only deploy target — e.g. **atlas**, dev
-repo `~/Documents/repos/atlas`):
+The runner has placed your working directory at the project's **canonical repo**
+per its `manifest.yml` `delivery.topology`, and (workspace-tier) guard hooks
+deny writes anywhere else. You do NOT need to detect topology or `cd` into
+`projects/<slug>` — **work, commit, and push from your current working
+directory.** Read `manifest.yml` (`delivery.topology`) to know which case you're
+in, because it changes how the change reaches production:
 
-- Make ALL edits and commits in the **dev repo**, never in `projects/<slug>`.
-- Deploy by enqueuing the project's deploy skill (e.g. `atlas-redeploy`), which
-  pulls, gates, builds, restarts. Do not `git push` from the runtime clone.
-- A commit created inside `projects/<slug>` for such a project is a defect that
-  blocks all future deploys (ff-only pull refuses; incident 2026-07-09).
+- **`dev-repo`** (your cwd is the dev repo, e.g. `~/Documents/repos/<slug>`):
+  commit + push here. The runtime clone `projects/<slug>` is **pull-only** —
+  never touch it. Your change reaches production via a **separate
+  `project-redeploy` step** (do NOT restart services yourself). If your ask
+  says "and deploy" (or you're a single-turn direct patch, not a plan subtask),
+  emit a follow-up: end with `TASK_COMPLETE` noting a deploy is required, so the
+  plan/DAG or the user runs `redeploy <slug>`.
+- **`in-place`** (your cwd is `projects/<slug>`): commit + push here, then
+  restart the service inline (Step 5 below) — the runtime clone IS the canonical.
 
-Only when no such topology is declared does the default flow below
-(work + commit + push inside `projects/<slug>`) apply.
+A commit inside a `pull-only` runtime clone is a defect that blocks all future
+deploys (ff-only pull refuses; incident 2026-07-09) — the guard hooks now deny
+it, but understand WHY.
 
 ## Multi-turn task protocol
 
@@ -199,8 +204,8 @@ healthcheck with the old behavior still serving is a FAIL (stale-bundle
 incident 2026-07-10).
 
 - If the project has a `test_command` in `manifest.yml`, run it. Red = stop.
-- For service-type projects: restart via `launchctl kickstart -k gui/$(id -u)/com.assistant.project.<slug>`, wait 3 seconds, then hit the healthcheck endpoint from `manifest.yml`. Expect the healthy code.
-- **Probe the actual change**: curl the specific route/page you modified and
+- **`in-place` projects only** — restart via `launchctl kickstart -k gui/$(id -u)/com.assistant.project.<slug>`, wait 3 seconds, then hit the healthcheck from `manifest.yml`; expect the healthy code. **`dev-repo` projects: do NOT restart** — the runtime clone isn't updated until `project-redeploy` runs; your verification is tests + reading back the changed files in your cwd, and the live probe belongs to the deploy step.
+- **Probe the actual change** (in-place, or after a dev-repo deploy): curl the specific route/page you modified and
   confirm the NEW behavior appears in the response (grep the response body
   for something your change introduced). For non-HTTP changes, read back the
   changed files or run the relevant command.
@@ -211,10 +216,14 @@ incident 2026-07-10).
   criteria — claims without evidence will bounce back as an EVAL_FAIL fix
   round.
 
+> **Paths below are relative to your working directory** (the project's
+> canonical repo — the runner put you there). Do NOT `cd projects/<slug>`; you
+> are already inside the project repo. Where steps say `projects/<slug>/…`,
+> read it as the same file at the repo root of your cwd.
+
 ### Step 6: Check for secrets
 
 ```bash
-cd projects/<slug>
 git diff --cached | grep -iE 'api[_-]?key|token|secret|password'
 git diff | grep -iE 'api[_-]?key|token|secret|password'
 ```
@@ -224,11 +233,15 @@ If real credentials found, abort the commit.
 ### Step 7: Commit and push
 
 ```bash
-cd projects/<slug>
 git add -A
 git commit -m "<concise subject describing the change>"
-git push origin main
+git push origin <branch>     # usually main; use the delivery.branch from manifest.yml
 ```
+
+Push gates: verify green before committing, `git fetch && git pull --rebase`
+before pushing, retry once on rejection then report. For a **dev-repo** project
+this pushes to the dev repo's remote; the runtime clone is updated later by
+`project-redeploy`, NOT by you.
 
 ### Step 8: Update ALL documentation
 
@@ -301,9 +314,9 @@ or emit `task_complete`. Just end your turn with your analysis/plan as text.
   `com.assistant.runner`, `com.assistant.bot`, or `com.assistant.web`. You
   ARE running inside the runner — restarting it kills your own session.
   You may only restart PROJECT services (`com.assistant.project.<slug>`).
-- **NEVER modify ai-server source code.** Your scope is `projects/<slug>/`
-  only. If you need server-side changes, note them in your summary and
-  leave them for a `server-patch` job.
+- **NEVER modify ai-server source code.** Your scope is the single project repo
+  you're in (the dev repo or `projects/<slug>`). If you need server-side
+  changes, note them in your summary and leave them for a `server-patch` job.
 - **NEVER read or act on files in `docs/superpowers/`** — those are for
   the human's planning sessions, not for you.
 - **Stay scoped to the project.** If the task conversation mentions a plan,

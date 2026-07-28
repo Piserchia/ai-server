@@ -5,7 +5,11 @@ type: service
 subdomain: <SLUG>
 port: <PORT>
 healthcheck: /health
-start_command: "uvicorn main:app --host 0.0.0.0 --port <PORT>"
+# Runs from the project's OWN venv so its deps are installed (a bare `uvicorn`
+# would use whatever is on PATH and crash on the first project import). The
+# venv is created at scaffold time and refreshed by project-redeploy on a deps
+# change. Bind to localhost — Caddy reverse-proxies to it.
+start_command: ".venv/bin/uvicorn main:app --host 127.0.0.1 --port <PORT>"
 web_strategy: native-web
 platforms:
   primary: web
@@ -15,3 +19,20 @@ created_at: "<TODAY>"
 git:
   repo: "https://github.com/Piserchia/<SLUG>"
   branch: main
+delivery:
+  topology: dev-repo
+  dev_repo: ~/Documents/repos/<SLUG>
+  runtime_clone: pull-only
+  branch: main
+  deployable: true
+  deploy:
+    skill: project-redeploy
+    autonomy: gated-auto
+    gates:
+      # If the project has tests, keep this; otherwise remove the test gate.
+      - kind: test
+        cmd: ".venv/bin/python -m pytest -q"
+      - kind: healthcheck
+        path: /health
+        expect: 200
+    services: [<SLUG>]     # launchd label com.assistant.project.<SLUG>

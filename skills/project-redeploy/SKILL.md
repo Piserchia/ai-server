@@ -95,6 +95,27 @@ set -a; [ -f .env ] && source .env; set +a
 <the migrate command from the manifest>
 ```
 
+### 2b. Install dependencies (only when their manifest changed)
+
+A pulled change may add a dependency; a build/test gate that runs without it
+red-gates with no way to self-heal. Reinstall ONLY when a dependency file
+changed in `BEFORE..AFTER` (read the project's `start_command`/build gate to
+find the right interpreter/venv — projects vary):
+
+```bash
+CHANGED=$(git diff --name-only "$BEFORE..$AFTER")
+# Node (front-end): a changed lockfile → clean install in the web dir.
+echo "$CHANGED" | grep -qE '(^|/)package(-lock)?\.json$' && (cd "<web dir from manifest>" && npm ci)
+# Python: a changed dep manifest → install into the project's OWN venv
+# (find it in start_command, e.g. .venv/bin/python or a pipenv venv). NEVER the
+# server's venv.
+echo "$CHANGED" | grep -qE '(pyproject\.toml|requirements.*\.txt|Pipfile)' && \
+  echo "python deps changed — install into the project venv named in start_command"
+```
+
+If nothing dependency-related changed, skip and say so. First-ever deploy of a
+freshly-cloned runtime clone counts as "changed" — install + build once.
+
 ### 3. Run the gates — in declared order, red = STOP
 
 For each entry in `delivery.deploy.gates`, in order:

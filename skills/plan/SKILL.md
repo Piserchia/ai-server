@@ -34,6 +34,18 @@ the work — it is to produce a plan the system can execute and verify.
    installed skill (usually `app-patch` for project code, `server-patch` for
    server code, `research-report` for research, `new-project` for new
    projects). Check `.context/SKILLS_REGISTRY.md`.
+
+   **"…and deploy it" needs its own subtask.** For a `dev-repo` project, an
+   `app-patch`/`new-project` subtask only commits to the dev repo — the change
+   does NOT reach the live site until a **`project-redeploy`** subtask runs
+   (`depends_on` the patch). If the ask includes deploying/shipping/making it
+   live for a dev-repo project, add that `project-redeploy` subtask
+   (`{"kind": "project-redeploy", "project_slug": "<slug>", "depends_on": ["<patch-id>"]}`)
+   — otherwise the acceptance evaluator will correctly FAIL the "deploy" half.
+   (`in-place` projects deploy inline in `app-patch`, so no separate step.)
+   There is currently **no schedule-creation skill** — if the ask needs a
+   recurring job, note it in the plan's goal and flag that the user must add it
+   via `/schedule` (don't invent a subtask kind for it).
 4. **Write acceptance criteria that are CHECKABLE.** Each criterion must be
    verifiable by a later session with tools: an HTTP endpoint that returns
    something specific, a file that exists with specific content, a test that

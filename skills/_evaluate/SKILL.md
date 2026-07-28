@@ -24,19 +24,37 @@ verdict. You are the reason "done" messages can be trusted.
 - `origin_summary` — what the work session claims it did
 - `project_slug` (optional) — the project the work happened in
 
+## Where the code and the served copy live (delivery topology)
+
+The runner has placed your working directory at the project's **canonical
+repo** — for a `dev-repo` project that is the dev repo (`~/Documents/repos/
+<slug>`), for an `in-place` project it is `projects/<slug>`. So:
+
+- **Commit checks run in your cwd** (`git log` — no `-C`), which is the
+  canonical where commits actually land.
+- **The SERVED copy is always `projects/<slug>`** (the runtime clone Caddy/
+  launchd point at). For a **dev-repo** project the runtime clone only reflects
+  a change AFTER a deploy (`project-redeploy`) has run — so if the plan's DAG
+  did not include a deploy step, a live-service probe will still show the OLD
+  behavior and that is a FAIL of "and deploy", not of the code. Read the
+  project's `manifest.yml` `delivery.topology` to know which case you're in.
+
 ## Procedure
 
 1. **Enumerate the criteria.** From `plan.acceptance_criteria` if present,
    else derived from the ask. List them explicitly in your output.
 2. **Collect evidence per criterion.** Read-only verification only:
-   - `git -C projects/<slug> log --oneline -5` and `git show --stat` — did
-     commits actually land?
+   - `git log --oneline -5` (in your cwd = the canonical repo) and
+     `git show --stat` — did commits actually land?
    - Run the project's tests if `manifest.yml` declares a `test_command`.
    - `curl -so /dev/null -w '%{http_code}' http://localhost:<port><healthcheck>`
      from `manifest.yml` — does the service answer?
    - `curl` the specific route/page the ask was about — does the CHANGE
-     actually show? (A green healthcheck with the old behavior is a FAIL —
-     stale-bundle incident 2026-07-10.)
+     actually show in the SERVED copy? (A green healthcheck with the old
+     behavior is a FAIL — stale-bundle incident 2026-07-10.) For a dev-repo
+     project, this only passes once a deploy has propagated the change to
+     `projects/<slug>`; if the ask included "and deploy" and it didn't, FAIL
+     with "committed to the dev repo but not deployed — needs project-redeploy".
    - Read changed files where behavior can't be probed over HTTP.
 3. **Verdict.** Every criterion needs evidence. Unverifiable ≠ passed.
 

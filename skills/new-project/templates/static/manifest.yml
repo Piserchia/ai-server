@@ -13,3 +13,17 @@ created_at: "<TODAY>"
 git:
   repo: "https://github.com/Piserchia/<SLUG>"
   branch: main
+delivery:
+  topology: dev-repo
+  dev_repo: ~/Documents/repos/<SLUG>
+  runtime_clone: pull-only
+  branch: main
+  deployable: true
+  deploy:
+    skill: project-redeploy
+    autonomy: gated-auto
+    gates:
+      - kind: healthcheck
+        path: /
+        expect: 200
+    services: []          # pure static — Caddy serves the files; nothing to restart

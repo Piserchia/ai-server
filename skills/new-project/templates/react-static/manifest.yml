@@ -14,3 +14,22 @@ build_command: "npm run build"
 git:
   repo: "https://github.com/Piserchia/<SLUG>"
   branch: main
+delivery:
+  topology: dev-repo
+  dev_repo: ~/Documents/repos/<SLUG>
+  runtime_clone: pull-only
+  branch: main
+  deployable: true
+  deploy:
+    skill: project-redeploy
+    autonomy: gated-auto
+    gates:
+      # dist/ is gitignored, so the runtime clone has NO built bundle — the
+      # deploy MUST rebuild it (npm ci + build) or Caddy serves a 404.
+      - kind: build
+        cmd: "npm ci && npm run build"
+        when_paths: ["src/", "public/", "package.json", "package-lock.json", "index.html", "vite.config.js"]
+      - kind: healthcheck
+        path: /
+        expect: 200
+    services: []          # static output — Caddy serves dist/; nothing to restart
