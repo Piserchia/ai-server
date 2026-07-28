@@ -147,8 +147,16 @@ fi
 
 If the newest remote backup is more than 48 hours old (or the listing is empty
 while rclone *is* configured), flag as an anomaly — off-site replication is
-broken even though local backups may be fine. `offsite-not-configured` is not an
-anomaly (the human hasn't set up R2 yet); note it once and move on.
+broken even though local backups may be fine.
+
+`offsite-not-configured` is a **STANDING WARNING**, not a silent OK: with no R2
+remote, every backup lives on the same SSD as the primary data, so a single
+disk failure loses the DB, the audit logs, AND every backup at once (RPO on
+disk loss = total). Surface it in the daily report EVERY run (a one-line
+"⚠️ off-site backup not configured — backups are local-only" is enough; it does
+NOT need to be a loud Telegram alarm), until the owner either configures R2
+(`rclone config` + set the `r2:` remote) or explicitly accepts local-only. Do
+not treat it as normal.
 
 ### 8c. Local backup freshness
 

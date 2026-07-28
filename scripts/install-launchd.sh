@@ -144,6 +144,42 @@ launchctl unload "$SYNC_PLIST" 2>/dev/null || true
 launchctl load -w "$SYNC_PLIST"
 echo "  ✓ $SYNC_LABEL (hourly timer)"
 
+# ── Timers: nightly backup + 5-min healthcheck (DR-critical) ───────────────
+# These were previously hand-created and thus ABSENT on a bare-metal rebuild —
+# exactly the DR moment they're needed (EVALUATION_2026-07-28 O2). Install a
+# nightly backup (04:00) and a 5-minute project healthcheck.
+install_timer() {  # $1=label suffix  $2=script  $3=interval-block
+  local label="com.assistant.$1"
+  local plist="$LAUNCH_DIR/${label}.plist"
+  cat > "$plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd "${PROJECT_DIR}" && bash $2</string>
+  </array>
+  <key>WorkingDirectory</key><string>${PROJECT_DIR}</string>
+  $3
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>${LOG_DIR}/$1.out.log</string>
+  <key>StandardErrorPath</key><string>${LOG_DIR}/$1.err.log</string>
+</dict>
+</plist>
+PLIST
+  launchctl unload "$plist" 2>/dev/null || true
+  launchctl load -w "$plist"
+  echo "  ✓ $label (timer)"
+}
+install_timer "backup" "scripts/backup.sh" \
+  "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>"
+install_timer "healthcheck-all" "scripts/healthcheck-all.sh" \
+  "<key>StartInterval</key><integer>300</integer>"
+
 echo ""
 echo "Done. Services will auto-start on login and auto-restart on crash."
 echo ""
