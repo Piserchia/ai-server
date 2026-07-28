@@ -2,6 +2,25 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-28 — test-only: stop leaking synthetic self-diagnose rows into prod DB
+
+**Files changed**: `tests/test_telegram_commands.py` — mock `enqueue_job` in
+`TestErrorSafeDecorator::test_exception_retries_then_replies` so the
+Level-3 branch of `_error_safe` no longer inserts a real
+`self-diagnose` row (with description "Telegram handler 'handler' failed
+twice. Error: boom") into the production `jobs` table on every test run.
+
+**Why**: five zombie self-diagnose sessions had spawned from the test
+suite over ~30 minutes; each burned a real Claude agent investigating a
+fake failure. Root cause was the test exercising the real decorator
+against real `enqueue_job`. Test now `patch()`es the callable and
+asserts it was awaited once with `kind="self-diagnose"`.
+
+**Side effects**: none for production code. `docs/Troubleshooting.md`
+"self-diagnose fires for Telegram handler with error 'boom'" section
+updated with the corrected root cause (previous entry had misattributed
+it to human-triggered synthetic payloads).
+
 ## 2026-07-27 — /api/projects surfaces the delivery contract (segregation Phase E)
 
 **Files changed**: `src/gateway/web.py` — `_get_projects(include_delivery=)`;

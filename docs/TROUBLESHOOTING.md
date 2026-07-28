@@ -492,23 +492,28 @@ scheduled restart landed inside the evaluator's session._
 `Telegram handler 'handler' failed twice. Error: boom` — the handler name is
 literally the identifier `handler` and the error is literally `boom`.
 
-**Root cause**: this is not a production failure. The exact strings come from
-`tests/test_telegram_commands.py::test_exception_retries_then_replies` (line
-116: `raise ValueError("boom")`). The `@_error_safe` wrapper retries once,
-producing the "failed twice" phrasing. Either a human manually invoked
-self-diagnose with a synthetic payload, or an event-trigger fired on
-test-flavored data.
+**Root cause (FIXED 2026-07-28)**: `tests/test_telegram_commands.py::TestErrorSafeDecorator::test_exception_retries_then_replies`
+was exercising the real `_error_safe` decorator without mocking
+`enqueue_job`. The Level-3 branch of `_error_safe` calls
+`enqueue_job("Self-diagnose: Telegram handler 'handler' failed twice. Error: boom", kind="self-diagnose", …)`
+against the production Postgres `jobs` table, spawning a real self-diagnose
+session for every test run. Five zombie rows had accumulated (see
+`SELECT id, kind, description FROM jobs WHERE description ILIKE '%handler%boom%'`).
+Not a production bot failure — a test-suite leak into production state.
 
-**Fix**: verify by:
-1. `tail volumes/logs/bot.err.log` — should show only 200 OK responses
-2. `launchctl list | grep com.assistant.bot` — should show exit code 0
-3. `psql assistant -c "SELECT id FROM jobs WHERE error_message ILIKE '%boom%';"` — should return zero rows
+**Fix**: patched `enqueue_job` in that test (commit landing 2026-07-28). Test
+now asserts the mock was awaited with `kind="self-diagnose"` instead of
+performing the real insertion. All 18 tests in the module still pass.
 
-If all three pass, no action is required. Close the diagnose job with a note.
+**Verify no relapse**:
+1. `psql assistant -c "SELECT COUNT(*) FROM jobs WHERE description ILIKE '%handler%boom%' AND created_at > NOW() - INTERVAL '1 day';"` after each pytest run — must be 0.
+2. If a fresh row appears, grep for `enqueue_job` calls introduced into `tests/` without mocks.
+3. `tail volumes/logs/bot.err.log` — should still show only 200 OK responses (real bot health is unrelated).
 
-**Prevention**: self-diagnose could recognize the sentinel strings
-(`handler`/`boom`) as synthetic and no-op immediately. Low priority — the
-manual verification is fast.
+**Historical note**: earlier revision of this entry hypothesised "human
+manually invoked self-diagnose with a synthetic payload" — that was wrong.
+The trigger was always the test suite itself. When self-diagnose lands on
+a synthetic string, always check `tests/` for real DB calls first.
 
 ---
 

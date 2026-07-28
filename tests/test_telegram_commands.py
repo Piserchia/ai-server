@@ -89,7 +89,7 @@ class TestParseCallback:
 
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestErrorSafeDecorator:
@@ -117,7 +117,16 @@ class TestErrorSafeDecorator:
         update = MagicMock()
         update.effective_chat.id = 123
         update.message.reply_text = AsyncMock()
-        asyncio.run(handler(update, None))
+        # Mock enqueue_job so the Level-3 self-diagnose branch doesn't insert
+        # a real row into the jobs table (which would spawn a real self-diagnose
+        # session investigating a synthetic test failure — see incident
+        # 2026-07-28 in docs/Troubleshooting.md).
+        with patch("src.gateway.telegram_bot.enqueue_job", new=AsyncMock()) as m:
+            asyncio.run(handler(update, None))
+            m.assert_awaited_once()
+            # Sanity: the dispatched job is the self-diagnose kind, not a job
+            # that would execute arbitrary work.
+            assert m.await_args.kwargs.get("kind") == "self-diagnose"
         assert call_count == 2  # original + 1 retry
         # Should have called reply_text at least twice (retry msg + final error msg)
         assert update.message.reply_text.call_count >= 2
