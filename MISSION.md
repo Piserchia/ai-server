@@ -151,7 +151,9 @@ element feeds or reads from it.
 
 Things the system is **explicitly prohibited from doing** autonomously:
 
-- Server code changes never auto-merge (INV-4)
+- Server code changes never auto-merge (INV-4) — one owner-authorized exception:
+  `server-deploy`'s self-healing lane may ship a code-review-LGTM'd, gate-green
+  hotfix during a deploy, with owner notification (see SYSTEM.md INV-4)
 - Project deletion requires Telegram Y/N confirmation
 - Skill deletion requires Telegram Y/N confirmation
 - `TELEGRAM_ALLOWED_CHAT_IDS` is config-only, not data — system can't modify it
