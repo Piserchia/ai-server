@@ -1,6 +1,6 @@
 # Charter — Delivery division
 
-**Manager:** `delivery-manager` *(planned — P2)*
+**Manager:** `delivery-manager`
 **Charter (goal):** turn a natural-language ask into a live, documented, deployed
 project, and keep hosted projects healthy across their lifecycle
 (create → host → deploy → verify → update → retire). MISSION objectives C/D:
@@ -10,7 +10,7 @@ project, and keep hosted projects healthy across their lifecycle
 
 | Agent | Role | Privilege | Purpose |
 |---|---|---|---|
-| `delivery-manager` | manager | read-only | *(P2)* Weekly delivery review: lifecycle gaps → proposals |
+| `delivery-manager` | manager | read-only | Weekly delivery review: lifecycle gaps → proposals (Tue 06:00) |
 | `new-project` | worker | prod-operator | Scaffold → host → register a new project (dev-repo topology) |
 | `app-patch` | worker | guarded-writer | Modify an existing project (workspace clone + guards) |
 | `project-evaluate` | worker | guarded-writer | Read a project, produce manifest + standard CONTEXT.md |

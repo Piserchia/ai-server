@@ -1,6 +1,6 @@
 # Charter — Knowledge division
 
-**Manager:** `knowledge-manager` *(planned — P2)*
+**Manager:** `knowledge-manager`
 **Charter (goal):** produce research, ideas, and content that compound over time
 (MISSION objectives B/E and § L "documentation that compounds"). Keep the content
 stores useful, deduplicated, and backed up.
@@ -9,7 +9,7 @@ stores useful, deduplicated, and backed up.
 
 | Agent | Role | Privilege | Purpose |
 |---|---|---|---|
-| `knowledge-manager` | manager | read-only | *(P2)* Weekly knowledge review: content/quality gaps → proposals |
+| `knowledge-manager` | manager | read-only | Weekly knowledge review: content/quality gaps → proposals (Wed 06:00) |
 | `research-report` | worker | content | Web research → dated markdown report in `projects/research/` |
 | `research-deep` | worker | content | Deep dive: 10–20 sources, 2000–5000 words |
 | `idea-generation` | worker | content | Generate + dedup ideas into `projects/ideas/` |

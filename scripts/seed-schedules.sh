@@ -18,9 +18,13 @@ upsert 'server-upkeep-daily' '0 3 * * *' 'server-upkeep' 'Daily server audit and
 
 # ── Management hierarchy (.context/org/) ───────────────────────────────────
 # Department managers run weekly (read-only: evaluate their division → report
-# with recommendations). The CEO runs monthly (reconcile reports vs MISSION).
-# As more managers are authored (delivery/knowledge/atlas — P2), add them here.
-upsert 'ops-manager-weekly'    '0 6 * * 1'  'ops-manager'    'Weekly Platform Ops division review'
+# with recommendations), staggered Mon-Thu so one review lands per morning.
+# The connector reconciles the Delivery→Ops seam Friday. The CEO runs monthly
+# (reconcile reports vs MISSION) — after a full week of division reports.
+upsert 'ops-manager-weekly'       '0 6 * * 1' 'ops-manager'       'Weekly Platform Ops division review'
+upsert 'delivery-manager-weekly'  '0 6 * * 2' 'delivery-manager'  'Weekly Delivery division review'
+upsert 'knowledge-manager-weekly' '0 6 * * 3' 'knowledge-manager' 'Weekly Knowledge division review'
+upsert 'atlas-manager-weekly'     '0 6 * * 4' 'atlas-manager'     'Weekly Atlas division review'
 upsert 'system-manager-monthly' '0 7 1 * *' 'system-manager' 'Monthly CEO org review vs MISSION'
 
 echo "Schedules seeded."

@@ -1,6 +1,6 @@
 # Charter — Atlas division
 
-**Manager:** `atlas-manager` *(planned — P2)*
+**Manager:** `atlas-manager`
 **Charter (goal):** run the atlas product (private financials/trading dashboard +
 agent platform) — its reports, scouting, briefs, portfolio interaction, and
 deploys. Atlas is a product sub-org with its own dev-repo topology
@@ -10,7 +10,7 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 
 | Agent | Role | Privilege | Purpose |
 |---|---|---|---|
-| `atlas-manager` | manager | read-only | *(P2)* Weekly atlas review: product/quality/ops gaps → proposals |
+| `atlas-manager` | manager | read-only | Weekly atlas review: product/quality/ops gaps → proposals (Thu 06:00) |
 | `atlas-report` | worker | content | Single expert report |
 | `atlas-report-sweep` | worker | content | Weekly full report pass |
 | `atlas-scout` | worker | content | Prediction-market / opportunity scan |
