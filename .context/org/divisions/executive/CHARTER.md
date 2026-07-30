@@ -11,6 +11,7 @@ capabilities. When divisions conflict or a gap spans them, the CEO decides.
 |---|---|---|---|
 | `system-manager` | ceo | read-only | Monthly org review: reconcile division reports + MISSION → org proposals + charter updates |
 | `gap-auditor` | auditor | read-only | Finds what's MISSING — capability gaps within a division (as a manager's subagent) and unowned domains/seams org-wide (for the CEO). The recurring version of the manual system evaluation. Finds + routes; never builds |
+| `delivery-ops-reconciler` | connector | read-only | Weekly Delivery→Ops seam reconciler: shipped-vs-operated drift (registration, healthcheck, supervision, DR) → routed proposals (Fri 06:00). Connectors close seams no single division owns — Executive claims them |
 | `review-and-improve` | worker | read-only | Retrospective analytics over job outcomes (the CEO's data arm — TUNES what exists; complements gap-auditor which finds what's absent) |
 | `new-skill` | worker | guarded-writer | Author new agents proposed by any division |
 | `_writeback` | worker | guarded-writer | Institutional-memory integrity: CHANGELOG follow-ups |

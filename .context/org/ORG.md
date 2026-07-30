@@ -27,7 +27,8 @@ self-modifying with full power (MISSION: "batched, proposed, reviewed").
   domains/seams org-wide (for the CEO). The complement to a manager (which
   improves what it owns) and to `review-and-improve` (which tunes what exists) —
   the auditor finds what *no one* owns. Independent of the managers it audits.
-- **Connectors** (P3) — agents that move information across divisions.
+- **Connectors** — read-only agents that close cross-division *seams* (see
+  § Connectors below).
 - **Proposals → gated execution** — every manager change goes through the
   existing gates: `server-patch` (code-review LGTM + human merge, INV-4),
   `new-skill`, `app-patch`. Managers never execute directly.
@@ -59,6 +60,27 @@ Per-job feedback loops already in place feed this: `code-review` (code quality),
 `_evaluate` (acceptance), the learning extractor → `_learning_apply`
 (institutional memory), the escalation chain (fail → higher model →
 self-diagnose).
+
+## Connectors
+
+A **connector** closes a *seam*: a handoff between two divisions that neither
+manager owns, because each sees only its own roster. (The gap-auditor finds
+seams; a connector is the recurring closure of one.) The mechanism:
+
+- A connector is a skill with `role: connector`, `privilege_class: read-only`,
+  `permission_mode: plan` — the same contract as a manager. It reconciles the
+  two divisions' views of the shared handoff and reports drift; it **never
+  executes** the fix.
+- Connectors are claimed by the **Executive** charter (cross-division work is
+  Executive's domain), scheduled like managers, and report via their job's
+  final text. Each finding is routed to the division manager that owns the fix,
+  naming the gated worker skill that would execute it; the CEO reads connector
+  reports alongside division reports and escalates systemic patterns.
+
+| Connector | Seam | Cadence |
+|---|---|---|
+| `delivery-ops-reconciler` | Delivery ships a project ⇒ Ops must operate it (registration, healthcheck, supervision, backup/DR) | weekly (Fri 06:00) |
+| `insight-router` *(planned — lower priority)* | Knowledge/Atlas findings ⇒ the divisions that should act on them | — |
 
 ## Privilege classes (segregation of duties)
 

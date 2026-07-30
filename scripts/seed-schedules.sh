@@ -25,6 +25,7 @@ upsert 'ops-manager-weekly'       '0 6 * * 1' 'ops-manager'       'Weekly Platfo
 upsert 'delivery-manager-weekly'  '0 6 * * 2' 'delivery-manager'  'Weekly Delivery division review'
 upsert 'knowledge-manager-weekly' '0 6 * * 3' 'knowledge-manager' 'Weekly Knowledge division review'
 upsert 'atlas-manager-weekly'     '0 6 * * 4' 'atlas-manager'     'Weekly Atlas division review'
+upsert 'delivery-ops-reconciler-weekly' '0 6 * * 5' 'delivery-ops-reconciler' 'Weekly Delivery->Ops seam reconciliation'
 upsert 'system-manager-monthly' '0 7 1 * *' 'system-manager' 'Monthly CEO org review vs MISSION'
 
 echo "Schedules seeded."

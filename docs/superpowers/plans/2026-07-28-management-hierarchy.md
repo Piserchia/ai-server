@@ -1,9 +1,8 @@
 # Self-Managing Agent Hierarchy — Design + Rollout (2026-07-28)
 
-> **STATUS: FOUNDATION IN PROGRESS.** Architecture + org structure + taxonomy +
-> the CEO and one exemplar department manager land first; the remaining managers
-> and the connectors + privilege guardrails are a mechanical rollout the pattern
-> makes repeatable.
+> **STATUS: P1–P3 SHIPPED** (P1 foundation + gap-auditor 2026-07-28; P2
+> remaining managers + P3 first connector 2026-07-30). Open rollout phases:
+> privilege guardrails (P4) and management surfaces (P5).
 
 **Goal (owner, 2026-07-28):** build a *hierarchy of manager agents* so the
 system manages itself. A top-level CEO agent dictates what the system should be
@@ -100,11 +99,15 @@ charters (via `server-patch`, gated).
   exactly one charter; charters well-formed); the **`system-manager` (CEO)** +
   **`ops-manager`** skills as the proven pattern; `role`/`division`/
   `privilege_class` fields in `SkillConfig`.
-- **P2: complete the managers.** `delivery-manager`, `knowledge-manager`,
-  `atlas-manager` (replicate the ops-manager pattern) + their schedules.
-- **P3: connectors.** `delivery→ops` handoff (new project ⇒ ops registers
-  hosting/healthcheck/DR); an `insight-router` (Knowledge/Atlas findings → other
-  divisions).
+- **P2 (SHIPPED 2026-07-30): complete the managers.** `delivery-manager`,
+  `knowledge-manager`, `atlas-manager` (replicate the ops-manager pattern) +
+  weekly schedules staggered Tue/Wed/Thu 06:00.
+- **P3 (first connector SHIPPED 2026-07-30): connectors.** `delivery→ops`
+  handoff built as `delivery-ops-reconciler` (weekly Fri 06:00: reconciles
+  shipped-vs-operated — registration, healthcheck coverage, supervision,
+  backup/DR — and routes drift as proposals; mechanism documented in ORG.md
+  § Connectors). The `insight-router` (Knowledge/Atlas findings → other
+  divisions) remains planned — lower priority.
 - **P4: privilege guardrails.** Implement the `prod-operator` allowlist guard;
   the `content` write-scope guard. Fix atlas `ANTHROPIC_API_KEY` boundary.
 - **P5: management surfaces.** `/proposals` view; a division-scoped

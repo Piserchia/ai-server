@@ -50,8 +50,10 @@ a claimed-but-unenforced standard). A gap with no evidence is a guess — drop i
    **Unowned domains are the highest-value finds** (nobody's manager will ever
    surface them). Ground each in evidence the domain is actually neglected.
 3. **Seams (org mode).** Handoffs between divisions — is each covered by a
-   connector or an explicit responsibility? (e.g. Delivery ships a project →
-   does anything ensure Ops registers its hosting/DR?)
+   connector or an explicit responsibility? (The Delivery→Ops handoff is now
+   owned by the `delivery-ops-reconciler` connector — audit whether that
+   coverage actually works; hunt for seams still like it USED to be: owned by
+   no one.)
 4. **Enforcement gap.** For each standard a charter/SYSTEM.md claims, check it is
    actually enforced/tested — not just asserted. (The recurring "invariant
    claimed but not enforced" pattern.) `grep`, read the code, check for a test.
