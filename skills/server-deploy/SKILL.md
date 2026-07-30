@@ -89,13 +89,13 @@ git log --oneline "$BEFORE..$AFTER"
 ```bash
 cd "$SRV"
 if git diff --name-only "$BEFORE..$AFTER" | grep -qE '^(Pipfile|pyproject\.toml)'; then
-  pipenv lock     # Pipfile.lock is untracked and per-checkout; server deps
-  pipenv sync     # live in pyproject (behind the editable install), which
-                  # Pipfile's hash never sees — so re-resolve, then install
-                  # exactly the fresh lock. The pytest gate below catches a
-                  # bad resolve before anything restarts. (2026-07-27: this
-                  # previously watched only Pipfile, so pyproject dep bumps —
-                  # e.g. the claude-agent-sdk floor — silently never installed.)
+  pipenv lock        # Pipfile.lock is untracked and per-checkout; server deps
+  pipenv sync --dev  # live in pyproject (behind the editable install), which
+                     # Pipfile's hash never sees — so re-resolve, then install
+                     # exactly the fresh lock. --dev is REQUIRED: the test gate
+                     # needs pytest-asyncio/fakeredis (dev deps); plain
+                     # `pipenv sync` omits them and the gate red-fails every
+                     # async test on a code-clean tree (real incident 2026-07-30).
 fi
 bash scripts/install-prod-hooks.sh          # re-arm the main-commit guard (hooks are untracked)
 ```
@@ -122,8 +122,16 @@ the dev repo). If there is NO migration in range, skip a/b/c entirely.
 ### 3. Test gate (the deploy gate)
 
 ```bash
-cd "$SRV" && pipenv run pytest -q
+cd "$SRV"
+pipenv sync --dev            # ENSURE the gate's own deps (pytest-asyncio, fakeredis)
+                             # are present — prod's dev deps can be stale even when
+                             # this deploy changed no deps (incident 2026-07-30).
+pipenv run pytest -q
 ```
+
+If the gate reports `async def not supported` / `Unknown config option:
+asyncio_mode` / async-fixture errors, that is NOT a code failure — it's missing
+`pytest-asyncio` (a dev dep). `pipenv sync --dev` fixes it; re-run the gate.
 
 **Any failure → § Self-healing.** Do NOT restart on a red gate. Red tests never
 reach the running services — but instead of only reporting, you diagnose and fix
