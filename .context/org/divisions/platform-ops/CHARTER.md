@@ -12,7 +12,7 @@ pipeline, DR, and incident response.
 |---|---|---|---|
 | `ops-manager` | manager | read-only | Weekly ops review: health/deploy/DR gaps → proposals |
 | `server-patch` | worker | guarded-writer | Modify server code (PR-gated, code-review LGTM, manual merge — INV-4/13) |
-| `server-deploy` | worker | prod-operator | **Self-healing** dev→prod: ff-only pull, migrate-safe, test gate, restart — AND fixes on the go (operational autonomously; code fixes born in the dev repo, re-gated, `code-review`-LGTM'd + owner-notified before deploy). The gate is never bypassed |
+| `server-deploy` | worker | prod-operator | **Self-healing** dev→prod: ff-only pull, migrate-safe, test gate, seed schedules, restart — AND fixes on the go (operational autonomously; code fixes born in the dev repo, re-gated, `code-review`-LGTM'd + owner-notified before deploy). The gate is never bypassed |
 | `server-upkeep` | worker | prod-operator | Daily 3am: log rotation, VACUUM, health audit, anomaly DM |
 | `restore` | worker | prod-operator | DR restore from backup (terminal/god only — stops the runner) |
 | `self-diagnose` | worker | prod-operator | Incident response: read audit/service logs, apply low-risk fixes |

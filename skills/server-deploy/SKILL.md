@@ -138,6 +138,22 @@ reach the running services — but instead of only reporting, you diagnose and f
 (within THE ONE INVARIANT). If a test failure appears only AFTER the migration
 applied, restore the pre-deploy snapshot from step 2b first.
 
+### 3b. Seed schedules (idempotent, every deploy)
+
+```bash
+cd "$SRV"
+bash scripts/seed-schedules.sh   # upsert-only; prints the schedules table when done
+```
+
+New skills often ship with new `schedules` rows (manager cadences, report
+sweeps) and nothing else applies them to prod — a skill that deploys without
+its schedule row silently never runs (the deployed-but-not-scheduled gap).
+Like the hook re-arm in step 2, this runs on EVERY deploy that got past the
+pull: a no-op when nothing changed, and it cannot drop or pause existing rows
+(`ON CONFLICT DO UPDATE` touches cron/kind/description only — a row the owner
+paused stays paused). Runs AFTER the green gate so schedules never activate
+for code that won't deploy.
+
 ### 4. Restart — bot and web directly, runner DETACHED
 
 You are running **inside** the runner. `launchctl kickstart -k` on
@@ -159,7 +175,8 @@ nohup /bin/bash -c "sleep 20 && launchctl kickstart -k gui/$UID_N/com.assistant.
 
 ### 5. Summary (final text — write it BEFORE the runner restart fires)
 
-One paragraph: BEFORE→AFTER commits deployed, gate results, web/bot restart +
+One paragraph: BEFORE→AFTER commits deployed, gate results, schedules seeded
+(note any new/changed rows from step 3b), web/bot restart +
 health code, and the line **"runner restart is scheduled detached in ~20s;
 verify with `/status` in a minute or check /health freshness"**. The external
 heartbeat worker alerts if the runner fails to come back.
@@ -178,6 +195,8 @@ lockfile. These are NOT code changes.
 → Fix in place (re-run `pipenv lock && pipenv sync`, recreate the dir, clear the
 stuck state, `launchctl kickstart` again, retry the pull after a `git fetch`),
 then re-run the failed step. Note what you did in the summary. Full autonomy.
+A step-3b `seed-schedules` failure is Class A when it's psql/connectivity
+(fix, re-run the script); a constraint/data error there is Class C.
 
 ### Class B — server-code failure (fix IN THE DEV REPO, re-gate, review, then deploy)
 Symptoms: `pytest` red, an import/attribute error, a real bug reached the pushed

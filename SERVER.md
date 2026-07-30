@@ -21,6 +21,11 @@ Managed by launchd, all under `~/Library/Application Support/ai-server/`:
 - **caddy** — reverse proxy; `*.yourdomain.com` routes to projects.
 - **cloudflared** — named tunnel exposing Caddy to the internet.
 
+Deploys are agent-run: commit in the dev repo → push `origin/main` → send
+`/task deploy server` — the self-healing `server-deploy` skill does the rest
+(pull, migrate, test gate, seed schedules, restart; see CLAUDE.md
+§ single-writer topology and `skills/server-deploy/SKILL.md`).
+
 ## Data stores
 
 - **Postgres** — `jobs`, `schedules`, `projects` (3 tables, 1 migration).
