@@ -17,6 +17,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_skill_sections,
     check_delivery_contracts,
     check_org_charters,
+    check_role_privileges,
 )
 
 
@@ -68,3 +69,8 @@ def test_delivery_contracts_valid():
 def test_org_charters_claim_every_skill():
     warnings = check_org_charters()
     assert warnings == [], f"Org charter / skill-roster mismatches: {warnings}"
+
+
+def test_role_privileges_read_only():
+    warnings = check_role_privileges()
+    assert warnings == [], f"Oversight-role privilege violations: {warnings}"

@@ -7,7 +7,7 @@ Usage:
     python scripts/lint-docs.py          # prints report, exit 0 if clean
     pipenv run pytest tests/test_doc_lint.py  # same checks as pytest tests
 
-Checks (10):
+Checks (12):
 1. Every skill directory has a row in SKILLS_REGISTRY.md
 2. Every project directory has a row in PROJECTS_REGISTRY.md
 3. Every src/runner/*.py file is mentioned in runner CONTEXT.md
@@ -18,6 +18,9 @@ Checks (10):
 8. Non-internal skills have required body sections (Gotchas, min body length)
 9. Skill `isolation` frontmatter values are valid tiers
 10. Every project manifest's delivery contract parses + validates
+11. Every skill is claimed by exactly one division CHARTER.md (org chart)
+12. Oversight roles (manager/ceo/connector/auditor) are read-only + plan mode,
+    and charter Role/Privilege columns match skill frontmatter
 """
 
 from __future__ import annotations
@@ -340,6 +343,85 @@ def check_org_charters() -> list[str]:
     return warnings
 
 
+def check_role_privileges() -> list[str]:
+    """The management-hierarchy safety invariant, made structural: any skill
+    declaring an oversight role (manager | ceo | connector | auditor) must be
+    read-only — `permission_mode: plan` AND `privilege_class: read-only`.
+    Managers direct, gated workers execute (MISSION: "batched, proposed,
+    reviewed"); an oversight agent that can write is a design violation, so a
+    frontmatter edit that widens one must fail lint instead of shipping silent.
+
+    Also cross-checks each charter roster row's Role/Privilege columns against
+    the skill's declared frontmatter — ORG.md calls the charters the source of
+    truth, so they must not advertise a different contract than the skill runs
+    with. Comparison fires only when the frontmatter declares the field
+    (workers commonly omit role/privilege_class and are charter-only)."""
+    import yaml
+
+    warnings: list[str] = []
+    skills_dir = REPO_ROOT / "skills"
+    org_dir = REPO_ROOT / ".context" / "org" / "divisions"
+    if not skills_dir.exists():
+        return warnings
+
+    oversight = {"manager", "ceo", "connector", "auditor"}
+    fm_by_skill: dict[str, dict] = {}
+    for child in sorted(skills_dir.iterdir()):
+        skill_md = child / "SKILL.md"
+        if not child.is_dir() or not skill_md.exists():
+            continue
+        text = skill_md.read_text()
+        if not text.startswith("---"):
+            continue
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            continue
+        try:
+            fm = yaml.safe_load(parts[1]) or {}
+        except Exception:
+            continue
+        fm_by_skill[child.name] = fm
+        role = str(fm.get("role", "") or "")
+        if role in oversight:
+            if str(fm.get("permission_mode", "") or "") != "plan":
+                warnings.append(
+                    f"Skill `{child.name}` declares role `{role}` but "
+                    f"permission_mode is not `plan` (oversight roles are read-only)"
+                )
+            if str(fm.get("privilege_class", "") or "") != "read-only":
+                warnings.append(
+                    f"Skill `{child.name}` declares role `{role}` but "
+                    f"privilege_class is not `read-only` (oversight roles "
+                    f"propose; gated workers execute)"
+                )
+
+    if org_dir.exists():
+        row_re = re.compile(
+            r"^\|\s*`([a-z0-9_-]+)`\s*\|\s*([a-z-]+)\s*\|\s*([a-z-]+)\s*\|")
+        for charter in sorted(org_dir.glob("*/CHARTER.md")):
+            for line in _read(charter).splitlines():
+                m = row_re.match(line)
+                if not m:
+                    continue
+                name, row_role, row_priv = m.groups()
+                fm = fm_by_skill.get(name)
+                if fm is None:
+                    continue  # planned-but-not-created: allowed (see check_org_charters)
+                fm_role = str(fm.get("role", "") or "")
+                fm_priv = str(fm.get("privilege_class", "") or "")
+                if fm_role and fm_role != row_role:
+                    warnings.append(
+                        f"Charter `{charter.parent.name}` lists `{name}` as role "
+                        f"`{row_role}` but its frontmatter declares `{fm_role}`"
+                    )
+                if fm_priv and fm_priv != row_priv:
+                    warnings.append(
+                        f"Charter `{charter.parent.name}` lists `{name}` privilege "
+                        f"`{row_priv}` but its frontmatter declares `{fm_priv}`"
+                    )
+    return warnings
+
+
 def check_delivery_contracts() -> list[str]:
     """Every project manifest.yml must parse AND its delivery contract must be
     internally valid (topology/autonomy enums, dev-repo requires dev_repo +
@@ -427,6 +509,7 @@ def run_all() -> dict[str, list[str]]:
         "isolation_values": check_isolation_values(),
         "delivery_contracts": check_delivery_contracts(),
         "org_charters": check_org_charters(),
+        "role_privileges": check_role_privileges(),
     }
 
 
