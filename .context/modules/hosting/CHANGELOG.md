@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — False-positive project-unhealthy trigger (healthcheck-all timer slip)
+
+**Files changed**: none in this module (TROUBLESHOOTING.md entry
+"false-positive 'project unhealthy 20+ min' self-diagnose while the project
+answers /health 200" was added by the paired atlas diagnose; this entry
+records the baseball-bingo half of the paired incident).
+
+**Trigger**: self-diagnose `43c909ca` fired on `baseball-bingo` unhealthy
+20+ min. Actual state: five consecutive `curl /healthz` and `/` returned
+200, `project.baseball-bingo.err.log` untouched since 2026-07-30 23:40, uvicorn
+worker up 45 min. Root cause was `com.assistant.healthcheck-all` skipping
+its 5-min cadence (last completed 04:04:22Z, next 04:25:53Z — 1291s gap),
+which let `projects.last_healthy_at` age past the 20-min cutoff in
+`src/runner/events.py:_should_trigger_project_diagnose` even though the
+service was fine. Paired with atlas diagnose `eed7225d` firing in the same
+minute for the same reason.
+
+**Action taken**: none on the project (a restart of a healthy service just
+creates real downtime). Documented in TROUBLESHOOTING as a false-positive
+class with a server-patch prevention plan (live-probe before enqueuing,
+gate on `healthcheck:last_run` Redis key, investigate launchd slippage).
+
 ## 2026-07-31 — Stale-venv-import failure mode documented in TROUBLESHOOTING
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (new symptom entry:

@@ -717,128 +717,146 @@ fix the predicate in `src/runner/guards.py`, and extend
 Keep guard predicates pure and covered by tests — `tests/test_guards.py` is
 the enforcement contract for INV-17.
 
-## Symptom: self-diagnose fires for a project that is actually healthy (last_healthy_at is 20+ min stale but the service is up)
+## Symptom: runner down, `launchctl list` shows no PID with last exit 0; queue not draining; web/bot fine
 
 ### Diagnostic
 
 ```bash
-# 1. Confirm the project is actually up.
-launchctl list | grep 'com.assistant.project.<slug>'          # should show a PID
-curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:<port>/<hc>   # 200
-
-# 2. When did the healthcheck-all launchd probe last run?
-tail -20 volumes/logs/healthcheck.out.log
-# Each successful run prints one line: "<ts> checked=N healthy=N failed=0".
-# A >5min gap between consecutive lines is the smoking gun.
-
-# 3. Correlate the gap with system sleep:
-pmset -g log 2>/dev/null | grep -E ' Sleep  |Wake from' | tail -20
+launchctl list | grep com.assistant          # runner: "-  0  com.assistant.runner"
+tail -30 "~/Library/Application Support/ai-server/volumes/logs/runner.err.log"
 ```
 
-### Root cause
+Look for `runner subsystem exited unexpectedly — shutting down for restart`
+right after `runner starting`. Kickstarting reproduces it within ~1s:
+`launchctl kickstart gui/$(id -u)/com.assistant.runner`.
 
-`scripts/healthcheck-all.sh` runs every 5min under launchd
-(`com.assistant.healthcheck-all`, `StartInterval=300`) and is the ONLY writer
-of `projects.last_healthy_at`. On idle sleep, `StartInterval` misses fire —
-a 20+min sleep window means `last_healthy_at` never advances during that
-window, even though the target service is fine.
+### Cause
 
-`src/runner/events.py:_pick_project_diagnoses` treats
-`last_healthy_at < now - 20min` as unhealthy, so it enqueues a self-diagnose.
-The "outage" is a monitoring artifact, not a service failure.
-
-First occurrence 2026-07-30: mac slept 22:56:30 EDT, briefly maintenance-woke
-23:14–23:19, then woke fully 23:35. healthcheck-all timer ran at 02:55:14 UTC
-then not again until 03:17:42 UTC (22min gap), then 03:39:16 UTC (another
-22min gap). Two false-positive self-diagnose jobs enqueued (`ad98b6e6`,
-`1bbc80bf`) for atlas; both themselves died on an unrelated runner-internal
-bug (`'Server' object has no attribute 'list_tools'`) before reaching any
-conclusion. A third (`4fe263f6`) diagnosed the false positive. atlas process
-had been up 16 days, 20 hours the entire time and served 200 to `/`.
+Two interacting behaviors (2026-07-30 incident):
+1. A **startup crash in a supervised subsystem** — that night, structlog-style
+   kwargs on a stdlib logger in `events.py` (`TypeError: Logger._log() got an
+   unexpected keyword argument`), fatal the moment `event_loop` started.
+2. The supervisor shut the process down but **exited 0**, and the plists use
+   `KeepAlive: {SuccessfulExit: false, Crashed: true}` — launchd never
+   restarts a successful exit, so the runner stayed down silently (web /health
+   stays green; nothing watched runner liveness).
 
 ### Fix
 
-None for the false positive. Close the diagnose job with a note confirming
-(1) `launchctl list` shows a live PID for the project, (2) the healthcheck
-endpoint returns 200, (3) there is a sleep transition immediately before
-the probe gap.
-
-### Prevention (requires server-patch)
-
-1. In `_pick_project_diagnoses` (src/runner/events.py): require BOTH
-   `last_healthy_at < cutoff` AND a fresh confirmation. The cheapest is to
-   check that healthcheck-all itself has produced a `checked=` line in
-   `healthcheck.out.log` since `last_healthy_at`; if the probe has been
-   silent, target staleness is unknowable — skip the diagnose spawn.
-2. Alternatively, have the event trigger issue a synchronous HTTP probe to
-   the manifest healthcheck URL before enqueuing. A 200 means the project is
-   fine regardless of what `last_healthy_at` says; update the column and skip.
-3. Long-term: run healthcheck-all under a `caffeinate`-wrapped invocation in
-   the plist, or promote it to a persistent daemon (not StartInterval) so
-   idle sleep can't swallow probes on this always-on box.
-
-_Related runner bug surfaced during this incident: two failed self-diagnose
-jobs (`ad98b6e6`, `1bbc80bf`) crashed with `'Server' object has no attribute
-'list_tools'` before doing any diagnostic work. That's a distinct MCP
-tool-listing defect in `src/runner/mcp_projects.py` (or the SDK wiring) and
-warrants a separate server-patch investigation._
-
----
-
-## Symptom: hosted project's `/healthz` returns 200 but real routes 500 with `ImportError: cannot import name 'TaskHandle' from 'anyio._core._tasks'` (or similar stale-import errors)
-
-### Diagnostic
-
-```bash
-SLUG=<project-slug>
-# Local healthz (usually OK) vs. real route (usually 500)
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<port>/healthz
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<port>/
-tail -80 "volumes/logs/project.${SLUG}.err.log"
-
-# Process uptime vs. venv package mtime
-launchctl list | grep "com.assistant.project.${SLUG}"   # note PID
-ps -o pid,etime -p <PID>
-# Compare against site-packages mtime for the module named in the ImportError
-ls -la /Users/alfredbot.ai.butler/.local/share/virtualenvs/ai-server-*/lib/python3.12/site-packages/<pkg>-*.dist-info
-```
-
-### Root cause
-
-Hosted projects use the ai-server's shared pipenv virtualenv
-(`ai-server-bpzo5SVu`). When `pipenv install` runs from the server root, it
-can upgrade packages **on disk** while long-running project processes
-continue to hold **stale module objects in memory**. Later, when a request
-triggers a lazy import (e.g. a Starlette `FileResponse` importing
-`anyio._backends._asyncio` for the first time), the new file on disk imports
-a symbol from the already-loaded stale module — and the symbol isn't there
-because it was added in the upgrade.
-
-First occurrence 2026-07-31: `baseball-bingo` PID 3357 had been running for
-16 days, 20 hours. `anyio` was upgraded to 4.14.2 on Jul 30 09:09.
-`/healthz` still returned 200 (JSON, no anyio.to_thread), but `/` served a
-FileResponse that triggered `anyio._backends._asyncio` (new on disk) →
-`from anyio._core._tasks import TaskHandle` (stale in memory, no such
-attribute) → 500. Restart cleared it in under 4 seconds.
-
-### Fix
-
-```bash
-launchctl kickstart -k "gui/$(id -u)/com.assistant.project.<slug>"
-sleep 4
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<port>/
-```
+Fix the crashing subsystem (deploy the code fix), then
+`launchctl kickstart gui/$(id -u)/com.assistant.runner`. Stranded `queued`
+job rows whose Redis entries are gone (`redis-cli llen jobs:queue` = 0 while
+rows say queued) never run — cancel them with a note.
 
 ### Prevention
 
-- After any `pipenv install`/`pipenv update` in the server root, restart
-  every hosted project that shares the shared venv (kickstart -k each
-  `com.assistant.project.*` label) — not just the ai-server core services.
-- Ideally each project would own its own venv. Until that lands, treat the
-  server venv as global state and cascade restarts.
-- `/healthz` endpoints that just return `{"status":"ok"}` don't exercise the
-  ASGI middleware stack — consider adding a probe that reads a file or
-  touches the DB so this class of stale-import defect surfaces earlier.
+Both halves are now structural: `main()` exits **1** on the crash path (so
+launchd actually restarts a crashed runner), and lint check 13
+(`check_logger_style`) bans structlog-kwargs-on-stdlib-logger repo-wide.
+Runner liveness is watched twice: web `/health` returns **503 when the
+runner heartbeat is stale** (the external dead-man's-switch alerts on
+non-200; worker activated 2026-07-30), and `healthcheck-all.sh` adds a
+tunnel-independent local layer (2026-07-31): heartbeat stale AND no runner
+PID → direct Telegram DM, rate-limited to one per 30 min.
+
+## Symptom: false-positive "project unhealthy 20+ min" self-diagnose while the project answers /health 200
+
+### Diagnostic
+
+Self-diagnose fires with `Self-diagnose: project '<slug>' has been unhealthy
+for 20+ minutes` (often two or more slugs at the same second, because
+they're all triggered by the same event tick). Direct probe says the project
+is fine:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 http://localhost:<port>/
+# → 200
+psql assistant -c "SELECT slug, NOW() - last_healthy_at AS staleness FROM projects;"
+# → staleness > 20 min for the triggered slugs
+
+# Check whether healthcheck-all itself skipped cycles:
+awk '{print $1}' volumes/logs/healthcheck.out.log | tail -50
+# Look for a gap ≫ 300s between successive lines.
+grep -E "^2026-..-..T..:..:..Z FAIL <slug>" volumes/logs/healthcheck.log
+# → no entry in the trigger window (script didn't run to observe a FAIL either)
+```
+
+Also check for a recent deploy or restart of any service (server-deploy,
+<project>-redeploy) — brief downtime plus a missed subsequent healthcheck
+tick and you cross 20 min without a real outage.
+
+### Root cause
+
+`com.assistant.healthcheck-all` (launchd, `StartInterval=300`) periodically
+slips its 5-minute cadence and takes ~20 min between successful executions.
+Observed 13 such gaps in ~24h on 2026-07-30/31 (typical gap 1100–1950s).
+Every slip lets `projects.last_healthy_at` age past the 20-min cutoff, so
+the event-trigger in `src/runner/events.py:_should_trigger_project_diagnose`
+fires even though the project is answering 200 the whole time.
+
+`last_healthy_at` is a proxy for "healthcheck-all observed a 200" — it is
+NOT a proxy for "project is unhealthy." The current trigger conflates the
+two.
+
+### Fix (this incident)
+
+None — the project is healthy. Close the self-diagnose job with a note
+that it was a false positive. Verify with the direct `curl` above.
+Attempting `restart_project` on a healthy service is harmful (brief real
+downtime for nothing).
+
+### Prevention (requires server-patch, MEDIUM risk)
+
+Two complementary changes:
+
+1. `src/runner/events.py:_check_project_health` — before enqueuing
+   self-diagnose for a stale `last_healthy_at`, probe the project's
+   `http://localhost:<port><healthcheck>` directly (5s timeout). Only fire
+   if the probe also fails. Refactor as a pure predicate that takes an
+   injected probe function so it stays unit-testable.
+2. Make `_check_project_health` skip when `healthcheck-all` itself is
+   unhealthy: add a `healthcheck:last_run` Redis key (set at the end of
+   `healthcheck-all.sh`, TTL 20 min) and gate the event on its presence.
+   Missing key ⇒ the observer is broken, not the observees ⇒ do not fire
+   per-project alerts. (Add a separate observer-down alert instead.)
+3. Long-term: investigate why the launchd job slips. `StartInterval` on a
+   sleepy Mac Mini can stack up if the machine idles/sleeps between ticks;
+   `launchd`'s coalescing skips missed intervals rather than catching up.
+   Options: replace StartInterval with a StartCalendarInterval array, or
+   switch the check to an in-process asyncio task inside the runner (with
+   the runner-down backstop still owned by launchd).
+
+_First observed here 2026-07-31 00:24:59 local: paired self-diagnose jobs
+for atlas + baseball-bingo (`eed7225d…`, `43c909ca…`) fired 44s after a
+successful atlas-redeploy (`d6f0b3ad…`, 43s runtime). Both projects were
+answering 200 the whole time. healthcheck-all's previous successful line
+was 04:04:22Z; next was 04:25:53Z — a 1291-second gap while the event
+engine's 20-min window ran out._
+
+_Recurrence 2026-07-31 ~05:11 local (job `95f6fecb`): single self-diagnose
+fired for atlas alone. Atlas answered 200 in 37ms and staleness was 23s by
+the time diagnosis ran. Cause: healthcheck-all had FOUR consecutive
+21–22-minute gaps in the prior 2h (02:55→03:17, 03:17→03:39, 04:04→04:25,
+04:50→05:11). Same defect, still unfixed — prevention item #1/#2 above
+remain the correct patch._
+
+_Recurrence 2026-07-31 ~05:42 local (job `dc1046d6`): single self-diagnose
+fired for atlas alone with staleness 20:59 at trigger. Direct probe of
+`http://localhost:8791/` returned 200 in 66ms. Same underlying cause:
+healthcheck-all slipped again 04:04:22Z→04:25:53Z (1291s) and 04:50:59Z→
+05:11:42Z (1243s), aging `last_healthy_at` past the 20-min cutoff while
+atlas was answering the whole time. Prevention items #1/#2 remain unfixed._
+
+_Recurrence 2026-07-31 ~05:43 local (job `9a30b37a`): single self-diagnose
+fired for baseball-bingo alone with staleness 21:16 at diagnosis time.
+Direct probes: `http://localhost:8790/healthz` → 200 in 4.6ms,
+`http://localhost:8790/` → 200 in 4.3ms,
+`https://bingo.chrispiserchia.com/` → 200 in 171ms. PID 71682 present.
+Same healthcheck-all slippage cluster as the sibling atlas false-positive
+one minute earlier. FOURTH documented occurrence of this defect within
+5h — the recurrence rate now exceeds one wasted self-diagnose session per
+hour. Prevention items #1/#2 in `src/runner/events.py` remain the correct
+patch and are increasingly overdue._
 
 ---
 
