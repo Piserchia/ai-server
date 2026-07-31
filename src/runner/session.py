@@ -597,9 +597,23 @@ def _build_options(
                 tools = [*tools, "Task"]
                 kwargs["allowed_tools"] = tools
 
-    # Guard hooks for workspace-tier sessions (INV-17): deny writes outside
-    # the clone + dangerous host commands, even under bypassPermissions.
-    if guard_workspace is not None:
+    # Guard hooks — two profiles (runner/guards.py):
+    #   read-only (skill declares privilege_class: read-only — oversight
+    #   skills): file tools + restart_project denied outright, Bash mutation
+    #   denylist; enqueue_job stays open. Attached in EVERY isolation tier
+    #   and permission mode — a belt under plan, load-bearing under
+    #   acceptEdits (dispatch-capable oversight skills must run acceptEdits
+    #   because plan blocks the dispatch MCP; proven live 2026-07-30).
+    #   workspace (workspace-tier writers, INV-17): contain writes to the
+    #   clone + deny dangerous host commands, even under bypassPermissions.
+    # A read-only skill should never also be workspace-tier (that tier exists
+    # to contain WRITERS, and a read-only session has nothing to push); if
+    # both somehow apply, read-only wins — it is strictly stronger (the
+    # workspace profile would permit writes inside the clone, which a
+    # read-only skill must never make).
+    if skill_cfg is not None and skill_cfg.privilege_class == "read-only":
+        kwargs["hooks"] = guards.make_readonly_guard_hooks(str(job.id))
+    elif guard_workspace is not None:
         kwargs["hooks"] = guards.make_guard_hooks(str(job.id), guard_workspace)
 
     # ── MCP server injection ──────────────────────────────────────────

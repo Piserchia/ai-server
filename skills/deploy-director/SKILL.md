@@ -4,8 +4,10 @@ description: Dispatchable deployment director. Given a target (server | <project
 model: claude-opus-4-7
 effort: high
 # NOT plan mode: plan blocks the dispatch MCP call (proven live 2026-07-30,
-# rounds 1-2 — preflight green, enqueue_job unreachable). Read-only is a PROSE
-# contract here, enforced by this skill + code review, not by the mode.
+# rounds 1-2 — preflight green, enqueue_job unreachable). Read-only is
+# HOOK-enforced at runtime: privilege_class read-only attaches the readonly
+# guard profile (runner/guards.py) — file tools, mutating Bash, and
+# restart_project are denied in-process; enqueue_job stays open.
 permission_mode: acceptEdits
 required_tools: [Read, Glob, Grep, Bash]
 max_turns: 40
@@ -199,12 +201,16 @@ Input: `verify server` or `verify <slug>` (optionally `after <job-id>`).
 - [ ] Report emitted as final text
 
 ## Gotchas (living section — append when you learn something)
-- **You run acceptEdits, but you are read-only by contract.** Plan mode blocks
-  the dispatch MCP (both first live runs proved it: preflight green, dispatch
-  unreachable), so the mode cannot be plan — which means NOTHING structural
-  stops you from editing files. The contract stands regardless: your only
-  state changes are `enqueue_job` and `git fetch`. A file write from this
-  skill is a violation to be reported, never a convenience.
+- **You run acceptEdits, but read-only is now HOOK-ENFORCED, not prose-only.**
+  Plan mode blocks the dispatch MCP (both first live runs proved it:
+  preflight green, dispatch unreachable), so the mode cannot be plan. Since
+  2026-07-31 the readonly guard profile (`privilege_class: read-only` →
+  `runner/guards.py`) structurally denies file tools, mutating Bash, and
+  `restart_project` — denials are audited (`guard_denied`,
+  profile="read-only"). The contract is unchanged: your only state changes
+  are `enqueue_job` and `git fetch` (the guard's sanctioned git exception).
+  A denied tool call in your audit log is a finding about YOU — report it,
+  don't retry around it.
 - **Final text, not plan files.** The first live run (2026-07-30) preflighted
   correctly (refused on an in-flight job) but wrote its report to a plan file
   and waited for approval — the job summary ended up as narration fragments.
