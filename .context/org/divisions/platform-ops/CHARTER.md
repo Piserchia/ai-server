@@ -16,6 +16,7 @@ pipeline, DR, and incident response.
 | `server-upkeep` | worker | prod-operator | Daily 3am: log rotation, VACUUM, health audit, anomaly DM |
 | `restore` | worker | prod-operator | DR restore from backup (terminal/god only — stops the runner) |
 | `self-diagnose` | worker | prod-operator | Incident response: read audit/service logs, apply low-risk fixes |
+| `deploy-director` | worker | read-only | Summary-first deploy dispatch: derives the pending-range summary, preflights, risk-classifies, dispatches the gated executor with the summary attached, verifies post-conditions. Directs; never executes a deploy |
 
 ## Standards
 
