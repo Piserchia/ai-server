@@ -15,9 +15,10 @@ reverse) never misreports a live runner as dead.
 `runner_heartbeat_age_s` (null when the key is missing/unparseable) under the
 same field name, and the **HTTP status semantics are untouched** — 200 only
 when the runner heartbeat is fresh AND DB + Redis are reachable, else 503.
-The external `ops/heartbeat-worker` dead-man's-switch (activated 2026-07-30,
-commit 5de688c) alerts on exactly that non-200, so flattening /health to
-always-200 would re-create the invisible-runner-down incident.
+The external `ops/heartbeat-worker` dead-man's-switch (config commit 5de688c,
+2026-07-28; worker wrangler-deployed/activated 2026-07-30) alerts on exactly
+that non-200, so flattening /health to always-200 would re-create the
+invisible-runner-down incident.
 
 **Tests**: `tests/test_health.py::TestParseHeartbeatAge` (7) alongside the
 existing verdict tests.

@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — Runner heartbeat TTL constant
+
+**Files changed**: `src/db.py` — `TTL_RUNNER_HEARTBEAT = 900` added beside
+`KEY_RUNNER_HEARTBEAT`; that key's comment corrected (value is epoch seconds,
+not ISO — the runner now writes `SET ... EX` so a dead runner's key expires
+instead of lingering stale). Part of the runner-liveness work (see runner
+CHANGELOG 2026-07-31).
+
 ## 2026-07-12 — P2: tasks.plan column + deferred job status
 
 **Files changed**:

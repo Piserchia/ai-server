@@ -753,8 +753,11 @@ rows say queued) never run — cancel them with a note.
 Both halves are now structural: `main()` exits **1** on the crash path (so
 launchd actually restarts a crashed runner), and lint check 13
 (`check_logger_style`) bans structlog-kwargs-on-stdlib-logger repo-wide.
-Residual gap: nothing external watches *runner* liveness specifically (the
-heartbeat keys off web) — a runner-liveness probe is a known ops follow-up.
+Runner liveness is watched twice: web `/health` returns **503 when the
+runner heartbeat is stale** (the external dead-man's-switch alerts on
+non-200; worker activated 2026-07-30), and `healthcheck-all.sh` adds a
+tunnel-independent local layer (2026-07-31): heartbeat stale AND no runner
+PID → direct Telegram DM, rate-limited to one per 30 min.
 
 ## Adding entries to this file
 

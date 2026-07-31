@@ -7,7 +7,7 @@ Usage:
     python scripts/lint-docs.py          # prints report, exit 0 if clean
     pipenv run pytest tests/test_doc_lint.py  # same checks as pytest tests
 
-Checks (12):
+Checks (13):
 1. Every skill directory has a row in SKILLS_REGISTRY.md
 2. Every project directory has a row in PROJECTS_REGISTRY.md
 3. Every src/runner/*.py file is mentioned in runner CONTEXT.md
