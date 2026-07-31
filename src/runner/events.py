@@ -173,8 +173,7 @@ async def _check_skill_failures() -> None:
             created_by="event-trigger:correlated",
         )
         logger.warning(
-            "event-triggered correlated self-diagnose",
-            skills=skill_list,
+            "event-triggered correlated self-diagnose for skills %s", skill_list
         )
         return  # skip individual diagnoses
 
@@ -190,7 +189,7 @@ async def _check_skill_failures() -> None:
             payload={"target_kind": "skill", "target_id": skill},
             created_by="event-trigger",
         )
-        logger.warning("event-triggered self-diagnose for skill", skill=skill)
+        logger.warning("event-triggered self-diagnose for skill %s", skill)
 
 
 async def _check_project_health() -> None:
@@ -229,7 +228,7 @@ async def _check_project_health() -> None:
             payload={"target_kind": "project", "target_id": slug},
             created_by="event-trigger",
         )
-        logger.warning("event-triggered self-diagnose for project", slug=slug)
+        logger.warning("event-triggered self-diagnose for project %s", slug)
 
 
 def _should_trigger_idle_review(
@@ -286,7 +285,9 @@ async def event_loop(shutdown: asyncio.Event) -> None:
     Fourth async task in the runner. Polls every 60 seconds for conditions
     that should trigger automatic self-diagnose jobs.
     """
-    logger.info("event loop started", poll_interval=POLL_INTERVAL_SECONDS)
+    # NB: stdlib logger — %-style only. Structlog-style kwargs here raise
+    # TypeError at log time and killed the runner at startup (2026-07-30).
+    logger.info("event loop started (poll interval %ss)", POLL_INTERVAL_SECONDS)
 
     while not shutdown.is_set():
         try:

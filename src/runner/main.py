@@ -1164,7 +1164,7 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
         loop.add_signal_handler(sig, _h)
 
 
-async def main() -> None:
+async def main() -> int:
     import logging
     logging.basicConfig(level=logging.INFO)
     _check_subscription_auth()
@@ -1217,7 +1217,12 @@ async def main() -> None:
     # would abort those already-running sessions. Let the survivors finish.
     await asyncio.gather(*pending, return_exceptions=True)
     logger.info("runner stopped")
+    # Crash path must exit NON-ZERO: launchd's KeepAlive {SuccessfulExit: false}
+    # only resurrects failed exits, so a clean exit here leaves the runner down
+    # permanently (2026-07-30 incident: latent event_loop startup crash →
+    # supervised shutdown → exit 0 → launchd never restarted it).
+    return 1 if crashed else 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

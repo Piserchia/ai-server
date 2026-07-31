@@ -259,9 +259,7 @@ async def run_code_review(
     )
 
     logger.info(
-        "code review complete",
-        parent_job=parent_job_id[:8],
-        outcome=outcome.value,
+        "code review complete for %s: %s", parent_job_id[:8], outcome.value
     )
 
     return outcome

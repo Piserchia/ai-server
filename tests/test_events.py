@@ -1,11 +1,13 @@
 """Tests for src/runner/events.py — pure-function tests only (no DB)."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from src.runner.events import (
     _should_trigger_skill_diagnose,
     _should_trigger_project_diagnose,
     _should_trigger_idle_review,
+    event_loop,
 )
 
 NOW = datetime.now(timezone.utc)
@@ -136,3 +138,27 @@ class TestIdleQueueReview:
 
     def test_just_under_cooldown(self):
         assert _should_trigger_idle_review(0, NOW - timedelta(hours=23, minutes=59)) is False
+
+
+class TestEventLoopStartup:
+    def test_startup_logging_does_not_raise(self):
+        """Regression (2026-07-30 runner-down incident): event_loop's startup
+        log line used structlog-style kwargs on a stdlib logger — TypeError the
+        moment the runner started, before the loop body ever ran. A pre-set
+        shutdown event exercises exactly that line (loop body skipped, no DB).
+
+        The level MUST be forced to INFO: `Logger.info` short-circuits on
+        `isEnabledFor` before reaching `_log()`, and pytest's default level is
+        WARNING — without this the buggy call never executes and the test
+        passes on broken code (prod crashes because main() sets INFO)."""
+        import logging
+
+        ev_logger = logging.getLogger("src.runner.events")
+        prior = ev_logger.level
+        ev_logger.setLevel(logging.INFO)
+        try:
+            shutdown = asyncio.Event()
+            shutdown.set()
+            asyncio.run(event_loop(shutdown))
+        finally:
+            ev_logger.setLevel(prior)

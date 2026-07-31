@@ -2,7 +2,35 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
-## 2026-07-28 — Fail-open invariant fixes (EVALUATION_2026-07-28 Batch 2)
+## 2026-07-30 — Runner-down incident: stdlib/structlog logging mismatch + supervisor exit code
+
+**Incident**: prod runner found down (launchctl: no PID, last exit 0) with the
+queue stranded. Root-cause chain: `events.py` logs with structlog-style kwargs
+on a stdlib `logging.getLogger` logger → `TypeError: Logger._log() got an
+unexpected keyword argument 'poll_interval'` the moment `event_loop` starts →
+the 2026-07-28 subsystem supervisor correctly shuts the process down — but
+`main()` exits **0**, and launchd's `KeepAlive {SuccessfulExit: false}` never
+restarts successful exits, so the runner stayed down. Latent since Phase 4
+(42ef735): before supervision, the event_loop task died silently at startup,
+which also means event triggers had never actually run in production.
+
+**Changes**:
+- `events.py` (×4), `retention.py` (×1), `review.py` (×1): structlog-style
+  kwargs → %-style stdlib logging. The last two instances (a multiline call in
+  events.py and review.py's `code review complete` — INV-13's own machinery)
+  were found by the new lint check, not by grep: AST beats regex here.
+- `main.main` now returns an exit code (`sys.exit(asyncio.run(main()))`):
+  crash path exits 1 so launchd actually restarts a crashed runner — the
+  supervision fix's stated intent, previously unreachable.
+- Regression test `tests/test_events.py::TestEventLoopStartup` (a pre-set
+  shutdown event exercises exactly the startup log line, no DB).
+- Lint check 13 `check_logger_style` (scripts/lint_docs.py, AST-based): bans
+  structlog-style kwargs on stdlib loggers across src/ — the whole bug class,
+  which pure-function tests can't catch because the crash is at log time in
+  paths tests never execute.
+
+**Why**: a repo mixing structlog (main, quota) and stdlib logging (everything
+else) will keep regrowing this bug unless it's linted structurally.
 
 Closed a cluster of silent-failure paths the 2026-07-28 audit found where a
 documented invariant wasn't actually enforced:

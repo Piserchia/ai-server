@@ -18,6 +18,7 @@ from scripts.lint_docs import (  # noqa: E402
     check_delivery_contracts,
     check_org_charters,
     check_role_privileges,
+    check_logger_style,
 )
 
 
@@ -74,3 +75,8 @@ def test_org_charters_claim_every_skill():
 def test_role_privileges_read_only():
     warnings = check_role_privileges()
     assert warnings == [], f"Oversight-role privilege violations: {warnings}"
+
+
+def test_logger_style_no_structlog_kwargs_on_stdlib():
+    warnings = check_logger_style()
+    assert warnings == [], f"Stdlib-logger kwarg violations: {warnings}"

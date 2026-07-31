@@ -37,5 +37,5 @@ def rotate_audit_logs(audit_dir: Path, archive_after_days: int = 30) -> int:
                 f.unlink()
                 processed += 1
 
-    logger.info("audit log rotation", processed=processed)
+    logger.info("audit log rotation: %s file(s) processed", processed)
     return processed
