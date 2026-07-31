@@ -88,7 +88,7 @@ here by sessions that learn something reusable. Format:
   git push fails, pull --rebase and retry")
 - **## Protocol** — reference to PROJECT_PROTOCOL.md or PROTOCOL.md if the
   skill has write-back obligations
-- **## Hard limits** — non-negotiable rules (e.g., "never auto-merge",
+- **## Hard limits** — non-negotiable rules (e.g., "never touch auth config",
   "never modify .env files")
 
 ## Conventions

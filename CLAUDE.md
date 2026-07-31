@@ -108,7 +108,12 @@ Run this procedure for ANY push from ANY checkout. No step is optional.
 ## Hard rules
 
 - **Never modify `.context/PROTOCOL.md`** without an explicit human request.
-- **Never add a server PR merge without `code-review` sub-agent LGTM**. Server code is always manual-merge.
+- **Never merge server code without `code-review` sub-agent LGTM** (INV-13).
+  Autonomous merge is allowed on the execution lane (gate-green + agent LGTM +
+  owner notification — MISSION §M, owner decision 2026-07-31); **protected
+  paths** (PROTOCOL.md, auth config, deletions, `src/runner/guards.py`,
+  `scripts/lint_docs.py`, MISSION §M, ORG.md's safety principle, the lane's
+  executor skills) always require explicit owner approval.
 - **Never modify `TELEGRAM_ALLOWED_CHAT_IDS`** — that's auth config, not data.
 - **Never delete a project or skill**. Propose a PR with rationale; a human confirms.
 

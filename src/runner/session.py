@@ -133,15 +133,20 @@ def _build_server_directive(
         if is_workspace:
             directive += (
                 f"\n**Isolated workspace**: your working directory `{cwd}` is a "
-                "per-job clone of the server repo. Commit your changes on a "
-                "branch and push to origin (`git push origin HEAD:<branch-name>`) "
-                "— server code lands via PR + deploy, never by editing the live "
-                "checkout. The server's context docs are readable at "
-                f"`{ctx_root}/`.\n"
+                "per-job clone of the server repo. Server code lands via your "
+                "skill's declared merge flow — the autonomous execution lane "
+                "where your SKILL.md grants it (gate-green + in-session "
+                "code-review LGTM + owner notification, MISSION §M 2026-07-31), "
+                "else a branch push + PR (`git push origin HEAD:<branch-name>`). "
+                "Protected paths ALWAYS stop at a PR for owner approval. Never "
+                "edit the live checkout. The server's context docs are readable "
+                f"at `{ctx_root}/`.\n"
                 "**Push gates**: pytest green before committing (red never gets "
                 "pushed), no secrets in the diff, CHANGELOG updated. Rejected "
-                "push → fetch + rebase your branch, retry ONCE; still failing → "
-                "report. NEVER force-push, never push to main from here.\n"
+                "push → fetch + rebase, retry ONCE; still failing → report. "
+                "NEVER force-push. Push to main ONLY when your skill's lane "
+                "explicitly authorizes it (server-patch/new-skill, post-LGTM); "
+                "all other skills branch + PR.\n"
             )
 
         # Graph-walked context injection (Rec 4): if the job description

@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — Workspace directive aligned to the execution lane
+
+**Files changed**: `src/runner/session.py` — the injected workspace directive
+told every server-scoped session "server code lands via PR + deploy ... never
+push to main from here", which contradicted the new autonomous execution lane
+(WS-C). It now defers to the skill's declared merge flow: lane-authorized
+skills (server-patch/new-skill, post-LGTM + owner notification) may push main;
+everything else branches + PRs; protected paths always stop at a PR. No
+behavior change outside the directive text.
+
 ## 2026-07-31 — Read-only guard profile: oversight skills get structural read-only + dispatch
 
 **Why**: `permission_mode: plan` blocks MCP tools (proven live 2026-07-30 —

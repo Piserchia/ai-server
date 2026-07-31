@@ -142,11 +142,10 @@ description: |
 **Verification wiring differs by target — this is machinery, not preference:**
 - **Project target**: also `enqueue_job` a verify child — kind
   `deploy_director`, description `verify <slug> after <executor-job-id>`,
-  `depends_on: [<executor-job-id>]` — ONLY if this job runs inside a task
-  (children inherit your task; `promote_deferred_for` returns early for
-  task-less jobs, so a depends_on child dispatched outside a task is stranded
-  as `deferred` forever). No task context → skip the child and say verification
-  is a follow-up dispatch.
+  `depends_on: [<executor-job-id>]`. Task context no longer matters
+  (2026-07-31): `promote_deferred_for` promotes task-less `depends_on`
+  children too (bounded scan, conservative empty escalation map), so the
+  child promotes when the executor completes either way.
 - **Atlas counts as a project here** (`atlas-redeploy` restarts atlas
   services, never the runner) — the project wiring applies.
 - **Server target**: NEVER auto-enqueue a depends_on verify child. Promotion
@@ -217,12 +216,14 @@ Input: `verify server` or `verify <slug>` (optionally `after <job-id>`).
   The final message is the report; nothing in this skill needs approval.
 - **You direct; executors execute.** Running the pipeline yourself — even one
   step, even on a red-looking queue — duplicates the deploy path and bypasses
-  the owner-authorized lane (`server-deploy`'s INV-4 narrowing belongs to that
-  skill alone). Dispatch or stop; nothing in between.
-- **The two machinery traps are real, not style**: task-less depends_on
-  children are never promoted (`plans.promote_deferred_for` early-returns),
-  and a server-deploy's detached runner restart kills whatever the promotion
-  just queued. Both are encoded in step 4 — do not "simplify" them away.
+  the owner-authorized lane (execution-lane merges belong to the gated worker
+  skills — server-patch/new-skill/server-deploy — under INV-4, never to you).
+  Dispatch or stop; nothing in between.
+- **The restart-race trap is real, not style**: a server-deploy's detached
+  runner restart kills whatever a promotion just queued (reconcile is
+  fail-only, INV-15) — the server-target no-verify-child rule stands. (The
+  OTHER old trap — task-less depends_on children never promoting — was FIXED
+  2026-07-31; step 4's project-target wiring was re-derived accordingly.)
 - **Read the executor fresh every run.** Its pipeline changes (step 3b was
   added 2026-07-30); a director reciting stale steps produces confident,
   wrong plans — and the staleness check only works if YOUR copy is current.
