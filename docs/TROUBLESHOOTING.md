@@ -858,6 +858,60 @@ one minute earlier. FOURTH documented occurrence of this defect within
 hour. Prevention items #1/#2 in `src/runner/events.py` remain the correct
 patch and are increasingly overdue._
 
+_Recurrence 2026-07-31 ~06:29 local (job `55a7ae36`): single self-diagnose
+fired for atlas alone. Direct probes at diagnosis time:
+`http://localhost:8791/` → 200 in 13ms, `https://atlas.chrispiserchia.com/`
+→ 302 (Cloudflare Access redirect) in 199ms. Atlas manifest healthy in DB
+(staleness 9s — a fresh healthcheck-all cycle had just landed at 06:29:39Z
+when the diagnosis ran). Healthcheck-all slippage pattern continues:
+06:08:37Z → 06:29:39Z (1262s gap), preceded by 05:21:43Z → 05:43:31Z
+(1308s) and 04:50:59Z → 05:11:42Z (1243s). FIFTH occurrence in ~6h. Same
+class of defect; prevention items #1/#2 in `src/runner/events.py` remain
+the only correct fix (event trigger must direct-probe before firing and
+gate on `healthcheck:last_run` freshness)._
+
+_Recurrence 2026-07-31 ~06:30 local (job `8be2a764`): single self-diagnose
+fired for baseball-bingo — the twin of `55a7ae36` one minute earlier, same
+slippage cluster. Direct probes at diagnosis time:
+`http://localhost:8790/` → 200 in 3.2ms, `http://localhost:8790/healthz`
+→ 200 in 1.0ms, `https://bingo.chrispiserchia.com/` → 200 in 179ms.
+PID 71682 present (unchanged since prior recurrence — service never
+bounced). Staleness only 18s by diagnosis time because a fresh
+healthcheck-all cycle had landed at 06:29:39Z; the trigger fired on the
+prior 06:08:37Z→06:29:39Z gap (1262s). SIXTH occurrence in ~6h. Prevention
+items #1/#2 in `src/runner/events.py` are now the single highest-value
+noise-suppression patch open — every ~40–90 min a self-diagnose burns a
+session on a healthy project._
+
+_Recurrence 2026-07-31 ~07:00 local (job `e1ca26ff`): single self-diagnose
+fired for baseball-bingo. Direct probes at diagnosis time:
+`http://localhost:8790/` → 200 in 4.2ms, `http://localhost:8790/healthz`
+→ 200 in 1.1ms, `https://bingo.chrispiserchia.com/` → 200 in 163ms.
+PID 71682 present (unchanged since 2026-07-31 ~06:29 — service has NEVER
+bounced across all recurrences today). Staleness only 3.5s by diagnosis
+time because a fresh healthcheck-all cycle had just landed at 07:00:35Z;
+the trigger fired on the prior 06:39:41Z→07:00:35Z gap (1254s). SEVENTH
+occurrence in ~7h. Slippage cluster in the trigger window: 06:08:37Z→
+06:29:39Z (1262s), 06:39:41Z→07:00:35Z (1254s), separated by three
+successful 5-min ticks in between — the launchd job runs cleanly for a
+while, then stalls for ~21 min, on repeat. Prevention items #1/#2 in
+`src/runner/events.py` remain unimplemented and are now the single
+highest-ROI open patch on the server; a direct-probe gate + observer
+freshness gate would have caught all seven of today's false positives._
+
+_Recurrence 2026-07-31 ~07:00 local (job `5aa7000f`): EIGHTH self-diagnose
+for atlas within ~7h — twin of `e1ca26ff` one minute earlier, same slippage
+cluster. Direct probe at diagnosis time: `http://localhost:8791/` → 200 in
+32ms. Atlas staleness only 20s by diagnosis (fresh 07:00:35Z healthcheck
+tick had just landed); trigger fired on the 06:39:41Z→07:00:35Z gap
+(1254s). All 3 launchd services present (com.assistant.project.atlas +
+dash-scheduler + pm-edge). Zero DB grep matches for prior `server-patch`
+kind jobs on this issue — despite 7 recurrences and a concrete patch spec
+sitting in this file since occurrence #1, no fix has been enqueued.
+Enqueuing `server-patch` now to implement prevention items #1/#2 (direct-
+probe gate + `healthcheck:last_run` freshness gate in
+`src/runner/events.py:_check_project_health`)._
+
 ---
 
 ## Adding entries to this file
