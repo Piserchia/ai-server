@@ -492,32 +492,28 @@ scheduled restart landed inside the evaluator's session._
 `Telegram handler 'handler' failed twice. Error: boom` — the handler name is
 literally the identifier `handler` and the error is literally `boom`.
 
-**Root cause**: this is not a production failure. The exact strings come from
-`tests/test_telegram_commands.py::test_exception_retries_then_replies` (line
-116: `raise ValueError("boom")`). The `@_error_safe` wrapper retries once,
-producing the "failed twice" phrasing. Three sources have been observed:
-(a) a human manually invoked self-diagnose with a synthetic payload;
-(b) an event-trigger fired on test-flavored data;
-(c) **a `pytest` run against the dev repo actually reached the wrapper's
-Level 3 branch and called the real `enqueue_job(...)`** because the test does
-not patch it. Confirm (c) by inspecting the incoming job's `payload.traceback`
-— if it points at `Documents/repos/ai-server/tests/test_telegram_commands.py`,
-pytest is the trigger. Fix belongs in the dev repo: patch
-`test_exception_retries_then_replies` to `monkeypatch` /
-`unittest.mock.patch` `src.gateway.telegram_bot.enqueue_job` with an
-`AsyncMock()` before invoking the wrapped handler, so the test never touches
-the runner queue.
+**Root cause (FIXED 2026-07-28)**: `tests/test_telegram_commands.py::TestErrorSafeDecorator::test_exception_retries_then_replies`
+was exercising the real `_error_safe` decorator without mocking
+`enqueue_job`. The Level-3 branch of `_error_safe` calls
+`enqueue_job("Self-diagnose: Telegram handler 'handler' failed twice. Error: boom", kind="self-diagnose", …)`
+against the production Postgres `jobs` table, spawning a real self-diagnose
+session for every test run. Five zombie rows had accumulated (see
+`SELECT id, kind, description FROM jobs WHERE description ILIKE '%handler%boom%'`).
+Not a production bot failure — a test-suite leak into production state.
 
-**Fix**: verify by:
-1. `tail volumes/logs/bot.err.log` — should show only 200 OK responses
-2. `launchctl list | grep com.assistant.bot` — should show exit code 0
-3. `psql assistant -c "SELECT id FROM jobs WHERE error_message ILIKE '%boom%';"` — should return zero rows
+**Fix**: patched `enqueue_job` in that test (commit landing 2026-07-28). Test
+now asserts the mock was awaited with `kind="self-diagnose"` instead of
+performing the real insertion. All 18 tests in the module still pass.
 
-If all three pass, no action is required. Close the diagnose job with a note.
+**Verify no relapse**:
+1. `psql assistant -c "SELECT COUNT(*) FROM jobs WHERE description ILIKE '%handler%boom%' AND created_at > NOW() - INTERVAL '1 day';"` after each pytest run — must be 0.
+2. If a fresh row appears, grep for `enqueue_job` calls introduced into `tests/` without mocks.
+3. `tail volumes/logs/bot.err.log` — should still show only 200 OK responses (real bot health is unrelated).
 
-**Prevention**: self-diagnose could recognize the sentinel strings
-(`handler`/`boom`) as synthetic and no-op immediately. Low priority — the
-manual verification is fast.
+**Historical note**: earlier revision of this entry hypothesised "human
+manually invoked self-diagnose with a synthetic payload" — that was wrong.
+The trigger was always the test suite itself. When self-diagnose lands on
+a synthetic string, always check `tests/` for real DB calls first.
 
 ---
 
@@ -685,6 +681,166 @@ After any `install-launchd.sh` run or manual unload/stop, verify with
 it never leaves the job in the stopped-but-loaded state. The external heartbeat
 worker (`ops/heartbeat-worker/`) alerts on `/health` going dark; if you got that
 alert plus a "Failed to load projects" page, start here.
+
+## Symptom: a job's audit log shows `guard_denied` events / a session complains a tool call was "denied by hook"
+
+### Diagnostic
+
+```bash
+cd "$HOME/Library/Application Support/ai-server"
+JOB_ID=<uuid>
+grep guard_denied "volumes/audit_log/${JOB_ID}.jsonl" | python3 -m json.tool
+```
+
+### Root cause
+
+Working as designed (2026-07-27, INV-17): workspace-tier sessions run under
+PreToolUse guard hooks (`src/runner/guards.py`) that deny (a) file writes
+outside the per-job workspace clone and (b) dangerous Bash — `sudo`,
+`launchctl`, keychain reads, force-push, `killall`/`pkill`, `crontab`,
+`ANTHROPIC_API_KEY` injection, and destructive commands referencing protected
+roots (live checkouts, `~/.claude`, `~/.ssh`, LaunchAgents). These replaced
+the docker container lane and bind even under `bypassPermissions`.
+
+### Fix
+
+Usually none — the denial is the isolation model doing its job, and the
+session should adapt (work inside its clone; ship via `git push`). It's a
+real defect only when a legitimately in-workspace action was denied
+(e.g. an over-broad denylist regex): reproduce with
+`pipenv run python -c "from src.runner.guards import bash_violation; ..."`,
+fix the predicate in `src/runner/guards.py`, and extend
+`tests/test_guards.py` with the false-positive case.
+
+### Prevention
+
+Keep guard predicates pure and covered by tests — `tests/test_guards.py` is
+the enforcement contract for INV-17.
+
+## Symptom: self-diagnose fires for a project that is actually healthy (last_healthy_at is 20+ min stale but the service is up)
+
+### Diagnostic
+
+```bash
+# 1. Confirm the project is actually up.
+launchctl list | grep 'com.assistant.project.<slug>'          # should show a PID
+curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:<port>/<hc>   # 200
+
+# 2. When did the healthcheck-all launchd probe last run?
+tail -20 volumes/logs/healthcheck.out.log
+# Each successful run prints one line: "<ts> checked=N healthy=N failed=0".
+# A >5min gap between consecutive lines is the smoking gun.
+
+# 3. Correlate the gap with system sleep:
+pmset -g log 2>/dev/null | grep -E ' Sleep  |Wake from' | tail -20
+```
+
+### Root cause
+
+`scripts/healthcheck-all.sh` runs every 5min under launchd
+(`com.assistant.healthcheck-all`, `StartInterval=300`) and is the ONLY writer
+of `projects.last_healthy_at`. On idle sleep, `StartInterval` misses fire —
+a 20+min sleep window means `last_healthy_at` never advances during that
+window, even though the target service is fine.
+
+`src/runner/events.py:_pick_project_diagnoses` treats
+`last_healthy_at < now - 20min` as unhealthy, so it enqueues a self-diagnose.
+The "outage" is a monitoring artifact, not a service failure.
+
+First occurrence 2026-07-30: mac slept 22:56:30 EDT, briefly maintenance-woke
+23:14–23:19, then woke fully 23:35. healthcheck-all timer ran at 02:55:14 UTC
+then not again until 03:17:42 UTC (22min gap), then 03:39:16 UTC (another
+22min gap). Two false-positive self-diagnose jobs enqueued (`ad98b6e6`,
+`1bbc80bf`) for atlas; both themselves died on an unrelated runner-internal
+bug (`'Server' object has no attribute 'list_tools'`) before reaching any
+conclusion. A third (`4fe263f6`) diagnosed the false positive. atlas process
+had been up 16 days, 20 hours the entire time and served 200 to `/`.
+
+### Fix
+
+None for the false positive. Close the diagnose job with a note confirming
+(1) `launchctl list` shows a live PID for the project, (2) the healthcheck
+endpoint returns 200, (3) there is a sleep transition immediately before
+the probe gap.
+
+### Prevention (requires server-patch)
+
+1. In `_pick_project_diagnoses` (src/runner/events.py): require BOTH
+   `last_healthy_at < cutoff` AND a fresh confirmation. The cheapest is to
+   check that healthcheck-all itself has produced a `checked=` line in
+   `healthcheck.out.log` since `last_healthy_at`; if the probe has been
+   silent, target staleness is unknowable — skip the diagnose spawn.
+2. Alternatively, have the event trigger issue a synchronous HTTP probe to
+   the manifest healthcheck URL before enqueuing. A 200 means the project is
+   fine regardless of what `last_healthy_at` says; update the column and skip.
+3. Long-term: run healthcheck-all under a `caffeinate`-wrapped invocation in
+   the plist, or promote it to a persistent daemon (not StartInterval) so
+   idle sleep can't swallow probes on this always-on box.
+
+_Related runner bug surfaced during this incident: two failed self-diagnose
+jobs (`ad98b6e6`, `1bbc80bf`) crashed with `'Server' object has no attribute
+'list_tools'` before doing any diagnostic work. That's a distinct MCP
+tool-listing defect in `src/runner/mcp_projects.py` (or the SDK wiring) and
+warrants a separate server-patch investigation._
+
+---
+
+## Symptom: hosted project's `/healthz` returns 200 but real routes 500 with `ImportError: cannot import name 'TaskHandle' from 'anyio._core._tasks'` (or similar stale-import errors)
+
+### Diagnostic
+
+```bash
+SLUG=<project-slug>
+# Local healthz (usually OK) vs. real route (usually 500)
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<port>/healthz
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<port>/
+tail -80 "volumes/logs/project.${SLUG}.err.log"
+
+# Process uptime vs. venv package mtime
+launchctl list | grep "com.assistant.project.${SLUG}"   # note PID
+ps -o pid,etime -p <PID>
+# Compare against site-packages mtime for the module named in the ImportError
+ls -la /Users/alfredbot.ai.butler/.local/share/virtualenvs/ai-server-*/lib/python3.12/site-packages/<pkg>-*.dist-info
+```
+
+### Root cause
+
+Hosted projects use the ai-server's shared pipenv virtualenv
+(`ai-server-bpzo5SVu`). When `pipenv install` runs from the server root, it
+can upgrade packages **on disk** while long-running project processes
+continue to hold **stale module objects in memory**. Later, when a request
+triggers a lazy import (e.g. a Starlette `FileResponse` importing
+`anyio._backends._asyncio` for the first time), the new file on disk imports
+a symbol from the already-loaded stale module — and the symbol isn't there
+because it was added in the upgrade.
+
+First occurrence 2026-07-31: `baseball-bingo` PID 3357 had been running for
+16 days, 20 hours. `anyio` was upgraded to 4.14.2 on Jul 30 09:09.
+`/healthz` still returned 200 (JSON, no anyio.to_thread), but `/` served a
+FileResponse that triggered `anyio._backends._asyncio` (new on disk) →
+`from anyio._core._tasks import TaskHandle` (stale in memory, no such
+attribute) → 500. Restart cleared it in under 4 seconds.
+
+### Fix
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/com.assistant.project.<slug>"
+sleep 4
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<port>/
+```
+
+### Prevention
+
+- After any `pipenv install`/`pipenv update` in the server root, restart
+  every hosted project that shares the shared venv (kickstart -k each
+  `com.assistant.project.*` label) — not just the ai-server core services.
+- Ideally each project would own its own venv. Until that lands, treat the
+  server venv as global state and cascade restarts.
+- `/healthz` endpoints that just return `{"status":"ok"}` don't exercise the
+  ASGI middleware stack — consider adding a probe that reads a file or
+  touches the DB so this class of stale-import defect surfaces earlier.
+
+---
 
 ## Adding entries to this file
 

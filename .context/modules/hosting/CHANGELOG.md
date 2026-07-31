@@ -2,6 +2,33 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — Stale-venv-import failure mode documented in TROUBLESHOOTING
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (new symptom entry:
+"hosted project's `/healthz` returns 200 but real routes 500 with
+`ImportError: cannot import name 'TaskHandle' from 'anyio._core._tasks'`").
+No code change.
+
+**Trigger**: self-diagnose fired on `baseball-bingo` unhealthy 20+ min.
+Root cause: bingo process running for 16d20h held stale `anyio._core._tasks`
+in memory; `anyio` was upgraded to 4.14.2 on-disk (2026-07-30 09:09) via
+`pipenv install` in the shared server venv. `/healthz` returned 200 (JSON
+short-circuits ASGI middleware), but `/` served a Starlette `FileResponse`
+whose lazy import of `anyio._backends._asyncio` (new file) tried to
+`from anyio._core._tasks import TaskHandle` on the stale in-memory module.
+`launchctl kickstart -k` restored 200s in <4s. Fix: cascade project
+restarts after any pipenv change in the server root, and consider giving
+each project its own venv.
+
+## 2026-07-27 — Manifest `delivery` block documented (segregation Phase D)
+
+**Files changed**: `.context/modules/hosting/CONTEXT.md` (manifest schema now
+documents the `delivery` contract); `skills/new-project/SKILL.md` (scaffolds
+dev-repo topology by default: canonical repo at `~/Documents/repos/<slug>`,
+GitHub backup, pull-only `projects/<slug>` runtime clone, writes the delivery
+block). No code change — the schema is parsed by `src/registry/manifest.py`
+(Phase A). See `docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`.
+
 ## 2026-07-12 — Commit-topology enforcement (post-incident hardening)
 
 **Files changed**:
