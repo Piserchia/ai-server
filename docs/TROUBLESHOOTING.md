@@ -717,6 +717,45 @@ fix the predicate in `src/runner/guards.py`, and extend
 Keep guard predicates pure and covered by tests — `tests/test_guards.py` is
 the enforcement contract for INV-17.
 
+## Symptom: runner down, `launchctl list` shows no PID with last exit 0; queue not draining; web/bot fine
+
+### Diagnostic
+
+```bash
+launchctl list | grep com.assistant          # runner: "-  0  com.assistant.runner"
+tail -30 "~/Library/Application Support/ai-server/volumes/logs/runner.err.log"
+```
+
+Look for `runner subsystem exited unexpectedly — shutting down for restart`
+right after `runner starting`. Kickstarting reproduces it within ~1s:
+`launchctl kickstart gui/$(id -u)/com.assistant.runner`.
+
+### Cause
+
+Two interacting behaviors (2026-07-30 incident):
+1. A **startup crash in a supervised subsystem** — that night, structlog-style
+   kwargs on a stdlib logger in `events.py` (`TypeError: Logger._log() got an
+   unexpected keyword argument`), fatal the moment `event_loop` started.
+2. The supervisor shut the process down but **exited 0**, and the plists use
+   `KeepAlive: {SuccessfulExit: false, Crashed: true}` — launchd never
+   restarts a successful exit, so the runner stayed down silently (web /health
+   stays green; nothing watched runner liveness).
+
+### Fix
+
+Fix the crashing subsystem (deploy the code fix), then
+`launchctl kickstart gui/$(id -u)/com.assistant.runner`. Stranded `queued`
+job rows whose Redis entries are gone (`redis-cli llen jobs:queue` = 0 while
+rows say queued) never run — cancel them with a note.
+
+### Prevention
+
+Both halves are now structural: `main()` exits **1** on the crash path (so
+launchd actually restarts a crashed runner), and lint check 13
+(`check_logger_style`) bans structlog-kwargs-on-stdlib-logger repo-wide.
+Residual gap: nothing external watches *runner* liveness specifically (the
+heartbeat keys off web) — a runner-liveness probe is a known ops follow-up.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:

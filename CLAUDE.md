@@ -65,7 +65,10 @@ The repo exists in two places with strictly separated write rights:
 
 Deploy path: dev commit → `origin/main` → `/task deploy server` (skill
 `server-deploy`: ff-only pull, migrate, pytest gate, seed schedules,
-restart). Learnings
+restart). Optional front-end: `/task deploy-director: server` (or a project
+slug) derives the what's-deploying summary, preflights, and dispatches the
+same gated executor with the summary attached; `deploy-director: verify
+<target>` re-checks post-conditions independently afterwards. Learnings
 path: prod session writes docs → sync-learnings → `origin/runtime-learnings`
 → merged into main from dev.
 

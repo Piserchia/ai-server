@@ -24,7 +24,9 @@ Managed by launchd, all under `~/Library/Application Support/ai-server/`:
 Deploys are agent-run: commit in the dev repo → push `origin/main` → send
 `/task deploy server` — the self-healing `server-deploy` skill does the rest
 (pull, migrate, test gate, seed schedules, restart; see CLAUDE.md
-§ single-writer topology and `skills/server-deploy/SKILL.md`).
+§ single-writer topology and `skills/server-deploy/SKILL.md`). The optional
+`deploy-director` front-end preflights and dispatches the same executor with
+a what's-deploying summary, and can independently verify afterwards.
 
 ## Data stores
 
