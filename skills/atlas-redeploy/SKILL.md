@@ -16,8 +16,10 @@ tags: [atlas, operations, deploy]
 # Atlas Redeploy
 
 Deterministic deploy pipeline for the Atlas project. Triggered via `/task redeploy atlas`
-(or the job API) after commits land in `~/Documents/repos/atlas`. The gate rule is absolute:
-**a red test suite means services keep running the old code** — report the failures instead.
+(or the job API) after commits land on `origin/master` — GitHub `Piserchia/atlas`, the
+canonical repo since 2026-07-31, pushed from any development machine. The gate rule is
+absolute: **a red test suite means services keep running the old code** — report the
+failures instead.
 
 ## Procedure
 
@@ -48,10 +50,10 @@ git log --oneline HEAD..origin/master                        # commits only the 
 
 Include the standard resolution in the report (human runs it, not this skill):
 backup branch (`git branch backup-<date>`) → verify origin points at
-`~/Documents/repos/atlas` → `reset --hard` to the last common commit → redeploy.
-Root-cause context: commits must only ever be born in the dev repo (single-writer rule,
-atlas CLAUDE.md §Deployment topology); runtime-only commits are a process violation —
-name the offending commits and their author identity in the summary.
+`https://github.com/Piserchia/atlas.git` → `reset --hard` to the last common commit →
+redeploy. Root-cause context: commits reach production only via GitHub `origin/master`
+(GitHub-canonical rule, atlas CLAUDE.md §Deployment topology); runtime-only commits are
+a process violation — name the offending commits and their author identity in the summary.
 
 ### 2. Environment + migrations
 
@@ -118,7 +120,8 @@ healthcheck code. If stopped at a gate: what failed and where to look.
 ## Hard rules
 
 - Never edit `.env` or any file in the runtime clone — deploys are read-only except for
-  build artifacts. Code changes belong in `~/Documents/repos/atlas`.
+  build artifacts. Code changes are born in a development clone (Mini:
+  `~/Documents/repos/atlas`, or any laptop clone) and reach here only via GitHub `master`.
 - `--ff-only` always. Divergence between dev repo and runtime clone is a human decision.
 - Red tests never reach production. No exceptions, including "it's just a docs change"
   (docs-only ranges will pass the gates anyway, so run them).
@@ -139,6 +142,6 @@ edit blocks every future deploy. Changelog entries for atlas belong in the DEV r
 - **Build is deterministic, not judgment** (step 4): run the exact `grep '^web/'` check on
   the range; skipping a needed build ships a stale UI (incident 2026-07-10).
 - **Runtime-born commits block deploys**: any `git commit` made inside `projects/atlas`
-  (not the dev repo at `~/Documents/repos/atlas`) will cause the next `--ff-only` pull to
-  refuse — a process violation; do NOT force-push or reset — stop, report, let the human
-  resolve (see `docs/TROUBLESHOOTING.md` § "atlas redeploy reports diverged").
+  (instead of a development clone that pushes to GitHub) will cause the next `--ff-only`
+  pull to refuse — a process violation; do NOT force-push or reset — stop, report, let the
+  human resolve (see `docs/TROUBLESHOOTING.md` § "atlas redeploy reports diverged").

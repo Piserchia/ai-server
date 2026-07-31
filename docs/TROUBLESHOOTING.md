@@ -581,28 +581,32 @@ git -C "$ATLAS" log --oneline HEAD..origin/master   # undeployed dev commits
 ```
 
 ### Root cause
-A commit was born in the runtime clone instead of the dev repo (~/Documents/repos/atlas).
-The runtime clone is a pull-only deploy target; any commit made there (hotfix, migration
-rename, "quick fix on the Mini") permanently blocks ff-only pulls. First occurrence
-2026-07-09: a dbmate migration-collision repair was committed on the Mini with the host
-git identity while the dev repo got its own equivalent commit — same content, different
-SHAs. Also check `remote -v`: after the 2026-07-09 pm-edge→atlas rename, origin must be
-`~/Documents/repos/atlas`.
+A commit was born in the runtime clone instead of a development clone. The runtime clone
+is a pull-only deploy target; any commit made there (hotfix, migration rename, "quick fix
+on the Mini") permanently blocks ff-only pulls. First occurrence 2026-07-09: a dbmate
+migration-collision repair was committed on the Mini with the host git identity while the
+dev repo got its own equivalent commit — same content, different SHAs. Also check
+`remote -v`: origin must be `https://github.com/Piserchia/atlas.git` (GitHub-canonical
+since 2026-07-31; before that it was the local dev-repo path — a local-path origin is now
+itself a misconfiguration).
 
 ### Fix
 ```bash
 git -C "$ATLAS" branch backup-$(date +%F)            # preserve, never destroy evidence
-git -C "$ATLAS" remote set-url origin "$HOME/Documents/repos/atlas"   # if wrong
+git -C "$ATLAS" remote set-url origin https://github.com/Piserchia/atlas.git   # if wrong
 git -C "$ATLAS" fetch origin
 git -C "$ATLAS" reset --hard <last common commit>    # then: /task redeploy atlas
-# afterwards: git log master..backup-<date> — if anything unique, cherry-pick INTO DEV
+# afterwards: git log master..backup-<date> — if anything unique, cherry-pick into a
+# development clone and land it via origin/master (never re-commit here)
 ```
 
 ### Prevention
-Single-writer rule (atlas CLAUDE.md §Deployment topology): all commits in the dev repo,
-runtime pulls only. Jobs and skills must never git-commit in projects/atlas; a fix found
-on the Mini is committed in dev and deployed via atlas-redeploy. The atlas-redeploy skill
-now emits the divergence evidence automatically.
+GitHub-canonical rule (atlas CLAUDE.md §Deployment topology, 2026-07-31): commits are
+born in development clones (Mini `~/Documents/repos/atlas` or a laptop), integrate only
+through GitHub `origin/master`, and the runtime clone pulls only. Jobs and skills must
+never git-commit in projects/atlas; a fix found on the Mini is committed in a dev clone,
+pushed, and deployed via atlas-redeploy. The atlas-redeploy skill emits the divergence
+evidence automatically.
 
 ## Symptom: a skill-triggered job ignores its skill and does unrelated "helpful" work
 

@@ -2,6 +2,31 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — Atlas goes GitHub-canonical; first live delivery contract (Phase E, atlas half)
+
+**Files changed**: `.context/PROJECTS_REGISTRY.md` (atlas source + delivery
+table → ACTIVE), `skills/atlas-redeploy/SKILL.md` (origin is GitHub; wording
+for multi-machine commits), `docs/TROUBLESHOOTING.md` (atlas divergence
+section: correct origin is now the GitHub URL). Non-repo state changes on the
+Mini (owner-directed in an interactive session): runtime clone
+`projects/atlas` origin repointed local-path → `https://github.com/Piserchia/atlas.git`;
+the stale dev-checkout copy `~/Documents/repos/ai-server/projects/atlas`
+repointed + fast-forwarded 99 commits.
+
+**Why**: owner decision 2026-07-31 — develop atlas from multiple machines.
+GitHub `Piserchia/atlas` (master) is the source of truth; single-writer is
+superseded by rebase+push single-branch integration (atlas CLAUDE.md
+§Deployment topology, atlas `docs/DEVELOPMENT.md`). The atlas manifest now
+carries the `delivery:` block (dev-repo topology, pull-only runtime,
+gated-auto) — the first project on the 2026-07-27 segregation contract, so
+runner enforcement (cwd scoping + deploy-authority gate) is live for atlas.
+
+**Verify**: `git -C "$HOME/Library/Application Support/ai-server/projects/atlas"
+remote get-url origin` → GitHub URL; `pipenv run python -c "from pathlib import
+Path; from src.registry.manifest import load;
+print(load(Path.home()/'Documents/repos/atlas/manifest.yml').delivery.topology)"`
+→ `dev-repo`; next `/task redeploy atlas` pulls from GitHub ff-only.
+
 ## 2026-07-27 — Manifest `delivery` block documented (segregation Phase D)
 
 **Files changed**: `.context/modules/hosting/CONTEXT.md` (manifest schema now
