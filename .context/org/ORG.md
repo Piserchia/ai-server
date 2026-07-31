@@ -29,9 +29,37 @@ self-modifying with full power (MISSION: "batched, proposed, reviewed").
   the auditor finds what *no one* owns. Independent of the managers it audits.
 - **Connectors** — read-only agents that close cross-division *seams* (see
   § Connectors below).
-- **Proposals → gated execution** — every manager change goes through the
-  existing gates: `server-patch` (code-review LGTM + human merge, INV-4),
-  `new-skill`, `app-patch`. Managers never execute directly.
+- **Proposals → dispatched, gated execution** — a manager (or the CEO) never
+  edits anything itself, but it may now DISPATCH gated worker jobs as well as
+  file proposals. Its own session stays read-only+dispatch — hook-enforced at
+  runtime (INV-20), not just by convention. The dispatched workers
+  (`server-patch`, `new-skill`, `app-patch`) execute autonomously under the
+  INV-4 lane (see § Execution lane below).
+
+## Execution lane (2026-07-31)
+
+Owner decision: on the worker lane, human pre-merge approval is replaced by
+owner **notification**. The division of power:
+
+- **Managers/CEO direct** — read-only + dispatch. INV-20 hook-enforces the
+  class at runtime: file-mutation tools, mutating Bash, and `restart_project`
+  are PreToolUse-denied for `privilege_class: read-only` sessions regardless
+  of permission_mode; dispatching gated worker jobs via `enqueue_job` stays
+  allowed.
+- **Workers execute autonomously** under the INV-4 lane: full test gate green
+  + in-session `code-review` subagent LGTM (plus the independent INV-13
+  post-session review) + mandatory owner notification with the diff.
+- **The owner is notified, not consulted** — EXCEPT protected paths, which
+  remain owner-approval-only, always: `.context/PROTOCOL.md`; auth config
+  (`TELEGRAM_ALLOWED_CHAT_IDS`, `.env`/secrets, submit-auth checks); deletion
+  of any project or skill directory; `src/runner/guards.py`;
+  `scripts/lint_docs.py`; `MISSION.md` (§M); this file's safety-principle
+  section (§ Operating model + § Privilege classes); and the lane's executor
+  skills (`server-patch`, `server-deploy`, `new-skill` SKILL.md).
+
+The safety principle stands: the org directs and improves itself, but it must
+never be able to relax its own restraints autonomously — every file that
+defines or enforces a restraint stays behind the owner.
 
 ## Division index
 
@@ -86,7 +114,9 @@ seams; a connector is the recurring closure of one.) The mechanism:
 
 `read-only` · `content` · `guarded-writer` · `prod-operator` · `break-glass` —
 defined with intended guardrails in the design doc. Each charter tags its agents.
-Managers are always `read-only`.
+Managers are always `read-only` — and since 2026-07-31 that class is
+hook-enforced at runtime (INV-20), with gated job dispatch (`enqueue_job`) as
+its only mutation channel.
 
 ## How to extend the org
 

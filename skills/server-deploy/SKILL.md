@@ -213,9 +213,10 @@ main.
    --ff-only`, and resume the pipeline from the gate (step 3).
 6. **Notify the owner** (in your summary / task update): what failed, the diff
    you shipped, and that it was code-reviewed. This is mandatory for every
-   Class-B fix — it is an owner-authorized narrowing of INV-4 (agent code-review
-   LGTM + notification substitutes for human pre-merge, ON THE DEPLOY-HOTFIX
-   PATH ONLY; normal `server-patch` still requires human merge).
+   Class-B fix — it is the INV-4 lane (agent code-review LGTM + notification
+   substitutes for human pre-merge; since 2026-07-31 the same lane governs
+   `server-patch`/`new-skill` too — protected paths always excepted, and this
+   skill's own SKILL.md is one of them).
 
 ### Class C — migration / data failure (validate + snapshot + notify)
 → Fix the migration in `$DEV` (Class-B flow), and BEFORE applying to prod:

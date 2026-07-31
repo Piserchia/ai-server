@@ -96,7 +96,7 @@ isn't served by anything in the table, we've drifted.
 | `jobs.user_rating` (1-5) + `/rate` command in Telegram + web | Quality signal per job |
 | `jobs.review_outcome` (LGTM / changes_requested / blocker) | Quality signal from `code-review` sub-agent |
 | `review-and-improve` skill (Phase 5, monthly, Opus 4.7 / max in plan mode) | Analyzes patterns, proposes changes as PRs |
-| **PRs only, no silent edits** (INV-4, INV-13) | You see every change; skills auto-merge on `code-review` LGTM; server code always manual-merge |
+| **Gated merges, no silent edits** (INV-4, INV-13) | You see every change: merges need gate-green + agent `code-review` LGTM + owner notification (2026-07-31 lane); protected paths always owner-approved |
 
 ### I. Self-expansion
 
@@ -104,7 +104,7 @@ isn't served by anything in the table, we've drifted.
 |---|---|
 | `new-project` skill | Adds a project |
 | `new-skill` skill | Adds a new skill (meta — the system learns new capabilities) |
-| `server-patch` skill (Phase 5) | Modifies server code, always PR-gated, always needs `code-review` LGTM |
+| `server-patch` skill (Phase 5) | Modifies server code under the INV-4 lane: gate-green + `code-review` LGTM + owner notification; protected paths via PR + owner approval |
 | SKILL.md as data, not code | Adding capability doesn't require a code deploy |
 
 ### J. Smart model selection
@@ -151,9 +151,25 @@ element feeds or reads from it.
 
 Things the system is **explicitly prohibited from doing** autonomously:
 
-- Server code changes never auto-merge (INV-4) — one owner-authorized exception:
-  `server-deploy`'s self-healing lane may ship a code-review-LGTM'd, gate-green
-  hotfix during a deploy, with owner notification (see SYSTEM.md INV-4)
+- Server code (INV-4, rewritten 2026-07-31 by owner decision): changes merge
+  autonomously ONLY when (a) the full test gate is green, (b) agent
+  `code-review` returns LGTM — the in-session subagent AND the post-session
+  INV-13 gate, and (c) the owner is notified with the diff. Human PRE-approval
+  is no longer required. EXCEPT the protected paths, which are
+  owner-approval-only, always — no autonomous merge regardless of LGTM:
+  1. `.context/PROTOCOL.md`
+  2. auth config (`TELEGRAM_ALLOWED_CHAT_IDS`, `.env`/secrets, the
+     chat-ID/web-auth checks)
+  3. deletion of any project or skill directory
+  4. `src/runner/guards.py`
+  5. `scripts/lint_docs.py`
+  6. `MISSION.md` (this file, §M especially)
+  7. the safety-principle section of `.context/org/ORG.md`
+  8. the lane's executor skills: `skills/server-patch/SKILL.md`,
+     `skills/server-deploy/SKILL.md`, `skills/new-skill/SKILL.md`
+
+  Rationale: the system must not be able to relax its own restraints
+  autonomously — every protected path defines or enforces a restraint.
 - Project deletion requires Telegram Y/N confirmation
 - Skill deletion requires Telegram Y/N confirmation
 - `TELEGRAM_ALLOWED_CHAT_IDS` is config-only, not data — system can't modify it
