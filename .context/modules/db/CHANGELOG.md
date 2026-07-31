@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — Event-loop circuit breaker key/TTL constants
+
+**Files changed**: `src/db.py` — `KEY_EVENTS_BREAKER = "events:breaker"` and
+`TTL_EVENTS_BREAKER = 1800` added beside the runner-heartbeat constants. Set
+by the runner's event loop when >= 5 failures in 10 min share one normalized
+error signature (key value = the signature); while present, event-trigger
+spawning is paused (idle-queue review exempt). 30-min TTL auto-resets the
+breaker. See runner CHANGELOG 2026-07-31 for the incident and semantics.
+
+
 ## 2026-07-31 — Runner heartbeat TTL constant
 
 **Files changed**: `src/db.py` — `TTL_RUNNER_HEARTBEAT = 900` added beside

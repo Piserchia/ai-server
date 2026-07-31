@@ -27,6 +27,14 @@ Deferred jobs are Job rows with status="deferred" and NO Redis queue entry;
 (a dependency also counts as satisfied when a completed escalation retry of
 it exists). `fail_dependents_of(job)` cascades failures so a broken foundation
 never silently strands its dependents.
+
+Task-less promotion (2026-07-31): deferred jobs can also be born OUTSIDE a
+task (dispatch-MCP `depends_on` from a task-less parent — task_id IS NULL).
+`promote_deferred_for` now also scans those for payload.depends_on naming the
+completed job, with the same guarded UPDATE/RPUSH/audit flow. Escalation
+lineage is task-scoped, so this path passes an empty escalation_map: a
+task-less dependency satisfied only via a completed escalation retry does not
+promote (conservative — under-promotes, never wrongly promotes).
 """
 
 from __future__ import annotations
@@ -45,6 +53,7 @@ from src.models import Job, JobStatus
 logger = logging.getLogger(__name__)
 
 MAX_SUBTASKS = 12
+TASKLESS_PROMOTION_SCAN_LIMIT = 200  # bound on task-less deferred rows scanned per promotion
 
 
 # ── Pure helpers (unit-tested) ──────────────────────────────────────────────
@@ -125,6 +134,13 @@ def deps_satisfied(dep_ids: list[str], completed: set[str], escalation_map: dict
     return all(d in completed or d in escalation_map for d in dep_ids)
 
 
+def names_dependency(payload: dict | None, job_id: str) -> bool:
+    """True when payload.depends_on names job_id (entries coerced to str,
+    matching how dep ids are stored/compared everywhere else). Pure function."""
+    deps = (payload or {}).get("depends_on") or []
+    return any(str(d) == str(job_id) for d in deps)
+
+
 # ── Spawn ───────────────────────────────────────────────────────────────────
 
 
@@ -189,23 +205,103 @@ async def _task_job_state(task_id) -> tuple[set[str], dict[str, str], list[Job]]
 
 
 async def promote_deferred_for(job: Job) -> int:
-    """After `job` completed: queue any deferred sibling whose dependencies
-    are now satisfied. Returns number promoted. Never raises."""
-    if not job.task_id:
-        return 0
+    """After `job` completed: queue any deferred sibling in the same task
+    whose dependencies are now satisfied, then any task-less dependent
+    (status='deferred', task_id IS NULL, payload.depends_on naming this job —
+    e.g. dispatch-MCP children of a task-less parent, which were previously
+    stranded forever). Returns number promoted. Never raises."""
+    promoted = 0
+    if job.task_id:
+        try:
+            completed, escalation_map, deferred = await _task_job_state(job.task_id)
+        except Exception:
+            logger.exception("deferred promotion: could not load task state for %s "
+                             "— deferred siblings may be stranded", str(job.id)[:8])
+            completed, escalation_map, deferred = set(), {}, []
+        for d in deferred:
+            # Per-item isolation: a failure promoting ONE subtask must not abort the
+            # rest of the loop and strand siblings that are ready to run (T4).
+            try:
+                deps = [str(x) for x in ((d.payload or {}).get("depends_on") or [])]
+                if deps_satisfied(deps, completed, escalation_map):
+                    async with session_scope() as s:
+                        await s.execute(
+                            update(Job).where(Job.id == d.id)
+                            .where(Job.status == JobStatus.deferred.value)
+                            .values(status=JobStatus.queued.value)
+                        )
+                    await redis.rpush(QUEUE_JOBS, str(d.id))
+                    audit_log.append(str(d.id), "job_promoted",
+                                     satisfied_by=str(job.id))
+                    promoted += 1
+            except Exception:
+                logger.exception("promotion of subtask %s failed (continuing with siblings)",
+                                 str(d.id)[:8])
+    promoted += await _promote_taskless_dependents(job)
+    return promoted
+
+
+async def _taskless_dependent_state(job: Job) -> tuple[set[str], list[Job]]:
+    """(completed dependency ids, task-less deferred jobs naming `job` in
+    payload.depends_on). Scans a bounded set — at most
+    TASKLESS_PROMOTION_SCAN_LIMIT deferred task-less rows, oldest first. The
+    completed set covers EVERY dependency of the candidates (not just `job`),
+    so multi-dependency children promote only when fully satisfied."""
+    async with async_session() as s:
+        result = await s.execute(
+            select(Job)
+            .where(Job.status == JobStatus.deferred.value)
+            .where(Job.task_id.is_(None))
+            .order_by(Job.created_at)
+            .limit(TASKLESS_PROMOTION_SCAN_LIMIT)
+        )
+        deferred = list(result.scalars())
+    candidates = [d for d in deferred if names_dependency(d.payload, str(job.id))]
+    if not candidates:
+        return set(), []
+    dep_uuids: set[uuid_mod.UUID] = set()
+    for d in candidates:
+        for x in (d.payload or {}).get("depends_on") or []:
+            try:
+                dep_uuids.add(uuid_mod.UUID(str(x)))
+            except ValueError:
+                pass  # malformed dep id can never complete; stays unsatisfied
+    completed: set[str] = set()
+    if dep_uuids:
+        async with async_session() as s:
+            result = await s.execute(
+                select(Job.id)
+                .where(Job.id.in_(dep_uuids))
+                .where(Job.status == JobStatus.completed.value)
+            )
+            completed = {str(row[0]) for row in result.fetchall()}
+    return completed, candidates
+
+
+async def _promote_taskless_dependents(job: Job) -> int:
+    """Queue task-less deferred jobs (task_id IS NULL) whose payload.depends_on
+    names `job` and whose dependencies are all completed. Mirrors the
+    task-scoped flow exactly: guarded deferred→queued UPDATE (INV-9), RPUSH,
+    job_promoted audit event, per-item isolation. Never raises.
+
+    escalation_map is deliberately EMPTY here: the map is derived from a
+    task's own job set (payload.escalated_from lineage in `_task_job_state`),
+    which has no task-less equivalent — so a dependency that failed and was
+    replaced by a completed escalation retry does NOT satisfy a task-less
+    child. Conservative: this can only under-promote (leave deferred), never
+    wrongly promote."""
     try:
-        completed, escalation_map, deferred = await _task_job_state(job.task_id)
+        completed, candidates = await _taskless_dependent_state(job)
     except Exception:
-        logger.exception("deferred promotion: could not load task state for %s "
-                         "— deferred siblings may be stranded", str(job.id)[:8])
+        logger.exception("deferred promotion: could not load task-less dependents "
+                         "of %s — they may remain deferred", str(job.id)[:8])
         return 0
     promoted = 0
-    for d in deferred:
-        # Per-item isolation: a failure promoting ONE subtask must not abort the
-        # rest of the loop and strand siblings that are ready to run (T4).
+    for d in candidates:
+        # Per-item isolation, same as the task-scoped loop (T4).
         try:
             deps = [str(x) for x in ((d.payload or {}).get("depends_on") or [])]
-            if deps_satisfied(deps, completed, escalation_map):
+            if deps_satisfied(deps, completed, {}):  # escalation maps are task-scoped
                 async with session_scope() as s:
                     await s.execute(
                         update(Job).where(Job.id == d.id)
@@ -217,7 +313,7 @@ async def promote_deferred_for(job: Job) -> int:
                                  satisfied_by=str(job.id))
                 promoted += 1
         except Exception:
-            logger.exception("promotion of subtask %s failed (continuing with siblings)",
+            logger.exception("promotion of task-less dependent %s failed (continuing)",
                              str(d.id)[:8])
     return promoted
 
