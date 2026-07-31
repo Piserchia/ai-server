@@ -941,6 +941,97 @@ same silent-drop failure (workspace runs green then no push event); the
 workspace push/merge path itself is a distinct medium-server-risk defect
 that needs human review before another attempt. Closing as false positive._
 
+_Recurrence 2026-07-31 ~10:26 local (job `9b73d181`): ELEVENTH self-diagnose
+in ~10.5h — baseball-bingo. Direct probes at diagnosis time:
+`http://localhost:8790/healthz` → 200 in 1.7ms,
+`http://localhost:8790/` → 200 in 5.3ms,
+`https://bingo.chrispiserchia.com/` → 200 in 162ms. PID 71682 still present
+(unchanged across all 11 recurrences — service has NEVER bounced today).
+Staleness only 16s at diagnosis (fresh 14:26:11Z healthcheck tick had just
+landed); trigger fired on the prior 14:05:03Z→14:26:11Z gap (1268s).
+Additional slippage visible in the healthcheck.out.log tail:
+13:17:51Z→13:33:12Z (921s) and 13:43:15Z→13:50:00Z (405s) alongside the
+big 21-min gap. `origin/main` HEAD is still `17136b3` — the completed
+server-patch `cb644203` from 03:03 still has not landed. Not re-dispatching
+per the 10th-occurrence guidance above; the ship path is the blocking
+defect. Closing as false positive._
+
+_Recurrence 2026-07-31 ~15:17 local (job `0ae26fdd`): THIRTEENTH self-diagnose
+in ~15h — atlas. Direct probes at diagnosis time:
+`http://localhost:8791/` → 200 in 30ms,
+`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 140ms.
+Staleness only 37s at diagnosis (fresh 15:17:01Z healthcheck tick had just
+landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
+PIDs 81426/81428/81432, unchanged). Biggest slippage yet observed:
+14:39:21Z → 15:17:01Z = ~2260s (~37.7 min) — well past the 20-min cutoff,
+so the trigger fired on a real gap in observer coverage while atlas was
+answering 200 the whole time. `origin/main` HEAD confirmed still `17136b3`
+(server-patch `cb644203` from 03:03 still not landed). Not re-dispatching
+per the 10th-occurrence guidance; the workspace push/merge silent-drop
+remains the blocking defect. Closed as false positive._
+
+_Recurrence 2026-07-31 ~15:17 local (job `418dec5e`): FOURTEENTH self-
+diagnose in ~15h — baseball-bingo twin of the atlas `0ae26fdd` entry above,
+same 14:39:21Z → 15:17:01Z (~2260s / ~37.7-min) healthcheck-all slippage
+cluster. Direct probes at diagnosis time:
+`http://localhost:8790/healthz` → 200 in 1.5ms,
+`http://localhost:8790/` → 200 in 5.8ms,
+`https://bingo.chrispiserchia.com/` → 200 in 155ms (first probe hit a
+transient 5.1s timeout via `curl --max-time 5`; retry with `--max-time 15`
+succeeded 200/155ms — momentary edge hiccup, not a project outage). PID
+71682 still present (unchanged across all 14 recurrences today — service
+has never bounced). Staleness only 46s at diagnosis (fresh 15:17:01Z
+healthcheck tick had just landed). `origin/main` HEAD confirmed still
+`17136b3`. Not re-dispatching per the 10th-occurrence guidance; the
+paired atlas+bingo firings on this ~37-min gap confirm the class of defect
+is escalating (both frequency and single-gap severity increasing) — the
+workspace push/merge silent-drop that stranded server-patch `cb644203`
+now warrants human intervention on the ship path. Closed as false
+positive._
+
+_Recurrence 2026-07-31 ~16:00 local (job `ba077bbe`): FIFTEENTH self-
+diagnose in ~15.5h — atlas. Direct probes at diagnosis time:
+`http://localhost:8791/` → 200 in 15ms,
+`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 112ms.
+Staleness only 10s at diagnosis (fresh 16:00:03Z healthcheck tick had just
+landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
+PIDs 81426/81428/81432, unchanged across the day — service never bounced).
+Trigger fired on the prior 15:39:43Z→16:00:03Z gap (~1220s / ~20.3 min),
+right at the 20-min cutoff. `origin/main` HEAD confirmed still `17136b3`
+(server-patch `cb644203` from 03:03 still not landed 13h later). Not
+re-dispatching per the 10th-occurrence guidance; the workspace push/merge
+silent-drop remains the blocking defect and needs human review before
+another server-patch attempt. Closed as false positive._
+
+_Recurrence 2026-07-31 ~16:00 local (job `ecd383a5`): SIXTEENTH self-
+diagnose in ~15.5h — baseball-bingo twin of atlas `ba077bbe` from the same
+15:39:43Z→16:00:03Z (~1220s / ~20.3-min) healthcheck-all slippage cluster.
+Direct probes at diagnosis time:
+`http://localhost:8790/healthz` → 200 in 1.5ms,
+`http://localhost:8790/` → 200 in 5.7ms,
+`https://bingo.chrispiserchia.com/` → 200 in 160ms. PID 71682 still present
+(unchanged across all 16 recurrences today — service has never bounced).
+Staleness only 11s at diagnosis (fresh 16:00:03Z healthcheck tick had just
+landed). `origin/main` HEAD confirmed still `17136b3` — server-patch
+`cb644203` from 03:03 still not landed 13h later. Not re-dispatching per
+the 10th-occurrence guidance; workspace push/merge silent-drop remains the
+blocking defect and needs human review before another server-patch attempt.
+Closed as false positive._
+
+_Recurrence 2026-07-31 ~14:26 local (job `eb777487`): TWELFTH self-diagnose
+in ~10.5h — atlas twin of the baseball-bingo `9b73d181` above, same
+14:05:03Z→14:26:11Z (~1268s) healthcheck-all slippage cluster. Direct
+probes at diagnosis time: `http://localhost:8791/` → 200 in 38ms,
+`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 116ms.
+Staleness only 22s at diagnosis (fresh 14:26:11Z healthcheck tick had just
+landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
+PIDs 81426/81428/81432). `origin/main` HEAD confirmed still `17136b3` —
+the direct-probe / freshness-gate logic in `_check_project_health` is
+still absent from production. Not re-dispatching per the 10th-occurrence
+guidance; workspace push/merge silent-drop remains the blocking defect
+(needs human review before another server-patch attempt). Closed as false
+positive._
+
 ---
 
 ## Adding entries to this file
