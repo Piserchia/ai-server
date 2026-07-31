@@ -2,6 +2,50 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — Event-loop circuit breaker + global (task-less) deferred promotion
+
+**1. Circuit breaker in `src/runner/events.py`** (2026-07-30 incident: ~17
+self-diagnose jobs event-spawned into a substrate where self-diagnose itself
+was broken — `'Server' object has no attribute 'list_tools'` — each failure
+feeding the 2-in-10-min window; only per-target dedup bounded it):
+- Pure `should_trip_breaker(recent_failures, threshold=5)`: groups failed
+  jobs by normalized error signature (`_error_signature`: whitespace-collapsed
+  first 80 chars; None/blank -> "unknown"); any cluster >= threshold returns
+  that signature (largest cluster wins, ties lexicographic).
+- `_check_circuit_breaker()` runs FIRST each cycle: if `KEY_EVENTS_BREAKER`
+  exists -> skip all event-trigger spawning (skill-failure, project-health,
+  correlated) but NOT the idle-queue review; one info line per cycle at most.
+  On trip: `SET NX EX TTL_EVENTS_BREAKER` (30 min), one error-level log, and
+  EXACTLY ONE `self-diagnose` job ("CIRCUIT BREAKER tripped: N failed jobs ...
+  share the error signature '<sig>'", `target_kind: circuit-breaker`,
+  `created_by: event-trigger:circuit-breaker`) — its completion summary DMs
+  the owner via the normal path. The check crashes fail OPEN in the loop's
+  non-fatal try/except style; new constants `BREAKER_WINDOW_MINUTES = 10`,
+  `BREAKER_FAILURE_THRESHOLD = 5`, `BREAKER_SIGNATURE_LEN = 80`.
+
+**2. Global deferred promotion in `src/runner/plans.py`**: `promote_deferred_for`
+early-returned for task-less completing jobs, stranding any task-less
+`depends_on` child forever (the limitation deploy-director's SKILL.md works
+around). Task-scoped sibling promotion is behaviorally unchanged; the function
+now ALSO scans `status='deferred' AND task_id IS NULL` rows (bounded:
+`TASKLESS_PROMOTION_SCAN_LIMIT = 200`, oldest first), Python-filters for
+`payload.depends_on` naming the completed job (pure `names_dependency`), and
+applies the identical flow: `deps_satisfied` over a completed-set covering all
+of each candidate's deps, INV-9-guarded deferred->queued UPDATE, RPUSH,
+`job_promoted` audit, per-item isolation, never raises. escalation_map is
+passed EMPTY on this path — escalation lineage is derived from a task's own
+job set and has no task-less equivalent — so a dep satisfied only via a
+completed escalation retry does not promote a task-less child (conservative:
+under-promotes, never wrongly promotes). NOTE: `main.py` gated the call on
+`job.task_id` — that gate is lifted in the merge commit so promotion fires
+for task-less parents too.
+
+Tests: `tests/test_events.py` +23 (signature normalization, breaker boundary/
+mixed/empty/None cases, loop gating incl. fail-open), `tests/test_plans.py`
++10 (`names_dependency`, task-less `deps_satisfied` semantics). Full suite
+898 passed; lint_docs all-PASS.
+
+
 ## 2026-07-30 — Enqueue visibility race fix (stranded queued jobs) + epoch heartbeat with TTL
 
 **BUG 1 — `_process_job` dropped popped ids whose row wasn't visible yet.**

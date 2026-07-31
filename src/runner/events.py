@@ -7,6 +7,16 @@ Polls every 60 seconds and evaluates two rules:
 
 Deduplication: skip if a self-diagnose job for the same target was already
 enqueued in the dedup window.
+
+Circuit breaker (2026-07-30 incident): when >= BREAKER_FAILURE_THRESHOLD
+recent failures share one normalized error signature, the substrate itself is
+broken — per-rule spawning would feed the failure loop (that night ~17
+self-diagnose jobs were event-spawned while self-diagnose itself was broken:
+"'Server' object has no attribute 'list_tools'"). The loop then sets
+KEY_EVENTS_BREAKER (TTL 30 min), enqueues exactly ONE self-diagnose naming
+the signature, and skips all event-trigger spawning (skill-failure,
+project-health, correlated) — but not the idle-queue review check — while
+the key exists.
 """
 
 from __future__ import annotations
@@ -17,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, func
 
-from src.db import async_session
+from src.db import KEY_EVENTS_BREAKER, TTL_EVENTS_BREAKER, async_session, redis
 from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project
 
@@ -30,6 +40,101 @@ PROJECT_UNHEALTHY_MINUTES = 20
 REVIEW_COOLDOWN_HOURS = 24
 MULTI_SKILL_CORRELATION_WINDOW_MINUTES = 5
 MULTI_SKILL_CORRELATION_THRESHOLD = 3
+BREAKER_WINDOW_MINUTES = 10
+BREAKER_FAILURE_THRESHOLD = 5
+BREAKER_SIGNATURE_LEN = 80
+
+
+def _error_signature(error_message: str | None, max_len: int = BREAKER_SIGNATURE_LEN) -> str:
+    """Normalize an error message into a grouping signature: whitespace
+    collapsed to single spaces, truncated to max_len chars. None or blank
+    messages group as "unknown". Pure function."""
+    if error_message is None:
+        return "unknown"
+    collapsed = " ".join(str(error_message).split())
+    if not collapsed:
+        return "unknown"
+    return collapsed[:max_len]
+
+
+def should_trip_breaker(
+    recent_failures: list[dict],
+    threshold: int = BREAKER_FAILURE_THRESHOLD,
+) -> str | None:
+    """
+    Pure function: given recent failed jobs, return the shared error signature
+    that should trip the circuit breaker, or None.
+
+    recent_failures: [{"error_message": str | None, "created_at": datetime}, ...]
+    (the caller bounds the time window; created_at is not re-filtered here).
+
+    Failures are grouped by normalized signature (`_error_signature`). If any
+    signature's count >= threshold, that signature is returned — the largest
+    cluster wins; ties break to the lexicographically smallest signature so
+    the result is deterministic.
+    """
+    counts: dict[str, int] = {}
+    for f in recent_failures:
+        sig = _error_signature(f.get("error_message"))
+        counts[sig] = counts.get(sig, 0) + 1
+    tripping = [s for s, c in counts.items() if c >= threshold]
+    if not tripping:
+        return None
+    return sorted(tripping, key=lambda s: (-counts[s], s))[0]
+
+
+async def _check_circuit_breaker() -> bool:
+    """Trip or observe the mass-failure circuit breaker. Returns True when
+    event-trigger spawning must be skipped this cycle (breaker key already
+    present, or just tripped). Caller wraps this non-fatally — a crash here
+    must never kill the event loop."""
+    if await redis.exists(KEY_EVENTS_BREAKER):
+        # One info line per cycle at most while the breaker is engaged.
+        logger.info("circuit breaker active — event-trigger spawning paused this cycle")
+        return True
+
+    window = datetime.now(timezone.utc) - timedelta(minutes=BREAKER_WINDOW_MINUTES)
+    async with async_session() as s:
+        result = await s.execute(
+            select(Job.error_message, Job.created_at)
+            .where(Job.status == JobStatus.failed.value)
+            .where(Job.created_at >= window)
+        )
+        failures = [
+            {"error_message": row[0], "created_at": row[1]}
+            for row in result.fetchall()
+        ]
+
+    signature = should_trip_breaker(failures)
+    if signature is None:
+        return False
+
+    count = sum(
+        1 for f in failures if _error_signature(f.get("error_message")) == signature
+    )
+    # NX guards the exactly-one enqueue against a set that sneaked in between
+    # the exists() check above and here.
+    newly_set = await redis.set(
+        KEY_EVENTS_BREAKER, signature, ex=TTL_EVENTS_BREAKER, nx=True
+    )
+    if not newly_set:
+        return True
+    logger.error(
+        "circuit breaker TRIPPED: %d failures in the last %d min share signature %r "
+        "— event-trigger spawning paused for %d min",
+        count, BREAKER_WINDOW_MINUTES, signature, TTL_EVENTS_BREAKER // 60,
+    )
+    await enqueue_job(
+        f"CIRCUIT BREAKER tripped: {count} failed jobs in the last "
+        f"{BREAKER_WINDOW_MINUTES} minutes share the error signature "
+        f"'{signature}'. Event-trigger spawning is paused for "
+        f"{TTL_EVENTS_BREAKER // 60} minutes. Diagnose the shared root cause "
+        f"instead of the individual failures.",
+        kind="self-diagnose",
+        payload={"target_kind": "circuit-breaker", "target_id": signature},
+        created_by="event-trigger:circuit-breaker",
+    )
+    return True
 
 
 def _should_trigger_skill_diagnose(
@@ -290,16 +395,29 @@ async def event_loop(shutdown: asyncio.Event) -> None:
     logger.info("event loop started (poll interval %ss)", POLL_INTERVAL_SECONDS)
 
     while not shutdown.is_set():
+        # Circuit breaker first: when many recent failures share one error
+        # signature, spawning more event-trigger jobs feeds the failure loop.
+        # A crash here fails OPEN (breaker treated as inactive) — the check
+        # must never take the loop down.
+        breaker_active = False
         try:
-            await _check_skill_failures()
+            breaker_active = await _check_circuit_breaker()
         except Exception:
-            logger.exception("event loop: skill failure check error (non-fatal)")
+            logger.exception("event loop: circuit breaker check error (non-fatal)")
 
-        try:
-            await _check_project_health()
-        except Exception:
-            logger.exception("event loop: project health check error (non-fatal)")
+        if not breaker_active:
+            try:
+                await _check_skill_failures()
+            except Exception:
+                logger.exception("event loop: skill failure check error (non-fatal)")
 
+            try:
+                await _check_project_health()
+            except Exception:
+                logger.exception("event loop: project health check error (non-fatal)")
+
+        # Idle-queue review is NOT gated by the breaker: it spawns on an idle
+        # queue, not on failures, so it can't amplify a failure storm.
         try:
             await _check_idle_queue_review()
         except Exception:

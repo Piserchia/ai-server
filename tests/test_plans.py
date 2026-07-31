@@ -8,7 +8,9 @@ import json
 
 from src.runner.plans import (
     MAX_SUBTASKS,
+    TASKLESS_PROMOTION_SCAN_LIMIT,
     deps_satisfied,
+    names_dependency,
     topo_order,
     validate_plan,
 )
@@ -120,6 +122,56 @@ class TestDepsSatisfied:
 
     def test_no_deps(self):
         assert deps_satisfied([], set(), {})
+
+
+class TestNamesDependency:
+    """Pure filter for the task-less promotion path: does a deferred job's
+    payload.depends_on name the completing job?"""
+
+    def test_match(self):
+        assert names_dependency({"depends_on": ["j1", "j2"]}, "j2")
+
+    def test_no_match(self):
+        assert not names_dependency({"depends_on": ["j1"]}, "j2")
+
+    def test_none_payload(self):
+        assert not names_dependency(None, "j1")
+
+    def test_missing_and_empty_depends_on(self):
+        assert not names_dependency({}, "j1")
+        assert not names_dependency({"depends_on": []}, "j1")
+        assert not names_dependency({"depends_on": None}, "j1")
+
+    def test_non_string_entries_coerced(self):
+        import uuid
+
+        u = uuid.uuid4()
+        assert names_dependency({"depends_on": [u]}, str(u))
+
+    def test_no_substring_matches(self):
+        # "j1" must not match a dep "j11" — exact id equality only
+        assert not names_dependency({"depends_on": ["j11"]}, "j1")
+
+
+class TestTasklessPromotionSemantics:
+    """The task-less path calls deps_satisfied with an EMPTY escalation_map
+    (escalation lineage is derived from a task's own job set and has no
+    task-less equivalent). These tests document the resulting semantics."""
+
+    def test_completed_dep_satisfies(self):
+        assert deps_satisfied(["j1"], {"j1"}, {})
+
+    def test_incomplete_dep_does_not_satisfy(self):
+        assert not deps_satisfied(["j1"], set(), {})
+
+    def test_escalation_retry_not_visible_without_map(self):
+        # Child depends on j1; j1 failed and its escalation retry j9 completed.
+        # With the empty map the child stays deferred — deliberate: the path
+        # can under-promote but never wrongly promote.
+        assert not deps_satisfied(["j1"], {"j9"}, {})
+
+    def test_scan_limit_is_bounded(self):
+        assert 0 < TASKLESS_PROMOTION_SCAN_LIMIT <= 1000
 
 
 class TestExtractTextEvents:

@@ -49,6 +49,12 @@ KEY_RUNNER_HEARTBEAT = "heartbeat:runner"         # SET by runner each loop = ep
 TTL_RUNNER_HEARTBEAT = 900                        # heartbeat TTL (s): a dead runner's key expires
                                                   # instead of sitting stale forever (15 min ≫ the
                                                   # 2s loop tick, ≥ the 600s healthcheck threshold)
+KEY_EVENTS_BREAKER = "events:breaker"             # SET by the event loop when many recent failures
+                                                  # share one error signature (value = signature);
+                                                  # while present, event-trigger spawning is paused
+TTL_EVENTS_BREAKER = 1800                         # breaker TTL (s): 30 min pause, then auto-reset
+                                                  # (2026-07-30 incident: ~17 self-diagnose jobs
+                                                  # spawned into a broken substrate)
 
 
 @asynccontextmanager
