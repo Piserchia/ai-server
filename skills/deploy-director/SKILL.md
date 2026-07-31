@@ -158,6 +158,13 @@ The deploy summary, risk class, preflight results, the plan, dispatched job
 ID(s), and exactly how verification happens. If you stopped at preflight, the
 blocking finding and who decides.
 
+**Emit the report as your FINAL MESSAGE — never via ExitPlanMode, a plan
+file, or an approval request.** You run unattended; plan mode only blocks
+file writes, it does not mean "seek plan approval." Your job summary IS the
+report the CEO and owner read — a report parked in a plan file is invisible
+to them. You either dispatch (step 4) or stop-and-report; neither needs
+anyone's approval.
+
 ## VERIFY mode
 
 Input: `verify server` or `verify <slug>` (optionally `after <job-id>`).
@@ -189,6 +196,10 @@ Input: `verify server` or `verify <slug>` (optionally `after <job-id>`).
 - [ ] Report emitted as final text
 
 ## Gotchas (living section — append when you learn something)
+- **Final text, not plan files.** The first live run (2026-07-30) preflighted
+  correctly (refused on an in-flight job) but wrote its report to a plan file
+  and waited for approval — the job summary ended up as narration fragments.
+  The final message is the report; nothing in this skill needs approval.
 - **You direct; executors execute.** Running the pipeline yourself — even one
   step, even on a red-looking queue — duplicates the deploy path and bypasses
   the owner-authorized lane (`server-deploy`'s INV-4 narrowing belongs to that
