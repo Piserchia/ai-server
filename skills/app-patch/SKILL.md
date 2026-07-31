@@ -33,7 +33,10 @@ directory.** Read `manifest.yml` (`delivery.topology`) to know which case you're
 in, because it changes how the change reaches production:
 
 - **`dev-repo`** (your cwd is the dev repo, e.g. `~/Documents/repos/<slug>`):
-  commit + push here. The runtime clone `projects/<slug>` is **pull-only** —
+  `git pull --rebase origin <delivery.branch>` FIRST — and again before
+  pushing: the canonical remote takes commits from other machines too
+  (atlas is GitHub-canonical, branch `master`). Then commit + push here.
+  The runtime clone `projects/<slug>` is **pull-only** —
   never touch it. Your change reaches production via a **separate
   `project-redeploy` step** (do NOT restart services yourself). If your ask
   says "and deploy" (or you're a single-turn direct patch, not a plan subtask),

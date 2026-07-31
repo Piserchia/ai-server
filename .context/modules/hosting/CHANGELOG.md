@@ -7,7 +7,12 @@
 **Files changed**: `.context/PROJECTS_REGISTRY.md` (atlas source + delivery
 table → ACTIVE), `skills/atlas-redeploy/SKILL.md` (origin is GitHub; wording
 for multi-machine commits), `docs/TROUBLESHOOTING.md` (atlas divergence
-section: correct origin is now the GitHub URL). Non-repo state changes on the
+section: correct origin is now the GitHub URL). Same-day follow-up — the
+every-session multi-machine procedure: root `CLAUDE.md` (push-gates dev-repo
+wording), `.context/PROJECT_PROTOCOL.md` (§1.4 rebase-before-work, §4.2
+delivery-branch push), `skills/app-patch/SKILL.md` (STEP 0 rebase-first);
+mirrored in atlas `CLAUDE.md` §Working-on-this-repo + `docs/DEVELOPMENT.md`
+(surfaces + checklist). Non-repo state changes on the
 Mini (owner-directed in an interactive session): runtime clone
 `projects/atlas` origin repointed local-path → `https://github.com/Piserchia/atlas.git`;
 the stale dev-checkout copy `~/Documents/repos/ai-server/projects/atlas`

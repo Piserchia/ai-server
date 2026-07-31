@@ -33,6 +33,14 @@ lessons from prior sessions working on this project.
 For services: note the port and healthcheck path from `manifest.yml`.
 For static sites: note the `web_root` (usually `.` or `dist/`).
 
+### 1.4 Sync the working tree (dev-repo projects)
+
+If the manifest declares `delivery.topology: dev-repo`, your cwd is the
+project's dev clone and its canonical remote takes commits from other
+machines too (multi-machine development — atlas is GitHub-canonical).
+Run `git pull --rebase origin <delivery.branch>` BEFORE any work — not
+just at push time.
+
 ---
 
 ## Phase 2: Execute (make changes)
@@ -151,8 +159,9 @@ elsewhere on the machine — NEVER commit or push in `projects/<slug>`
 cd <project root>          # your cwd — never the ai-server root
 git add -A
 git commit -m "<concise subject>"
-git fetch origin && git pull --rebase origin main
-git push origin main
+BR=<delivery.branch>       # from manifest.yml (default main; atlas: master)
+git fetch origin && git pull --rebase origin "$BR"
+git push origin "$BR"
 ```
 
 ### 4.3 If the push is rejected

@@ -103,7 +103,10 @@ Run this procedure for ANY push from ANY checkout. No step is optional.
 5. **Where pushes go**: dev server repo → `origin main` after gates.
    Workspace clones → exactly what the skill instructs (the canonical is
    ff-synced automatically after your push). Dev-repo-topology projects
-   (e.g. atlas) → their dev repo only, never the runtime clone.
+   (e.g. atlas) → work in the project's dev clone and push to its canonical
+   remote (`delivery.branch`; atlas = GitHub `Piserchia/atlas`, branch
+   `master`) — rebase before starting AND before pushing (other machines
+   commit too); never commit in the runtime clone.
 
 ## Hard rules
 
