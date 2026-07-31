@@ -307,15 +307,17 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.completed, result=result)
         log.info("job completed")
 
-        # Plan DAG: promote deferred siblings whose dependencies are now met (P2)
-        if job.task_id:
-            try:
-                from src.runner import plans as plans_mod
-                promoted = await plans_mod.promote_deferred_for(job)
-                if promoted:
-                    log.info("promoted deferred jobs", count=promoted)
-            except Exception:
-                log.exception("deferred promotion failed (non-fatal)")
+        # Promote deferred dependents whose dependencies are now met — both the
+        # task-scoped plan-DAG path and (2026-07-31) task-less depends_on
+        # children, so the call runs for EVERY completing job. plans_mod
+        # handles both paths and never raises past its per-item isolation.
+        try:
+            from src.runner import plans as plans_mod
+            promoted = await plans_mod.promote_deferred_for(job)
+            if promoted:
+                log.info("promoted deferred jobs", count=promoted)
+        except Exception:
+            log.exception("deferred promotion failed (non-fatal)")
 
         # Code review — runs for skills that opt in via post_review.trigger.
         # Internal skills (leading _, e.g. _evaluate/_writeback) are exempt.

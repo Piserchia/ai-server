@@ -82,8 +82,8 @@ passed EMPTY on this path — escalation lineage is derived from a task's own
 job set and has no task-less equivalent — so a dep satisfied only via a
 completed escalation retry does not promote a task-less child (conservative:
 under-promotes, never wrongly promotes). NOTE: `main.py` gated the call on
-`job.task_id` — that gate is lifted in the merge commit so promotion fires
-for task-less parents too.
+`job.task_id` — that gate was lifted in the integration commit immediately
+after this merge, so promotion now fires for every completing job.
 
 Tests: `tests/test_events.py` +23 (signature normalization, breaker boundary/
 mixed/empty/None cases, loop gating incl. fail-open), `tests/test_plans.py`

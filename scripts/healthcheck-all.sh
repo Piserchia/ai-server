@@ -137,5 +137,70 @@ check_runner_liveness() {
 
 check_runner_liveness || true
 
+# ── Deploy autopilot (continuous delivery, 2026-07-31) ──────────────────────
+# Pushed-but-undeployed commits used to wait for a human to say "deploy".
+# This zero-token check notices a pending origin/main range and dispatches a
+# `deploy-director` job — the DIRECTOR (an LLM session) then does all judgment:
+# preflight, risk class, in-flight-job safety, and the actual executor
+# dispatch. This script only notices "there is something to deploy".
+# Guards: DEPLOY_AUTOPILOT=0 in .env disables; range must be fast-forward and
+# QUIET (tip ≥10 min old — never deploy mid-push-session); no deploy/director
+# job already queued/running; one dispatch per 30 min. Never blocks probes.
+DEPLOY_STATE="$PROJECT_DIR/volumes/healthcheck-deploy-dispatch.epoch"
+DEPLOY_QUIET_SECONDS=600
+DEPLOY_INTERVAL_SECONDS=1800
+
+check_deploy_pending() {
+    local now autopilot head remote tip_age last pending job_id active
+    now=$(date +%s)
+
+    autopilot=$(grep -E '^DEPLOY_AUTOPILOT=' "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+    [[ "$autopilot" == "0" || "$autopilot" == "false" ]] && return 0
+
+    git -C "$PROJECT_DIR" fetch origin main --quiet 2>/dev/null || return 0
+    head=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null) || return 0
+    remote=$(git -C "$PROJECT_DIR" rev-parse origin/main 2>/dev/null) || return 0
+    [[ "$head" == "$remote" ]] && return 0
+
+    # fast-forward only — divergence is a human problem, log and stand down
+    if ! git -C "$PROJECT_DIR" merge-base --is-ancestor "$head" "$remote" 2>/dev/null; then
+        echo "$(date -u +%FT%TZ) WARN deploy-autopilot: HEAD/origin diverged — skipping" >> "$LOG"
+        return 0
+    fi
+
+    # quiet window: don't chase a push session mid-flight
+    tip_age=$(( now - $(git -C "$PROJECT_DIR" log -1 --format=%ct origin/main 2>/dev/null || echo "$now") ))
+    (( tip_age < DEPLOY_QUIET_SECONDS )) && return 0
+
+    # rate limit
+    last=$(cat "$DEPLOY_STATE" 2>/dev/null || echo 0)
+    [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    (( now - last < DEPLOY_INTERVAL_SECONDS )) && return 0
+
+    # no deploy machinery already in flight
+    active=$(psql assistant -tAc "SELECT count(*) FROM jobs WHERE status IN ('queued','running')
+        AND (kind IN ('server-deploy','server_deploy','deploy-director','deploy_director')
+             OR resolved_skill IN ('server-deploy','deploy-director'))" 2>/dev/null || echo 1)
+    [[ "$active" =~ ^[0-9]+$ ]] || return 0
+    (( active > 0 )) && return 0
+
+    pending=$(git -C "$PROJECT_DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
+    job_id=$(psql assistant -tAc "INSERT INTO jobs (id, kind, description, status, created_by, created_at)
+        VALUES (gen_random_uuid(), 'deploy-director',
+                'server — deploy autopilot: ' || '$pending' || ' pending commit(s) on origin/main (' || LEFT('$remote',8) || '); dispatched by healthcheck-all check_deploy_pending',
+                'queued', 'deploy-autopilot', NOW()) RETURNING id;" 2>/dev/null | head -1 | tr -d ' ') || return 0
+    [[ -n "$job_id" ]] || return 0
+    if redis-cli rpush jobs:queue "$job_id" > /dev/null 2>&1; then
+        echo "$now" > "$DEPLOY_STATE" 2>/dev/null || true
+        echo "$(date -u +%FT%TZ) AUTOPILOT dispatched deploy-director $job_id ($pending pending)" >> "$LOG"
+    else
+        psql assistant -qc "UPDATE jobs SET status='cancelled', error_message='autopilot RPUSH failed; row cancelled to avoid stranding' WHERE id='$job_id'::uuid;" 2>/dev/null || true
+        echo "$(date -u +%FT%TZ) WARN deploy-autopilot enqueue failed at RPUSH; job row cancelled" >> "$LOG"
+    fi
+    return 0
+}
+
+check_deploy_pending || true
+
 # Summary (visible in healthcheck.out.log)
 echo "$(date -u +%FT%TZ) checked=$CHECKED healthy=$HEALTHY failed=$FAILED"

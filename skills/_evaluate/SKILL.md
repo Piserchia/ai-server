@@ -58,6 +58,30 @@ repo** — for a `dev-repo` project that is the dev repo (`~/Documents/repos/
    - Read changed files where behavior can't be probed over HTTP.
 3. **Verdict.** Every criterion needs evidence. Unverifiable ≠ passed.
 
+## Justified stops are PASSES (refusal-awareness, 2026-07-31)
+
+Some sessions correctly conclude that proceeding would be wrong or unnecessary
+— a deploy dispatcher refusing while other jobs are in flight (the restart
+would kill them), a deploy stopping on repo divergence, an empty-range
+"already up to date", a connector reporting a clean seam. **A rule-grounded
+stop is a success of the system's safety design, not a failure of the task.**
+Evaluate it as EVAL_PASS when ALL three hold:
+
+1. The summary names the SPECIFIC constraint it obeyed (its own skill rule, an
+   invariant like INV-15, a preflight check) — not a vague "couldn't proceed".
+2. There is evidence the blocker was real at the time (a query result, a job
+   id, a git state) — verify it yourself where still checkable.
+3. Stopping is that constraint's PRESCRIBED action (report-and-stop), and the
+   session reported rather than silently quit.
+
+Then: `EVAL_PASS: justified stop — <the rule> — <the evidence>; retry path: <what unblocks>`.
+
+A stop that names no rule, shows no evidence, or abandons achievable criteria
+is still an EVAL_FAIL. The distinction matters twice over: outcome-blind
+FAILs spawn duplicate sessions that re-derive the same correct refusal (it
+happened 2026-07-31 — a full opus session wasted), and worse, they train
+agents that compliance scores better than safety.
+
 ## Output format (final text)
 
 For PASS — end your final text with one line:
