@@ -246,6 +246,23 @@ git -C "$CANON" push origin main
 git -C projects/<slug> pull --ff-only
 ```
 
+## Register-only mode (drift repair)
+
+If the ask is "register existing project <slug>" (typically routed by the
+`delivery-ops-reconciler` — a project that exists but was never wired into
+hosting), SKIP all scaffolding phases and do only:
+
+1. Verify `projects/<slug>/manifest.yml` exists and parses
+   (`pipenv run python -c "from src.registry.manifest import load; load('projects/<slug>/manifest.yml')"`).
+   No manifest → STOP and report that `project-evaluate` must produce one first.
+2. Run § 2.7 (register-project.sh), § 2.8 (registry row if missing).
+3. Verify: healthcheck probe passes (or the project is `type: static`/content),
+   DB row exists (`SELECT slug, port FROM projects WHERE slug='<slug>'`).
+4. Report what was registered and what the reconciler should see next run.
+
+Registration is THIS skill's owned capability (Delivery charter) — both at
+creation time and as repair.
+
 ## Quality gate
 
 Before finishing, verify ALL of these:

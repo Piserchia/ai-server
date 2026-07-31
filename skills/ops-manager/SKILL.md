@@ -55,6 +55,22 @@ Also read: the latest `docs/EVALUATION_*.md` (open Ops items), recent
 `docs/TROUBLESHOOTING.md` additions, `server-upkeep`'s recent anomaly reports,
 and the ops skills themselves for drift vs the charter's standards.
 
+Three standing audits your charter added 2026-07-31 (CEO directives):
+- **Self-healing lane audit**: for each recent `server-deploy` job, if its
+  summary mentions a Class-B fix (code pushed during the deploy), verify the
+  commit exists on origin/main, `code-review` LGTM was recorded, and the owner
+  notification is in the summary. A self-shipped fix missing any of the three
+  is your TOP finding (it's the sharpest autonomy in the system).
+- **Subscription economics** (MISSION § K — Ops owns it): check
+  `redis-cli get quota:paused_until`, grep recent audit logs for quota pauses,
+  and eyeball job volume (`SELECT count(*), date_trunc('day', created_at) FROM
+  jobs GROUP BY 2 ORDER BY 2 DESC LIMIT 7;`). Recurring pauses or a volume
+  spike = a finding with a cost angle.
+- **User-facing surface** (Telegram bot + web gateway — Ops owns it as
+  infrastructure): recent bot/web error-log growth
+  (`ls -la volumes/logs/bot.err.log web.out.log`), `/health` status, anything
+  users would feel. UX-level product changes still route to the CEO.
+
 ### 2b. Delegate the skillset-gap analysis to `gap-auditor`
 You have a `gap-auditor` subagent. Delegate to it (Task tool) with your scope —
 "audit the platform-ops division's skillset for missing capabilities" — and fold

@@ -80,7 +80,7 @@ seams; a connector is the recurring closure of one.) The mechanism:
 | Connector | Seam | Cadence |
 |---|---|---|
 | `delivery-ops-reconciler` | Delivery ships a project ⇒ Ops must operate it (registration, healthcheck, supervision, backup/DR) | weekly (Fri 06:00) |
-| `insight-router` *(planned — lower priority)* | Knowledge/Atlas findings ⇒ the divisions that should act on them | — |
+| `insight-router` | Knowledge/Atlas findings ⇒ the divisions that should act on them (ideas → Delivery, tooling → Ops, product → Atlas) | weekly (Sat 06:00) |
 
 ## Privilege classes (segregation of duties)
 

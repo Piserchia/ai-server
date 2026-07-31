@@ -32,6 +32,14 @@ pipeline, DR, and incident response.
   standing concern until R2 is configured (EVALUATION_2026-07-28 B2/B3).
 - `prod-operator` agents run with the most reach and least containment today —
   the division's top enhancement target is the privilege guardrail (design doc P4).
+- **Subscription economics is owned here** (MISSION § K): quota-pause frequency,
+  job-volume trends, and model-tier spend hygiene are ops-manager audit items.
+- **The user-facing surface (Telegram bot + web gateway) is owned here as
+  infrastructure** (CEO 2026-07-30 finding #8, owner-adopted): availability,
+  error rates, and health of `gateway/telegram_bot` + `gateway/web`. Product/UX
+  evolution of the surface routes through the CEO.
+- **The `server-deploy` self-healing lane is audited weekly** by ops-manager:
+  every Class-B fix must show commit + code-review LGTM + owner notification.
 
 ## Cadence
 

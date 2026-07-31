@@ -52,7 +52,17 @@ psql assistant -c "SELECT resolved_skill, id, completed_at FROM jobs
 cat volumes/audit_log/<job-id>.summary.md
 ```
 Also skim `runner.retrospective` output (system-wide skill performance) and the
-latest `docs/EVALUATION_*.md`.
+latest `docs/EVALUATION_*.md`. And audit the propose→execute loop itself:
+
+```bash
+# un-executed proposals and their age — a proposal nobody executes is a broken loop
+psql assistant -c "SELECT LEFT(id::text,8), outcome, change_type,
+  LEFT(target_file,60), proposed_at FROM proposals
+  WHERE applied_at IS NULL ORDER BY proposed_at LIMIT 20;"
+```
+Stale proposals (open > 30 days) are an org finding: either the proposal was
+wrong (close it) or execution is blocked (surface why). The full proposals
+ledger/surface is design-doc P5 — until it ships, this check IS the loop audit.
 
 ### 2b. Delegate the org-wide negative-space audit to `gap-auditor`
 You have a `gap-auditor` subagent. Delegate to it (Task tool) in ORG mode —

@@ -26,7 +26,13 @@ upsert 'delivery-manager-weekly'  '0 6 * * 2' 'delivery-manager'  'Weekly Delive
 upsert 'knowledge-manager-weekly' '0 6 * * 3' 'knowledge-manager' 'Weekly Knowledge division review'
 upsert 'atlas-manager-weekly'     '0 6 * * 4' 'atlas-manager'     'Weekly Atlas division review'
 upsert 'delivery-ops-reconciler-weekly' '0 6 * * 5' 'delivery-ops-reconciler' 'Weekly Delivery->Ops seam reconciliation'
+upsert 'insight-router-weekly'    '0 6 * * 6' 'insight-router'    'Weekly Knowledge/Atlas insight routing'
 upsert 'system-manager-monthly' '0 7 1 * *' 'system-manager' 'Monthly CEO org review vs MISSION'
+
+# ── Content cadence (Knowledge division) ────────────────────────────────────
+# research-report was registered but never scheduled (T13 / registry remark;
+# reconciler + knowledge-manager both flagged it). Weekly Monday 13:00 UTC.
+upsert 'research-report-weekly' '0 13 * * 1' 'research-report' 'Weekly research report'
 
 echo "Schedules seeded."
 echo ""

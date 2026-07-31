@@ -23,6 +23,10 @@ project, and keep hosted projects healthy across their lifecycle
 
 - Dev-repo topology is the default; the runtime clone is pull-only (guards deny
   writes). Consumers stay coherent with it (EVALUATION Batch 3).
+- **Registration is owned by `new-project`** — both at creation (scaffold→host
+  runs `register-project.sh`) and as drift-repair: "register existing project
+  <slug>" dispatches `new-project` in register-only mode (validate manifest →
+  register → verify healthcheck). The reconciler routes registration drift here.
 - "and deploy" is a real subtask (`project-redeploy`), not implied.
 - Every project carries a valid `delivery` contract (lint-enforced).
 - "Done" means evidence-checked by `_evaluate`, not claimed.

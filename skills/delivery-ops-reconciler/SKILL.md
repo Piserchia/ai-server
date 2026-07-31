@@ -91,12 +91,11 @@ done
 Each drift item gets an **owner** (the Delivery or Platform Ops manager) and a
 **proposed fix naming the gated worker skill** — e.g. `project-evaluate` to
 produce a missing manifest, `app-patch` to add a healthcheck endpoint,
-`server-patch` when the seam is systemic (e.g. making registration a mandatory
-step of `new-project`'s contract — prefer the structural fix when the same
-drift class recurs). Registration itself (`scripts/register-project.sh`)
-currently has NO gated skill owner — when a fix requires running it, say so
-explicitly and flag the item for an owner decision instead of presenting a raw
-script run as a gated path.
+`server-patch` when the seam is systemic (prefer the structural fix when the
+same drift class recurs). Registration drift routes to **`new-project` in
+register-only mode** ("register existing project <slug>") — that skill owns
+`register-project.sh` at creation time and as repair (Delivery charter,
+2026-07-31).
 
 ## Output (your final text = the reconciliation report)
 
