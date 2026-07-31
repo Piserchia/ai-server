@@ -899,6 +899,20 @@ while, then stalls for ~21 min, on repeat. Prevention items #1/#2 in
 highest-ROI open patch on the server; a direct-probe gate + observer
 freshness gate would have caught all seven of today's false positives._
 
+_Recurrence 2026-07-31 ~07:47 local (job `650bee2f`): NINTH self-diagnose
+fired for baseball-bingo. Direct probes at diagnosis time:
+`http://localhost:8790/healthz` → 200 in 6.1ms,
+`http://localhost:8790/` → 200 in 3.6ms,
+`https://bingo.chrispiserchia.com/` → 200 in 141ms. PID 71682 still present
+(unchanged across all recurrences — service has NEVER bounced). Staleness
+only 0.26s by diagnosis time because a fresh healthcheck-all cycle had just
+landed at 07:46:47Z; the trigger fired on the prior 07:25:40Z→07:46:47Z gap
+(~1267s). NB: server-patch `cb644203` completed 2026-07-31 03:11 to
+implement prevention items #1/#2 but no PR / no commit landed in
+`origin/main` (HEAD still at `17136b3`, no open PR for events.py) — the
+fix is somewhere between the workspace and merge and needs a human to
+finish the ship. Until then the false positives continue at ~1/hour._
+
 _Recurrence 2026-07-31 ~07:00 local (job `5aa7000f`): EIGHTH self-diagnose
 for atlas within ~7h — twin of `e1ca26ff` one minute earlier, same slippage
 cluster. Direct probe at diagnosis time: `http://localhost:8791/` → 200 in
@@ -911,6 +925,21 @@ sitting in this file since occurrence #1, no fix has been enqueued.
 Enqueuing `server-patch` now to implement prevention items #1/#2 (direct-
 probe gate + `healthcheck:last_run` freshness gate in
 `src/runner/events.py:_check_project_health`)._
+
+_Recurrence 2026-07-31 ~07:46 local (job `ee7f12d6`): TENTH self-diagnose
+in ~7.5h — atlas twin of the baseball-bingo `650bee2f` noted above, same
+07:25:40Z→07:46:47Z (~1267s) healthcheck-all slippage cluster. Direct
+probe at diagnosis time: `http://localhost:8791/` → 200 in 69ms. Staleness
+0.29s at diagnosis (fresh 07:46:47Z tick had landed). All 3 launchd
+services present (com.assistant.project.atlas + dash-scheduler + pm-edge).
+Confirmed the sibling's finding: `origin/main` HEAD is still `17136b3` and
+does not contain the direct-probe / freshness-gate logic in
+`src/runner/events.py`, so the previously-completed server-patch
+`cb644203` (03:03) never landed. Not re-dispatching from THIS self-
+diagnose — a second server-patch attempt would probably reproduce the
+same silent-drop failure (workspace runs green then no push event); the
+workspace push/merge path itself is a distinct medium-server-risk defect
+that needs human review before another attempt. Closing as false positive._
 
 ---
 
