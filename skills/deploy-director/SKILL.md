@@ -3,7 +3,10 @@ name: deploy-director
 description: Dispatchable deployment director. Given a target (server | <project-slug>), builds the what's-deploying summary from the actual pending range, preflights the system, risk-classifies, then dispatches the gated deploy executor with that summary attached; in verify mode it independently checks post-conditions after a deploy. It directs and verifies — it never executes a deploy itself.
 model: claude-opus-4-7
 effort: high
-permission_mode: plan
+# NOT plan mode: plan blocks the dispatch MCP call (proven live 2026-07-30,
+# rounds 1-2 — preflight green, enqueue_job unreachable). Read-only is a PROSE
+# contract here, enforced by this skill + code review, not by the mode.
+permission_mode: acceptEdits
 required_tools: [Read, Glob, Grep, Bash]
 max_turns: 40
 role: worker
@@ -196,6 +199,12 @@ Input: `verify server` or `verify <slug>` (optionally `after <job-id>`).
 - [ ] Report emitted as final text
 
 ## Gotchas (living section — append when you learn something)
+- **You run acceptEdits, but you are read-only by contract.** Plan mode blocks
+  the dispatch MCP (both first live runs proved it: preflight green, dispatch
+  unreachable), so the mode cannot be plan — which means NOTHING structural
+  stops you from editing files. The contract stands regardless: your only
+  state changes are `enqueue_job` and `git fetch`. A file write from this
+  skill is a violation to be reported, never a convenience.
 - **Final text, not plan files.** The first live run (2026-07-30) preflighted
   correctly (refused on an in-flight job) but wrote its report to a plan file
   and waited for approval — the job summary ended up as narration fragments.
