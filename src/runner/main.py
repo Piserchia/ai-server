@@ -24,6 +24,7 @@ import os
 import shutil
 import signal
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,7 @@ from src.db import (
     CHANNEL_JOB_CANCEL,
     KEY_RUNNER_HEARTBEAT,
     QUEUE_JOBS,
+    TTL_RUNNER_HEARTBEAT,
     async_session,
     redis,
     session_scope,
@@ -111,7 +113,9 @@ async def _job_loop() -> None:
         # strands the whole runner while the process stays "up" under launchd.
         # (The heartbeat stops on a real death, so /health still catches that.)
         try:
-            await redis.set(KEY_RUNNER_HEARTBEAT, datetime.now(timezone.utc).isoformat())
+            # Epoch seconds (bash-comparable for healthcheck-all.sh) with a TTL
+            # so a dead runner's key vanishes instead of going stale-but-present.
+            await redis.set(KEY_RUNNER_HEARTBEAT, int(time.time()), ex=TTL_RUNNER_HEARTBEAT)
             paused, reset_at, reason = await quota.is_paused()
         except Exception:
             logger.warning("heartbeat/quota check failed — retrying shortly")
@@ -163,6 +167,41 @@ async def _run_with_semaphore(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None
         await _process_job(job_id)
 
 
+# ── Enqueue visibility race (BLPOP can win against the INSERT's commit) ─────
+#
+# Producers make the id visible in Redis before the Job row is visible to other
+# transactions — `_tick_schedules` RPUSHes inside an open transaction, and the
+# gateway's commit races the BLPOP by sub-ms. Dropping the popped id on
+# not-found strands the row in status='queued' forever (job e38d0028,
+# 2026-07-30). So: retry the SELECT over ~2s, then requeue to the TAIL exactly
+# once, then drop for good.
+
+# Delay before each SELECT attempt; first is immediate, sleeps total ~2s.
+_JOB_FETCH_DELAYS: tuple[float, ...] = (0.0, 0.2, 0.3, 0.5, 1.0)
+
+# Ids already given their one requeue. In-memory on purpose: bounded (an id is
+# cleared when its row appears or when it is dropped), and a restart merely
+# grants a rare id one more retry cycle.
+_requeued_missing_ids: set[str] = set()
+
+
+def note_missing_job(job_id_str: str, requeued_once: set[str]) -> str:
+    """Decide-and-record for a popped queue id whose Job row is still missing
+    after the `_JOB_FETCH_DELAYS` retries. Deterministic, no I/O.
+
+    First miss → "requeue": the id is recorded and the caller pushes it back to
+    the queue TAIL exactly once (covers a race that outlives the in-process
+    retries). Repeat miss → "drop": the id is cleared and the caller gives up —
+    the row is truly gone (deleted), and without the record a dead id would
+    ping-pong through the queue forever.
+    """
+    if job_id_str in requeued_once:
+        requeued_once.discard(job_id_str)
+        return "drop"
+    requeued_once.add(job_id_str)
+    return "requeue"
+
+
 async def _preflight_check(job: Job, log) -> str | None:
     """Validate job config before running a session. Returns error string or None.
 
@@ -206,16 +245,42 @@ async def _preflight_check(job: Job, log) -> str | None:
 
 
 async def _process_job(job_id: uuid.UUID) -> None:
-    async with async_session() as s:
-        job = await s.get(Job, job_id)
-        if job is None:
-            logger.warning("job not found", job_id=str(job_id))
-            return
-        if job.status != JobStatus.queued.value:
-            return
-        job.status = JobStatus.running.value
-        job.started_at = datetime.now(timezone.utc)
-        await s.commit()
+    job: Job | None = None
+    for delay in _JOB_FETCH_DELAYS:
+        if delay:
+            await asyncio.sleep(delay)
+        # Fresh session per attempt: only a new transaction can see a commit
+        # that landed after the previous attempt began.
+        async with async_session() as s:
+            job = await s.get(Job, job_id)
+            if job is not None:
+                _requeued_missing_ids.discard(str(job_id))
+                if job.status != JobStatus.queued.value:
+                    return
+                job.status = JobStatus.running.value
+                job.started_at = datetime.now(timezone.utc)
+                await s.commit()
+        if job is not None:
+            break
+
+    if job is None:
+        # The Redis entry is already consumed — dropping the id here is what
+        # stranded queued jobs. One tail-requeue, then give up loudly. The
+        # RPUSH is guarded (loop hygiene, 2026-07-28): on a Redis blip the id
+        # survives only in this log line, never as an unraised exception.
+        action = note_missing_job(str(job_id), _requeued_missing_ids)
+        if action == "requeue":
+            try:
+                await redis.rpush(QUEUE_JOBS, str(job_id))
+                logger.warning("job not found after retries — requeued at queue tail once",
+                               job_id=str(job_id))
+            except Exception:
+                logger.exception("job not found and tail-requeue failed — id may be lost",
+                                 job_id=str(job_id))
+        else:
+            logger.error("job not found after retries and one requeue — dropping for good",
+                         job_id=str(job_id))
+        return
 
     log = logger.bind(job_id=str(job_id), kind=job.kind)
     log.info("job started")

@@ -2,6 +2,47 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-30 — Enqueue visibility race fix (stranded queued jobs) + epoch heartbeat with TTL
+
+**BUG 1 — `_process_job` dropped popped ids whose row wasn't visible yet.**
+BLPOP can return a job id before the INSERTing transaction's commit is visible
+to the runner's SELECT: `_tick_schedules` RPUSHes *inside* an open transaction
+(add → flush → rpush → … commit on scope exit), and even commit-then-RPUSH
+producers race the BLPOP by sub-ms. The old code logged "job not found" and
+returned — the Redis entry was consumed, the row stayed `status='queued'`
+forever. Bit tonight: job e38d0028 ("job not found" at its exact created_at
+second; re-pushed by hand).
+
+**Fix (consumer-side, covers every producer)** in `src/runner/main.py`:
+- `_process_job` retries the SELECT over ~2s (`_JOB_FETCH_DELAYS` =
+  (0.0, 0.2, 0.3, 0.5, 1.0); fresh session per attempt — only a new
+  transaction sees a commit that landed after the previous attempt began).
+- Still missing → `note_missing_job(id, _requeued_missing_ids)` (deterministic,
+  no-I/O helper + module-level set): first miss → RPUSH the id back to the
+  queue **TAIL** exactly once; a repeat miss → error-log and drop for good, so
+  a truly-deleted row can't ping-pong. The set stays bounded (cleared on found
+  and on drop). The requeue RPUSH is guarded per the loop's 2026-07-28 Redis
+  try/except hygiene — a Redis blip logs the id instead of raising.
+- Found-but-not-queued rows return silently as before (cancel race etc.).
+
+Tests: `tests/test_job_visibility.py` (8 — decision sequences + retry-schedule
+contract).
+
+**BUG 2a — heartbeat hardened for off-runner consumers**: `_job_loop` now
+writes `KEY_RUNNER_HEARTBEAT` as **epoch seconds** with a **15-min TTL**
+(`TTL_RUNNER_HEARTBEAT`, new constant in `src/db.py` beside the key name —
+db.py comment updated in the same commit). Epoch so
+`scripts/healthcheck-all.sh` can age-check it from bash; TTL so a dead
+runner's key disappears instead of sitting stale-but-parsable. Companions:
+gateway `/health` parses epoch with ISO fallback (see gateway CHANGELOG);
+`scripts/healthcheck-all.sh` gained an independent runner-down Telegram DM
+(heartbeat missing/>600s AND no launchd PID for com.assistant.runner; creds
+READ from the checkout's .env; one DM per 30 min via a volumes/ state file;
+fully guarded so project probes can never be blocked). Closes the liveness
+blind spot from the 2026-07-30 incident (runner down ~a day —
+docs/TROUBLESHOOTING.md "runner down, launchctl shows no PID with last
+exit 0").
+
 ## 2026-07-30 — mcp 2.0.0 regression: pin `mcp<2` (dispatch/projects MCP injection broken)
 
 **Incident** (same evening as the runner-down fix, surfaced by the hierarchy's

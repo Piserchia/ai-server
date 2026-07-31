@@ -122,6 +122,30 @@ def _serialize(job: Job) -> JobOut:
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 
+def parse_heartbeat_age(raw: str | None, now: datetime) -> float | None:
+    """Pure. Runner-heartbeat Redis value → age in seconds, or None if the key
+    is absent or unparseable.
+
+    The runner writes epoch seconds (2026-07-30, with a 15-min TTL — see
+    ``db.KEY_RUNNER_HEARTBEAT``); runners before that wrote ISO-8601. Accept
+    both so the mixed-version deploy window (new web + old runner, or the
+    reverse) never misreports a live runner as dead.
+    """
+    if not raw:
+        return None
+    try:
+        return now.timestamp() - float(raw)
+    except (TypeError, ValueError):
+        pass
+    try:
+        ts = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (now - ts).total_seconds()
+
+
 def health_verdict(
     heartbeat_age: float | None,
     db_ok: bool,
@@ -156,14 +180,7 @@ async def health():
     try:
         hb = await redis.get(KEY_RUNNER_HEARTBEAT)
         queue_depth = await redis.llen(QUEUE_JOBS)
-        if hb:
-            try:
-                ts = datetime.fromisoformat(hb)
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                heartbeat_age = (now - ts).total_seconds()
-            except ValueError:
-                heartbeat_age = None
+        heartbeat_age = parse_heartbeat_age(hb, now)
     except Exception:
         redis_ok = False
 

@@ -2,6 +2,26 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-30 — /health: parse the epoch runner heartbeat (status semantics unchanged)
+
+**Files changed**: `src/gateway/web.py` — new pure helper
+`parse_heartbeat_age(raw, now)` replaces the inline ISO parsing in `health()`.
+The runner now writes `heartbeat:runner` as epoch seconds with a 15-min TTL
+(see runner CHANGELOG same date); the helper reads epoch first and falls back
+to ISO-8601 so the mixed-version deploy window (new web + old runner, or the
+reverse) never misreports a live runner as dead.
+
+**Unchanged on purpose**: the JSON body still reports
+`runner_heartbeat_age_s` (null when the key is missing/unparseable) under the
+same field name, and the **HTTP status semantics are untouched** — 200 only
+when the runner heartbeat is fresh AND DB + Redis are reachable, else 503.
+The external `ops/heartbeat-worker` dead-man's-switch (activated 2026-07-30,
+commit 5de688c) alerts on exactly that non-200, so flattening /health to
+always-200 would re-create the invisible-runner-down incident.
+
+**Tests**: `tests/test_health.py::TestParseHeartbeatAge` (7) alongside the
+existing verdict tests.
+
 ## 2026-07-28 — test-only: stop leaking synthetic self-diagnose rows into prod DB
 
 **Files changed**: `tests/test_telegram_commands.py` — mock `enqueue_job` in
