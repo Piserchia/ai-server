@@ -227,6 +227,13 @@ Input: `verify server` or `verify <slug>` (optionally `after <job-id>`).
 - **Read the executor fresh every run.** Its pipeline changes (step 3b was
   added 2026-07-30); a director reciting stale steps produces confident,
   wrong plans — and the staleness check only works if YOUR copy is current.
+- **Dispatch with the EXACT executor kind — never `task`.** `kind: "task"`
+  routes by keyword over your description, and a deploy summary is keyword
+  soup: on 2026-07-31 a fix-round dispatch with kind `task` sent the deploy
+  description to `research-report` (it mentioned research once). The kinds
+  are literal: `server_deploy`, `project_redeploy`, `atlas_redeploy`,
+  `deploy_director`, `self_diagnose`. Verify the enqueue result's job id and
+  note it in your report.
 - **An empty range is a success, not a failure.** "Nothing to deploy" reported
   clearly beats a no-op dispatch that burns an executor session.
 - `git fetch` is the ONLY permitted ref mutation, and only for the range

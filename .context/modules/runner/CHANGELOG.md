@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — MCP tools joined allowed_tools (the second dispatch blocker)
+
+**Files changed**: `src/runner/session.py` — the MCP injection block now
+appends the injected servers' tool names (`mcp__dispatch__enqueue_job`,
+`mcp__projects__{list_projects,get_project,read_project_logs,restart_project}`)
+to `allowed_tools`, mirroring the Task-tool auto-add. Without it, acceptEdits
+sessions had MCP servers but no permission to call them — acceptEdits
+auto-accepts EDITS only, and a headless session can answer no permission
+prompt. Proven live 2026-07-31: the deploy-director's first autonomous
+dispatch attempt ran a clean preflight, prepared the executor description,
+and was then denied `enqueue_job` twice. This was the SECOND layer of the
+dispatch blocker (the first: plan mode blocks MCP outright) — dispatch had
+only ever worked under bypassPermissions, which is also why
+review-and-improve's dispatch stayed dead even after its plan→acceptEdits
+fix. The readonly guard profile (INV-20) still hook-denies restart_project
+for read-only skills; hooks fire before permission evaluation.
+
 ## 2026-07-31 — Workspace directive aligned to the execution lane
 
 **Files changed**: `src/runner/session.py` — the injected workspace directive

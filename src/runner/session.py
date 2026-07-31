@@ -638,6 +638,29 @@ def _build_options(
 
     if mcp_servers:
         kwargs["mcp_servers"] = mcp_servers
+        # Injected MCP tools must ALSO be in allowed_tools: acceptEdits
+        # auto-accepts EDITS only, so an MCP call otherwise raises a
+        # permission request no headless session can answer (proven live
+        # 2026-07-31 — deploy-director's enqueue_job denied twice under
+        # acceptEdits; dispatch had only ever worked under bypassPermissions,
+        # which is why review-and-improve's dispatch stayed dead even after
+        # its plan→acceptEdits fix). Same pattern as the Task auto-add above.
+        # The readonly guard profile still hook-denies restart_project for
+        # read-only skills — hooks fire before permission evaluation.
+        mcp_tool_names: list[str] = []
+        if "projects" in mcp_servers:
+            mcp_tool_names += [
+                "mcp__projects__list_projects",
+                "mcp__projects__get_project",
+                "mcp__projects__read_project_logs",
+                "mcp__projects__restart_project",
+            ]
+        if "dispatch" in mcp_servers:
+            mcp_tool_names.append("mcp__dispatch__enqueue_job")
+        missing = [t for t in mcp_tool_names if t not in tools]
+        if missing:
+            tools = [*tools, *missing]
+            kwargs["allowed_tools"] = tools
 
     return ClaudeAgentOptions(**kwargs)
 
