@@ -1018,6 +1018,38 @@ the 10th-occurrence guidance; workspace push/merge silent-drop remains the
 blocking defect and needs human review before another server-patch attempt.
 Closed as false positive._
 
+_Recurrence 2026-07-31 ~16:38 local (job `d8260ed9`): SEVENTEENTH self-
+diagnose in ~16h — atlas. Direct probes at diagnosis time:
+`http://localhost:8791/` → 200 in 12ms,
+`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 167ms.
+Staleness only 4.68s at diagnosis (fresh 16:37:57Z healthcheck tick had just
+landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
+PIDs 81426/81428/81432, unchanged across the day — service never bounced).
+Trigger fired on the prior 16:15:07Z→16:37:57Z gap (~1370s / ~22.8 min) —
+this hour's healthcheck-all slippage past the 20-min cutoff. `origin/main`
+HEAD confirmed still `17136b3` (server-patch `cb644203` from 03:03 still
+not landed 13.5h later). Not re-dispatching per the 10th-occurrence
+guidance; the workspace push/merge silent-drop remains the blocking defect
+and needs human review before another server-patch attempt. Closed as
+false positive._
+
+_Recurrence 2026-07-31 ~16:38 local (job `d4c39cb3`): EIGHTEENTH self-
+diagnose in ~16h — baseball-bingo twin of atlas `d8260ed9` from the same
+16:15:07Z→16:37:57Z (~1370s / ~22.8-min) healthcheck-all slippage cluster.
+Direct probes at diagnosis time:
+`http://localhost:8790/healthz` → 200 in 1.4ms,
+`http://localhost:8790/` → 200 in 3.6ms,
+`https://bingo.chrispiserchia.com/` → 200 in 199ms. PID 71682 still present
+(unchanged across all 18 recurrences today — service has NEVER bounced).
+Staleness only 13s at diagnosis (fresh 16:37:57Z healthcheck tick had just
+landed). `origin/main` HEAD confirmed still `17136b3` — server-patch
+`cb644203` from 03:03 still not landed ~13.5h later. Paired atlas+bingo
+firings at 16:38 confirm the class of defect continues to escalate on the
+~22-min slippage clusters. Not re-dispatching per the 10th-occurrence
+guidance; workspace push/merge silent-drop remains the blocking defect and
+needs human review before another server-patch attempt. Closed as false
+positive._
+
 _Recurrence 2026-07-31 ~14:26 local (job `eb777487`): TWELFTH self-diagnose
 in ~10.5h — atlas twin of the baseball-bingo `9b73d181` above, same
 14:05:03Z→14:26:11Z (~1268s) healthcheck-all slippage cluster. Direct
