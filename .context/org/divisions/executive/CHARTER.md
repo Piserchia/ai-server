@@ -9,12 +9,12 @@ capabilities. When divisions conflict or a gap spans them, the CEO decides.
 
 | Agent | Role | Privilege | Purpose |
 |---|---|---|---|
-| `system-manager` | ceo | read-only | Monthly org review: reconcile division reports + MISSION → org proposals + charter updates |
+| `system-manager` | ceo | read-only | Monthly org review: reconcile division reports + MISSION → org proposals + charter updates. May DISPATCH gated worker jobs (read-only+dispatch tier, INV-20 hook-enforced) — workers then execute under the INV-4 lane |
 | `gap-auditor` | auditor | read-only | Finds what's MISSING — capability gaps within a division (as a manager's subagent) and unowned domains/seams org-wide (for the CEO). The recurring version of the manual system evaluation. Finds + routes; never builds |
 | `delivery-ops-reconciler` | connector | read-only | Weekly Delivery→Ops seam reconciler: shipped-vs-operated drift (registration, healthcheck, supervision, DR) → routed proposals (Fri 06:00). Connectors close seams no single division owns — Executive claims them |
 | `insight-router` | connector | read-only | Weekly Knowledge/Atlas→everyone router: extracts insights actionable outside their origin division (ideas → Delivery, tooling findings → Ops, product signals → Atlas) → routed digest with evidence + gated skill per item (Sat 06:00) |
 | `review-and-improve` | worker | read-only | Retrospective analytics over job outcomes (the CEO's data arm — TUNES what exists; complements gap-auditor which finds what's absent) |
-| `new-skill` | worker | guarded-writer | Author new agents proposed by any division |
+| `new-skill` | worker | guarded-writer | Author new agents proposed by any division; lands via the INV-4 lane (agent LGTM + owner notification) — new `prod-operator`/`break-glass`/`isolation: host` skills always need owner approval |
 | `_writeback` | worker | guarded-writer | Institutional-memory integrity: CHANGELOG follow-ups |
 | `_learning_apply` | worker | guarded-writer | Institutional memory: append extracted learnings |
 | `chat` | worker | read-only | Intake: one-shot conversation |
@@ -25,7 +25,11 @@ capabilities. When divisions conflict or a gap spans them, the CEO decides.
 
 - MISSION.md is the north star; a division charter that stops serving an
   objective is a finding.
-- The org may only self-**direct** (propose), never self-modify with full power.
+- The org may only self-**direct**: managers/CEO propose and DISPATCH gated
+  worker jobs (read-only+dispatch, INV-20) — they never edit anything
+  themselves. Workers merge via the INV-4 lane (gate-green + agent
+  `code-review` LGTM + owner notification); protected paths and additions of
+  high-privilege agents always require the owner (ORG.md § Execution lane).
 - Every division has a manager, a charter, and a cadence.
 
 ## Cadence

@@ -11,7 +11,7 @@ pipeline, DR, and incident response.
 | Agent | Role | Privilege | Purpose |
 |---|---|---|---|
 | `ops-manager` | manager | read-only | Weekly ops review: health/deploy/DR gaps → proposals |
-| `server-patch` | worker | guarded-writer | Modify server code (PR-gated, code-review LGTM, manual merge — INV-4/13) |
+| `server-patch` | worker | guarded-writer | Modify server code under the INV-4 lane: gate-green + in-session `code-review` LGTM + owner notification; protected paths → PR + owner approval (INV-13 post-review always) |
 | `server-deploy` | worker | prod-operator | **Self-healing** dev→prod: ff-only pull, migrate-safe, test gate, seed schedules, restart — AND fixes on the go (operational autonomously; code fixes born in the dev repo, re-gated, `code-review`-LGTM'd + owner-notified before deploy). The gate is never bypassed |
 | `server-upkeep` | worker | prod-operator | Daily 3am: log rotation, VACUUM, health audit, anomaly DM |
 | `restore` | worker | prod-operator | DR restore from backup (terminal/god only — stops the runner) |
@@ -22,12 +22,16 @@ pipeline, DR, and incident response.
 
 - Red gate never reaches prod (tests/build/healthcheck). Migrations validated on
   a throwaway DB + snapshot before the live upgrade (server-deploy §2).
-- Server code never auto-merges (INV-4) — **except** the owner-authorized
-  deploy-hotfix lane: `server-deploy`'s Class-B fixes push a `code-review`-LGTM'd,
-  gate-green fix to main + notify the owner (no human pre-merge), ON THE DEPLOY
-  PATH ONLY. Normal `server-patch` still requires human merge. `code-review` must
-  LGTM either way (INV-13). This is the sharpest autonomy in the system and the
-  #1 reason the `prod-operator` guardrail (P4) matters.
+- Server code merges under the INV-4 lane (owner decision 2026-07-31,
+  generalizing `server-deploy`'s Class-B hotfix lane): full test gate green +
+  agent `code-review` LGTM (in-session subagent AND the INV-13 post-session
+  review) + owner NOTIFICATION with the diff — human pre-merge approval is no
+  longer required. Protected paths (PROTOCOL.md, auth config, project/skill
+  deletions, `guards.py`, `lint_docs.py`, MISSION §M, ORG.md's
+  safety-principle section, the lane's own executor skills) are
+  owner-approval-only, always. This is the sharpest autonomy in the system
+  and the #1 reason the privilege guardrails (INV-20 read-only enforcement;
+  P4 `prod-operator`) matter.
 - DR must actually work: `restore` targets DB `assistant`; off-site backup is a
   standing concern until R2 is configured (EVALUATION_2026-07-28 B2/B3).
 - `prod-operator` agents run with the most reach and least containment today —
@@ -38,8 +42,10 @@ pipeline, DR, and incident response.
   infrastructure** (CEO 2026-07-30 finding #8, owner-adopted): availability,
   error rates, and health of `gateway/telegram_bot` + `gateway/web`. Product/UX
   evolution of the surface routes through the CEO.
-- **The `server-deploy` self-healing lane is audited weekly** by ops-manager:
-  every Class-B fix must show commit + code-review LGTM + owner notification.
+- **The INV-4 autonomous-merge lane is audited weekly** by ops-manager: every
+  autonomous merge (`server-deploy` Class-B, `server-patch`, `new-skill`) must
+  show commit + code-review LGTM + owner notification; any protected-path
+  change must show explicit owner approval (a PR the owner merged).
 
 ## Cadence
 

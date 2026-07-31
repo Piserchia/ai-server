@@ -1,6 +1,6 @@
 ---
 name: new-skill
-description: Author a new skill (SKILL.md + support files) from a natural-language description
+description: Author a new skill (SKILL.md + support files) from a natural-language description; lands autonomously on agent code-review LGTM + owner notification (high-privilege skills and protected paths always need owner approval)
 model: claude-opus-4-7
 effort: high
 permission_mode: bypassPermissions
@@ -16,14 +16,39 @@ escalation:
     effort: max
 context_files: [".context/SKILLS_REGISTRY.md", "skills/README.md"]
 tags: [meta, skill-creation]
+isolation: workspace
+subagents: [code-review]
 ---
 
 # New Skill
 
 You are authoring a brand-new skill for the assistant server. Your output is a
 complete `skills/<slug>/SKILL.md` (plus any support files), a router rule if
-the skill is user-triggerable, and an updated SKILLS_REGISTRY. The code-review
-sub-agent will run automatically after you finish.
+the skill is user-triggerable, and an updated SKILLS_REGISTRY.
+
+**Landing lane (owner decision 2026-07-31, INV-4):** your work merges to main
+autonomously when (a) the gates below are green, (b) your in-session
+`code-review` subagent returns LGTM on the diff, and (c) the owner is
+**notified** in your final summary. Human pre-merge approval is not required —
+EXCEPT for the two ceilings below, which always require a PR + explicit owner
+approval:
+
+1. **High-privilege skill ceiling**: the new skill's frontmatter declares
+   `privilege_class: prod-operator` or `privilege_class: break-glass`, or
+   `isolation: host`. Adding a high-privilege agent to the roster expands what
+   the system can do to its host — that is ALWAYS an owner decision, never an
+   autonomous one.
+2. **Protected paths** (same list as `server-patch`): `.context/PROTOCOL.md`;
+   auth config (`TELEGRAM_ALLOWED_CHAT_IDS`, `.env`/secrets, chat-ID/web-auth
+   checks); deletion of any project or skill directory; `src/runner/guards.py`;
+   `scripts/lint_docs.py`; `MISSION.md`; the safety-principle section of
+   `.context/org/ORG.md`; and the lane's executor skills themselves
+   (`skills/server-patch/SKILL.md`, `skills/server-deploy/SKILL.md`,
+   `skills/new-skill/SKILL.md`). The system must not be able to relax its own
+   restraints autonomously — for these, LGTM is necessary but never sufficient.
+
+The runner's independent post-session review still runs after you finish
+(INV-13, `post_review` frontmatter — never weaken it).
 
 **Read `skills/TEMPLATE.md` first** — it defines the required sections
 (Inputs, Procedure, Quality gate, Gotchas) and frontmatter conventions.
@@ -59,6 +84,9 @@ Extract from the job description (and optionally `payload`):
      should escalate on failure, declare `escalation.on_failure`.
    - **Permission mode**: `default` for read-only, `acceptEdits` for file
      mutations, `plan` for review-only analysis.
+   - **Privilege**: if the skill needs `prod-operator`/`break-glass` privilege
+     or `isolation: host`, note NOW that this run ends in the PR lane (ceiling
+     1 above) — author it anyway, but plan for owner approval.
 
 2. **Check for overlap.** Read `.context/SKILLS_REGISTRY.md`. If an existing
    skill already covers this use case:
@@ -146,19 +174,57 @@ Extract from the job description (and optionally `payload`):
    ```
    Run via: `psql "$DATABASE_URL" -c "<sql>"`.
 
-9. **Commit.** Stage all new and modified files and commit to the ai-server
-   repo. Do NOT push -- the code-review sub-agent runs after this session.
-   If it returns LGTM, the runner handles the merge.
+9. **Gate.** Run the quality-gate checklist below, plus:
    ```bash
-   git add skills/<slug>/ .context/SKILLS_REGISTRY.md
-   # Include router.py and runner CHANGELOG only if you modified them:
-   # git add src/runner/router.py .context/modules/runner/CHANGELOG.md
-   git commit -m "Add <slug> skill (Phase <N>)"
+   python scripts/lint_docs.py        # registries/org/body checks must PASS
+   # If you touched any src/ file (e.g. router.py):
+   pipenv run pytest tests/ -v        # full gate, must be green
    ```
 
-10. **Summary.** Your final text message must report:
-    - What was created (skill slug, files)
-    - How to trigger it (router pattern, cron, or internal-only)
+10. **Ceiling + protected-path check.** Commit on a branch first:
+    ```bash
+    git checkout -b new-skill/<slug>
+    git add -A && git commit -m "Add <slug> skill"
+    git diff main --name-only
+    ```
+    - The new skill declares `prod-operator`/`break-glass` privilege or
+      `isolation: host` → **PR lane** (step 12), always.
+    - Any changed/deleted path is on the protected list above → **PR lane**.
+    - Otherwise → step 11.
+
+11. **In-session review → autonomous landing.** Delegate the branch-vs-main
+    diff (`git diff main`) to your `code-review` subagent via the Task tool,
+    with a short statement of what the skill is for.
+    - **LGTM** →
+      ```bash
+      git checkout main && git pull --ff-only
+      git merge --no-ff new-skill/<slug>
+      python scripts/lint_docs.py            # re-check on merged main
+      git push origin main
+      ```
+      Rejected push → `git pull --rebase origin main`, re-run the gate,
+      retry ONCE; still failing → PR lane. The canonical checkout
+      fast-forwards automatically after your push.
+    - **CHANGES / BLOCKER** → address what you can, re-run steps 9–11 ONCE;
+      still not LGTM → PR lane.
+    - **Review could not run** → PR lane. Fail closed: an unreviewed skill
+      never lands itself.
+
+12. **PR lane (owner approval).** Push the branch and open a PR; never merge
+    it yourself; stop with status awaiting the owner:
+    ```bash
+    git push -u origin new-skill/<slug>
+    gh pr create --title "Add <slug> skill" \
+      --body "<what it does; why owner approval is needed (ceiling/protected
+      path/review verdict); review findings; gate output>"
+    ```
+
+13. **Summary — MANDATORY owner notification.** Your final text message must
+    report:
+    - What was created (skill slug, files) and how to trigger it (router
+      pattern, cron, or internal-only)
+    - Landing lane taken: autonomous (include `git diff --stat`, the
+      subagent's LGTM, gates run, pushed sha) or PR (URL + why)
     - Any router rule added or modified
     - Any open questions or limitations
 
@@ -170,15 +236,21 @@ Run these checks before your final text message:
   ```bash
   python3 -c "import yaml; yaml.safe_load(open('skills/<slug>/SKILL.md').read().split('---')[1])"
   ```
+- [ ] `python scripts/lint_docs.py` passes (registry row, body sections,
+  `## Gotchas`, division charter claim, isolation values).
 - [ ] Router rule (if added) uses a narrow regex that does not match unrelated
   descriptions. Test with 3 positive and 3 negative examples.
 - [ ] No duplicate or overlapping skill in SKILLS_REGISTRY.
 - [ ] SKILLS_REGISTRY updated (moved from Planned to Installed, or new row added).
+- [ ] The new skill is claimed by exactly one division CHARTER.md roster
+  (`.context/org/divisions/<div>/CHARTER.md`) — lint enforces this.
 - [ ] Internal skills use a leading underscore in the directory name.
 - [ ] The skill body is written as instructions to Claude (imperative), not as
   documentation for a human.
 - [ ] If `router.py` was modified, `.context/modules/runner/CHANGELOG.md` was
-  also updated.
+  also updated and the full pytest gate is green.
+- [ ] Ceiling check done: privilege class / isolation of the NEW skill checked,
+  protected-path scan of the diff done, lane recorded for the summary.
 
 ## Gotchas
 
@@ -200,6 +272,20 @@ Run these checks before your final text message:
   `projects/` or `src/`, include CHANGELOG update instructions in the
   Procedure. Otherwise the `_writeback` skill will be spawned automatically
   as a follow-up.
+- **The high-privilege ceiling is about the AUTHORED skill, not this one**:
+  you (new-skill) are a guarded writer; the skill you are creating is what's
+  checked for `prod-operator`/`break-glass`/`isolation: host`. Don't talk
+  yourself into "it's just frontmatter" — privilege frontmatter IS the
+  authority grant, which is why it's owner-approval-only.
+- **You work in a workspace clone** (`isolation: workspace`): your cwd is a
+  per-job clone whose `origin` is the real remote; guard hooks contain your
+  writes to the clone. The autonomous landing pushes `origin main` from
+  there; the canonical is ff-synced after. If a generic runner directive says
+  "never push to main from here", the 2026-07-31 lane supersedes it ONLY when
+  the full lane (green gates + LGTM + no ceiling/protected path) holds.
+- **A new skill without a charter claim fails lint** — add the roster row in
+  the owning division's CHARTER.md in the same diff (which division proposed
+  it tells you where it belongs).
 
 ## Files this skill updates
 
@@ -207,4 +293,5 @@ Run these checks before your final text message:
 - `skills/<slug>/` (any support files: templates, examples, data)
 - `src/runner/router.py` (only if adding a router rule for a user-triggerable skill)
 - `.context/SKILLS_REGISTRY.md` (append to Installed table)
+- `.context/org/divisions/<div>/CHARTER.md` (roster row for the new skill)
 - `.context/modules/runner/CHANGELOG.md` (only if `router.py` was modified)

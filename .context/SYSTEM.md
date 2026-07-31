@@ -1,8 +1,10 @@
 # System context
 
 > Source of truth for the server's architecture. Update when modules change.
-> Last updated: 2026-07-27 (SDK-native overhaul: docker/`claude -p` lane removed;
-> guard hooks, in-session subagents, structured outputs, typed rate limits —
+> Last updated: 2026-07-31 (autonomous execution lane: INV-4 rewritten —
+> gate-green + agent code-review LGTM + owner notification replaces human
+> pre-merge, protected paths excepted; INV-20 added: read-only privilege is
+> hook-enforced. Previous: 2026-07-27 SDK-native overhaul —
 > docs/SDK_MIGRATION_2026-07-27.md)
 
 ## Tech stack
@@ -104,7 +106,7 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | INV-1 | Every session has a resolved model, effort, permission_mode | `runner/session.py:_build_options` |
 | INV-2 | Every job writes `job_started` + one terminal event to audit log (exception: pre-execution rejections — preflight failures and the deploy-authority gate — write only the terminal event; reconcile keys off the terminal event, so no orphan) | `runner/main.py:_process_job` |
 | INV-3 | Server uses subscription auth; `ANTHROPIC_API_KEY` is never set | `runner/main.py:_check_subscription_auth` + `scripts/run.sh` |
-| INV-4 | Server code changes never auto-merge — EXCEPT the owner-authorized deploy-hotfix lane (2026-07-28): `server-deploy` may push a `code-review`-LGTM'd, gate-green fix to main + notify the owner, WITHOUT human pre-merge, ONLY while self-healing a deploy. Normal `server-patch` still requires human merge; `code-review` LGTM required in both. | `server-patch` SKILL.md + PR gate; `server-deploy` § Self-healing |
+| INV-4 | Server code merges autonomously only with gate-green + agent code-review LGTM + owner notification (owner decision 2026-07-31, generalizing the 2026-07-28 deploy-hotfix lane); protected paths (PROTOCOL.md, auth config, deletions, guards.py, lint_docs.py, MISSION §M, ORG.md safety-principle section, the lane's own executor skills) always require owner approval | `server-patch`/`new-skill` SKILL.md flow + INV-13 post-review + readonly guard hooks; `server-deploy` § Self-healing |
 | INV-5 | Write-back verification runs after every session that modified code | `runner/main.py` post-session hook (Phase 4+) |
 | INV-6 | Only whitelisted chat IDs can submit jobs via Telegram | `gateway/telegram_bot.py:_guard` |
 | INV-7 | Only auth'd web requests can submit jobs | `gateway/web.py:_check_auth` |
@@ -120,6 +122,7 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | INV-17 | Workspace-tier sessions are guard-hooked: file writes outside the per-job clone and dangerous host commands (sudo, launchctl, keychain, force-push, kills, API-key injection, destructive ops on protected roots) are DENIED at PreToolUse — hooks fire before permission evaluation, so this binds even under bypassPermissions. Denials are audited (`guard_denied`). (Redefined 2026-07-27; formerly the container-env rule.) | `runner/guards.py` + `runner/session.py:_build_options` |
 | INV-18 | `god` is the ONLY host-tier skill — the deliberate break-glass lane for phone-initiated server fixes | `skills/god/SKILL.md` frontmatter + `scripts/lint_docs.py:check_isolation_values` |
 | INV-19 | A task auto-closes only on an `_evaluate` EVAL_PASS backed by evidence; the user can always overrule via Reopen | `runner/main.py:_handle_evaluator_result` + bot `reopen` action |
+| INV-20 | `privilege_class: read-only` is hook-enforced at runtime: file-mutation tools, mutating Bash, and `restart_project` are PreToolUse-denied for such sessions regardless of permission_mode (dispatch via enqueue_job stays allowed) | `runner/guards.py:make_readonly_guard_hooks` + `runner/session.py:_build_options` |
 
 ## Environment & setup
 
