@@ -6,6 +6,7 @@ from pathlib import Path
 # Add repo root to path so we can import the lint script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import scripts.lint_docs as lint_docs  # noqa: E402
 from scripts.lint_docs import (  # noqa: E402
     check_skills_registry,
     check_projects_registry,
@@ -75,6 +76,85 @@ def test_org_charters_claim_every_skill():
 def test_role_privileges_read_only():
     warnings = check_role_privileges()
     assert warnings == [], f"Oversight-role privilege violations: {warnings}"
+
+
+# ── check_role_privileges rule logic (fixture repos, not the live tree) ─────
+#
+# The repo-level test above proves the real skills pass; these prove the rules
+# themselves fire (and stay silent) correctly, by pointing REPO_ROOT at a
+# synthetic tree. No .context/org/ dir is created, so the charter cross-check
+# is skipped — these exercise only the frontmatter rules.
+
+
+def _write_skill(root: Path, name: str, fm_lines: list[str]) -> None:
+    d = root / "skills" / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\n" + "\n".join(fm_lines) + "\n---\n\n# X\n\nbody\n"
+    )
+
+
+def test_oversight_accepts_acceptedits_with_readonly(monkeypatch, tmp_path):
+    # The post-2026-07-31 manager shape: acceptEdits + read-only + dispatch tag.
+    _write_skill(tmp_path, "mgr", [
+        "name: mgr", "role: manager", "permission_mode: acceptEdits",
+        "privilege_class: read-only", "tags: [needs-dispatch-mcp]",
+    ])
+    monkeypatch.setattr(lint_docs, "REPO_ROOT", tmp_path)
+    assert lint_docs.check_role_privileges() == []
+
+
+def test_oversight_accepts_plan_without_dispatch_tag(monkeypatch, tmp_path):
+    # Pure reporters (gap-auditor / connectors) stay plan — still valid.
+    _write_skill(tmp_path, "conn", [
+        "name: conn", "role: connector", "permission_mode: plan",
+        "privilege_class: read-only", "tags: [management]",
+    ])
+    monkeypatch.setattr(lint_docs, "REPO_ROOT", tmp_path)
+    assert lint_docs.check_role_privileges() == []
+
+
+def test_oversight_rejects_bypass_permissions(monkeypatch, tmp_path):
+    _write_skill(tmp_path, "mgr", [
+        "name: mgr", "role: manager", "permission_mode: bypassPermissions",
+        "privilege_class: read-only",
+    ])
+    monkeypatch.setattr(lint_docs, "REPO_ROOT", tmp_path)
+    warnings = lint_docs.check_role_privileges()
+    assert len(warnings) == 1 and "acceptEdits" in warnings[0]
+
+
+def test_oversight_requires_read_only_privilege(monkeypatch, tmp_path):
+    _write_skill(tmp_path, "mgr", [
+        "name: mgr", "role: manager", "permission_mode: acceptEdits",
+        "privilege_class: guarded-writer",
+    ])
+    monkeypatch.setattr(lint_docs, "REPO_ROOT", tmp_path)
+    warnings = lint_docs.check_role_privileges()
+    assert len(warnings) == 1 and "privilege_class" in warnings[0]
+
+
+def test_dispatch_readonly_on_plan_fails(monkeypatch, tmp_path):
+    # The 2026-07-30 failure shape: read-only dispatcher stuck on plan mode —
+    # its enqueue_job would silently never fire. Role-independent.
+    _write_skill(tmp_path, "worker-dispatch", [
+        "name: worker-dispatch", "permission_mode: plan",
+        "privilege_class: read-only", "tags: [retrospective, needs-dispatch-mcp]",
+    ])
+    monkeypatch.setattr(lint_docs, "REPO_ROOT", tmp_path)
+    warnings = lint_docs.check_role_privileges()
+    assert len(warnings) == 1 and "dispatch MCP" in warnings[0]
+
+
+def test_dispatch_rule_ignores_non_readonly_skills(monkeypatch, tmp_path):
+    # god / self-diagnose shape: dispatch tag without the read-only privilege
+    # class — outside this rule's scope, whatever the mode.
+    _write_skill(tmp_path, "fixer", [
+        "name: fixer", "permission_mode: bypassPermissions",
+        "tags: [needs-dispatch-mcp]",
+    ])
+    monkeypatch.setattr(lint_docs, "REPO_ROOT", tmp_path)
+    assert lint_docs.check_role_privileges() == []
 
 
 def test_logger_style_no_structlog_kwargs_on_stdlib():

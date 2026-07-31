@@ -19,8 +19,12 @@ Checks (13):
 9. Skill `isolation` frontmatter values are valid tiers
 10. Every project manifest's delivery contract parses + validates
 11. Every skill is claimed by exactly one division CHARTER.md (org chart)
-12. Oversight roles (manager/ceo/connector/auditor) are read-only + plan mode,
-    and charter Role/Privilege columns match skill frontmatter
+12. Oversight roles (manager/ceo/connector/auditor) are privilege_class
+    read-only (hook-enforced at runtime by the readonly guard profile,
+    runner/guards.py) with permission_mode plan or acceptEdits; any skill
+    combining tag needs-dispatch-mcp with privilege_class read-only must run
+    acceptEdits (plan blocks the dispatch MCP — proven live 2026-07-30); and
+    charter Role/Privilege columns match skill frontmatter
 13. No structlog-style kwargs on stdlib loggers (TypeError at log time)
 """
 
@@ -347,10 +351,20 @@ def check_org_charters() -> list[str]:
 def check_role_privileges() -> list[str]:
     """The management-hierarchy safety invariant, made structural: any skill
     declaring an oversight role (manager | ceo | connector | auditor) must be
-    read-only — `permission_mode: plan` AND `privilege_class: read-only`.
-    Managers direct, gated workers execute (MISSION: "batched, proposed,
-    reviewed"); an oversight agent that can write is a design violation, so a
-    frontmatter edit that widens one must fail lint instead of shipping silent.
+    `privilege_class: read-only` with `permission_mode` plan OR acceptEdits.
+    Read-only is no longer mode-enforced but HOOK-enforced at runtime: the
+    readonly guard profile (runner/guards.py, wired in session._build_options)
+    denies file tools, mutating Bash, and restart_project for every
+    privilege_class=read-only session, in every mode — which is what makes
+    acceptEdits acceptable for oversight. Managers direct, gated workers
+    execute (MISSION: "batched, proposed, reviewed"); a frontmatter edit that
+    widens an oversight agent must fail lint instead of shipping silent.
+
+    Second rule, role-independent: any skill combining tag `needs-dispatch-mcp`
+    with `privilege_class: read-only` must run `permission_mode: acceptEdits` —
+    plan blocks MCP tool calls, so a plan-mode dispatcher's enqueue_job
+    silently never fires (proven live 2026-07-30, deploy-director rounds 1-2;
+    the same rot broke review-and-improve's dispatch for weeks).
 
     Also cross-checks each charter roster row's Role/Privilege columns against
     the skill's declared frontmatter — ORG.md calls the charters the source of
@@ -383,18 +397,38 @@ def check_role_privileges() -> list[str]:
             continue
         fm_by_skill[child.name] = fm
         role = str(fm.get("role", "") or "")
+        mode = str(fm.get("permission_mode", "") or "")
+        priv = str(fm.get("privilege_class", "") or "")
+        tags = fm.get("tags") or []
         if role in oversight:
-            if str(fm.get("permission_mode", "") or "") != "plan":
+            if mode not in {"plan", "acceptEdits"}:
                 warnings.append(
                     f"Skill `{child.name}` declares role `{role}` but "
-                    f"permission_mode is not `plan` (oversight roles are read-only)"
+                    f"permission_mode `{mode or '(default)'}` is not `plan` or "
+                    f"`acceptEdits` (oversight is read-only — hook-enforced at "
+                    f"runtime by the readonly guard profile; acceptEdits exists "
+                    f"only because plan blocks the dispatch MCP)"
                 )
-            if str(fm.get("privilege_class", "") or "") != "read-only":
+            if priv != "read-only":
                 warnings.append(
                     f"Skill `{child.name}` declares role `{role}` but "
                     f"privilege_class is not `read-only` (oversight roles "
                     f"propose; gated workers execute)"
                 )
+        # Dispatch-capable read-only skills must run acceptEdits: plan blocks
+        # MCP tool calls, so their enqueue_job dispatch silently never fires
+        # (proven live 2026-07-30). Role-independent — it applies to any skill
+        # combining the dispatch tag with the read-only privilege class (the
+        # readonly guard profile, not the mode, is what enforces read-only).
+        if ("needs-dispatch-mcp" in tags and priv == "read-only"
+                and mode != "acceptEdits"):
+            warnings.append(
+                f"Skill `{child.name}` is privilege_class read-only with tag "
+                f"needs-dispatch-mcp but permission_mode is "
+                f"`{mode or '(default)'}` — must be `acceptEdits`: plan blocks "
+                f"the dispatch MCP (proven live 2026-07-30); read-only is "
+                f"enforced by the runtime readonly guard profile, not the mode"
+            )
 
     if org_dir.exists():
         row_re = re.compile(

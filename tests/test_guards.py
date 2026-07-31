@@ -8,7 +8,10 @@ workspace-tier sessions gain host access.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+import pytest
 
 from src.runner import guards
 
@@ -278,5 +281,277 @@ class TestGuardHooks:
         out = await bash_hook(
             {"tool_name": "Bash", "tool_input": {"command": "pytest -q"}},
             "tu-4", None,
+        )
+        assert out == {}
+
+
+# ── read-only profile: readonly_file_violation ──────────────────────────────
+
+
+class TestReadonlyFileViolation:
+    @pytest.mark.parametrize("tool", ["Write", "Edit", "MultiEdit", "NotebookEdit"])
+    def test_file_mutation_tools_always_denied(self, tool):
+        reason = guards.readonly_file_violation(tool)
+        assert reason is not None and "read-only" in reason
+
+    @pytest.mark.parametrize(
+        "tool", ["Read", "Glob", "Grep", "Bash", "Task", "WebFetch", "WebSearch"])
+    def test_non_mutating_tools_ignored(self, tool):
+        assert guards.readonly_file_violation(tool) is None
+
+
+# ── read-only profile: readonly_bash_violation ──────────────────────────────
+
+# Deny matrix: every mutation class the profile promises to stop.
+RO_DENY = [
+    # output redirection / tee
+    "echo hacked > /tmp/x",
+    "echo x >> notes.md",
+    "git log --oneline | tee /tmp/out.txt",
+    'psql assistant -c "SELECT * FROM jobs" > /tmp/dump.txt',
+    # sed -i and file mutators
+    "sed -i '' 's/a/b/' src/config.py",
+    "rm -rf volumes/workspaces/old",
+    "mv a.txt b.txt",
+    "cp .env /tmp/steal",
+    "mkdir -p /tmp/scratch",
+    "touch marker",
+    "chmod +x run.sh",
+    "chown me:staff f",
+    "ln -s /etc/passwd link",
+    "find volumes/ -name '*.log' -delete",
+    # git mutators (fetch is the sanctioned exception — see allow matrix)
+    "git push origin main",
+    "git commit -m 'x'",
+    "git add -A",
+    "git checkout -- src/",
+    "git reset --hard origin/main",
+    "git merge origin/main",
+    "git pull --rebase origin main",
+    "git rebase main",
+    "git stash",
+    "git cherry-pick abc1234",
+    "git fetch origin && git merge origin/main",
+    # psql write verbs — word-boundary, case-insensitive
+    "psql assistant -c \"UPDATE jobs SET status='failed' WHERE id='x'\"",
+    "psql assistant -c \"update jobs set status='x'\"",
+    "psql assistant -c \"INSERT INTO jobs (kind) VALUES ('x')\"",
+    'psql assistant -c "DELETE FROM proposals"',
+    'psql assistant -c "drop table jobs"',
+    'psql assistant -c "ALTER TABLE jobs ADD COLUMN x int"',
+    'psql assistant -c "CREATE TABLE evil (id int)"',
+    'psql assistant -c "TRUNCATE jobs"',
+    'psql assistant -c "GRANT ALL ON jobs TO evil"',
+    'psql assistant -c "SELECT 1; DELETE FROM jobs;"',
+    # redis-cli mutators
+    "redis-cli set quota:paused_until 0",
+    "redis-cli del jobs:queue",
+    "redis-cli rpush jobs:queue payload",
+    "redis-cli lpush jobs:queue payload",
+    "redis-cli LPOP jobs:queue",
+    "redis-cli flushall",
+    "redis-cli flushdb",
+    "redis-cli expire quota:paused_until 1",
+    # launchctl service mutation
+    "launchctl kickstart -k gui/501/com.assistant.runner",
+    "launchctl bootout gui/501/com.assistant.web",
+    "launchctl stop com.assistant.runner",
+    "launchctl start com.assistant.runner",
+    "launchctl kill SIGTERM gui/501/com.assistant.runner",
+    # migrations / db admin
+    "alembic upgrade head",
+    "pipenv run alembic downgrade -1",
+    "alembic revision -m 'x'",
+    "dbmate up",
+    "dropdb assistant",
+    # package/environment managers
+    "pipenv install requests",
+    "pipenv sync",
+    "pipenv lock",
+    "pip install httpx",
+    "pip3 uninstall httpx",
+    "npm install left-pad",
+    "npm ci",
+    "npx install thing",
+    "brew install jq",
+    "brew services restart redis",
+    # hard denials
+    "sudo rm -rf /",
+    "kill 8123",
+    "pkill -f runner",
+    "crontab -e",
+    "security find-generic-password -s Claude",
+    "export ANTHROPIC_API_KEY=sk-x",
+]
+
+# Allow matrix: the REAL inspection vocabulary from the oversight skill bodies
+# (managers, CEO, deploy-director, review-and-improve). A false positive here
+# breaks a live skill — these are the regression net for that.
+RO_ALLOW = [
+    # SQL — comparison `>` inside quotes, verb-like column/skill names
+    ("psql assistant -c \"SELECT resolved_skill, status FROM jobs "
+     "WHERE created_at > NOW() - INTERVAL '14 days' "
+     "ORDER BY created_at DESC LIMIT 40;\""),
+    ("psql assistant -c \"SELECT resolved_skill, status FROM jobs "
+     "WHERE resolved_skill IN ('new-project','app-patch','project-evaluate',"
+     "'project-redeploy','project-update-poll','code-review','_evaluate');\""),
+    ("psql assistant -c \"SELECT count(*), date_trunc('day', created_at) "
+     "FROM jobs GROUP BY 2 ORDER BY 2 DESC LIMIT 7;\""),
+    ("psql assistant -c \"SELECT name, cron_expression, paused FROM schedules "
+     "WHERE replace(job_kind,'_','-') IN ('research-report','research-deep',"
+     "'idea-generation');\""),
+    ("psql assistant -c \"SELECT LEFT(id::text,8), outcome, change_type, "
+     "LEFT(target_file,60), proposed_at FROM proposals "
+     "WHERE applied_at IS NULL ORDER BY proposed_at LIMIT 20;\""),
+    'psql assistant -c "\\dt"',
+    'psql assistant -c "\\d jobs"',
+    'psql assistant -c "SELECT 1;"',
+    # git inspection + the sanctioned refs-only fetch
+    "git log --oneline HEAD..origin/main",
+    'git -C "$HOME/Library/Application Support/ai-server" fetch origin',
+    "git status --short --branch",
+    "git rev-parse HEAD",
+    "git diff --stat HEAD..origin/main",
+    "git diff --name-only HEAD..origin/main",
+    "git -C projects/atlas log --oneline '@{u}..HEAD' 2>/dev/null | head -5",
+    "git -C projects/research remote -v 2>/dev/null | head -1",
+    "git -C \"$p\" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1",
+    # the delivery-manager dev-repo coherence loop, verbatim shape
+    ("for p in projects/*/; do if git -C \"$p\" rev-parse --abbrev-ref '@{u}' "
+     ">/dev/null 2>&1; then git -C \"$p\" log --oneline '@{u}..HEAD' "
+     "| sed \"s|^|$p ahead: |\" | head -3; else echo \"$p NO-UPSTREAM\"; fi; done"),
+    # plain reads (incl. stderr-to-/dev/null, which must NOT trip redirection)
+    "grep -rn quota src/",
+    "grep -h escalation_spawned volumes/audit_log/*.jsonl 2>/dev/null | tail -20",
+    "grep -n 'ANTHROPIC_API_KEY' projects/atlas/manifest.yml 2>/dev/null",
+    "grep -l '^delivery:' projects/*/manifest.yml 2>/dev/null",
+    "ls -la volumes/logs/",
+    "ls -lt projects/research/ 2>/dev/null | head -15",
+    "cat volumes/audit_log/abc12345.summary.md",
+    "tail -5 projects/ideas/history.jsonl 2>/dev/null",
+    "curl -so /dev/null -w '%{http_code}' http://localhost:8080/health",
+    "df -h .",
+    # redis / launchctl / alembic read-only forms
+    "redis-cli get quota:paused_until",
+    "redis-cli llen jobs:queue",
+    "redis-cli lrange jobs:queue 0 5",
+    "redis-cli ping",
+    "launchctl list | grep com.assistant",
+    "pipenv run alembic current",
+    "pipenv run alembic heads",
+    "pipenv run python scripts/lint_docs.py",
+    "echo \"$p NO-UPSTREAM\"",
+]
+
+
+class TestReadonlyBashViolation:
+    @pytest.mark.parametrize("cmd", RO_DENY, ids=lambda c: c[:48])
+    def test_denied(self, cmd):
+        assert guards.readonly_bash_violation(cmd) is not None, f"should DENY: {cmd}"
+
+    @pytest.mark.parametrize("cmd", RO_ALLOW, ids=lambda c: c[:48])
+    def test_allowed(self, cmd):
+        assert guards.readonly_bash_violation(cmd) is None, f"should ALLOW: {cmd}"
+
+    def test_empty_command_allowed(self):
+        assert guards.readonly_bash_violation("") is None
+
+    def test_deny_reason_names_the_profile(self):
+        reason = guards.readonly_bash_violation("git push origin main")
+        assert reason is not None and "read-only" in reason
+
+
+# ── read-only profile: hook factory ─────────────────────────────────────────
+
+
+class TestReadonlyGuardHooks:
+    def test_structure(self):
+        hooks = guards.make_readonly_guard_hooks("job-r1")
+        assert set(hooks) == {"PreToolUse"}
+        matchers = hooks["PreToolUse"]
+        assert len(matchers) == 3
+        assert matchers[0].matcher == "|".join(guards.FILE_WRITE_TOOLS)
+        assert matchers[1].matcher == "Bash"
+        assert matchers[2].matcher == f".*{guards.RESTART_TOOL_SUFFIX}"
+
+    def test_restart_matcher_matches_mcp_name_under_both_regex_semantics(self):
+        # The SDK treats matcher strings as regex (the existing "A|B" matcher
+        # relies on it); the suffix pattern must hold under fullmatch AND search.
+        pattern = f".*{guards.RESTART_TOOL_SUFFIX}"
+        assert re.fullmatch(pattern, "mcp__projects__restart_project")
+        assert re.search(pattern, "mcp__projects__restart_project")
+
+    def test_enqueue_job_never_matched(self):
+        # Dispatch is the tier's sanctioned state change — no matcher may
+        # claim the dispatch MCP tool under either regex semantics.
+        hooks = guards.make_readonly_guard_hooks("job-r2")
+        name = "mcp__dispatch__enqueue_job"
+        for m in hooks["PreToolUse"]:
+            assert not re.fullmatch(m.matcher, name), m.matcher
+            assert not re.search(m.matcher, name), m.matcher
+
+    async def test_file_hook_denies_even_tmp_and_audits_profile(self, monkeypatch):
+        events: list[tuple] = []
+        monkeypatch.setattr(guards.audit_log, "append",
+                            lambda job_id, kind, **kw: events.append((job_id, kind, kw)))
+        hooks = guards.make_readonly_guard_hooks("job-r3")
+        file_hook = hooks["PreToolUse"][0].hooks[0]
+        # /tmp is allowed for the workspace profile — the read-only profile
+        # has NO path exceptions.
+        out = await file_hook(
+            {"tool_name": "Write", "tool_input": {"file_path": "/tmp/scratch.md"}},
+            "tu-r1", None,
+        )
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert events[0][1] == "guard_denied"
+        assert events[0][2]["profile"] == "read-only"
+
+    async def test_bash_hook_allows_select(self):
+        hooks = guards.make_readonly_guard_hooks("job-r4")
+        bash_hook = hooks["PreToolUse"][1].hooks[0]
+        out = await bash_hook(
+            {"tool_name": "Bash",
+             "tool_input": {"command": 'psql assistant -c "SELECT 1;"'}},
+            "tu-r2", None,
+        )
+        assert out == {}
+
+    async def test_bash_hook_denies_push_and_audits_profile(self, monkeypatch):
+        events: list[tuple] = []
+        monkeypatch.setattr(guards.audit_log, "append",
+                            lambda job_id, kind, **kw: events.append((job_id, kind, kw)))
+        hooks = guards.make_readonly_guard_hooks("job-r5")
+        bash_hook = hooks["PreToolUse"][1].hooks[0]
+        out = await bash_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}},
+            "tu-r3", None,
+        )
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert events[0][2]["profile"] == "read-only"
+        assert events[0][2]["command"] == "git push origin main"
+
+    async def test_restart_hook_denies_by_suffix_and_audits(self, monkeypatch):
+        events: list[tuple] = []
+        monkeypatch.setattr(guards.audit_log, "append",
+                            lambda job_id, kind, **kw: events.append((job_id, kind, kw)))
+        hooks = guards.make_readonly_guard_hooks("job-r6")
+        restart_hook = hooks["PreToolUse"][2].hooks[0]
+        out = await restart_hook(
+            {"tool_name": "mcp__projects__restart_project",
+             "tool_input": {"slug": "atlas"}},
+            "tu-r4", None,
+        )
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert events[0][1] == "guard_denied"
+        assert events[0][2]["profile"] == "read-only"
+
+    async def test_restart_hook_ignores_other_projects_tools(self):
+        # The hook re-checks the suffix, so even if the matcher were broader
+        # than intended it can never deny an unrelated tool.
+        hooks = guards.make_readonly_guard_hooks("job-r7")
+        restart_hook = hooks["PreToolUse"][2].hooks[0]
+        out = await restart_hook(
+            {"tool_name": "mcp__projects__list_projects", "tool_input": {}},
+            "tu-r5", None,
         )
         assert out == {}

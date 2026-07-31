@@ -2,6 +2,51 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-31 — Read-only guard profile: oversight skills get structural read-only + dispatch
+
+**Why**: `permission_mode: plan` blocks MCP tools (proven live 2026-07-30 —
+deploy-director's enqueue_job unreachable; review-and-improve's dispatch
+silently dead for weeks), so dispatch-capable oversight skills must run
+acceptEdits — which until now left their read-only-ness prose-only.
+
+**guards.py**: new READ-ONLY profile alongside the workspace profile. Pure
+predicates `readonly_file_violation` (Write/Edit/MultiEdit/NotebookEdit denied
+outright — no path exceptions, temp dirs included) and
+`readonly_bash_violation` (mutation denylist: output redirection except
+/dev/null + fd-dups, quote-masked so quoted SQL `>` comparisons pass; file
+mutators; git mutators with `git fetch` as the sanctioned refs-only exception;
+launchctl mutating subcommands, list/print allowed; alembic
+upgrade/downgrade/revision/stamp; dbmate; createdb/dropdb; pip/pipenv
+install/uninstall/sync/lock; npm/npx/brew; redis-cli
+set/del/push/pop/flush/expire; psql write verbs — statement-start anchored, so
+identifiers like `project-update-poll`/`created_at` never false-positive;
+sudo/kill/crontab/keychain/API-key hard denials).
+`make_readonly_guard_hooks(job_id)` → 3 PreToolUse matchers: file tools, Bash,
+and `.*restart_project` (suffix re-checked in-hook); `enqueue_job`
+deliberately unmatched. Denials audited `guard_denied` with
+`profile: "read-only"`. The guarantee, honestly: file tools structurally
+denied; Bash is a best-effort denylist, not a sandbox (SDK Seatbelt stays the
+SYSTEM.md-tracked OS-level closure).
+
+**session.py**: `_build_options` attaches the readonly profile whenever
+`skill_cfg.privilege_class == "read-only"` — every isolation tier and
+permission mode (belt under plan, load-bearing under acceptEdits); read-only
+wins over workspace hooks if both somehow apply. Workspace wiring untouched.
+
+**lint**: oversight roles ⇒ read-only + mode ∈ {plan, acceptEdits}; new
+role-independent rule: needs-dispatch-mcp + read-only ⇒ acceptEdits.
+
+**Skills**: system-manager + 4 division managers plan→acceptEdits +
+needs-dispatch-mcp + dispatch-authority paragraphs; review-and-improve
+plan→acceptEdits + privilege_class read-only (matches its charter row) +
+gotcha recording the silent-dispatch weeks; deploy-director gotcha updated —
+its read-only contract is now hook-enforced, not prose-only.
+
+Tests: tests/test_guards.py +127 (69-entry deny matrix, 37-entry allow matrix
+of real oversight command vocabulary, 8 hook-contract); tests/test_doc_lint.py
++6 (rule logic on synthetic trees).
+
+
 ## 2026-07-31 — Event-loop circuit breaker + global (task-less) deferred promotion
 
 **1. Circuit breaker in `src/runner/events.py`** (2026-07-30 incident: ~17

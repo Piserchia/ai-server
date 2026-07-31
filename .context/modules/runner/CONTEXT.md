@@ -1,6 +1,7 @@
 # Runner module
 
 **Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`, `src/runner/workspaces.py`, `src/runner/guards.py`, `src/runner/agents.py`, `src/runner/delivery.py`, `src/runner/plans.py`, `src/runner/llm_router.py`
+  - `guards.make_readonly_guard_hooks(job_id)` — PreToolUse hooks for `privilege_class: read-only` sessions: Write/Edit/MultiEdit/NotebookEdit and `mcp__projects__restart_project` denied outright; Bash checked against a mutation denylist (`readonly_bash_violation`; `git fetch` + SELECT-only psql allowed); `enqueue_job` deliberately unmatched. Every tier/mode; readonly wins over the workspace profile. Denials audited (`guard_denied`, `profile="read-only"`).
 
 ## Purpose
 
