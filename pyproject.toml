@@ -10,6 +10,14 @@ dependencies = [
     # or regress. The 0.2.x line exists — upgrade deliberately, with its own
     # test pass, never as a side effect (docs/SDK_MIGRATION_2026-07-27.md).
     "claude-agent-sdk>=0.1.81,<0.2",
+    # mcp 2.0.0 removed the 1.x lowlevel Server API (Server.list_tools) that
+    # claude-agent-sdk 0.1.x's create_sdk_mcp_server bridge calls — with mcp 2
+    # installed, every needs-dispatch-mcp / needs-projects-mcp session dies with
+    # "'Server' object has no attribute 'list_tools'" (prod incident 2026-07-30;
+    # a routine re-lock pulled 2.0.0 because the SDK's own pin, mcp>=1.19.0,
+    # has no upper bound).
+    # Drop this pin only together with the deliberate SDK 0.2.x migration.
+    "mcp<2",
 
     # Database
     "sqlalchemy[asyncio]>=2.0.29",

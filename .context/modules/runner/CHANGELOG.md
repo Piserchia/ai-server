@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-07-30 — mcp 2.0.0 regression: pin `mcp<2` (dispatch/projects MCP injection broken)
+
+**Incident** (same evening as the runner-down fix, surfaced by the hierarchy's
+first pass): every `needs-dispatch-mcp` / `needs-projects-mcp` session failed
+with `'Server' object has no attribute 'list_tools'` (review-and-improve + the
+two event-triggered self-diagnose jobs — the event triggers' first-ever real
+firings, ironically). Cause: claude-agent-sdk 0.1.x pins `mcp>=1.19.0`
+with no upper bound; a routine `pipenv lock` on 2026-07-30 pulled mcp 2.0.0,
+which removed the 1.x lowlevel `Server.list_tools` API the SDK's
+`create_sdk_mcp_server` bridge calls. Last working dispatch-MCP job: 2026-07-28 22:46 (pre-re-lock).
+
+**Fix**: explicit `"mcp<2"` in pyproject dependencies (drop only with the
+deliberate SDK 0.2.x migration); both venvs repaired in place with
+`pip install "mcp<2"` (mcp 1.28.1) pending the next deploy's re-lock.
+Bonus finding: mcp 2.0 in the venv silently suppressed 40 MCP-dependent tests
+from collection — the suite is back to full strength (842).
+
 ## 2026-07-30 — Runner-down incident: stdlib/structlog logging mismatch + supervisor exit code
 
 **Incident**: prod runner found down (launchctl: no PID, last exit 0) with the
