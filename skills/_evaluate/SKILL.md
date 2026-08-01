@@ -6,6 +6,7 @@ effort: medium
 permission_mode: default
 required_tools: [Read, Glob, Grep, Bash]
 max_turns: 25
+context_files: [".context/SYSTEM.md"]
 tags: [orchestration, internal]
 ---
 

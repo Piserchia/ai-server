@@ -6,6 +6,7 @@ effort: medium
 permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
 max_turns: 30
+context_files: [".context/SYSTEM.md"]
 escalation:
   on_failure:
     model: claude-opus-4-7
