@@ -2,6 +2,394 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-01 — Restored missing APPEND_ENTRIES_BELOW marker in runner/skills/PATTERNS.md
+
+**Files changed**: `.context/modules/runner/skills/PATTERNS.md` — inserted the
+standard `<!-- APPEND_ENTRIES_BELOW -->` marker that every other module's
+skills/*.md file has. This file pre-dated the seed convention and had never
+been re-seeded, which caused `_learning_apply` job `912237f7` to hit
+max_turns while the model wandered checking other modules' files instead of
+following its own Step 3 fallback ("if the marker is missing, just append at
+end"). Also applied the learning that failed job was trying to write (about
+`context_files` frontmatter injection, evidence job `64644863`). See
+Troubleshooting entry for the failure mode. Diagnosed by self-diagnose job
+`f13d03a6`.
+
+## 2026-07-31 — MCP tools joined allowed_tools (the second dispatch blocker)
+
+**Files changed**: `src/runner/session.py` — the MCP injection block now
+appends the injected servers' tool names (`mcp__dispatch__enqueue_job`,
+`mcp__projects__{list_projects,get_project,read_project_logs,restart_project}`)
+to `allowed_tools`, mirroring the Task-tool auto-add. Without it, acceptEdits
+sessions had MCP servers but no permission to call them — acceptEdits
+auto-accepts EDITS only, and a headless session can answer no permission
+prompt. Proven live 2026-07-31: the deploy-director's first autonomous
+dispatch attempt ran a clean preflight, prepared the executor description,
+and was then denied `enqueue_job` twice. This was the SECOND layer of the
+dispatch blocker (the first: plan mode blocks MCP outright) — dispatch had
+only ever worked under bypassPermissions, which is also why
+review-and-improve's dispatch stayed dead even after its plan→acceptEdits
+fix. The readonly guard profile (INV-20) still hook-denies restart_project
+for read-only skills; hooks fire before permission evaluation.
+
+## 2026-07-31 — Workspace directive aligned to the execution lane
+
+**Files changed**: `src/runner/session.py` — the injected workspace directive
+told every server-scoped session "server code lands via PR + deploy ... never
+push to main from here", which contradicted the new autonomous execution lane
+(WS-C). It now defers to the skill's declared merge flow: lane-authorized
+skills (server-patch/new-skill, post-LGTM + owner notification) may push main;
+everything else branches + PRs; protected paths always stop at a PR. No
+behavior change outside the directive text.
+
+## 2026-07-31 — Read-only guard profile: oversight skills get structural read-only + dispatch
+
+**Why**: `permission_mode: plan` blocks MCP tools (proven live 2026-07-30 —
+deploy-director's enqueue_job unreachable; review-and-improve's dispatch
+silently dead for weeks), so dispatch-capable oversight skills must run
+acceptEdits — which until now left their read-only-ness prose-only.
+
+**guards.py**: new READ-ONLY profile alongside the workspace profile. Pure
+predicates `readonly_file_violation` (Write/Edit/MultiEdit/NotebookEdit denied
+outright — no path exceptions, temp dirs included) and
+`readonly_bash_violation` (mutation denylist: output redirection except
+/dev/null + fd-dups, quote-masked so quoted SQL `>` comparisons pass; file
+mutators; git mutators with `git fetch` as the sanctioned refs-only exception;
+launchctl mutating subcommands, list/print allowed; alembic
+upgrade/downgrade/revision/stamp; dbmate; createdb/dropdb; pip/pipenv
+install/uninstall/sync/lock; npm/npx/brew; redis-cli
+set/del/push/pop/flush/expire; psql write verbs — statement-start anchored, so
+identifiers like `project-update-poll`/`created_at` never false-positive;
+sudo/kill/crontab/keychain/API-key hard denials).
+`make_readonly_guard_hooks(job_id)` → 3 PreToolUse matchers: file tools, Bash,
+and `.*restart_project` (suffix re-checked in-hook); `enqueue_job`
+deliberately unmatched. Denials audited `guard_denied` with
+`profile: "read-only"`. The guarantee, honestly: file tools structurally
+denied; Bash is a best-effort denylist, not a sandbox (SDK Seatbelt stays the
+SYSTEM.md-tracked OS-level closure).
+
+**session.py**: `_build_options` attaches the readonly profile whenever
+`skill_cfg.privilege_class == "read-only"` — every isolation tier and
+permission mode (belt under plan, load-bearing under acceptEdits); read-only
+wins over workspace hooks if both somehow apply. Workspace wiring untouched.
+
+**lint**: oversight roles ⇒ read-only + mode ∈ {plan, acceptEdits}; new
+role-independent rule: needs-dispatch-mcp + read-only ⇒ acceptEdits.
+
+**Skills**: system-manager + 4 division managers plan→acceptEdits +
+needs-dispatch-mcp + dispatch-authority paragraphs; review-and-improve
+plan→acceptEdits + privilege_class read-only (matches its charter row) +
+gotcha recording the silent-dispatch weeks; deploy-director gotcha updated —
+its read-only contract is now hook-enforced, not prose-only.
+
+Tests: tests/test_guards.py +127 (69-entry deny matrix, 37-entry allow matrix
+of real oversight command vocabulary, 8 hook-contract); tests/test_doc_lint.py
++6 (rule logic on synthetic trees).
+
+
+## 2026-07-31 — Event-loop circuit breaker + global (task-less) deferred promotion
+
+**1. Circuit breaker in `src/runner/events.py`** (2026-07-30 incident: ~17
+self-diagnose jobs event-spawned into a substrate where self-diagnose itself
+was broken — `'Server' object has no attribute 'list_tools'` — each failure
+feeding the 2-in-10-min window; only per-target dedup bounded it):
+- Pure `should_trip_breaker(recent_failures, threshold=5)`: groups failed
+  jobs by normalized error signature (`_error_signature`: whitespace-collapsed
+  first 80 chars; None/blank -> "unknown"); any cluster >= threshold returns
+  that signature (largest cluster wins, ties lexicographic).
+- `_check_circuit_breaker()` runs FIRST each cycle: if `KEY_EVENTS_BREAKER`
+  exists -> skip all event-trigger spawning (skill-failure, project-health,
+  correlated) but NOT the idle-queue review; one info line per cycle at most.
+  On trip: `SET NX EX TTL_EVENTS_BREAKER` (30 min), one error-level log, and
+  EXACTLY ONE `self-diagnose` job ("CIRCUIT BREAKER tripped: N failed jobs ...
+  share the error signature '<sig>'", `target_kind: circuit-breaker`,
+  `created_by: event-trigger:circuit-breaker`) — its completion summary DMs
+  the owner via the normal path. The check crashes fail OPEN in the loop's
+  non-fatal try/except style; new constants `BREAKER_WINDOW_MINUTES = 10`,
+  `BREAKER_FAILURE_THRESHOLD = 5`, `BREAKER_SIGNATURE_LEN = 80`.
+
+**2. Global deferred promotion in `src/runner/plans.py`**: `promote_deferred_for`
+early-returned for task-less completing jobs, stranding any task-less
+`depends_on` child forever (the limitation deploy-director's SKILL.md works
+around). Task-scoped sibling promotion is behaviorally unchanged; the function
+now ALSO scans `status='deferred' AND task_id IS NULL` rows (bounded:
+`TASKLESS_PROMOTION_SCAN_LIMIT = 200`, oldest first), Python-filters for
+`payload.depends_on` naming the completed job (pure `names_dependency`), and
+applies the identical flow: `deps_satisfied` over a completed-set covering all
+of each candidate's deps, INV-9-guarded deferred->queued UPDATE, RPUSH,
+`job_promoted` audit, per-item isolation, never raises. escalation_map is
+passed EMPTY on this path — escalation lineage is derived from a task's own
+job set and has no task-less equivalent — so a dep satisfied only via a
+completed escalation retry does not promote a task-less child (conservative:
+under-promotes, never wrongly promotes). NOTE: `main.py` gated the call on
+`job.task_id` — that gate was lifted in the integration commit immediately
+after this merge, so promotion now fires for every completing job.
+
+Tests: `tests/test_events.py` +23 (signature normalization, breaker boundary/
+mixed/empty/None cases, loop gating incl. fail-open), `tests/test_plans.py`
++10 (`names_dependency`, task-less `deps_satisfied` semantics). Full suite
+898 passed; lint_docs all-PASS.
+
+
+## 2026-07-30 — Enqueue visibility race fix (stranded queued jobs) + epoch heartbeat with TTL
+
+**BUG 1 — `_process_job` dropped popped ids whose row wasn't visible yet.**
+BLPOP can return a job id before the INSERTing transaction's commit is visible
+to the runner's SELECT: `_tick_schedules` RPUSHes *inside* an open transaction
+(add → flush → rpush → … commit on scope exit), and even commit-then-RPUSH
+producers race the BLPOP by sub-ms. The old code logged "job not found" and
+returned — the Redis entry was consumed, the row stayed `status='queued'`
+forever. Bit tonight: job e38d0028 ("job not found" at its exact created_at
+second; re-pushed by hand).
+
+**Fix (consumer-side, covers every producer)** in `src/runner/main.py`:
+- `_process_job` retries the SELECT over ~2s (`_JOB_FETCH_DELAYS` =
+  (0.0, 0.2, 0.3, 0.5, 1.0); fresh session per attempt — only a new
+  transaction sees a commit that landed after the previous attempt began).
+- Still missing → `note_missing_job(id, _requeued_missing_ids)` (deterministic,
+  no-I/O helper + module-level set): first miss → RPUSH the id back to the
+  queue **TAIL** exactly once; a repeat miss → error-log and drop for good, so
+  a truly-deleted row can't ping-pong. The set stays bounded (cleared on found
+  and on drop). The requeue RPUSH is guarded per the loop's 2026-07-28 Redis
+  try/except hygiene — a Redis blip logs the id instead of raising.
+- Found-but-not-queued rows return silently as before (cancel race etc.).
+
+Tests: `tests/test_job_visibility.py` (8 — decision sequences + retry-schedule
+contract).
+
+**BUG 2a — heartbeat hardened for off-runner consumers**: `_job_loop` now
+writes `KEY_RUNNER_HEARTBEAT` as **epoch seconds** with a **15-min TTL**
+(`TTL_RUNNER_HEARTBEAT`, new constant in `src/db.py` beside the key name —
+db.py comment updated in the same commit). Epoch so
+`scripts/healthcheck-all.sh` can age-check it from bash; TTL so a dead
+runner's key disappears instead of sitting stale-but-parsable. Companions:
+gateway `/health` parses epoch with ISO fallback (see gateway CHANGELOG);
+`scripts/healthcheck-all.sh` gained an independent runner-down Telegram DM
+(heartbeat missing/>600s AND no launchd PID for com.assistant.runner; creds
+READ from the checkout's .env; one DM per 30 min via a volumes/ state file;
+fully guarded so project probes can never be blocked). Closes the liveness
+blind spot from the 2026-07-30 incident (runner down ~a day —
+docs/TROUBLESHOOTING.md "runner down, launchctl shows no PID with last
+exit 0").
+
+## 2026-07-30 — mcp 2.0.0 regression: pin `mcp<2` (dispatch/projects MCP injection broken)
+
+**Incident** (same evening as the runner-down fix, surfaced by the hierarchy's
+first pass): every `needs-dispatch-mcp` / `needs-projects-mcp` session failed
+with `'Server' object has no attribute 'list_tools'` (review-and-improve + the
+two event-triggered self-diagnose jobs — the event triggers' first-ever real
+firings, ironically). Cause: claude-agent-sdk 0.1.x pins `mcp>=1.19.0`
+with no upper bound; a routine `pipenv lock` on 2026-07-30 pulled mcp 2.0.0,
+which removed the 1.x lowlevel `Server.list_tools` API the SDK's
+`create_sdk_mcp_server` bridge calls. Last working dispatch-MCP job: 2026-07-28 22:46 (pre-re-lock).
+
+**Fix**: explicit `"mcp<2"` in pyproject dependencies (drop only with the
+deliberate SDK 0.2.x migration); both venvs repaired in place with
+`pip install "mcp<2"` (mcp 1.28.1) pending the next deploy's re-lock.
+Bonus finding: mcp 2.0 in the venv silently suppressed 40 MCP-dependent tests
+from collection — the suite is back to full strength (842).
+
+## 2026-07-30 — Runner-down incident: stdlib/structlog logging mismatch + supervisor exit code
+
+**Incident**: prod runner found down (launchctl: no PID, last exit 0) with the
+queue stranded. Root-cause chain: `events.py` logs with structlog-style kwargs
+on a stdlib `logging.getLogger` logger → `TypeError: Logger._log() got an
+unexpected keyword argument 'poll_interval'` the moment `event_loop` starts →
+the 2026-07-28 subsystem supervisor correctly shuts the process down — but
+`main()` exits **0**, and launchd's `KeepAlive {SuccessfulExit: false}` never
+restarts successful exits, so the runner stayed down. Latent since Phase 4
+(42ef735): before supervision, the event_loop task died silently at startup,
+which also means event triggers had never actually run in production.
+
+**Changes**:
+- `events.py` (×4), `retention.py` (×1), `review.py` (×1): structlog-style
+  kwargs → %-style stdlib logging. The last two instances (a multiline call in
+  events.py and review.py's `code review complete` — INV-13's own machinery)
+  were found by the new lint check, not by grep: AST beats regex here.
+- `main.main` now returns an exit code (`sys.exit(asyncio.run(main()))`):
+  crash path exits 1 so launchd actually restarts a crashed runner — the
+  supervision fix's stated intent, previously unreachable.
+- Regression test `tests/test_events.py::TestEventLoopStartup` (a pre-set
+  shutdown event exercises exactly the startup log line, no DB).
+- Lint check 13 `check_logger_style` (scripts/lint_docs.py, AST-based): bans
+  structlog-style kwargs on stdlib loggers across src/ — the whole bug class,
+  which pure-function tests can't catch because the crash is at log time in
+  paths tests never execute.
+
+**Why**: a repo mixing structlog (main, quota) and stdlib logging (everything
+else) will keep regrowing this bug unless it's linted structurally.
+
+Closed a cluster of silent-failure paths the 2026-07-28 audit found where a
+documented invariant wasn't actually enforced:
+
+- **`main._cancel_listener`** (INV-8): per-iteration try/except + UUID
+  validation. A malformed cancel payload (`uuid.UUID("garbage")`) or a
+  transient Redis error previously killed the listener permanently while
+  `/health` stayed green (only `_job_loop` heartbeats).
+- **`main._finish_job`** (INV-9): guards `WHERE status != 'cancelled'` +
+  rowcount check, so the cancel-race (cancel lands, then a trailing
+  `_finish_job(completed)` resurrects the job) can't overwrite a user cancel.
+  `completed→awaiting_user` (review blocker) is still allowed.
+- **`main._job_loop`** (M5): `is_paused` + `blpop` are now inside the Redis
+  try/except — a Redis blip no longer kills the loop and strands the runner.
+- **`main.main`** (M5): supervises the 4 async tasks — if any exits on its own
+  (dead scheduler/cancel-listener), it shuts the process down so launchd
+  restarts a clean one instead of limping invisibly. (Code-review fix: cancel
+  survivors ONLY on the crash path — on graceful SIGTERM `_job_loop` is draining
+  in-flight jobs, so cancelling it there would abort running sessions.)
+- **`review.run_code_review` + `main._maybe_review`** (INV-13): the review gate
+  fails CLOSED. A review that can't run now returns `ReviewOutcome.error` →
+  `awaiting_user`, instead of `changes_requested` (which doesn't gate) letting
+  an unreviewed diff ship.
+- **`plans.promote_deferred_for` / `fail_dependents_of`** (T4): per-item
+  isolation — one failed subtask promotion/cascade no longer aborts the loop
+  and strands ready siblings.
+- **`workspaces._run_git`** (M3): catches `TimeoutExpired` → returncode 124, so
+  a hung `git pull --ff-only` in `sync_canonical`'s finally can't turn an
+  already-pushed, successful job into a failure that re-runs done work.
+- **`config.server_root`** default corrected (`assistant` → `ai-server`) — the
+  wrong default silently repointed every volume path when SERVER_ROOT was unset.
+- **`audit_log.py`** docstring: `job_completed` writes `usage`+`duration_seconds`,
+  not the previously-documented `cost_usd` (none — subscription auth).
+
+Behavioral tests for these land with the fakeredis/DB harness (Batch 4).
+
+## 2026-07-28 — Segregation code-review fixes (Phases A–E)
+
+Addressed the code-review sub-agent's should-fixes (all were latent — they bite
+the first dev-repo project, not today's legacy ones):
+- **main.py `_maybe_review` / `_verify_writeback`** now resolve the diff cwd via
+  `session._resolve_cwd(job, resolved_skill)` (delivery-aware) instead of always
+  the runtime clone — otherwise a dev-repo project (which commits to the dev
+  repo) would show an empty diff and SILENTLY SKIP the code-review gate.
+- **main.py `DeployNeedsApproval`** now fails terminally with an actionable nudge
+  instead of parking in `awaiting_user` — there is no deploy-resume path (the
+  telegram Approve button completes a task, it does not re-enqueue a deploy), so
+  parking would hang forever.
+- **`skills/project-redeploy`** fails CLOSED when a project has no
+  `delivery.deploy` block or (service/api) empty `services` — a bare pull with no
+  restart ships stale code. Fixed the slug example (slug is the projects/ dir
+  name, may differ from subdomain — `baseball-bingo` not `bingo`).
+- **router.py** `\bredeploy\b.*\batlas\b` → atlas-redeploy so "redeploy the atlas
+  dashboard" keeps atlas's bespoke pipeline instead of the generic engine.
+- Doc nits: corrected the `_resolve_delivery` docstring (described a runtime
+  special-case that never existed) and noted the INV-2 pre-execution-rejection
+  exception in SYSTEM.md.
+
+## 2026-07-27 — Generic project-redeploy router rule (segregation Phase C)
+
+**Files changed**: `src/runner/router.py` — added `\bredeploy\b` → `project-redeploy`
+AFTER the atlas + server-deploy rules (first-match-wins, so "redeploy atlas" →
+atlas-redeploy and "deploy the server" → server-deploy still win; "redeploy
+bingo" → the generic engine). "deploy X" phrasings the regex misses fall to the
+LLM router via the new skill's description.
+
+**Why**: `skills/project-redeploy/SKILL.md` (new) is the contract-driven deploy
+engine that reads a project's `delivery.deploy` block; it needs a routing entry.
+`atlas-redeploy` is kept (hard rule: never delete a skill) and remains atlas's
+path until atlas's manifest carries an explicit delivery block (Phase E).
+
+## 2026-07-27 — Project delivery enforcement (segregation Phase B)
+
+**Files created**: `src/runner/delivery.py` (contract enforcement: dev-repo
+cwd scoping + deploy-authority gate; pure decision fns + fail-open manifest
+loader), `tests/test_delivery.py` (24).
+
+**Files changed**:
+- `src/runner/session.py` — `_resolve_project(job, skill_name)` resolves the
+  session cwd from the project's delivery contract: `topology: dev-repo` scopes
+  a NON-deploy session to the canonical dev repo (the separate git thread),
+  audited as `project_cwd_resolved`. run_session runs the deploy-authority gate
+  BEFORE any work (raises `DeployRefused`/`DeployNeedsApproval`).
+- `src/runner/main.py` — `_process_job` catches `DeployRefused` (terminal fail,
+  NO escalation — a policy refusal must not retry) and `DeployNeedsApproval`
+  (→ awaiting_user + notify).
+- `src/runner/guards.py` — git write subcommands (commit/add/rebase/merge added
+  to reset/checkout/clean/restore) now count as mutators, so a workspace-tier
+  session that reaches into a runtime clone via absolute path
+  (`cd <runtime-clone> && git add -A && git commit`) is guard-denied. The
+  runtime clone lives under server_root (already a protected root), so no new
+  plumbing. Guards bind workspace-tier only → content projects (isolation:none)
+  that legitimately commit are unaffected.
+
+**Why**: make the single-writer / deployability rules structural instead of
+prose. Combined with dev-repo cwd scoping, the EXISTING workspace guard (denies
+writes outside the per-job clone) already prevents a dev-repo patch session from
+touching the runtime clone — the git-mutator addition is belt-and-suspenders for
+explicit-absolute-path reaches. See
+`docs/superpowers/plans/2026-07-27-project-delivery-segregation.md`.
+
+**Side effects**: NONE until a project opts in with a `delivery` block —
+legacy/derived manifests resolve to the runtime clone exactly as before. A
+deploy job whose project is `deployable:false`/`manual-only` (autonomous) now
+fails with a clear contract reason instead of running.
+
+**Gotchas discovered**: the deploy gate raises before `job_started` is logged
+(like preflight failures already do) — the `deploy_authority` audit event is the
+record. Adding `git add`/`commit` to the mutator set is safe ONLY because it is
+gated on a protected-root reference AND guards bind workspace-tier sessions only.
+
+## 2026-07-27 — SDK-native overhaul: container lane removed, guard hooks + subagents + structured outputs
+
+**Files created**: `src/runner/guards.py` (PreToolUse guard hooks — the
+container lane's containment duty, now enforced in-process and binding even
+under bypassPermissions), `src/runner/agents.py` (SKILL.md → SDK
+AgentDefinition compilation; frontmatter `subagents:` → in-session Task-tool
+delegation), `tests/test_guards.py`, `tests/test_agents.py`.
+
+**Files removed**: `src/runner/executors.py`, `tests/test_executors.py`,
+`Dockerfile.agent` — the `claude -p`-in-docker lane and its image.
+
+**Files changed**:
+- `src/runner/session.py` — single execution path (in-process SDK only);
+  wires guard hooks for workspace-tier sessions + `agents=` subagents +
+  effort validation (`xhigh` is a native SDK value on 0.1.81 — passed
+  through, NOT remapped); typed
+  rate-limit handling (`RateLimitEvent` → QuotaExhausted, audited as
+  `rate_limit_status`); ResultMessage.is_error now fails the job when no
+  usable text was produced (parity with the removed container lane).
+- `src/runner/workspaces.py` — `resolve_isolation(skill, payload)` (2-arg);
+  tiers are `none | workspace | host`; retired `container` maps to workspace.
+- `src/runner/quota.py` — `detect_from_rate_limit(info)`: typed detection
+  from RateLimitInfo (status/resets_at); string heuristic kept as fallback.
+  Retires the "quota detection is heuristic" debt item.
+- `src/runner/review.py` — **bug fix**: the reviewer called the nonexistent
+  `ClaudeSDKClient.process_message()`; the blanket except turned EVERY review
+  into `changes_requested` silently (no LGTM/blocker verdict was ever real).
+  Rewritten on `query()` + `output_format` json_schema (verdict enum enforced
+  by the SDK; `outcome_from_structured` pure, text parse kept as fallback).
+- `src/runner/llm_router.py` / `src/runner/learning.py` — structured outputs
+  via `output_format` (+ `route_from_structured` / `proposal_from_obj` pure
+  validators); text parsers kept as fallback; router catalog now reads
+  `SkillConfig.description` instead of re-parsing YAML per skill.
+- `src/runner/main.py` — startup check no longer shells out to
+  `claude --version`; verifies no ANTHROPIC_API_KEY + SDK import + bundled
+  (or system) CLI presence.
+- `src/config.py` — container settings removed (CONTAINER_RUNTIME,
+  AGENT_IMAGE, CONTAINER_MEMORY, CONTAINER_CPUS, CLAUDE_CODE_OAUTH_TOKEN);
+  stale env vars are ignored (`extra="ignore"`).
+- `evals/run.py` — judge ported from `claude -p` subprocess to an SDK
+  `query()` call (last CLI shell-out in the codebase).
+- `pyproject.toml` — `claude-agent-sdk>=0.1.63,<0.2` (0.2.x exists; upgrade
+  is a deliberate follow-up with its own test pass).
+
+**Why**: the mission is Agent-SDK-native on subscription auth. The docker
+lane was our only self-managed CLI execution path, was disabled by default
+(empty CONTAINER_RUNTIME), and duplicated the SDK lane's audit plumbing.
+The SDK's own surface (hooks, agents, output_format, RateLimitEvent,
+bundled CLI) now covers everything the lane did, with enforcement instead
+of convention. Full rationale: `docs/SDK_MIGRATION_2026-07-27.md`.
+
+**Side effects**: INV-17 redefined (guard hooks instead of containers);
+`isolation: container` frontmatter is lint-flagged (runtime still maps it);
+sessions that error with no output now FAIL instead of completing empty.
+
+**Gotchas discovered**: `ClaudeAgentOptions.effort` accepts only
+low|medium|high|max — the repo's `xhigh` was passing through unvalidated;
+hook input keys are snake_case (`tool_name`, `tool_input`); workspace clones
+live UNDER server_root, so guard path scans must mask the workspace path
+before matching protected roots.
+
 ## 2026-07-12 — Push gates injected into workspace directives
 
 **Files changed**: `src/runner/session.py` — both workspace directive

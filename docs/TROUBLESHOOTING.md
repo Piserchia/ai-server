@@ -9,6 +9,42 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: `_learning_apply` job fails with `error_max_turns: Reached maximum number of turns (6)`
+
+### Root cause
+
+The `_learning_apply` skill has a tight `max_turns: 6` budget. Happy path uses
+~5 tool calls (ls → grep marker → date → Edit → git commit). Any exploratory
+detour blows the budget. Common trigger: the target module's
+`skills/<CATEGORY>.md` is missing the `<!-- APPEND_ENTRIES_BELOW -->` marker.
+The skill's own Step 3 says "if the marker is missing, just append at end",
+but models often instead wander to check other modules' files and burn the
+turn budget.
+
+### Fix
+
+1. Ensure the target file has the marker:
+   ```bash
+   grep -l APPEND_ENTRIES_BELOW .context/modules/*/skills/*.md
+   ```
+   If any file is missing from that list, either re-run
+   `bash scripts/seed-module-skills.sh` (safe on empty stubs — never
+   overwrites existing content) or manually insert
+   `<!-- Append entries below this marker. Do not delete the marker. -->`
+   followed by `<!-- APPEND_ENTRIES_BELOW -->` near the top of the file,
+   before any existing entries.
+2. If it recurs even with markers in place, raise `max_turns` in
+   `skills/_learning_apply/SKILL.md` (must be committed in the DEV repo, then
+   deployed — skill frontmatter is server code).
+
+### Incident
+
+Job `912237f7` (2026-08-01) — target was `runner/PATTERNS.md`, which was the
+only module skills file that had never been seeded with the marker.
+Diagnosed by job `f13d03a6`.
+
+---
+
 ## Symptom: `/task` submitted, shows "queued", then `failed` quickly with generic error
 
 ### Quick triage commands
@@ -581,28 +617,32 @@ git -C "$ATLAS" log --oneline HEAD..origin/master   # undeployed dev commits
 ```
 
 ### Root cause
-A commit was born in the runtime clone instead of the dev repo (~/Documents/repos/atlas).
-The runtime clone is a pull-only deploy target; any commit made there (hotfix, migration
-rename, "quick fix on the Mini") permanently blocks ff-only pulls. First occurrence
-2026-07-09: a dbmate migration-collision repair was committed on the Mini with the host
-git identity while the dev repo got its own equivalent commit — same content, different
-SHAs. Also check `remote -v`: after the 2026-07-09 pm-edge→atlas rename, origin must be
-`~/Documents/repos/atlas`.
+A commit was born in the runtime clone instead of a development clone. The runtime clone
+is a pull-only deploy target; any commit made there (hotfix, migration rename, "quick fix
+on the Mini") permanently blocks ff-only pulls. First occurrence 2026-07-09: a dbmate
+migration-collision repair was committed on the Mini with the host git identity while the
+dev repo got its own equivalent commit — same content, different SHAs. Also check
+`remote -v`: origin must be `https://github.com/Piserchia/atlas.git` (GitHub-canonical
+since 2026-07-31; before that it was the local dev-repo path — a local-path origin is now
+itself a misconfiguration).
 
 ### Fix
 ```bash
 git -C "$ATLAS" branch backup-$(date +%F)            # preserve, never destroy evidence
-git -C "$ATLAS" remote set-url origin "$HOME/Documents/repos/atlas"   # if wrong
+git -C "$ATLAS" remote set-url origin https://github.com/Piserchia/atlas.git   # if wrong
 git -C "$ATLAS" fetch origin
 git -C "$ATLAS" reset --hard <last common commit>    # then: /task redeploy atlas
-# afterwards: git log master..backup-<date> — if anything unique, cherry-pick INTO DEV
+# afterwards: git log master..backup-<date> — if anything unique, cherry-pick into a
+# development clone and land it via origin/master (never re-commit here)
 ```
 
 ### Prevention
-Single-writer rule (atlas CLAUDE.md §Deployment topology): all commits in the dev repo,
-runtime pulls only. Jobs and skills must never git-commit in projects/atlas; a fix found
-on the Mini is committed in dev and deployed via atlas-redeploy. The atlas-redeploy skill
-now emits the divergence evidence automatically.
+GitHub-canonical rule (atlas CLAUDE.md §Deployment topology, 2026-07-31): commits are
+born in development clones (Mini `~/Documents/repos/atlas` or a laptop), integrate only
+through GitHub `origin/master`, and the runtime clone pulls only. Jobs and skills must
+never git-commit in projects/atlas; a fix found on the Mini is committed in a dev clone,
+pushed, and deployed via atlas-redeploy. The atlas-redeploy skill emits the divergence
+evidence automatically.
 
 ## Symptom: a skill-triggered job ignores its skill and does unrelated "helpful" work
 
@@ -758,313 +798,6 @@ runner heartbeat is stale** (the external dead-man's-switch alerts on
 non-200; worker activated 2026-07-30), and `healthcheck-all.sh` adds a
 tunnel-independent local layer (2026-07-31): heartbeat stale AND no runner
 PID → direct Telegram DM, rate-limited to one per 30 min.
-
-## Symptom: false-positive "project unhealthy 20+ min" self-diagnose while the project answers /health 200
-
-### Diagnostic
-
-Self-diagnose fires with `Self-diagnose: project '<slug>' has been unhealthy
-for 20+ minutes` (often two or more slugs at the same second, because
-they're all triggered by the same event tick). Direct probe says the project
-is fine:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 http://localhost:<port>/
-# → 200
-psql assistant -c "SELECT slug, NOW() - last_healthy_at AS staleness FROM projects;"
-# → staleness > 20 min for the triggered slugs
-
-# Check whether healthcheck-all itself skipped cycles:
-awk '{print $1}' volumes/logs/healthcheck.out.log | tail -50
-# Look for a gap ≫ 300s between successive lines.
-grep -E "^2026-..-..T..:..:..Z FAIL <slug>" volumes/logs/healthcheck.log
-# → no entry in the trigger window (script didn't run to observe a FAIL either)
-```
-
-Also check for a recent deploy or restart of any service (server-deploy,
-<project>-redeploy) — brief downtime plus a missed subsequent healthcheck
-tick and you cross 20 min without a real outage.
-
-### Root cause
-
-`com.assistant.healthcheck-all` (launchd, `StartInterval=300`) periodically
-slips its 5-minute cadence and takes ~20 min between successful executions.
-Observed 13 such gaps in ~24h on 2026-07-30/31 (typical gap 1100–1950s).
-Every slip lets `projects.last_healthy_at` age past the 20-min cutoff, so
-the event-trigger in `src/runner/events.py:_should_trigger_project_diagnose`
-fires even though the project is answering 200 the whole time.
-
-`last_healthy_at` is a proxy for "healthcheck-all observed a 200" — it is
-NOT a proxy for "project is unhealthy." The current trigger conflates the
-two.
-
-### Fix (this incident)
-
-None — the project is healthy. Close the self-diagnose job with a note
-that it was a false positive. Verify with the direct `curl` above.
-Attempting `restart_project` on a healthy service is harmful (brief real
-downtime for nothing).
-
-### Prevention (requires server-patch, MEDIUM risk)
-
-Two complementary changes:
-
-1. `src/runner/events.py:_check_project_health` — before enqueuing
-   self-diagnose for a stale `last_healthy_at`, probe the project's
-   `http://localhost:<port><healthcheck>` directly (5s timeout). Only fire
-   if the probe also fails. Refactor as a pure predicate that takes an
-   injected probe function so it stays unit-testable.
-2. Make `_check_project_health` skip when `healthcheck-all` itself is
-   unhealthy: add a `healthcheck:last_run` Redis key (set at the end of
-   `healthcheck-all.sh`, TTL 20 min) and gate the event on its presence.
-   Missing key ⇒ the observer is broken, not the observees ⇒ do not fire
-   per-project alerts. (Add a separate observer-down alert instead.)
-3. Long-term: investigate why the launchd job slips. `StartInterval` on a
-   sleepy Mac Mini can stack up if the machine idles/sleeps between ticks;
-   `launchd`'s coalescing skips missed intervals rather than catching up.
-   Options: replace StartInterval with a StartCalendarInterval array, or
-   switch the check to an in-process asyncio task inside the runner (with
-   the runner-down backstop still owned by launchd).
-
-_First observed here 2026-07-31 00:24:59 local: paired self-diagnose jobs
-for atlas + baseball-bingo (`eed7225d…`, `43c909ca…`) fired 44s after a
-successful atlas-redeploy (`d6f0b3ad…`, 43s runtime). Both projects were
-answering 200 the whole time. healthcheck-all's previous successful line
-was 04:04:22Z; next was 04:25:53Z — a 1291-second gap while the event
-engine's 20-min window ran out._
-
-_Recurrence 2026-07-31 ~05:11 local (job `95f6fecb`): single self-diagnose
-fired for atlas alone. Atlas answered 200 in 37ms and staleness was 23s by
-the time diagnosis ran. Cause: healthcheck-all had FOUR consecutive
-21–22-minute gaps in the prior 2h (02:55→03:17, 03:17→03:39, 04:04→04:25,
-04:50→05:11). Same defect, still unfixed — prevention item #1/#2 above
-remain the correct patch._
-
-_Recurrence 2026-07-31 ~05:42 local (job `dc1046d6`): single self-diagnose
-fired for atlas alone with staleness 20:59 at trigger. Direct probe of
-`http://localhost:8791/` returned 200 in 66ms. Same underlying cause:
-healthcheck-all slipped again 04:04:22Z→04:25:53Z (1291s) and 04:50:59Z→
-05:11:42Z (1243s), aging `last_healthy_at` past the 20-min cutoff while
-atlas was answering the whole time. Prevention items #1/#2 remain unfixed._
-
-_Recurrence 2026-07-31 ~05:43 local (job `9a30b37a`): single self-diagnose
-fired for baseball-bingo alone with staleness 21:16 at diagnosis time.
-Direct probes: `http://localhost:8790/healthz` → 200 in 4.6ms,
-`http://localhost:8790/` → 200 in 4.3ms,
-`https://bingo.chrispiserchia.com/` → 200 in 171ms. PID 71682 present.
-Same healthcheck-all slippage cluster as the sibling atlas false-positive
-one minute earlier. FOURTH documented occurrence of this defect within
-5h — the recurrence rate now exceeds one wasted self-diagnose session per
-hour. Prevention items #1/#2 in `src/runner/events.py` remain the correct
-patch and are increasingly overdue._
-
-_Recurrence 2026-07-31 ~06:29 local (job `55a7ae36`): single self-diagnose
-fired for atlas alone. Direct probes at diagnosis time:
-`http://localhost:8791/` → 200 in 13ms, `https://atlas.chrispiserchia.com/`
-→ 302 (Cloudflare Access redirect) in 199ms. Atlas manifest healthy in DB
-(staleness 9s — a fresh healthcheck-all cycle had just landed at 06:29:39Z
-when the diagnosis ran). Healthcheck-all slippage pattern continues:
-06:08:37Z → 06:29:39Z (1262s gap), preceded by 05:21:43Z → 05:43:31Z
-(1308s) and 04:50:59Z → 05:11:42Z (1243s). FIFTH occurrence in ~6h. Same
-class of defect; prevention items #1/#2 in `src/runner/events.py` remain
-the only correct fix (event trigger must direct-probe before firing and
-gate on `healthcheck:last_run` freshness)._
-
-_Recurrence 2026-07-31 ~06:30 local (job `8be2a764`): single self-diagnose
-fired for baseball-bingo — the twin of `55a7ae36` one minute earlier, same
-slippage cluster. Direct probes at diagnosis time:
-`http://localhost:8790/` → 200 in 3.2ms, `http://localhost:8790/healthz`
-→ 200 in 1.0ms, `https://bingo.chrispiserchia.com/` → 200 in 179ms.
-PID 71682 present (unchanged since prior recurrence — service never
-bounced). Staleness only 18s by diagnosis time because a fresh
-healthcheck-all cycle had landed at 06:29:39Z; the trigger fired on the
-prior 06:08:37Z→06:29:39Z gap (1262s). SIXTH occurrence in ~6h. Prevention
-items #1/#2 in `src/runner/events.py` are now the single highest-value
-noise-suppression patch open — every ~40–90 min a self-diagnose burns a
-session on a healthy project._
-
-_Recurrence 2026-07-31 ~07:00 local (job `e1ca26ff`): single self-diagnose
-fired for baseball-bingo. Direct probes at diagnosis time:
-`http://localhost:8790/` → 200 in 4.2ms, `http://localhost:8790/healthz`
-→ 200 in 1.1ms, `https://bingo.chrispiserchia.com/` → 200 in 163ms.
-PID 71682 present (unchanged since 2026-07-31 ~06:29 — service has NEVER
-bounced across all recurrences today). Staleness only 3.5s by diagnosis
-time because a fresh healthcheck-all cycle had just landed at 07:00:35Z;
-the trigger fired on the prior 06:39:41Z→07:00:35Z gap (1254s). SEVENTH
-occurrence in ~7h. Slippage cluster in the trigger window: 06:08:37Z→
-06:29:39Z (1262s), 06:39:41Z→07:00:35Z (1254s), separated by three
-successful 5-min ticks in between — the launchd job runs cleanly for a
-while, then stalls for ~21 min, on repeat. Prevention items #1/#2 in
-`src/runner/events.py` remain unimplemented and are now the single
-highest-ROI open patch on the server; a direct-probe gate + observer
-freshness gate would have caught all seven of today's false positives._
-
-_Recurrence 2026-07-31 ~07:47 local (job `650bee2f`): NINTH self-diagnose
-fired for baseball-bingo. Direct probes at diagnosis time:
-`http://localhost:8790/healthz` → 200 in 6.1ms,
-`http://localhost:8790/` → 200 in 3.6ms,
-`https://bingo.chrispiserchia.com/` → 200 in 141ms. PID 71682 still present
-(unchanged across all recurrences — service has NEVER bounced). Staleness
-only 0.26s by diagnosis time because a fresh healthcheck-all cycle had just
-landed at 07:46:47Z; the trigger fired on the prior 07:25:40Z→07:46:47Z gap
-(~1267s). NB: server-patch `cb644203` completed 2026-07-31 03:11 to
-implement prevention items #1/#2 but no PR / no commit landed in
-`origin/main` (HEAD still at `17136b3`, no open PR for events.py) — the
-fix is somewhere between the workspace and merge and needs a human to
-finish the ship. Until then the false positives continue at ~1/hour._
-
-_Recurrence 2026-07-31 ~07:00 local (job `5aa7000f`): EIGHTH self-diagnose
-for atlas within ~7h — twin of `e1ca26ff` one minute earlier, same slippage
-cluster. Direct probe at diagnosis time: `http://localhost:8791/` → 200 in
-32ms. Atlas staleness only 20s by diagnosis (fresh 07:00:35Z healthcheck
-tick had just landed); trigger fired on the 06:39:41Z→07:00:35Z gap
-(1254s). All 3 launchd services present (com.assistant.project.atlas +
-dash-scheduler + pm-edge). Zero DB grep matches for prior `server-patch`
-kind jobs on this issue — despite 7 recurrences and a concrete patch spec
-sitting in this file since occurrence #1, no fix has been enqueued.
-Enqueuing `server-patch` now to implement prevention items #1/#2 (direct-
-probe gate + `healthcheck:last_run` freshness gate in
-`src/runner/events.py:_check_project_health`)._
-
-_Recurrence 2026-07-31 ~07:46 local (job `ee7f12d6`): TENTH self-diagnose
-in ~7.5h — atlas twin of the baseball-bingo `650bee2f` noted above, same
-07:25:40Z→07:46:47Z (~1267s) healthcheck-all slippage cluster. Direct
-probe at diagnosis time: `http://localhost:8791/` → 200 in 69ms. Staleness
-0.29s at diagnosis (fresh 07:46:47Z tick had landed). All 3 launchd
-services present (com.assistant.project.atlas + dash-scheduler + pm-edge).
-Confirmed the sibling's finding: `origin/main` HEAD is still `17136b3` and
-does not contain the direct-probe / freshness-gate logic in
-`src/runner/events.py`, so the previously-completed server-patch
-`cb644203` (03:03) never landed. Not re-dispatching from THIS self-
-diagnose — a second server-patch attempt would probably reproduce the
-same silent-drop failure (workspace runs green then no push event); the
-workspace push/merge path itself is a distinct medium-server-risk defect
-that needs human review before another attempt. Closing as false positive._
-
-_Recurrence 2026-07-31 ~10:26 local (job `9b73d181`): ELEVENTH self-diagnose
-in ~10.5h — baseball-bingo. Direct probes at diagnosis time:
-`http://localhost:8790/healthz` → 200 in 1.7ms,
-`http://localhost:8790/` → 200 in 5.3ms,
-`https://bingo.chrispiserchia.com/` → 200 in 162ms. PID 71682 still present
-(unchanged across all 11 recurrences — service has NEVER bounced today).
-Staleness only 16s at diagnosis (fresh 14:26:11Z healthcheck tick had just
-landed); trigger fired on the prior 14:05:03Z→14:26:11Z gap (1268s).
-Additional slippage visible in the healthcheck.out.log tail:
-13:17:51Z→13:33:12Z (921s) and 13:43:15Z→13:50:00Z (405s) alongside the
-big 21-min gap. `origin/main` HEAD is still `17136b3` — the completed
-server-patch `cb644203` from 03:03 still has not landed. Not re-dispatching
-per the 10th-occurrence guidance above; the ship path is the blocking
-defect. Closing as false positive._
-
-_Recurrence 2026-07-31 ~15:17 local (job `0ae26fdd`): THIRTEENTH self-diagnose
-in ~15h — atlas. Direct probes at diagnosis time:
-`http://localhost:8791/` → 200 in 30ms,
-`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 140ms.
-Staleness only 37s at diagnosis (fresh 15:17:01Z healthcheck tick had just
-landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
-PIDs 81426/81428/81432, unchanged). Biggest slippage yet observed:
-14:39:21Z → 15:17:01Z = ~2260s (~37.7 min) — well past the 20-min cutoff,
-so the trigger fired on a real gap in observer coverage while atlas was
-answering 200 the whole time. `origin/main` HEAD confirmed still `17136b3`
-(server-patch `cb644203` from 03:03 still not landed). Not re-dispatching
-per the 10th-occurrence guidance; the workspace push/merge silent-drop
-remains the blocking defect. Closed as false positive._
-
-_Recurrence 2026-07-31 ~15:17 local (job `418dec5e`): FOURTEENTH self-
-diagnose in ~15h — baseball-bingo twin of the atlas `0ae26fdd` entry above,
-same 14:39:21Z → 15:17:01Z (~2260s / ~37.7-min) healthcheck-all slippage
-cluster. Direct probes at diagnosis time:
-`http://localhost:8790/healthz` → 200 in 1.5ms,
-`http://localhost:8790/` → 200 in 5.8ms,
-`https://bingo.chrispiserchia.com/` → 200 in 155ms (first probe hit a
-transient 5.1s timeout via `curl --max-time 5`; retry with `--max-time 15`
-succeeded 200/155ms — momentary edge hiccup, not a project outage). PID
-71682 still present (unchanged across all 14 recurrences today — service
-has never bounced). Staleness only 46s at diagnosis (fresh 15:17:01Z
-healthcheck tick had just landed). `origin/main` HEAD confirmed still
-`17136b3`. Not re-dispatching per the 10th-occurrence guidance; the
-paired atlas+bingo firings on this ~37-min gap confirm the class of defect
-is escalating (both frequency and single-gap severity increasing) — the
-workspace push/merge silent-drop that stranded server-patch `cb644203`
-now warrants human intervention on the ship path. Closed as false
-positive._
-
-_Recurrence 2026-07-31 ~16:00 local (job `ba077bbe`): FIFTEENTH self-
-diagnose in ~15.5h — atlas. Direct probes at diagnosis time:
-`http://localhost:8791/` → 200 in 15ms,
-`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 112ms.
-Staleness only 10s at diagnosis (fresh 16:00:03Z healthcheck tick had just
-landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
-PIDs 81426/81428/81432, unchanged across the day — service never bounced).
-Trigger fired on the prior 15:39:43Z→16:00:03Z gap (~1220s / ~20.3 min),
-right at the 20-min cutoff. `origin/main` HEAD confirmed still `17136b3`
-(server-patch `cb644203` from 03:03 still not landed 13h later). Not
-re-dispatching per the 10th-occurrence guidance; the workspace push/merge
-silent-drop remains the blocking defect and needs human review before
-another server-patch attempt. Closed as false positive._
-
-_Recurrence 2026-07-31 ~16:00 local (job `ecd383a5`): SIXTEENTH self-
-diagnose in ~15.5h — baseball-bingo twin of atlas `ba077bbe` from the same
-15:39:43Z→16:00:03Z (~1220s / ~20.3-min) healthcheck-all slippage cluster.
-Direct probes at diagnosis time:
-`http://localhost:8790/healthz` → 200 in 1.5ms,
-`http://localhost:8790/` → 200 in 5.7ms,
-`https://bingo.chrispiserchia.com/` → 200 in 160ms. PID 71682 still present
-(unchanged across all 16 recurrences today — service has never bounced).
-Staleness only 11s at diagnosis (fresh 16:00:03Z healthcheck tick had just
-landed). `origin/main` HEAD confirmed still `17136b3` — server-patch
-`cb644203` from 03:03 still not landed 13h later. Not re-dispatching per
-the 10th-occurrence guidance; workspace push/merge silent-drop remains the
-blocking defect and needs human review before another server-patch attempt.
-Closed as false positive._
-
-_Recurrence 2026-07-31 ~16:38 local (job `d8260ed9`): SEVENTEENTH self-
-diagnose in ~16h — atlas. Direct probes at diagnosis time:
-`http://localhost:8791/` → 200 in 12ms,
-`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 167ms.
-Staleness only 4.68s at diagnosis (fresh 16:37:57Z healthcheck tick had just
-landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
-PIDs 81426/81428/81432, unchanged across the day — service never bounced).
-Trigger fired on the prior 16:15:07Z→16:37:57Z gap (~1370s / ~22.8 min) —
-this hour's healthcheck-all slippage past the 20-min cutoff. `origin/main`
-HEAD confirmed still `17136b3` (server-patch `cb644203` from 03:03 still
-not landed 13.5h later). Not re-dispatching per the 10th-occurrence
-guidance; the workspace push/merge silent-drop remains the blocking defect
-and needs human review before another server-patch attempt. Closed as
-false positive._
-
-_Recurrence 2026-07-31 ~16:38 local (job `d4c39cb3`): EIGHTEENTH self-
-diagnose in ~16h — baseball-bingo twin of atlas `d8260ed9` from the same
-16:15:07Z→16:37:57Z (~1370s / ~22.8-min) healthcheck-all slippage cluster.
-Direct probes at diagnosis time:
-`http://localhost:8790/healthz` → 200 in 1.4ms,
-`http://localhost:8790/` → 200 in 3.6ms,
-`https://bingo.chrispiserchia.com/` → 200 in 199ms. PID 71682 still present
-(unchanged across all 18 recurrences today — service has NEVER bounced).
-Staleness only 13s at diagnosis (fresh 16:37:57Z healthcheck tick had just
-landed). `origin/main` HEAD confirmed still `17136b3` — server-patch
-`cb644203` from 03:03 still not landed ~13.5h later. Paired atlas+bingo
-firings at 16:38 confirm the class of defect continues to escalate on the
-~22-min slippage clusters. Not re-dispatching per the 10th-occurrence
-guidance; workspace push/merge silent-drop remains the blocking defect and
-needs human review before another server-patch attempt. Closed as false
-positive._
-
-_Recurrence 2026-07-31 ~14:26 local (job `eb777487`): TWELFTH self-diagnose
-in ~10.5h — atlas twin of the baseball-bingo `9b73d181` above, same
-14:05:03Z→14:26:11Z (~1268s) healthcheck-all slippage cluster. Direct
-probes at diagnosis time: `http://localhost:8791/` → 200 in 38ms,
-`https://atlas.chrispiserchia.com/` → 302 (Cloudflare Access) in 116ms.
-Staleness only 22s at diagnosis (fresh 14:26:11Z healthcheck tick had just
-landed). All 3 launchd services present (atlas + dash-scheduler + pm-edge,
-PIDs 81426/81428/81432). `origin/main` HEAD confirmed still `17136b3` —
-the direct-probe / freshness-gate logic in `_check_project_health` is
-still absent from production. Not re-dispatching per the 10th-occurrence
-guidance; workspace push/merge silent-drop remains the blocking defect
-(needs human review before another server-patch attempt). Closed as false
-positive._
-
----
 
 ## Adding entries to this file
 

@@ -3,6 +3,15 @@
 ## When to use this
 Extending the runner with new post-session hooks (write-back, review, escalation, etc.).
 
+<!-- Append entries below this marker. Do not delete the marker. -->
+<!-- APPEND_ENTRIES_BELOW -->
+
+## 2026-08-01 — Use context_files in skill frontmatter to inject documentation
+
+Skills can declare `context_files: [".context/SYSTEM.md"]` (or other context paths) in their SKILL.md frontmatter. The runner automatically injects these files at prompt-open time, making documentation available to the skill without duplicating it in the prompt. Use this pattern for architecture guides, system reference documentation, or other materials that multiple skills need access to — it avoids prompt bloat and keeps context centralized and maintainable.
+
+_Evidence: job `64644863`_
+
 ## The pattern: spawn a child job, link via parent_job_id
 
 The runner wraps `run_session` in `_process_job`. After the session terminates
