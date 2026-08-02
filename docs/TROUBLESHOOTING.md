@@ -931,9 +931,21 @@ ticks signature), project PID 71682 healthy; healthcheck-all had already
 self-resumed at 17:57:09Z by the time the diagnose ran — no inline kickstart
 needed. Notable: this fires at the same cadence as the concurrent atlas
 diagnose in the entry immediately above; both projects share one healthcheck
-cadence, so every slip pings the diagnose skill twice). **Sixteen+
-occurrences** across atlas and baseball-bingo without the prevention patch
-being landed — the `events.py` guard should be top of the queue._
+cadence, so every slip pings the diagnose skill twice); 2026-08-02 ~20:11Z
+(job `e38f595c`, atlas answered `/` 200 in 67ms on port 8791,
+`last_healthy_at` age 33m19s at diagnosis — `healthcheck.out.log` last tick
+19:37:42Z (six missed 5-min ticks in a row), all three atlas launchd
+processes healthy with PIDs 24233/81428/81432; healthcheck-all kickstarted
+inline and resumed at 20:11:21Z, atlas `last_healthy_at` refreshed to 5s
+old); 2026-08-02 ~20:11Z (job `018fbae0`, baseball-bingo answered `/healthz`
+200 in 7.6ms and `/` 200 in 3.7ms on port 8790, `last_healthy_at` age
+33m30s at diagnosis — same 19:37:42Z last tick as the concurrent atlas
+diagnose immediately above (six missed 5-min ticks in a row), project PID
+71682 healthy; healthcheck-all kickstart shared with the atlas diagnose,
+cadence resumed at 20:11:41Z — reinforcing that every cadence slip pings
+both projects' diagnose skills simultaneously). **Eighteen+ occurrences**
+across atlas and baseball-bingo without the prevention patch being landed
+— the `events.py` guard should be top of the queue._
 
 ## Adding entries to this file
 
