@@ -898,8 +898,28 @@ three atlas launchd processes healthy with PIDs 24233/81428/81432); 2026-08-02
 `last_healthy_at` age 34m23s at diagnosis — `healthcheck.out.log` last tick
 14:16Z (35 min stale, cadence had paused), all three atlas launchd processes
 healthy with PIDs 24233/81428/81432; healthcheck-all kickstarted inline and
-resumed at 14:51Z). **Ten+ occurrences** without the prevention patch being
-landed — the `events.py` guard is worth prioritizing._
+resumed at 14:51Z); 2026-08-02 ~16:18Z (job `386fd41d`, baseball-bingo
+answered `/healthz` 200 in 5.8ms, `last_healthy_at` age 20m42s at diagnosis
+— healthcheck-all last tick 15:57:54Z (exactly 20-min slip past the 5-min
+cadence), project PID 71682 healthy; healthcheck-all kickstarted inline and
+resumed at 16:18:53Z); 2026-08-02 ~16:18Z (job `32dd1e8c`, atlas answered
+`/` 200 in 79ms on port 8791, `last_healthy_at` age 20m40s at diagnosis —
+same 15:57:54Z last tick as the concurrent baseball-bingo diagnose, all
+three atlas launchd processes healthy with PIDs 24233/81428/81432;
+healthcheck-all kickstarted inline (shared with concurrent diagnose) and
+resumed at 16:19:12Z); 2026-08-02 ~17:10Z (job `93497f75`, atlas answered
+`/` 200 in 69ms on port 8791, `last_healthy_at` age 36m03s at diagnosis —
+`healthcheck.out.log` last tick 16:34:17Z matching the DB timestamp exactly
+(36-min slip past the 5-min cadence, i.e. six missed ticks in a row), all
+three atlas launchd processes healthy with PIDs 24233/81428/81432;
+healthcheck-all kickstarted inline and resumed at 17:10:33Z); 2026-08-02
+~17:10Z (job `db910324`, baseball-bingo answered `/healthz` 200 in 8.4ms,
+`last_healthy_at` age 35m58s at diagnosis — same 16:34:17Z last tick as the
+concurrent atlas diagnose above (the 5-min cadence had missed six ticks in a
+row), project PID 71682 healthy; healthcheck-all kickstart shared with the
+concurrent atlas diagnose and resumed at 17:10:33Z / 17:10:44Z). **Fourteen+
+occurrences** across atlas and baseball-bingo without the prevention patch
+being landed — the `events.py` guard should be top of the queue._
 
 ## Adding entries to this file
 
