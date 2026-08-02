@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-02 — Recurring false-positive self-diagnose (bingo, ~17:58Z, job `67d9a2bc`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only — appended sixteenth
+recurrence of the `_check_project_health` false-positive symptom. Same
+`healthcheck-all.sh` cadence-slip signature as the prior fifteen: last
+successful tick 17:35:54Z, then a 21-min gap that pushed
+`projects.last_healthy_at` past the 20-min unhealthy threshold in
+`src/runner/events.py:_check_project_health`. Direct probes returned 200 on
+`/healthz`, `/`, and `/static/app.js`; project PID 71682 was healthy;
+healthcheck-all had already self-resumed at 17:57:09Z before the diagnose
+ran, so no inline kickstart was needed. No server code changed — the
+prevention patch (gate the trigger on a fresh direct probe, or trust a
+`healthcheck:last_run` freshness key) still requires `server-patch` (Phase
+5). Runner behavior unchanged.
+
 ## 2026-08-02 — Applied stranded learning + refined `_learning_apply` root cause
 
 **Files changed**: `.context/modules/runner/skills/GOTCHAS.md` — inserted the
