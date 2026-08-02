@@ -37,11 +37,38 @@ turn budget.
    `skills/_learning_apply/SKILL.md` (must be committed in the DEV repo, then
    deployed — skill frontmatter is server code).
 
-### Incident
+### Deeper root cause (2026-08-02 update)
 
-Job `912237f7` (2026-08-01) — target was `runner/PATTERNS.md`, which was the
-only module skills file that had never been seeded with the marker.
-Diagnosed by job `f13d03a6`.
+Even when the payload includes `module: <name>` and the target file has the
+marker, the skill still exhausts its 6-turn budget. Reason: `session.py` passes
+only `job.description` as the model's user message (see
+`_run_in_process(job_id, job.description, options)` at L881+). The skill's
+"Payload you will receive" section is aspirational — the payload dict is used
+for internal skill config overrides only. The model must infer `module` from
+the description string, which usually forces at least three exploratory
+tool calls (`ls .context/modules/`, cat parent summary, `ls skills/`) before
+the mandatory read/edit/commit sequence — right at or above the 6-turn cap.
+
+**Fix (medium risk, server-code)**: either
+
+1. Inline the payload into the description at enqueue time in
+   `src/runner/learning.py` (e.g., prefix
+   `"[module=runner category=GOTCHA] Apply learning: ..."`), or
+2. In `session.py`, when the job kind starts with `_` (internal), append a
+   `\n\n## Payload\n\n<json>` block to the user prompt so the skill sees
+   what it was told to expect, or
+3. Raise `max_turns` on `_learning_apply` to 10 (buys headroom but doesn't
+   fix the misleading skill prompt).
+
+### Incidents
+
+- `912237f7` (2026-08-01) — target `runner/PATTERNS.md` missing marker.
+  Diagnosed by `f13d03a6`.
+- `30d66555` (2026-08-02) — target `runner/GOTCHAS.md` HAD marker and payload
+  HAD `module=runner`, but the model didn't see the payload and burned turns
+  exploring modules. Diagnosed + entry manually applied by self-diagnose
+  `6c281518`. This is the "deeper root cause" recurrence — server-code fix now
+  warranted.
 
 ---
 
@@ -798,6 +825,62 @@ runner heartbeat is stale** (the external dead-man's-switch alerts on
 non-200; worker activated 2026-07-30), and `healthcheck-all.sh` adds a
 tunnel-independent local layer (2026-07-31): heartbeat stale AND no runner
 PID → direct Telegram DM, rate-limited to one per 30 min.
+
+## Symptom: self-diagnose fires "project 'X' unhealthy for 20+ min" but the project is actually up
+
+### Diagnostic
+
+```bash
+# 1. Direct probe — do NOT trust projects.last_healthy_at alone
+curl -s -o /dev/null -w "%{http_code} in %{time_total}s\n" http://localhost:<port>/<healthcheck_path>
+
+# 2. Check last_healthy_at age vs. current healthcheck cadence
+psql assistant -c "SELECT slug, last_healthy_at, NOW() - last_healthy_at AS age FROM projects WHERE slug='<slug>';"
+
+# 3. Confirm process is alive
+launchctl list | grep com.assistant.project.<slug>
+```
+
+If `/` returns 200 and processes have PIDs but `last_healthy_at` is old, the
+event trigger is a **false positive**: `events._check_project_health` fires off
+the DB timestamp alone, and `healthcheck-all.sh` (the script that refreshes it)
+slipped its 5-min launchd cadence. Common causes of slippage: the Mac was in
+low-power/sleep, the machine was under load, or a prior healthcheck-all took
+long enough to push the next tick out.
+
+### Root cause
+
+The `_check_project_health` event trigger in `src/runner/events.py` uses
+`projects.last_healthy_at` as its sole liveness signal. That timestamp is only
+written by `scripts/healthcheck-all.sh` on its 5-min launchd cadence. When the
+cadence slips past 20 minutes for any reason — most often macOS power/sleep
+throttling on the Mini — the trigger fires even though the project is fine.
+Diagnose costs ~1 Opus session and (worse) any auto-remediation would cause
+real downtime for nothing.
+
+### Fix
+
+None operationally — verify with the direct curl probe above, append a
+recurrence note here, close the diagnose job. Do **not** restart the project;
+that would cause the only actual downtime of the incident.
+
+### Prevention (requires server-patch)
+
+1. Gate the event trigger on a fresh **direct probe** inside
+   `_check_project_health`: if the project responds 2xx to its healthcheck path
+   within a short timeout, skip the diagnose spawn and refresh
+   `last_healthy_at` in-line.
+2. Alternatively, add a Redis key `healthcheck:last_run` written by
+   `healthcheck-all.sh` on each tick; if that key is older than ~10 min, the
+   whole freshness signal is untrustworthy and the trigger should back off.
+3. Consider raising `caffeinate`/`pmset` guarantees for the healthcheck plist
+   or move the probe in-process (runner-side) so it can't be throttled by
+   launchd sleep behavior.
+
+_Recurrences: 2026-07-31 00:24Z, 05:11Z; 2026-08-01 (job `dc1046d6`);
+2026-08-02 05:32Z (job `a480b1ee`, atlas answered 200 in 18ms, `last_healthy_at`
+23s old at diagnosis time). Four+ occurrences without the prevention patch
+being landed — the `events.py` guard is worth prioritizing._
 
 ## Adding entries to this file
 

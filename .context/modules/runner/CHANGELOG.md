@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-02 — Applied stranded learning + refined `_learning_apply` root cause
+
+**Files changed**: `.context/modules/runner/skills/GOTCHAS.md` — inserted the
+"Aged healthcheck timestamp triggers false-positive unhealthy alert" gotcha
+(from evidence job `a480b1ee`) that `_learning_apply` job `30d66555`
+tried but failed to write when it hit `max_turns:6`. Also updated
+`docs/TROUBLESHOOTING.md` with the deeper root cause: `session.py` passes
+only `job.description` as the user prompt, so the skill's "Payload you will
+receive" section is aspirational — the model never sees `payload.module` and
+has to infer it, burning turns before it can Edit. Three fixes proposed
+(inline payload into description, append payload block in session.py for
+internal skill kinds, or bump max_turns to 10) — all server-code, medium
+risk, deferred to server-patch. Diagnosed by self-diagnose job `6c281518`.
+
 ## 2026-08-01 — Restored missing APPEND_ENTRIES_BELOW marker in runner/skills/PATTERNS.md
 
 **Files changed**: `.context/modules/runner/skills/PATTERNS.md` — inserted the

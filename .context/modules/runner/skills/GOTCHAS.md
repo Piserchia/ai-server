@@ -14,6 +14,18 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-08-02 — Aged healthcheck timestamp triggers false-positive "unhealthy" alert after macOS sleep
+
+The event trigger `_check_project_health` in `src/runner/events.py` fires an alert when `scripts/healthcheck-all.sh` misses its 5-minute launchd cadence (typically due to macOS sleep/throttle on the Mini). The database `last_healthy_at` timestamp ages past 20 minutes, causing the trigger to assume the service is down—but the service is actually healthy (HTTP 200, all launchd PIDs running).
+
+Trap: The natural response is to restart, which would be the ONLY real downtime of the incident.
+
+Diagnosis: `psql assistant -c "SELECT slug, last_healthy_at, NOW() - last_healthy_at AS age FROM projects"` (check timestamp age) + `curl http://localhost:8791/` (verify service responds) + verify launchd PIDs with `pgrep -f atlas`.
+
+Prevention: Replace timestamp-based event triggers with direct HTTP probes, or add a Redis `healthcheck:last_run` gate to avoid firing when the cadence itself missed a window (not when the service went down). This is a medium-risk server-code change in `src/runner/events.py`.
+
+_Evidence: job `a480b1ee` (applied manually by self-diagnose `6c281518` after `_learning_apply` job `30d66555` hit max_turns:6)_
+
 ## 2026-07-11 — Runner auto-continue hijacks session without task_complete
 
 When the runner's auto-continue feature is enabled, it will resume a session by injecting a follow-up prompt ("Continue to the next phase of the plan.") even when the previous job never emitted a `task_complete` event. This causes the agent to re-enter an earlier plan phase, duplicate work, or make conflicting changes. The symptom is a job whose description is "Continue to the next phase of the plan." but whose audit log shows no `task_complete` in the preceding job. Fix: ensure every job that auto-continue may follow emits an explicit `task_complete` (or `task_stop`) before finishing; alternatively, gate auto-continue on the presence of that event in the prior job's audit log.
