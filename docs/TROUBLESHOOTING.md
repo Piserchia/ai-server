@@ -943,9 +943,62 @@ old); 2026-08-02 ~20:11Z (job `018fbae0`, baseball-bingo answered `/healthz`
 diagnose immediately above (six missed 5-min ticks in a row), project PID
 71682 healthy; healthcheck-all kickstart shared with the atlas diagnose,
 cadence resumed at 20:11:41Z — reinforcing that every cadence slip pings
-both projects' diagnose skills simultaneously). **Eighteen+ occurrences**
-across atlas and baseball-bingo without the prevention patch being landed
-— the `events.py` guard should be top of the queue._
+both projects' diagnose skills simultaneously); 2026-08-02 ~20:57Z (job
+`663d66ab`, baseball-bingo answered `/healthz` 200 in 4.7ms and `/` 200
+in 4.1ms on port 8790, `last_healthy_at` age 20m27s at diagnosis —
+`healthcheck.out.log` last tick 20:36:51Z matching the DB timestamp
+exactly (20-min slip / four missed 5-min ticks in a row), project PID
+71682 healthy; healthcheck-all kickstarted inline via
+`gui/$(id -u)/com.assistant.healthcheck-all` and resumed at 20:57:41Z,
+baseball-bingo `last_healthy_at` refreshed to 3s old — note the launchd
+label is `com.assistant.healthcheck-all` not `com.assistant.healthcheck`);
+2026-08-02 ~20:57Z (job `45e2dc1b`, atlas twin of the baseball-bingo
+diagnose immediately above — atlas answered `/` 200 in 62ms on port
+8791, `last_healthy_at` age 20m29s at diagnosis — same 20:36:51Z last
+tick / four missed 5-min ticks signature, all three atlas launchd
+processes healthy with PIDs 24233/81428/81432; healthcheck-all kickstart
+shared with the concurrent baseball-bingo diagnose, atlas
+`last_healthy_at` refreshed to 2s old at 20:57:56Z — twentieth
+recurrence and the ninth in the last ~24h, still a twin-fires-per-slip);
+2026-08-02 ~21:36Z (job `8a7afcaf`, atlas answered `/` 200 in 22ms on
+port 8791, `last_healthy_at` age was stale then refreshed to 9s old by
+the time diagnosis ran — `healthcheck.out.log` gap 21:13:06Z → 21:36:51Z
+(23-min slip past the 5-min cadence, i.e. four missed 5-min ticks in a
+row), all three atlas launchd processes healthy with PIDs
+24233/81428/81432; healthcheck-all had already self-resumed at 21:36:51Z
+before the diagnose ran — no inline kickstart needed. Twenty-first
+recurrence); 2026-08-02 ~21:36Z (job `84d10de1`, baseball-bingo twin of
+the atlas diagnose immediately above — baseball-bingo answered
+`/healthz` 200 in 1.4ms and `/` 200 in 4.0ms on port 8790,
+`last_healthy_at` age 23m45s at diagnosis fire, refreshed to 13s old by
+the time the direct probe ran — same 21:13:06Z → 21:36:51Z gap / four
+missed 5-min ticks signature as the concurrent atlas diagnose, project
+PID 71682 healthy; healthcheck-all self-resumed 4s AFTER the diagnose
+fired (21:36:47Z fire → 21:36:51Z tick), no inline kickstart needed.
+Twenty-second recurrence — twin-fires-per-slip pattern continues, both
+projects share one cadence so every slip pings the diagnose skill
+twice); 2026-08-02 ~22:17Z (job `4a4e86d8`, atlas answered `/` 200 in
+9ms on port 8791, `last_healthy_at` age 3s at diagnosis — refreshed to
+current by the time direct probe ran; `healthcheck.out.log` gap
+21:56:59Z → 22:17:35Z (20-min slip / four missed 5-min ticks in a row),
+all three atlas launchd processes healthy with PIDs
+24233/81428/81432; healthcheck-all had already self-resumed at
+22:17:35Z before diagnosis ran — no inline kickstart needed. Twenty-third
+recurrence — atlas-only fire this time, no concurrent baseball-bingo
+twin observed); 2026-08-02 ~22:18Z (job `d0c9f6de`, baseball-bingo
+twin of the atlas diagnose immediately above that was reported as
+"atlas-only" — the twin *was* enqueued but its diagnose skill loaded a
+moment later. baseball-bingo answered `/healthz` 200 in 0.9ms and `/`
+200 in 4.2ms on port 8790, `last_healthy_at` age 3s at diagnosis time —
+same 21:56:59Z → 22:17:35Z gap / four missed 5-min ticks signature as
+the concurrent atlas diagnose above, project PID 71682 healthy;
+healthcheck-all had already self-resumed at 22:17:35Z, no inline
+kickstart needed. Twenty-fourth recurrence — twin-fires-per-slip pattern
+DID hold this slip; the atlas entry's "atlas-only" note above was
+written before this baseball-bingo diagnose reported in).
+**Twenty-four+ occurrences** across atlas and baseball-bingo without the
+prevention patch being landed — the `events.py` guard should be top of
+the queue._
 
 ## Adding entries to this file
 
