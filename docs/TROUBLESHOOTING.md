@@ -890,9 +890,16 @@ age 21m48s at diagnosis — healthcheck-all last tick 08:51 local, project
 PID 71682 healthy); 2026-08-02 ~13:13Z (job `eb3cca84`, atlas answered `/`
 200 in 78ms on port 8791, `last_healthy_at` age 21m52s at diagnosis —
 `healthcheck.out.log` last write 08:51 local matching the timestamp, all
-three atlas launchd processes healthy with PIDs 24233/81428/81432). Eight+
-occurrences without the prevention patch being landed — the `events.py`
-guard is worth prioritizing._
+three atlas launchd processes healthy with PIDs 24233/81428/81432); 2026-08-02
+~14:51Z (job `0e350c5b`, baseball-bingo answered `/healthz` 200 in 5.8ms,
+`last_healthy_at` age 34m31s at diagnosis — `healthcheck.out.log` last write
+10:16 local matching the DB timestamp, project PID 71682 healthy); 2026-08-02
+~14:51Z (job `7a6b6f32`, atlas answered `/` 200 in 60ms on port 8791,
+`last_healthy_at` age 34m23s at diagnosis — `healthcheck.out.log` last tick
+14:16Z (35 min stale, cadence had paused), all three atlas launchd processes
+healthy with PIDs 24233/81428/81432; healthcheck-all kickstarted inline and
+resumed at 14:51Z). **Ten+ occurrences** without the prevention patch being
+landed — the `events.py` guard is worth prioritizing._
 
 ## Adding entries to this file
 
