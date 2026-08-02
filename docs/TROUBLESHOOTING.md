@@ -879,8 +879,20 @@ that would cause the only actual downtime of the incident.
 
 _Recurrences: 2026-07-31 00:24Z, 05:11Z; 2026-08-01 (job `dc1046d6`);
 2026-08-02 05:32Z (job `a480b1ee`, atlas answered 200 in 18ms, `last_healthy_at`
-23s old at diagnosis time). Four+ occurrences without the prevention patch
-being landed — the `events.py` guard is worth prioritizing._
+23s old at diagnosis time); 2026-08-02 later (job `70196d4c`, baseball-bingo
+answered `/healthz` 200 in <1ms, `last_healthy_at` age 20m30s at diagnosis —
+`healthcheck-all.sh` cadence slipped); 2026-08-02 11:56Z (job `a38ce894`,
+atlas answered `/` 200 in 72ms, `last_healthy_at` age 20m22s at diagnosis —
+same cadence-slip signature, healthcheck-all last tick 07:35 local, all three
+atlas launchd processes healthy with PIDs); 2026-08-02 ~13:13Z (job
+`81efdc40`, baseball-bingo answered `/healthz` 200 in 7ms, `last_healthy_at`
+age 21m48s at diagnosis — healthcheck-all last tick 08:51 local, project
+PID 71682 healthy); 2026-08-02 ~13:13Z (job `eb3cca84`, atlas answered `/`
+200 in 78ms on port 8791, `last_healthy_at` age 21m52s at diagnosis —
+`healthcheck.out.log` last write 08:51 local matching the timestamp, all
+three atlas launchd processes healthy with PIDs 24233/81428/81432). Eight+
+occurrences without the prevention patch being landed — the `events.py`
+guard is worth prioritizing._
 
 ## Adding entries to this file
 
