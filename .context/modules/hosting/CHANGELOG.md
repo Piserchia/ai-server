@@ -2,6 +2,27 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 59th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended as
+59th entry, dispatch-window twin of the atlas 58th entry immediately
+above).
+
+**Why**: self-diagnose fired for baseball-bingo unhealthy
+(`last_healthy_at` 21m09s stale at fire) though `/healthz` returned 200
+and `/` returned 200 on port 8790 (PID 71682, uvicorn stable for 3d16h).
+`healthcheck.out.log` gap 19:19:46Z → 19:41:16Z (four missed 5-min ticks,
+macOS-sleep-cadence-slip signature). The concurrent atlas twin diagnose
+(job `2c663dd3`, enqueued 13ms earlier) had already kickstarted
+`com.assistant.healthcheck-all` at 19:41:16Z before this baseball-bingo
+job probed, so no additional kickstart was needed; a manual
+`healthcheck-all.sh` run also refreshed baseball-bingo `last_healthy_at`
+to <1min old. Historical anyio `TaskHandle` ImportError bursts in
+`project.baseball-bingo.err.log` re-confirmed as stale (July 30 pre-restart
+PID 3619); anyio 4.14.2 exports `TaskHandle` correctly at current
+interpreter state. Prevention (events.py live-probe gate) still blocked
+by the workspace-push meta-bug — owner action remains the unblock.
+
 ## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 44th recurrence)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;

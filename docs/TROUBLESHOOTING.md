@@ -1622,6 +1622,55 @@ inline action taken on atlas — it's healthy; the pre-existing
 present in stderr but unrelated to healthcheck and root `/` still
 serves 200.)
 
+2026-08-03 ~19:41Z (job `c057fea4`, baseball-bingo twin of atlas job
+`2c663dd3` — both enqueued at 19:40:37Z, 13ms apart, but this
+baseball-bingo diagnose reported in AFTER the atlas twin had already
+kickstarted `healthcheck-all` at 19:41:16Z. At probe time
+(19:41:09Z curl), baseball-bingo answered `/healthz` 200 and root `/` 200
+on port 8790, PID 71682 (uvicorn started 3d16h ago, stable). Manual
+`healthcheck-all` invocation refreshed `last_healthy_at` to
+2026-08-03 19:42:00Z (~14s stale at check), then the natural 19:41:16Z
+tick — from the atlas twin's kickstart — was already recorded in
+`healthcheck.out.log`. Six historical anyio `TaskHandle` ImportError
+bursts in `project.baseball-bingo.err.log` are still all from the July
+30 23:40 initial partial pip-install (pre-restart PID 3619) and no
+longer relevant (verified: `from anyio._core._tasks import TaskHandle`
+succeeds cleanly at anyio 4.14.2 in shared venv). Fifty-ninth
+recurrence — dispatch-window twin of the atlas 58th entry immediately
+above; no additional kickstart needed since the atlas twin had already
+resumed cadence 7s before this job's probe. Same
+macOS-sleep-cadence-slip signature as recurrences 43–58. Per the 51st
+entry, still NOT re-dispatching a third `server-patch` for the
+`events.py` live-probe gate — the workspace-push meta-bug in
+`src/runner/workspaces.py` / session-finalization continues to trap the
+fix in the runtime clone before it reaches origin. Owner action on
+the workspace-push meta-bug remains the true unblock for the events.py
+live-probe fix that would zero these false positives.)
+
+2026-08-03 ~19:40Z (job `2c663dd3`, atlas twin of baseball-bingo job
+`c057fea4` — both enqueued at 19:40:37Z, 13ms apart. Atlas answered `/`
+200 in 60ms on port 8791 at diagnosis. All three atlas launchd
+processes healthy with PIDs 24233 / 81428 / 81432, state `running` (the
+`-15` LastExitStatus entries are stale). `last_healthy_at` at diagnosis
+was 21m19s stale (stamp 19:19:46Z vs probe 19:40:56Z). `healthcheck-all`
+had no PID — cadence had stopped. `healthcheck.out.log` gap
+19:19:46Z → 19:41:16Z (21m30s / four missed 5-min ticks); inline
+`launchctl kickstart -k gui/$UID/com.assistant.healthcheck-all`
+resumed cadence at 19:41:16Z, both atlas and baseball-bingo
+`last_healthy_at` refreshed to ~7s old. Fifty-eighth recurrence — same
+macOS-sleep-cadence-slip signature as recurrences 43–57. Per the 51st
+entry, still NOT re-dispatching a third `server-patch` for the
+`events.py` live-probe gate — the workspace-push meta-bug in
+`src/runner/workspaces.py` / session-finalization continues to trap the
+fix in the runtime clone before it reaches origin (last touch of
+`src/runner/events.py` on origin/main is still `197f239`, pre-patch).
+Owner action still needed on the workspace-push meta-bug before the
+events.py fix can land through the normal patch lane. No inline action
+taken on atlas — it's healthy; the pre-existing
+`invalid input syntax for type uuid: "AAPL"` bug in
+`.next/server/app/api/atlas/{assets,candles}/route.js` is unrelated
+to healthcheck and root `/` still serves 200.)
+
 **Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
 insert a live-probe gate before `enqueue_job`. Between lines 323-330,
 for each `slug` returned by `_should_trigger_project_diagnose`, fetch
