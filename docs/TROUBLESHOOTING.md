@@ -1069,8 +1069,102 @@ process healthy; historical anyio `TaskHandle` ImportError in
 and no longer relevant. healthcheck-all kickstarted inline via
 `gui/$(id -u)/com.assistant.healthcheck-all` (baseball-bingo
 `last_healthy_at` refreshed to 3s old at 02:36:31Z). Thirty-first
-recurrence — twin-fires-per-slip pattern still holds).
-**Thirty-one+ occurrences** across atlas and baseball-bingo without
+recurrence — twin-fires-per-slip pattern still holds); 2026-08-03
+~03:27Z (job `29089bda`, atlas answered `/` 200 in 33ms on port
+8791, `last_healthy_at` age 16s at diagnosis — refreshed to current
+by the time direct probe ran; `healthcheck.out.log` gap 03:06:43Z →
+03:26:53Z (20-min slip past the 5-min cadence, i.e. four missed
+5-min ticks in a row), all three atlas launchd processes healthy
+with PIDs 24233/81428/81432; healthcheck-all had already
+self-resumed at 03:26:53Z before diagnosis ran — no inline
+kickstart needed. Thirty-second recurrence — atlas-only fire in
+the dispatch window at diagnosis time; no concurrent baseball-bingo
+twin observed); 2026-08-03 ~03:26Z (job `f5728984`, baseball-bingo
+twin of the atlas diagnose immediately above that was reported as
+"atlas-only" — the twin *was* enqueued (11ms earlier at 03:26:50.28Z
+vs atlas 03:26:50.29Z), its diagnose skill just loaded a moment
+later. baseball-bingo answered `/healthz` 200 in 1.3ms and `/` 200
+in 3.6ms on port 8790, `last_healthy_at` age 11s at diagnosis —
+refreshed to current by the time direct probe ran; same 03:06:43Z →
+03:26:53Z gap / four missed 5-min ticks signature as the concurrent
+atlas diagnose above, project PID 71682 healthy; healthcheck-all
+had already self-resumed at 03:26:53Z, no inline kickstart needed.
+Thirty-third recurrence — the atlas entry's "atlas-only" note above
+was written before this baseball-bingo diagnose reported in;
+twin-fires-per-slip pattern still holds); 2026-08-03 ~05:28Z (job
+`bcedfdd5`, baseball-bingo answered `/healthz` 200 in 1.8ms and `/`
+200 in 6.9ms on port 8790, `last_healthy_at` age 84s at diagnosis —
+refreshed to current by the time direct probe ran; `healthcheck.out.log`
+gap 03:57:12Z → 05:07:09Z (70-min slip past the 5-min cadence, i.e.
+**thirteen** missed 5-min ticks in a row — longest slip observed so
+far), then another 20-min gap 05:07:09Z → 05:27:58Z (four more missed
+ticks), project PID 71682 healthy; healthcheck-all self-resumed at
+05:27:58Z before diagnosis ran — no inline kickstart needed.
+Thirty-fourth recurrence — baseball-bingo-only fire in the dispatch
+window at diagnosis time; no concurrent atlas diagnose observed for
+this slip. Notable: the 70-min gap is roughly double the previous
+longest (~36 min); the `events.py` live-probe gate spec at the bottom
+of this section is still un-landed).
+2026-08-03 ~04:32Z (job `aa522b99`, atlas answered `/` 200 in 48ms
+on port 8791, `last_healthy_at` age 2m49s at diagnosis — refreshed
+to current by the time direct probe ran; `healthcheck.out.log` gap
+03:57:12Z → 05:07:09Z (**70-min slip, thirteen missed 5-min ticks
+in a row — ties the prior longest slip observed one hour earlier**)
+then another 20-min gap 05:07:09Z → 05:27:58Z, all three atlas
+launchd processes healthy with PIDs 24233/81428/81432;
+healthcheck-all had already self-resumed at 05:27:58Z (~55 min
+AFTER this diagnose was enqueued at 04:32:56Z, which explains why
+`last_healthy_at` was already fresh by the time the diagnose skill
+actually loaded). Thirty-fifth recurrence — atlas-only fire in the
+dispatch window at diagnosis time; no concurrent baseball-bingo
+twin observed. Notable: second 70-min slip in ~1h, likely macOS
+sleep/power throttling on the Mini through the early-morning
+window; still the same signature, still no prevention patch landed).
+2026-08-03 ~05:27Z (job `bdc87c02`, atlas answered `/` 200 in
+47ms on port 8791, `last_healthy_at` age 4m17s at diagnosis —
+already refreshed to fresh by the time the diagnose skill loaded;
+`healthcheck.out.log` gap 03:57:12Z → 05:07:09Z (70-min slip /
+thirteen missed 5-min ticks in a row) followed by 05:07:09Z →
+05:27:58Z (20-min slip / four missed ticks), all three atlas
+launchd processes healthy with PIDs 24233/81428/81432;
+healthcheck-all self-resumed at 05:27:58Z (~23s AFTER this
+diagnose was enqueued at 05:27:35Z) — no inline kickstart needed.
+Thirty-sixth recurrence — this fired concurrently with the
+baseball-bingo twin `3ea71a39` (same 05:27:35Z enqueue
+timestamp), so the twin-fires-per-slip pattern still holds; both
+projects share one cadence and every slip pings both diagnose
+skills. Notable: back-to-back 70-min slips in the early-morning
+Mini window are becoming the norm rather than the exception —
+`events.py` live-probe gate is still un-landed.
+2026-08-03 ~05:33Z (job `7a648d7b`, baseball-bingo answered `/healthz`
+200 in 1.4ms and `/` 200 in 5.5ms on port 8790, `last_healthy_at` age
+39s at diagnosis — already refreshed by the time the diagnose loaded;
+same 03:57:12Z → 05:07:09Z 70-min slip / thirteen missed 5-min ticks
+signature as the thirty-fifth/thirty-sixth recurrences immediately
+above (queue-latency victim: enqueued 05:06:49Z, started 05:33:19Z
+— 27 min queued behind the earlier diagnose burst), project PID
+71682 healthy (launchd shows last exit `-15` from a prior SIGTERM,
+not current). healthcheck-all had already self-resumed at 05:27:58Z
+then 05:33:00Z before the diagnose ran — no inline kickstart needed.
+Thirty-seventh recurrence — concurrent atlas twin `9fa3a72c` still
+queued behind the earlier burst confirms twin-fires-per-slip. Notable:
+queue-latency amplification is now a distinct failure mode of the
+false-positive pattern — 5:06Z fire + 5:27Z fire = 4 stale diagnoses
+in queue for one underlying slip. The `events.py` live-probe gate
+spec at the bottom of this section would zero this out).
+2026-08-03 ~05:27Z (job `bdc87c02`, atlas answered `/` 200 on port 8791,
+`last_healthy_at` age at diagnosis fire was stale then refreshed to 3s old
+after inline kickstart — `healthcheck.out.log` gap 05:07:09Z → 05:27:58Z
+(21-min slip / four missed 5-min ticks in a row, still riding the tail of
+the 70-min sleep-window slip that produced the thirty-fifth–thirty-seventh
+recurrences overnight), all three atlas launchd processes healthy with
+PIDs 24233/81428/81432. healthcheck-all kickstarted inline via
+`gui/$(id -u)/com.assistant.healthcheck-all` and resumed at 05:37:55Z,
+atlas `last_healthy_at` refreshed to 3s old. Thirty-eighth recurrence —
+still atlas false positive; `events.py` live-probe gate spec below is
+still un-landed and should be prioritized).
+
+**Thirty-eight+ occurrences** across atlas and baseball-bingo without
 the prevention patch being landed — the `events.py` guard should be
 top of the queue.
 
