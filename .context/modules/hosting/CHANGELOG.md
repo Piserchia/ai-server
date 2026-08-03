@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 44th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;
+44+ occurrences counter bumped from 43+).
+
+**Why**: self-diagnose fired for baseball-bingo unhealthy (`last_healthy_at`
+age 21m09s at fire) though `/healthz` returned 200 in 6.1ms and `/` returned
+200 in 5.4ms with full HTML on port 8790 (PID 71682 healthy).
+`healthcheck.out.log` gap 13:47:17Z → 14:08:28Z (21-min slip, four missed
+5-min ticks). `com.assistant.healthcheck-all` was not actively running (PID
+`-`); kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`.
+Cadence resumed 14:29:52Z, both baseball-bingo and atlas `last_healthy_at`
+refreshed to 7s old (single kickstart, both projects refreshed —
+shared-cadence pattern reinforced). No prevention patch landed yet;
+`events.py` live-probe gate and `healthcheck-all.sh` psql-exit-status
+surfacing both remain un-landed.
+
 ## 2026-08-03 — healthcheck-all cadence-slip false positive (atlas, 39th recurrence)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;

@@ -1258,6 +1258,22 @@ recurrences, no silent-UPDATE-loss wrinkle this time. `events.py`
 live-probe gate and `healthcheck-all.sh` psql-exit-status surfacing
 both still un-landed.)
 
+2026-08-03 ~14:29Z (job `9e0b1a78`, baseball-bingo answered `/healthz`
+200 in 6.1ms and `/` 200 in 5.4ms with full HTML on port 8790,
+`last_healthy_at` age 21m09s at diagnosis — stamp 14:08:27Z vs probe
+14:29:36Z; `healthcheck.out.log` gap 13:47:17Z → 14:08:28Z (21-min slip
+/ four missed 5-min ticks in a row), project PID 71682 healthy.
+`com.assistant.healthcheck-all` was not actively running (PID `-`) so
+kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`;
+cadence resumed at 14:29:52Z, both baseball-bingo AND atlas
+`last_healthy_at` refreshed to 7s old (one kickstart, both projects
+refreshed — reinforcing the shared-cadence pattern). Forty-fourth
+recurrence — baseball-bingo-only fire in the dispatch window at
+diagnosis time; no concurrent atlas twin observed for this slip.
+Notable: same missed-tick signature, no silent-UPDATE-loss wrinkle;
+`events.py` live-probe gate and `healthcheck-all.sh` psql-exit-status
+surfacing both still un-landed.)
+
 2026-08-03 ~10:27Z (job `132fa29a`, baseball-bingo twin of atlas
 job `8b40c8d6` immediately above — same 10:06:33Z → 10:27:59Z gap /
 four missed 5-min ticks signature. baseball-bingo answered `/healthz`
@@ -1404,6 +1420,52 @@ COMMIT-AND-PUSH-BEFORE-EXIT instructions.)
 **never committed** (see 50th entry above); re-dispatched fresh
 `server-patch` at 2026-08-03 12:44Z with explicit commit/push
 requirements + INV-13 code-review gate reminder.
+
+2026-08-03 ~14:29Z (job `b3b68a9e`, atlas — probed at 14:29:39Z.
+`/` 200 in 63ms on port 8791, all three atlas launchd processes healthy
+(PIDs 24233 / 81428 / 81432, `state = running`; the `-15` LastExitStatus
+on the two sub-services is STALE from a prior restart cycle, not a
+live crash). `last_healthy_at` at diagnosis fire was 21m11s stale
+(stamp 14:08:27Z vs current 14:29:39Z); refreshed to 39s old by the
+14:29:52Z healthcheck-all tick that fired 13s AFTER this diagnose
+picked up, no inline kickstart needed. Preceding `healthcheck.out.log`
+gap 13:47:17Z → 14:08:28Z (21m11s slip / four missed 5-min ticks)
+followed by 14:08:28Z → 14:29:52Z (21m24s slip / four missed 5-min
+ticks) — two back-to-back slips, the second of which fired this
+trigger. Same macOS-sleep-cadence-slip signature as recurrences 43–50.
+Concurrent baseball-bingo twin `9e0b1a78` running in same dispatch
+window (both enqueued at 14:29:11Z, same event tick — the
+queued-but-unresolved dedup race still holds).
+
+**Fifty-first recurrence. CRITICAL META-FINDING**: the second
+server-patch `2bfb6d20` dispatched 2026-08-03 12:44Z (08:44 EDT) DID
+commit locally as `4330b2f` (+415/-5, 13 new tests, all 61 event
+tests green, code-review agent invoked) — but the workspace was
+never pushed to origin before job completion. Same PATTERN as prior
+patch `5dfebb42` (which never committed at all), same OUTCOME
+(fix not on origin/main). `workspace_synced` event on this job reads
+`"canonical fast-forwarded from origin"` — the runtime canonical
+pulled what origin already had, but the workspace's local `4330b2f`
+was garbage-collected with the workspace directory. Verified: `git
+cat-file -e 4330b2f` in the runtime clone reports "malformed object
+name"; commit is gone. Two consecutive server-patch attempts have
+failed to actually land the same fix.
+
+**Root cause of the meta-bug is NOT in this skill's lane** — it's in
+`src/runner/workspaces.py` (or the session-finalization hook that's
+supposed to `git push` workspace commits before ff-syncing the
+canonical). This is a **medium-risk server-code bug** that requires a
+`server-patch` to `src/runner/workspaces.py` and the session teardown
+path. Diagnose-only from this session — NOT re-dispatching a third
+server-patch for the events.py fix until the workspace-push bug is
+addressed, since it would land in the same trap.
+
+No inline action taken on atlas — it's healthy, the false-positive
+class continues to fire, and dispatching more one-off server-patches
+just burns cycles without landing the fix. Owner action needed:
+investigate why `src/runner/workspaces.py` isn't pushing workspace
+commits back to origin after session completion, then re-dispatch
+the events.py live-probe gate (spec still valid, unchanged).)
 
 **Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
 insert a live-probe gate before `enqueue_job`. Between lines 323-330,
