@@ -1196,7 +1196,81 @@ state. Fortieth recurrence — still `events.py` live-probe gate un-landed;
 also worth landing a same-tick dedup so parallel `atlas` + `baseball-bingo`
 slips produce one diagnose fire, not two.
 
-**Forty+ occurrences** across atlas and baseball-bingo without
+2026-08-03 ~09:42Z (job `daa80e8a`, baseball-bingo answered `/healthz`
+200 in <1ms internal and 200 via the public tunnel `https://bingo.chrispiserchia.com/healthz`
+with `{"status":"ok"}`. `last_healthy_at` age 33m58s at diagnosis —
+`healthcheck.out.log` last tick 08:49:17Z → 09:25:51Z was a 36-min slip
+(six missed 5-min ticks); the 09:25:51Z tick logged `checked=2 healthy=2`
+but its psql UPDATE apparently did not land — DB still showed
+09:09:21Z at diagnosis time, so this was actually a compound slip
+(missed ticks AND a silent DB update loss on the 09:25 tick).
+Project PID 71682 healthy with 3d6h uptime. Manually ran
+`bash scripts/healthcheck-all.sh` inline to refresh — both
+baseball-bingo and atlas `last_healthy_at` refreshed to <1s old at
+09:43:37Z. Forty-first recurrence — `events.py` live-probe gate still
+un-landed. New wrinkle: this occurrence adds *silent psql UPDATE loss*
+on top of the usual missed-tick pattern; the healthcheck script uses
+`psql ... > /dev/null 2>&1` and swallows any error, so a transient
+DB blip or lock contention would go unnoticed. Consider surfacing
+psql exit status in the summary line as a lightweight companion fix
+alongside the events.py gate).
+
+2026-08-03 ~09:42Z (job `3e813db1`, atlas twin of the baseball-bingo
+diagnose `daa80e8a` immediately above — both diagnoses were dispatched
+by the same event tick and share the exact 08:49:17Z → 09:25:51Z 36-min
+healthcheck-all slip + silent psql UPDATE loss on the 09:25:51Z tick.
+Atlas answered `/` 200 in 43ms on port 8791, `last_healthy_at` age was
+33m20s at the 09:42:17Z fire, still stale on my first DB read at 09:42:41Z
+(09:09:21Z stamp — confirming the 09:25:51Z tick's UPDATE never landed),
+then refreshed to 34s old at 09:43:36Z when the natural launchd 09:43
+tick finally ran successfully (no inline kickstart needed this time —
+launchd caught up on its own). All three atlas launchd processes healthy
+throughout with PIDs 24233/81428/81432, all state `running`. Forty-second
+recurrence — this is the twin the baseball-bingo entry above hinted at
+(same tick, same slip signature, same silent UPDATE loss). Notable: the
+compound failure mode (missed ticks + silent UPDATE swallow) is now
+observed twice back-to-back (41st and 42nd recurrences share it); the
+lightweight companion fix — stop `psql ... > /dev/null 2>&1` in
+`scripts/healthcheck-all.sh` and surface exit status in the summary —
+is worth landing WITH the `events.py` live-probe gate.
+
+2026-08-03 ~10:27Z (job `8b40c8d6`, atlas answered `/` 200 in 85ms on
+port 8791, `last_healthy_at` age 21m15s at diagnosis — stamp 10:06:33Z
+vs probe 10:27:48Z; `healthcheck.out.log` gap 10:06:33Z → 10:27:59Z
+(21-min slip / four missed 5-min ticks in a row), all three atlas
+launchd processes healthy with PIDs 24233/81428/81432 and state
+`running`; `com.assistant.healthcheck-all` was NOT actively running
+(PID `-`) so kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`
+and cadence resumed at 10:27:59Z, atlas `last_healthy_at` refreshed to
+7s old. Forty-third recurrence — atlas-only fire in the dispatch
+window at diagnosis time; no concurrent baseball-bingo twin observed
+for this slip. Notable: same missed-tick signature as most prior
+recurrences, no silent-UPDATE-loss wrinkle this time. `events.py`
+live-probe gate and `healthcheck-all.sh` psql-exit-status surfacing
+both still un-landed.)
+
+2026-08-03 ~10:27Z (job `132fa29a`, baseball-bingo twin of atlas
+job `8b40c8d6` immediately above — same 10:06:33Z → 10:27:59Z gap /
+four missed 5-min ticks signature. baseball-bingo answered `/healthz`
+200 in 5.8ms and `/` 200 in 4.7ms on port 8790, `last_healthy_at`
+age 21m17s at diagnosis (stamp 10:06:33Z vs probe 10:27:47Z), project
+PID 71682 healthy; healthcheck-all had already been kickstarted by
+the concurrent atlas diagnose at 10:27:59Z so no second kickstart
+needed, baseball-bingo `last_healthy_at` refreshed to 4s old.
+Forty-fourth recurrence — the atlas entry above was written as
+"atlas-only in the dispatch window" but this baseball-bingo twin
+loaded moments later; twin-fires-per-slip pattern still holds. Same
+false-positive signature; `events.py` live-probe gate still un-landed.)
+
+Also noticed while triaging: the atlas API log shows repeated
+`invalid input syntax for type uuid: "AAPL"` errors from
+`.next/server/app/api/atlas/{assets,candles}/route.js`. That's a real
+pre-existing app bug (a stock ticker being passed where a UUID asset id
+is expected) but it's unrelated to healthcheck — the root `/` route
+still returns 200 and the launchd services stay up. Track separately if
+still current after the next atlas deploy.
+
+**Forty-four occurrences** across atlas and baseball-bingo without
 the prevention patch being landed — the `events.py` guard should be
 top of the queue.
 

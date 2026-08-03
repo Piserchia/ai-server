@@ -2,6 +2,26 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — Forty-second false-positive self-diagnose (atlas, ~09:42Z, job `3e813db1`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only — appended forty-second
+recurrence of the `_check_project_health` false positive as the atlas twin
+of the concurrent baseball-bingo diagnose `daa80e8a` (both fired by the
+same event tick, same 08:49:17Z → 09:25:51Z 36-min `healthcheck-all.sh`
+slip + a silent psql UPDATE loss on the 09:25:51Z tick that left
+`projects.last_healthy_at` at 09:09:21Z despite a `checked=2 healthy=2`
+summary). Atlas answered `/` 200 in 43ms on port 8791; all three atlas
+launchd processes stayed running (PIDs 24233/81428/81432). No inline
+kickstart needed — the natural launchd 09:43 tick self-caught-up.
+Runner behavior unchanged. Also noted in TROUBLESHOOTING for follow-up:
+a real, unrelated app bug is visible in the atlas project log
+(`invalid input syntax for type uuid: "AAPL"` in the Next.js
+`/api/atlas/{assets,candles}` routes) — separate from healthcheck and
+should be triaged in an atlas deploy, not here. The `events.py`
+live-probe gate + a companion fix to stop `psql ... > /dev/null 2>&1`
+in `scripts/healthcheck-all.sh` remain the correct prevention
+(server-patch, Phase 5).
+
 ## 2026-08-02 — Recurring false-positive self-diagnose (bingo, ~17:58Z, job `67d9a2bc`)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` only — appended sixteenth
