@@ -14,6 +14,10 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-08-03 — server-patch skill silently drops the commit/push step
+
+Two consecutive `server-patch` sessions (`5dfebb42`, `2bfb6d20`) both wrote the same `_check_project_health` live-probe patch, added passing tests, updated the CHANGELOG, and returned `status=completed` — but neither ever landed a commit on `origin/main` (`git log origin/main -- src/runner/events.py` still at `197f239`, pre-patch). Audit summary of `2bfb6d20` shows the session ending mid-flow ("Now trigger the code-review subagent:") with no evidence of `git commit && git push`. Symptom: the exact same false-positive keeps re-firing every ~30 min after each "successful" patch. Do NOT re-dispatch `server-patch` a third time for this same fix without first fixing the skill's commit/push handoff — you'll just lose a third Opus session. Diagnosis: check whether the code-review sub-agent handoff is returning to the parent session BEFORE the parent commits, or whether the workspace is being GC'd before the push completes. _Evidence: jobs `5dfebb42`, `2bfb6d20`; both marked completed, zero on-origin diff._
+
 ## 2026-08-03 — Health check event trigger fires based on stale timestamp without live probe
 
 `_check_project_health` in `src/runner/events.py:300` evaluates only the `projects.last_healthy_at` DB timestamp to decide whether to enqueue a self-diagnose job — it performs no live HTTP probe. When `healthcheck-all.sh` misses multiple 5-minute launchd ticks (e.g., a 21-minute gap), the timestamp ages past the threshold and a false-positive self-diagnose is enqueued even though the service returns HTTP 200. This has occurred 48 times across atlas and baseball-bingo. The fix is to add a live-probe gate (curl/httpx to `http://localhost:<port><healthcheck_path>` with 3s timeout) before enqueuing; skip the enqueue on 200. See `docs/TROUBLESHOOTING.md:1322` for the patch spec.

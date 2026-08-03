@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — Second server-patch attempt also failed to land; baseball-bingo diagnose #44 (job `a629fb94`, ~18:23Z)
+
+**Files changed**: `.context/modules/runner/CHANGELOG.md` (this entry) +
+`.context/modules/runner/skills/GOTCHAS.md` (occurrence tick). No code
+touched. Baseball-bingo `/healthz` returned 200 in ~1ms, uvicorn PID 71682
+up 3d14h, `projects.last_healthy_at` = 54s stale (fresh) at diagnosis
+time — same cadence-slip false positive as the previous 43 baseball-bingo
+recurrences (88 total across atlas+bingo). **Critical**: the second
+server-patch attempt `2bfb6d20-dedf-43a1-96dd-ce36e3a35956` (completed
+2026-08-03 12:55Z) ALSO failed to land on origin/main — `git log
+origin/main -- src/runner/events.py` still shows `197f239` as the latest
+touch. Audit summary shows the session wrote the patch, added 13 passing
+tests, updated CHANGELOG, and was about to trigger code-review, but no
+commit ever reached origin. Two consecutive server-patch attempts have
+now produced no on-disk change; the fix is being re-lost each time. Not
+re-dispatching from this diagnose — pattern indicates a defect in the
+server-patch skill's commit/push handoff (workspace GC before push, or
+code-review sub-agent returning without merging back). Recommend human
+review of the server-patch skill flow before spending a third Opus
+session on the same fix. Concurrent atlas twin `fa287ee8` running in
+same dispatch window (queued-but-unresolved dedup race still open).
+
 ## 2026-08-03 — Fiftieth false-positive self-diagnose + prior server-patch never committed (baseball-bingo, ~12:41Z, job `61e9de7d`)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` only. Baseball-bingo answered
