@@ -5,7 +5,7 @@ model: claude-opus-4-7
 effort: xhigh
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
-max_turns: 60
+max_turns: 90
 post_review:
   trigger: always
   reviewer_model: claude-opus-4-7

@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — server-patch max_turns 60 → 90 (turn-budget exhaustion)
+
+**Files changed**: `skills/server-patch/SKILL.md` — bumped `max_turns: 60`
+to `90`. Root cause: server-patch sessions were exhausting their 60-turn
+budget before reaching the commit/push phase. Evidence in
+`.context/modules/runner/skills/GOTCHAS.md`: job `5dfebb42` used exactly 60
+tool_use events, hitting the limit during test-run before any git commit;
+job `2bfb6d20` used its last turn to invoke `code-review` and had 0 turns
+left to execute step 8A. The skill's protocol (orient → patch → verify →
+code-review → commit → push → PR-or-merge) plus its post_review reviewer
+routinely bumps against 60 on non-trivial diffs; 90 restores headroom
+without inviting unbounded loops. Protected-path change (skill executor
+frontmatter) → PR, not autonomous merge. Test suite unchanged (pre-existing
+`test_context_files_exist` failure is workspace-clone drift on
+`projects/ideas/history.jsonl`, not caused by this change).
+
 ## 2026-07-31 — MCP tools joined allowed_tools (the second dispatch blocker)
 
 **Files changed**: `src/runner/session.py` — the MCP injection block now
