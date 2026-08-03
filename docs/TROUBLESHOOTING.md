@@ -1014,10 +1014,32 @@ all three atlas launchd processes healthy with PIDs
 at 23:39:14Z ~31s AFTER this diagnose was enqueued. **The prior entry
 above claimed "no concurrent atlas twin observed"; this IS that
 twin** — the trigger dispatch window straddled the slip so atlas fired
-32s later. Twenty-sixth recurrence).
-**Twenty-six+ occurrences** across atlas and baseball-bingo without the
-prevention patch being landed — the `events.py` guard should be top of
-the queue.
+32s later. Twenty-sixth recurrence); 2026-08-03 ~00:21Z (job
+`f74b7415`, baseball-bingo answered `/healthz` 200 in 8.5ms and `/`
+200 in 3.1ms on port 8790, `last_healthy_at` age 21m43s at diagnosis
+— `healthcheck.out.log` last tick 23:59:21Z (21-min slip past the
+5-min cadence, i.e. four missed 5-min ticks in a row), project PID
+71682 healthy; healthcheck-all kickstarted inline via
+`gui/$(id -u)/com.assistant.healthcheck-all` and resumed at
+00:21:19Z, baseball-bingo `last_healthy_at` refreshed to 3s old.
+Twenty-seventh recurrence — baseball-bingo-only in the dispatch
+window; no concurrent atlas diagnose was enqueued for this slip);
+2026-08-03 ~00:20Z (job `9fc8f94a`, atlas twin of the baseball-bingo
+diagnose immediately above that was reported as "baseball-bingo-only"
+— the atlas twin *was* enqueued; its diagnose loaded a moment later.
+Atlas answered `/` 200 in 72ms on port 8791, `last_healthy_at` age
+21m32s at diagnosis — same 23:59:21Z last tick / four missed 5-min
+ticks signature as the concurrent baseball-bingo diagnose above, all
+three atlas launchd processes healthy with PIDs 24233/81428/81432
+and `state = running`; healthcheck-all had already been kickstarted
+by the concurrent baseball-bingo diagnose so no second kickstart was
+needed, atlas `last_healthy_at` refreshed to 2s old at 00:21:22Z.
+Twenty-eighth recurrence — the prior "baseball-bingo-only" note above
+was written before this atlas diagnose reported in; twin-fires-per-slip
+pattern still holds).
+**Twenty-eight+ occurrences** across atlas and baseball-bingo without
+the prevention patch being landed — the `events.py` guard should be
+top of the queue.
 
 **Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
 insert a live-probe gate before `enqueue_job`. Between lines 323-330,
@@ -1026,7 +1048,7 @@ the project's `port` and issue `curl -sf -m 3 http://localhost:<port><healthchec
 (or an async httpx GET). If it returns 200, skip the enqueue and just
 refresh `last_healthy_at` inline (or leave for the next healthcheck-all
 tick). Only enqueue diagnose when the live probe also fails. This
-converts the 26+ false positives to zero without changing the trigger
+converts the 28+ false positives to zero without changing the trigger
 semantics for genuine outages. Cost: one HTTP call per slug per tick
 (negligible; already happens in healthcheck-all)._
 

@@ -2,45 +2,50 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
-## 2026-07-31 — False-positive project-unhealthy trigger (healthcheck-all timer slip)
+## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 27th recurrence)
 
-**Files changed**: none in this module (TROUBLESHOOTING.md entry
-"false-positive 'project unhealthy 20+ min' self-diagnose while the project
-answers /health 200" was added by the paired atlas diagnose; this entry
-records the baseball-bingo half of the paired incident).
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;
+27+ occurrences counter bumped).
 
-**Trigger**: self-diagnose `43c909ca` fired on `baseball-bingo` unhealthy
-20+ min. Actual state: five consecutive `curl /healthz` and `/` returned
-200, `project.baseball-bingo.err.log` untouched since 2026-07-30 23:40, uvicorn
-worker up 45 min. Root cause was `com.assistant.healthcheck-all` skipping
-its 5-min cadence (last completed 04:04:22Z, next 04:25:53Z — 1291s gap),
-which let `projects.last_healthy_at` age past the 20-min cutoff in
-`src/runner/events.py:_should_trigger_project_diagnose` even though the
-service was fine. Paired with atlas diagnose `eed7225d` firing in the same
-minute for the same reason.
+**Why**: `_check_project_health` in `runner/events.py` fired for
+baseball-bingo (`last_healthy_at` age 21m43s) though the project answered
+`/healthz` 200 in 8.5ms. `healthcheck.out.log` last tick 23:59:21Z —
+four missed 5-min ticks in a row. Kickstarted
+`gui/$(id -u)/com.assistant.healthcheck-all` inline; cadence resumed
+00:21:19Z, `last_healthy_at` refreshed to 3s. No project restart
+needed (that would be the only real downtime of the incident). The
+prevention patch (live-probe gate in `events.py` `_check_project_health`)
+remains unimplemented — job `f74b7415`.
 
-**Action taken**: none on the project (a restart of a healthy service just
-creates real downtime). Documented in TROUBLESHOOTING as a false-positive
-class with a server-patch prevention plan (live-probe before enqueuing,
-gate on `healthcheck:last_run` Redis key, investigate launchd slippage).
+## 2026-07-31 — Atlas goes GitHub-canonical; first live delivery contract (Phase E, atlas half)
 
-## 2026-07-31 — Stale-venv-import failure mode documented in TROUBLESHOOTING
+**Files changed**: `.context/PROJECTS_REGISTRY.md` (atlas source + delivery
+table → ACTIVE), `skills/atlas-redeploy/SKILL.md` (origin is GitHub; wording
+for multi-machine commits), `docs/TROUBLESHOOTING.md` (atlas divergence
+section: correct origin is now the GitHub URL). Same-day follow-up — the
+every-session multi-machine procedure: root `CLAUDE.md` (push-gates dev-repo
+wording), `.context/PROJECT_PROTOCOL.md` (§1.4 rebase-before-work, §4.2
+delivery-branch push), `skills/app-patch/SKILL.md` (STEP 0 rebase-first);
+mirrored in atlas `CLAUDE.md` §Working-on-this-repo + `docs/DEVELOPMENT.md`
+(surfaces + checklist). Non-repo state changes on the
+Mini (owner-directed in an interactive session): runtime clone
+`projects/atlas` origin repointed local-path → `https://github.com/Piserchia/atlas.git`;
+the stale dev-checkout copy `~/Documents/repos/ai-server/projects/atlas`
+repointed + fast-forwarded 99 commits.
 
-**Files changed**: `docs/TROUBLESHOOTING.md` (new symptom entry:
-"hosted project's `/healthz` returns 200 but real routes 500 with
-`ImportError: cannot import name 'TaskHandle' from 'anyio._core._tasks'`").
-No code change.
+**Why**: owner decision 2026-07-31 — develop atlas from multiple machines.
+GitHub `Piserchia/atlas` (master) is the source of truth; single-writer is
+superseded by rebase+push single-branch integration (atlas CLAUDE.md
+§Deployment topology, atlas `docs/DEVELOPMENT.md`). The atlas manifest now
+carries the `delivery:` block (dev-repo topology, pull-only runtime,
+gated-auto) — the first project on the 2026-07-27 segregation contract, so
+runner enforcement (cwd scoping + deploy-authority gate) is live for atlas.
 
-**Trigger**: self-diagnose fired on `baseball-bingo` unhealthy 20+ min.
-Root cause: bingo process running for 16d20h held stale `anyio._core._tasks`
-in memory; `anyio` was upgraded to 4.14.2 on-disk (2026-07-30 09:09) via
-`pipenv install` in the shared server venv. `/healthz` returned 200 (JSON
-short-circuits ASGI middleware), but `/` served a Starlette `FileResponse`
-whose lazy import of `anyio._backends._asyncio` (new file) tried to
-`from anyio._core._tasks import TaskHandle` on the stale in-memory module.
-`launchctl kickstart -k` restored 200s in <4s. Fix: cascade project
-restarts after any pipenv change in the server root, and consider giving
-each project its own venv.
+**Verify**: `git -C "$HOME/Library/Application Support/ai-server/projects/atlas"
+remote get-url origin` → GitHub URL; `pipenv run python -c "from pathlib import
+Path; from src.registry.manifest import load;
+print(load(Path.home()/'Documents/repos/atlas/manifest.yml').delivery.topology)"`
+→ `dev-repo`; next `/task redeploy atlas` pulls from GitHub ff-only.
 
 ## 2026-07-27 — Manifest `delivery` block documented (segregation Phase D)
 
