@@ -1287,6 +1287,22 @@ Forty-fourth recurrence — the atlas entry above was written as
 loaded moments later; twin-fires-per-slip pattern still holds. Same
 false-positive signature; `events.py` live-probe gate still un-landed.)
 
+2026-08-03 ~16:09Z (job `a66fc623`, baseball-bingo answered `/healthz`
+200 in 6.2ms and `/` 200 in 6.7ms on port 8790, `last_healthy_at` age
+34m11s at diagnosis — stamp 15:35:31Z vs probe 16:09:42Z;
+`healthcheck.out.log` gap 15:35:32Z → 16:09:58Z (34-min slip / six
+missed 5-min ticks in a row), project PID healthy.
+`com.assistant.healthcheck-all` was `state = not running` (idle between
+ticks — last exit 0) so kickstarted inline via
+`gui/$(id -u)/com.assistant.healthcheck-all`; cadence resumed at
+16:09:58Z, both baseball-bingo AND atlas `last_healthy_at` refreshed
+to 7s old (shared-cadence pattern once again). Forty-fifth recurrence
+— baseball-bingo-only fire in the dispatch window; no concurrent atlas
+diagnose observed for this slip. Same missed-tick signature, no
+silent-UPDATE-loss wrinkle; `events.py` live-probe gate and
+`healthcheck-all.sh` psql-exit-status surfacing both STILL un-landed
+after 45 recurrences.)
+
 Also noticed while triaging: the atlas API log shows repeated
 `invalid input syntax for type uuid: "AAPL"` errors from
 `.next/server/app/api/atlas/{assets,candles}/route.js`. That's a real
@@ -1466,6 +1482,37 @@ just burns cycles without landing the fix. Owner action needed:
 investigate why `src/runner/workspaces.py` isn't pushing workspace
 commits back to origin after session completion, then re-dispatch
 the events.py live-probe gate (spec still valid, unchanged).)
+
+2026-08-03 ~16:09Z (job `5e0d207e`, atlas — probed at 16:09:37Z.
+`/` returned HTTP 200 in 58ms on port 8791. All three atlas launchd
+processes healthy: `com.assistant.project.atlas` PID 24233 (uptime
+2d 21h), `atlas-dash-scheduler` PID 81428 (uptime 3d 11h),
+`atlas-pm-edge` PID 81432 (uptime 3d 11h); the `-15` LastExitStatus on
+each launchctl row is stale from a prior restart cycle, not a live
+crash. `last_healthy_at` at diagnosis fire was 34m26s stale (stamp
+15:35:32Z vs current 16:09:37Z); refreshed to 19s old by the natural
+16:09:58Z healthcheck-all tick that fired ~20s AFTER this diagnose
+picked up, so no inline kickstart needed. `healthcheck.out.log` gap
+15:35:32Z → 16:09:58Z (34m26s slip / **six** missed 5-min ticks — the
+longest slip in the current recurrence run). Concurrent baseball-bingo
+row also fresh (staleness 19.7s), so twin was NOT dispatched this tick
+(single-fire this time — the queued-but-unresolved dedup race just
+happened not to race). Same macOS-sleep-cadence-slip signature as
+recurrences 43–51.
+
+**Fifty-second recurrence.** Per the 51st entry above, NOT
+re-dispatching a third server-patch for the `events.py` live-probe gate:
+two prior server-patches (`5dfebb42` never committed, `2bfb6d20`
+committed as `4330b2f` but the workspace commit was garbage-collected
+before push) have proven that the workspace-push meta-bug in
+`src/runner/workspaces.py` traps any fix landed via the normal
+`server-patch` lane. Verified this session: `git log origin/main --
+src/runner/events.py` still shows `197f239` as the latest touch (fix
+never landed on origin/main). Until the workspace-push bug is fixed,
+re-dispatching this patch just repeats the same trap. No inline action
+taken on atlas — it's healthy; healthcheck-all self-resumed 21s after
+the diagnose fired, and the false-positive class continues to fire on
+its own cadence-slip signature.)
 
 **Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
 insert a live-probe gate before `enqueue_job`. Between lines 323-330,
