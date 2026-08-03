@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-08-03 — Health check event trigger fires based on stale timestamp without live probe
+
+`_check_project_health` in `src/runner/events.py:300` evaluates only the `projects.last_healthy_at` DB timestamp to decide whether to enqueue a self-diagnose job — it performs no live HTTP probe. When `healthcheck-all.sh` misses multiple 5-minute launchd ticks (e.g., a 21-minute gap), the timestamp ages past the threshold and a false-positive self-diagnose is enqueued even though the service returns HTTP 200. This has occurred 48 times across atlas and baseball-bingo. The fix is to add a live-probe gate (curl/httpx to `http://localhost:<port><healthcheck_path>` with 3s timeout) before enqueuing; skip the enqueue on 200. See `docs/TROUBLESHOOTING.md:1322` for the patch spec.
+
+_Evidence: job `b0efa36e`_
+
 ## 2026-08-02 — Aged healthcheck timestamp triggers false-positive "unhealthy" alert after macOS sleep
 
 The event trigger `_check_project_health` in `src/runner/events.py` fires an alert when `scripts/healthcheck-all.sh` misses its 5-minute launchd cadence (typically due to macOS sleep/throttle on the Mini). The database `last_healthy_at` timestamp ages past 20 minutes, causing the trigger to assume the service is down—but the service is actually healthy (HTTP 200, all launchd PIDs running).

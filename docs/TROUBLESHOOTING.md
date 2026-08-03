@@ -69,6 +69,15 @@ the mandatory read/edit/commit sequence — right at or above the 6-turn cap.
   exploring modules. Diagnosed + entry manually applied by self-diagnose
   `6c281518`. This is the "deeper root cause" recurrence — server-code fix now
   warranted.
+- `e8b05830` (2026-08-03) — same recurrence. Payload had `module=runner`, target
+  file had marker, but the model spent turns 1–2 cat'ing the parent job's
+  summary to "discover" the module, then reached the `Edit` on turn 6 and hit
+  the wall before the `git commit`. The Edit itself SUCCEEDED — the GOTCHAS
+  entry is in-tree at line 17 and will flow via `sync-learnings.sh` to
+  `origin/runtime-learnings`. Only the commit step was lost. Diagnosed by
+  self-diagnose `64d5cb30`. Server-code fix still pending in dev repo (raise
+  `max_turns` to 10 AND inline payload into description at enqueue in
+  `src/runner/learning.py`).
 
 ---
 
@@ -1270,9 +1279,131 @@ is expected) but it's unrelated to healthcheck — the root `/` route
 still returns 200 and the launchd services stay up. Track separately if
 still current after the next atlas deploy.
 
-**Forty-four occurrences** across atlas and baseball-bingo without
-the prevention patch being landed — the `events.py` guard should be
-top of the queue.
+2026-08-03 ~11:28Z (job `440b02dd`, baseball-bingo — probed at
+11:29:48Z, immediately after enqueue. `/healthz` 200 in 1.2ms and `/`
+200 in 5.7ms on port 8790; port listener PID 71686 (child of the bash
+launchd wrapper whose PID 71682 shows `LastExitStatus=15` — normal, the
+python child outlives the shell). `last_healthy_at` at diagnosis was
+11:29:05Z, i.e. 43s old — already fresh by the time this diagnose ran,
+so the slip closed on its own between enqueue and pickup. Re-verified
+`from anyio._core._tasks import TaskHandle` succeeds cleanly at the
+current interpreter, confirming the June-30 `TaskHandle` ImportError
+burst in `project.baseball-bingo.err.log` is stale and not the source of
+this fire. Forty-fifth recurrence — same false-positive signature;
+`events.py:_check_project_health` live-probe gate STILL un-landed.)
+
+2026-08-03 ~11:28Z (job `fc3ab12d`, atlas twin of baseball-bingo job
+`440b02dd` immediately above — same event tick (07:28:51 EDT / 11:28:51Z),
+same slip signature. Atlas answered `/` 200 in 12ms on port 8791.
+`last_healthy_at` at diagnosis was 11:29:05.883Z, 17s old at the first
+DB read — the 11:29:06Z healthcheck-all tick had already fired
+self-recovered before this diagnose job even picked up (no inline
+kickstart needed). Preceding `healthcheck.out.log` gap 11:08:32Z →
+11:29:06Z (20-min slip / four missed 5-min ticks). All three atlas
+launchd processes healthy with PIDs 24233/81428/81432, state `running`.
+Forty-sixth recurrence — twin-fires-per-slip pattern still holds
+(45+46 = shared 11:08:32Z → 11:29:06Z slip). Same false-positive
+signature; `events.py:_check_project_health` live-probe gate STILL
+un-landed. Also re-observed the pre-existing atlas `invalid input
+syntax for type uuid: "AAPL"` bug in `assets/candles` API route —
+unrelated to healthcheck, root `/` still 200. No app-patch dispatched
+from this session — diagnose-only lane.)
+
+2026-08-03 ~11:53Z (job `db9c2625`, baseball-bingo — probed at
+11:53:43Z. `/healthz` 200 in 4.0ms and `/` 200 in 4.5ms on port 8790,
+project PID 71682 healthy. DB `last_healthy_at` was 2m54s old at
+diagnosis (stamp 07:50:47 EDT / 11:50:48Z) — already refreshed by the
+natural 11:50:48Z healthcheck-all tick before this diagnose loaded, no
+inline kickstart needed. Preceding `healthcheck.out.log` slips this
+session: 11:08:32Z → 11:29:06Z (20-min slip / four missed 5-min ticks)
+then 11:29:06Z → 11:50:48Z (22-min slip / four missed ticks) — two
+back-to-back slips in the same window, the second of which fired this
+trigger. Forty-seventh recurrence — baseball-bingo-only fire in the
+dispatch window at diagnosis time; no concurrent atlas diagnose observed
+for this specific slip (jobs `440b02dd`+`fc3ab12d` were the twin for the
+prior 11:08→11:29 slip). Same false-positive signature;
+`events.py:_check_project_health` live-probe gate STILL un-landed.)
+
+2026-08-03 ~11:50Z (job `b0efa36e`, baseball-bingo — probed at
+11:55:37Z. `/healthz` 200 OK on port 8790, uvicorn PID 71686 (parent
+71682) up since 2026-07-30, `state = running`. DB `last_healthy_at`
+was 21m43s stale at diagnosis fire (07:50:31 EDT / 11:50:31Z; stamp
+was 07:29:06 EDT / 11:29:06Z) — refreshed to 58s old by the natural
+11:50:48Z healthcheck-all tick which landed 17s AFTER this diagnose
+was enqueued, no inline kickstart needed. `healthcheck.out.log` gap
+11:29:06Z → 11:50:48Z (21m42s slip / four missed 5-min ticks); a
+fresh 11:55:49Z tick has since fired on cadence. Historical anyio
+`TaskHandle` ImportError in `project.baseball-bingo.err.log` last
+written Jul 30 23:40 — the read_project_logs stderr dump surfaces
+these ancient errors on every diagnose and is misleading; they are
+pre-restart PID 3619 and no longer relevant (verified: anyio 4.14.2
+in shared venv now exports `TaskHandle` from `_core._tasks`). Forty-eighth
+recurrence — baseball-bingo-only fire in the dispatch window at
+diagnosis time; no concurrent atlas diagnose queued for this specific
+slip. Same false-positive signature; `events.py:_check_project_health`
+live-probe gate STILL un-landed after 48 recurrences.)
+
+2026-08-03 ~11:50Z (job `69cb8760`, atlas twin of baseball-bingo job
+`b0efa36e` immediately above — same event tick (07:50:31 EDT /
+11:50:31Z), same 11:29:06Z → 11:50:48Z slip. Atlas answered `/` 200
+in 65ms on port 8791. DB `last_healthy_at` was 3m25s old at diagnosis
+(stamp 07:50:47 EDT / 11:50:47Z) — already refreshed by the natural
+11:50:48Z healthcheck-all tick which landed 17s AFTER the event
+trigger fired, no inline kickstart needed. atlas launchd PIDs
+24233/81428/81432 healthy, `state = running`; the `-15` last-exit
+codes visible in `launchctl list` are STALE from prior instances and
+misleading. This session also observed and cancelled a queued
+duplicate atlas diagnose `30bbf10e` stacked behind this running peer
+— dedup race: `_should_trigger_project_diagnose` filters
+`existing_diagnoses` on `Job.resolved_skill == 'self-diagnose'`, but
+queued-but-unresolved duplicates have NULL `resolved_skill` and slip
+through, so during back-to-back slips the trigger double-fires per
+project. Folded into the server-patch spec below. Re-observed the
+pre-existing atlas `invalid input syntax for type uuid: "AAPL"` bug
+in `.next/server/app/api/atlas/{assets,candles}/route.js` — unrelated
+to this class, root `/` still 200, not addressed here. Forty-ninth
+recurrence.
+
+**NEW — prevention patch dispatched**: server-patch job
+`5dfebb42-5e0f-4009-be11-1112b9d4b9b2` enqueued at 11:54Z to land
+BOTH the live-probe gate in `events.py:_check_project_health` AND
+the queued-but-unresolved dedup fix. First landing attempt after 48
+diagnose-only fires. If it merges green, this class of false
+positive should end; if it fails or gets deferred, the recurrence
+counter will keep climbing and the next self-diagnose should
+re-dispatch.)
+
+2026-08-03 ~12:41Z (job `61e9de7d`, baseball-bingo — probed at 12:41:38Z.
+`/healthz` 200 in 17ms and `/` 200 in 6ms on port 8790, uvicorn PID 71686
+(parent 71682) up since 2026-07-30, `state = running`. DB `last_healthy_at`
+was 20m38s stale at diagnosis fire (stamp 08:21:00 EDT / 12:21:00Z) —
+refreshed to fresh by the natural 12:41:41Z healthcheck-all tick that
+landed 3s after this diagnose picked up, no inline kickstart needed.
+`healthcheck.out.log` gap 12:21:07Z → 12:41:41Z (20m34s slip / four
+missed 5-min ticks). Concurrent atlas twin `7a19aaf7` running in same
+dispatch window (both enqueued at 12:41:04Z, same event tick — the
+queued-but-unresolved dedup race still holds since the prevention patch
+never landed). **Critical finding**: prior server-patch `5dfebb42` from
+`~11:54Z` completed but the fix was **never committed or pushed**. The
+session made the edits to `src/runner/events.py` (`_check_project_health`
++ `_resolve_probe_decision` helper) AND added 6 passing tests to
+`tests/test_pure_functions.py`, but the workspace `workspace_synced` event
+records only `canonical fast-forwarded from origin` (i.e. no local commits
+to push). The session ended after the test run without a git commit,
+git push, TASK_COMPLETE marker, or code_review invocation. `git log
+origin/main -- src/runner/events.py` still shows `197f239` (pre-patch) as
+the latest touch — the changes were thrown away when the workspace was
+GC'd. Also noted: guard hook mis-fired on a benign `find` command
+containing the protected-path substring — separate secondary bug worth
+tightening. Fiftieth recurrence — same false-positive signature; live-probe
+gate STILL un-landed. Re-dispatching a fresh server-patch with explicit
+COMMIT-AND-PUSH-BEFORE-EXIT instructions.)
+
+**Fifty occurrences** across atlas and baseball-bingo. Server-patch
+`5dfebb42` dispatched 2026-08-03 11:54Z made the edits + tests but
+**never committed** (see 50th entry above); re-dispatched fresh
+`server-patch` at 2026-08-03 12:44Z with explicit commit/push
+requirements + INV-13 code-review gate reminder.
 
 **Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
 insert a live-probe gate before `enqueue_job`. Between lines 323-330,

@@ -2,6 +2,43 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — Fiftieth false-positive self-diagnose + prior server-patch never committed (baseball-bingo, ~12:41Z, job `61e9de7d`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only. Baseball-bingo answered
+`/healthz` 200 in 17ms and `/` 200 in 6ms on port 8790, uvicorn PID 71686
+healthy. DB `last_healthy_at` was 20m38s stale at diagnosis due to another
+`healthcheck-all` cadence slip (12:21:07Z → 12:41:41Z, four missed ticks);
+natural launchd tick refreshed it 3s after this diagnose picked up.
+Concurrent atlas twin `7a19aaf7` running in the same dispatch window —
+queued-but-unresolved dedup race still active. **Critical finding**:
+prior server-patch `5dfebb42` (dispatched at the 49th recurrence) DID
+edit `src/runner/events.py` and DID add 6 passing tests to
+`tests/test_pure_functions.py`, but the session ended without committing
+or pushing — `workspace_synced` recorded only `canonical fast-forwarded
+from origin`, no local commits existed, and `git log origin/main --
+src/runner/events.py` still shows `197f239` as the latest touch (pre-patch).
+The workspace was GC'd and the fix is lost. Re-dispatched fresh
+`server-patch` job `2bfb6d20-dedf-43a1-96dd-ce36e3a35956` at ~12:44Z with
+explicit COMMIT-AND-PUSH-BEFORE-EXIT + INV-13 code-review instructions.
+Secondary bug observed but not fixed here: the workspace guard hook
+mis-fired on a benign `find` command containing the protected-path
+substring — worth tightening the destructive-command classifier.
+
+## 2026-08-03 — Forty-seventh false-positive self-diagnose (baseball-bingo, ~11:53Z, job `db9c2625`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only — appended forty-seventh
+recurrence of the `events.py:_check_project_health` false positive.
+baseball-bingo answered `/healthz` 200 in 4.0ms and `/` 200 in 4.5ms on
+port 8790, project PID 71682 healthy. Two back-to-back `healthcheck-all`
+cadence slips this window (11:08:32Z → 11:29:06Z, then 11:29:06Z →
+11:50:48Z, each ~20-min / four missed 5-min ticks), the second fired the
+trigger; natural launchd 11:50:48Z tick had already refreshed
+`last_healthy_at` to 2m54s old before this diagnose loaded, so no inline
+kickstart needed. Runner behavior unchanged. The `events.py` live-probe
+gate + the `healthcheck-all.sh` psql-exit-status surfacing remain the
+correct prevention (server-patch, Phase 5) — un-landed after 47
+recurrences.
+
 ## 2026-08-03 — Forty-second false-positive self-diagnose (atlas, ~09:42Z, job `3e813db1`)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` only — appended forty-second
