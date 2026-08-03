@@ -995,10 +995,40 @@ the concurrent atlas diagnose above, project PID 71682 healthy;
 healthcheck-all had already self-resumed at 22:17:35Z, no inline
 kickstart needed. Twenty-fourth recurrence — twin-fires-per-slip pattern
 DID hold this slip; the atlas entry's "atlas-only" note above was
-written before this baseball-bingo diagnose reported in).
-**Twenty-four+ occurrences** across atlas and baseball-bingo without the
+written before this baseball-bingo diagnose reported in); 2026-08-02
+~23:39Z (job `16b3576e`, baseball-bingo answered `/healthz` 200 in
+12.2ms and `/` 200 in 3.2ms on port 8790, `last_healthy_at` age
+20m53s at diagnosis — `healthcheck.out.log` gap 23:18:06Z →
+23:39:14Z (21-min slip past the 5-min cadence, i.e. four missed
+5-min ticks in a row), project PID 71682 healthy; healthcheck-all
+kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`
+and resumed at 23:39:14Z, both baseball-bingo and atlas
+`last_healthy_at` refreshed to ~8s old. Twenty-fifth recurrence —
+this fire was baseball-bingo-only in the dispatch window; no
+concurrent atlas twin observed this slip); 2026-08-02 ~23:38Z (job
+`4d1f4963`, atlas answered `/` 200 in 63ms on port 8791,
+`last_healthy_at` age 74s at diagnosis — same 23:18:06Z → 23:39:14Z
+cadence-slip signature as the baseball-bingo entry immediately above,
+all three atlas launchd processes healthy with PIDs
+24233/81428/81432 and `state = running`; healthcheck-all self-resumed
+at 23:39:14Z ~31s AFTER this diagnose was enqueued. **The prior entry
+above claimed "no concurrent atlas twin observed"; this IS that
+twin** — the trigger dispatch window straddled the slip so atlas fired
+32s later. Twenty-sixth recurrence).
+**Twenty-six+ occurrences** across atlas and baseball-bingo without the
 prevention patch being landed — the `events.py` guard should be top of
-the queue._
+the queue.
+
+**Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
+insert a live-probe gate before `enqueue_job`. Between lines 323-330,
+for each `slug` returned by `_should_trigger_project_diagnose`, fetch
+the project's `port` and issue `curl -sf -m 3 http://localhost:<port><healthcheck_path>`
+(or an async httpx GET). If it returns 200, skip the enqueue and just
+refresh `last_healthy_at` inline (or leave for the next healthcheck-all
+tick). Only enqueue diagnose when the live probe also fails. This
+converts the 26+ false positives to zero without changing the trigger
+semantics for genuine outages. Cost: one HTTP call per slug per tick
+(negligible; already happens in healthcheck-all)._
 
 ## Adding entries to this file
 
