@@ -2,6 +2,24 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — healthcheck-all cadence-slip false positive (atlas, 39th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;
+39+ occurrences counter bumped from 38+).
+
+**Why**: `_check_project_health` in `runner/events.py` fired for atlas
+(`last_healthy_at` age 35m at fire time) though the project answered
+`/` HTTP 200 in 74ms on port 8791. `healthcheck.out.log` last tick
+06:08:09Z — seven missed 5-min ticks in a row (06:13/18/23/28/33/38/43).
+Kickstarted `gui/$(id -u)/com.assistant.healthcheck-all` inline;
+cadence resumed 06:44:14Z, both atlas and baseball-bingo
+`last_healthy_at` refreshed to ~2s. All three atlas launchd processes
+(atlas / atlas-dash-scheduler / atlas-pm-edge, PIDs 24233/81428/81432)
+were up continuously — same PID trio as recurrences 35–38, confirming
+no atlas restart was needed. The prevention patch (live-probe gate in
+`events.py:_check_project_health`) still un-landed — spec captured in
+TROUBLESHOOTING.md and referenced in prior CHANGELOG entries.
+
 ## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 27th recurrence)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;

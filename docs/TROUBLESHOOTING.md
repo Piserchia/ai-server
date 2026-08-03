@@ -1163,8 +1163,40 @@ PIDs 24233/81428/81432. healthcheck-all kickstarted inline via
 atlas `last_healthy_at` refreshed to 3s old. Thirty-eighth recurrence —
 still atlas false positive; `events.py` live-probe gate spec below is
 still un-landed and should be prioritized).
+2026-08-03 ~06:43Z (job `bfbbaa74`, atlas answered `/` 200 in 74ms on
+port 8791, `last_healthy_at` age at diagnosis fire was 35m stale,
+refreshed to 2s after inline kickstart — `healthcheck.out.log` last
+tick 06:08:09Z (seven missed 5-min ticks in a row: 06:13/18/23/28/33/38/43),
+all three atlas launchd processes healthy with PIDs 24233/81428/81432
+(same trio as recurrences 35–38, so the atlas main + dash-scheduler +
+pm-edge have been continuously up through the whole slip streak).
+`healthcheck-all` kickstarted inline via
+`gui/$(id -u)/com.assistant.healthcheck-all` and resumed at 06:44:14Z,
+both atlas and baseball-bingo `last_healthy_at` refreshed. Thirty-ninth
+recurrence — same atlas false-positive shape; `events.py` live-probe
+gate spec below still un-landed. Baseball-bingo appears not to have
+tripped a diagnose fire this window despite the same DB staleness,
+suggesting the 20-min threshold only crossed for one of them at eval time.
+2026-08-03 ~06:44Z (job `5d2ec98b`, baseball-bingo — twin of the atlas
+thirty-ninth just above; correcting that entry's assumption, baseball-bingo
+DID fire a parallel diagnose in the same window, so this is a same-tick
+twin-fire from the shared 06:08:09Z → 06:44:14Z healthcheck gap).
+Baseball-bingo answered `/healthz` 200 in 9ms, `/` 200 with full HTML,
+and `/static/style.css` 200 in 3ms on port 8790 — every code path healthy
+including the FileResponse path that originally caught the July 30 startup
+anyio ImportError. No kickstart needed — the natural 06:44:14Z tick had
+already refreshed `last_healthy_at` to 8s old before the probe ran
+(so the diagnose fired against a race window that was already closed by
+the atlas-diagnose's inline kickstart one minute earlier). Historical note:
+the six `TaskHandle`-from-anyio ImportError bursts in
+`project.baseball-bingo.err.log` are ALL from the July 30 23:40 initial
+startup (err.log unchanged since; process uptime 3d3h and stable);
+`anyio 4.14.2` exports `TaskHandle` correctly at the current interpreter
+state. Fortieth recurrence — still `events.py` live-probe gate un-landed;
+also worth landing a same-tick dedup so parallel `atlas` + `baseball-bingo`
+slips produce one diagnose fire, not two.
 
-**Thirty-eight+ occurrences** across atlas and baseball-bingo without
+**Forty+ occurrences** across atlas and baseball-bingo without
 the prevention patch being landed — the `events.py` guard should be
 top of the queue.
 
