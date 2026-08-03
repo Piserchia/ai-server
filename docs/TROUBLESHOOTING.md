@@ -1036,8 +1036,41 @@ by the concurrent baseball-bingo diagnose so no second kickstart was
 needed, atlas `last_healthy_at` refreshed to 2s old at 00:21:22Z.
 Twenty-eighth recurrence — the prior "baseball-bingo-only" note above
 was written before this atlas diagnose reported in; twin-fires-per-slip
-pattern still holds).
-**Twenty-eight+ occurrences** across atlas and baseball-bingo without
+pattern still holds); 2026-08-03 ~02:14Z (job `5356ea20`, atlas answered
+`/` 200 in 37ms on port 8791, `last_healthy_at` age 17s at diagnosis —
+refreshed to current by the time direct probe ran; `healthcheck.out.log`
+gap 01:52:33Z → 02:13:26Z (21-min slip past the 5-min cadence, i.e.
+four missed 5-min ticks in a row), all three atlas launchd processes
+healthy with PIDs 24233/81428/81432; healthcheck-all had already
+self-resumed at 02:13:26Z before diagnosis ran — no inline kickstart
+needed. Twenty-ninth recurrence — atlas-only fire in the dispatch
+window at diagnosis time; no concurrent baseball-bingo twin observed);
+2026-08-03 ~02:33Z (job `617fca69`, atlas answered `/` 200 in 63ms on
+port 8791, `last_healthy_at` age 84s at diagnosis — refreshed to
+current by the time direct probe ran; `healthcheck.out.log` gap
+01:52:33Z → 02:13:26Z → 02:33:48Z (two consecutive slips: first a
+21-min gap / four missed 5-min ticks, second a 20-min gap / four
+missed 5-min ticks), all three atlas launchd processes healthy with
+PIDs 24233/81428/81432; healthcheck-all had already self-resumed at
+02:33:48Z (7s AFTER this diagnose was enqueued at 02:33:41Z) — no
+inline kickstart needed. Thirtieth recurrence — atlas-only fire in the
+dispatch window at diagnosis time; no concurrent baseball-bingo twin
+observed for this slip); 2026-08-03 ~02:33Z (job `a6ab792e`,
+baseball-bingo answered `/healthz` 200 on port 8790, `last_healthy_at`
+age 90s at diagnosis time (02:33:48Z stamp vs 02:35:18Z probe) —
+**this IS the concurrent baseball-bingo twin of atlas job `617fca69`
+above**; both diagnoses enqueued at 02:33:41Z, but this baseball-bingo
+diagnose loaded later so the entry immediately above (Thirtieth
+recurrence) was written before this twin reported in and its
+"atlas-only fire ... no concurrent baseball-bingo twin observed" note
+was premature. Project PID 71686 up 4 days without restart, uvicorn
+process healthy; historical anyio `TaskHandle` ImportError in
+`project.baseball-bingo.err.log` is from PID 3619 pre-restart 2026-07-30
+and no longer relevant. healthcheck-all kickstarted inline via
+`gui/$(id -u)/com.assistant.healthcheck-all` (baseball-bingo
+`last_healthy_at` refreshed to 3s old at 02:36:31Z). Thirty-first
+recurrence — twin-fires-per-slip pattern still holds).
+**Thirty-one+ occurrences** across atlas and baseball-bingo without
 the prevention patch being landed — the `events.py` guard should be
 top of the queue.
 
