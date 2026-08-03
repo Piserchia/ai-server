@@ -14,9 +14,21 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
-## 2026-08-03 — server-patch skill silently drops the commit/push step
+## 2026-08-03 — server-patch skill silently drops the commit/push step (ROOT CAUSE: max_turns=60 exhausted)
 
-Two consecutive `server-patch` sessions (`5dfebb42`, `2bfb6d20`) both wrote the same `_check_project_health` live-probe patch, added passing tests, updated the CHANGELOG, and returned `status=completed` — but neither ever landed a commit on `origin/main` (`git log origin/main -- src/runner/events.py` still at `197f239`, pre-patch). Audit summary of `2bfb6d20` shows the session ending mid-flow ("Now trigger the code-review subagent:") with no evidence of `git commit && git push`. Symptom: the exact same false-positive keeps re-firing every ~30 min after each "successful" patch. Do NOT re-dispatch `server-patch` a third time for this same fix without first fixing the skill's commit/push handoff — you'll just lose a third Opus session. Diagnosis: check whether the code-review sub-agent handoff is returning to the parent session BEFORE the parent commits, or whether the workspace is being GC'd before the push completes. _Evidence: jobs `5dfebb42`, `2bfb6d20`; both marked completed, zero on-origin diff._
+**ROOT CAUSE CONFIRMED (2026-08-03, job `2e92aaae`)**: `max_turns: 60` in `skills/server-patch/SKILL.md` is too low for typical server-patch sessions that read substantial context before coding.
+
+Precise audit trail:
+- **`5dfebb42`**: session used exactly 60 `tool_use` events (Bash:23, Read:16, Grep:13, Glob:4, Edit:4) exhausting `max_turns` during the test-run phase — BEFORE any `git commit`. Final line in summary: "Now run the full test suite:". No commit, no push. Workspace cleaned up with `keep=False` (no exception), commits GC'd.
+- **`2bfb6d20`**: session reached `git commit` at turn ~59 then invoked the code-review subagent on turn 60 (the final allowed turn). Code-review returned its verdict but the parent had 0 turns left to execute step 8A (checkout main, merge, push). Session ended; workspace GC'd. Commit `4330b2f` existed only in the workspace clone — never pushed.
+
+Both `workspace_synced: ok=true, detail="canonical fast-forwarded from origin"` are misleading: `sync_canonical` saw commits from OTHER concurrent pushes to origin/main and fast-forwarded those, not the events.py fix.
+
+**The fix**: Increase `max_turns` in `skills/server-patch/SKILL.md` from 60 to ≥90. This is a **protected path** (server-patch SKILL.md) — requires a PR + owner approval. A targeted server-patch for this one change should complete within 60 turns (it's a one-line edit, small context surface).
+
+**Do NOT re-dispatch server-patch for events.py live-probe gate** until `max_turns` is increased and that PR is merged and deployed. Then retry with confidence.
+
+_Evidence: jobs `5dfebb42` (60 tool_use events, no commit), `2bfb6d20` (67 total: 59 parent + 8 subagent, commit on turn 59 but no turns left to merge/push). Investigation job: `2e92aaae`._
 
 ## 2026-08-03 — Health check event trigger fires based on stale timestamp without live probe
 

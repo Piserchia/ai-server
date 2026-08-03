@@ -2,6 +2,32 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — healthcheck-all cadence-slip false positive (atlas, 61st recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended).
+
+**Why**: self-diagnose fired for atlas unhealthy (`last_healthy_at`
+20m31s stale at fire, stamp 22:03:19Z vs probe 22:23:50Z), though
+`/` returned HTTP 200 in 64ms on port 8791 and all three launchd
+processes (atlas / dash-scheduler / pm-edge, PIDs 24233 / 81428 /
+81432) were healthy. `healthcheck.out.log` gap 22:03:19Z →
+22:24:01Z = 20m42s / four missed 5-min ticks — the same
+macOS-sleep-cadence-slip pattern as recurrences 43–60. No concurrent
+baseball-bingo twin observed this slip.
+
+**Fix**: `launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all`.
+Cadence resumed with a tick at 22:24:01Z; atlas `last_healthy_at`
+refreshed to <1s at 22:24:00Z. Very-low-risk auto-apply per the
+self-diagnose skill.
+
+**Still blocked**: the events.py live-probe gate that would zero
+these false positives is trapped in the runtime clone by the
+workspace-push meta-bug (`src/runner/workspaces.py`) — see
+TROUBLESHOOTING.md entries 51–60. Not re-dispatching another
+server-patch until the meta-bug is unblocked.
+
+Job: `348ec5db`.
+
 ## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 59th recurrence)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended as

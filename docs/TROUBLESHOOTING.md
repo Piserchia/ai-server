@@ -1682,6 +1682,47 @@ converts the 28+ false positives to zero without changing the trigger
 semantics for genuine outages. Cost: one HTTP call per slug per tick
 (negligible; already happens in healthcheck-all)._
 
+2026-08-03 ~21:48Z (job `aaa710c0`, atlas-only fire — no concurrent
+baseball-bingo twin observed this slip despite both sharing the same
+cadence, and no baseball-bingo self-diagnose in the last 2h in the DB;
+possible race in the events loop tick, unimportant since both projects
+were healthy). Atlas answered `/` HTTP 200 on port 8791; all three
+launchd processes healthy with PIDs 24233 / 81428 / 81432 (main web
+uptime 3d02h, sub-services 3d17h — stable). `last_healthy_at` at
+diagnosis was 20m20s stale (stamp 21:27:54Z vs trigger evaluation
+21:48:14Z — dead-on the 20-min threshold). `healthcheck.out.log` gap
+21:27:54Z → 21:48:15Z (20m21s / four missed 5-min ticks). By the time
+the diagnose skill loaded and probed (~21:53Z), `healthcheck-all` had
+already self-resumed at 21:48:15Z and again at 21:53:16Z — no inline
+kickstart needed. Sixtieth recurrence — same macOS-sleep-cadence-slip
+signature as recurrences 43–59. Per the 51st entry, still NOT
+re-dispatching a `server-patch` for the `events.py` live-probe gate —
+the workspace-push meta-bug documented above continues to trap the
+fix in the runtime clone before it reaches origin. Owner action on
+the workspace-push meta-bug remains the true unblock for the
+events.py live-probe fix that would zero these false positives.
+Prior healthcheck.out.log gaps in the same session (20:26:29Z →
+21:02:47Z = 36m, and 21:27:54Z → 21:48:15Z = 20m) confirm the
+cadence-slip pattern is still active on this Mini.)
+
+2026-08-03 ~22:23Z (job `348ec5db`, atlas-only fire — no concurrent
+baseball-bingo twin observed this slip). Atlas answered `/` HTTP 200
+in 64ms on port 8791; all three launchd processes healthy with PIDs
+24233 / 81428 / 81432. `last_healthy_at` stamp 22:03:19Z vs diagnosis
+probe 22:23:50Z (20m31s stale — dead-on the 20-min threshold).
+`healthcheck.out.log` gap 22:03:19Z → 22:24:01Z (20m42s / four
+missed 5-min ticks) — cadence had paused. Ticked inline via
+`launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all`;
+`last_healthy_at` refreshed to <1s at 22:24:00Z. Sixty-first
+recurrence — same macOS-sleep-cadence-slip signature as 43–60. Per
+the 51st entry, still NOT re-dispatching a third `server-patch` for
+the `events.py` live-probe gate; the workspace-push meta-bug in
+`src/runner/workspaces.py` / session-finalization continues to trap
+the fix in the runtime clone before it reaches origin (last touch of
+`src/runner/events.py` on origin/main is still `197f239`, pre-patch).
+Owner action still needed on the workspace-push meta-bug before the
+events.py fix can land through the normal patch lane.)
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:

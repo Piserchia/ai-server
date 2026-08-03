@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — P4/P5 phase continuation: max_turns root-cause confirmed, two server-patch jobs dispatched (job `2e92aaae`)
+
+**Files changed**: `.context/modules/runner/skills/GOTCHAS.md` (root-cause diagnosis appended),
+`docs/superpowers/plans/2026-07-28-management-hierarchy.md` (P4/P5 status updated).
+**Why**: Investigation of the "Continue to the next phase of the plan" task. Confirmed root cause
+of the server-patch workspace-push meta-bug: `max_turns: 60` is exhausted by context-reading +
+coding + test-running before the session reaches the commit/push phase. Job `5dfebb42` hit exactly
+60 tool_use events during tests (no commit). Job `2bfb6d20` committed on turn ~59 and used its
+last turn to invoke code-review — 0 turns left to execute step 8A merge/push. Dispatched two
+follow-up server-patch jobs: `388681d6` (max_turns fix, PR mode — protected path) and `98e3eb75`
+(P5 management surfaces: /proposals command + dashboard rollup, autonomous merge lane).
+**Side effects**: P4 (guards.py privilege guardrails) remains blocked until `388681d6` PR is
+merged and deployed; then a new server-patch for P4 can complete within the increased turn budget.
+
 ## 2026-08-03 — Second server-patch attempt also failed to land; baseball-bingo diagnose #44 (job `a629fb94`, ~18:23Z)
 
 **Files changed**: `.context/modules/runner/CHANGELOG.md` (this entry) +
