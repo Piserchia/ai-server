@@ -39,7 +39,7 @@ the time window based on the job description (default: last 30 days).
 psql assistant -c "
   SELECT kind,
          COUNT(*) AS total,
-         COUNT(*) FILTER (WHERE status = 'done') AS succeeded,
+         COUNT(*) FILTER (WHERE status = 'completed') AS succeeded,
          COUNT(*) FILTER (WHERE status = 'failed') AS failed,
          ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'failed') / COUNT(*), 1) AS fail_pct
   FROM jobs
@@ -54,11 +54,11 @@ psql assistant -c "
 ```bash
 psql assistant -c "
   SELECT kind,
-         COUNT(rating) AS rated,
-         ROUND(AVG(rating), 2) AS avg_rating
+         COUNT(user_rating) AS rated,
+         ROUND(AVG(user_rating), 2) AS avg_rating
   FROM jobs
   WHERE created_at > NOW() - INTERVAL '30 days'
-    AND rating IS NOT NULL
+    AND user_rating IS NOT NULL
   GROUP BY kind
   ORDER BY avg_rating ASC;
 "
