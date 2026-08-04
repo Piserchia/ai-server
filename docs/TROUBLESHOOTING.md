@@ -1758,6 +1758,51 @@ the `events.py` live-probe gate; workspace-push meta-bug continues
 to trap that fix in the runtime clone. Owner action on the
 workspace-push meta-bug remains the true unblock.)
 
+## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
+
+### Diagnostic
+```bash
+cd "$HOME/Library/Application Support/ai-server/projects/atlas"
+set -a; source .env; set +a
+dashboard/.venv/bin/atlas-dash packet
+# → decimal.InvalidOperation from holdings.py:153 (portfolio_summary)
+```
+
+Audit log signature (see e.g. `ba92d4d4-08c5-4163-a1f2-b1a1768c4e35.jsonl`):
+step 1's `atlas-dash chat-context --market` succeeds, step 1's `atlas-dash packet`
+returns exit 1, then the session spends its remaining turns probing the atlas DB
+schema (`\d holdings`, `\d portfolio_snapshots`, `\d assets`, …) trying to
+reconstruct the packet by hand — hits `max_turns: 14` before authoring the brief.
+
+### Root cause
+Two things compound:
+1. **`atlas-dash packet` bug** — `dashboard/atlas_dash/holdings.py:153` (and :157)
+   does `val / total_value * Decimal("100")` guarded only by `total_value > 0`. A
+   non-finite Decimal (NaN) in one asset class total sneaks past that guard and
+   trips `decimal.InvalidOperation`. Live snapshot shows `total_value≈$156k`, so
+   it's not zero — it's NaN or precision overflow in one of the per-class sums.
+2. **Skill has no degraded path** — `skills/atlas-daily-brief/SKILL.md` treats
+   `atlas-dash packet` as required. When it fails the model reasonably tries to
+   reconstruct book state from raw SQL, but the 14-turn budget is sized for the
+   happy path (3 gathers → author → save → summary).
+
+### Fix
+- Real fix: patch atlas in the dev clone (`~/Documents/repos/atlas`) — filter
+  non-finite Decimals from `priced` in `portfolio_summary()` (and add `.is_finite()`
+  alongside `> 0` guards at `holdings.py:88, 153, 157`). Deploy via
+  `/task redeploy atlas`. Dispatched as app-patch job on 2026-08-04.
+- Skill hardening (follow-up): teach `atlas-daily-brief` to degrade gracefully
+  when `packet` fails — read `portfolio_snapshots` (schema:
+  `ts, total_value, total_cost, source`) for yesterday's totals and mark the
+  brief's Book line as "(fallback from snapshot, packet failed)". Prevents
+  every future packet regression from silently killing the pre-open read.
+
+### Prevention
+Any atlas CLI subcommand the daily-brief skill depends on should have a
+graceful-fallback branch in the skill AND a golden test in the dashboard
+package. NaN/inf Decimals are a recurring hazard for finance code — filter
+them at the boundary (`valued_holdings`) rather than defending every consumer.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
