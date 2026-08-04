@@ -55,13 +55,15 @@ key boundary matters).
 ### 2. Evaluate (division-scoped, read-only)
 Gather evidence about YOUR roster only (`atlas-report`, `atlas-report-sweep`,
 `atlas-scout`, `atlas-daily-brief`, `atlas-portfolio`, `atlas-chat`,
-`atlas-redeploy`):
+`atlas-redeploy`, and the living loops: `atlas-evaluate`, `atlas-gap-scout`,
+`atlas-refresh-knowledge` — fully unattended, so their failures surface ONLY
+here):
 
 ```bash
 # outcomes for your division's skills over the last 14 days
 psql assistant -c "SELECT resolved_skill, status, review_outcome, user_rating,
   LEFT(error_message,80) FROM jobs
-  WHERE resolved_skill IN ('atlas-report','atlas-report-sweep','atlas-scout','atlas-daily-brief','atlas-portfolio','atlas-chat','atlas-redeploy')
+  WHERE resolved_skill IN ('atlas-report','atlas-report-sweep','atlas-scout','atlas-daily-brief','atlas-portfolio','atlas-chat','atlas-redeploy','atlas-evaluate','atlas-gap-scout','atlas-refresh-knowledge')
     AND created_at > NOW() - INTERVAL '14 days' ORDER BY created_at DESC LIMIT 40;"
 # cadence: daily brief + weekly sweep actually scheduled and unpaused?
 psql assistant -c "SELECT name, cron_expression, paused FROM schedules

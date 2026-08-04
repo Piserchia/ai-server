@@ -18,6 +18,9 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-portfolio` | worker | content | Portfolio interaction / Q&A |
 | `atlas-chat` | worker | content | Atlas conversational interface |
 | `atlas-redeploy` | worker | prod-operator | Deploy atlas (bespoke pipeline; `project-redeploy` generalizes it) |
+| `atlas-evaluate` | worker | content | Weekly scorecard + data_gaps triage + backlog re-route (Mon 11:00) |
+| `atlas-gap-scout` | worker | content | Weekly top-gap free-source spec + live probe (Wed 11:00) |
+| `atlas-refresh-knowledge` | worker | content | Monthly knowledge curation + stale-claim re-verify (1st 11:30) |
 
 ## Standards
 
