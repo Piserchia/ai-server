@@ -1723,6 +1723,41 @@ the fix in the runtime clone before it reaches origin (last touch of
 Owner action still needed on the workspace-push meta-bug before the
 events.py fix can land through the normal patch lane.)
 
+2026-08-03 ~23:49Z (job `24bb4633`, baseball-bingo-only fire — no
+concurrent atlas twin observed at diagnosis time). Baseball-bingo
+answered `/healthz` HTTP 200 in 11ms and `/` HTTP 200 in 5.5ms on port
+8790; project PID 71682 up 3d20h without restart. `last_healthy_at`
+stamp 23:14:18Z vs diagnosis probe ~23:49:35Z (35m17s stale — seven
+missed 5-min ticks past the 20-min threshold). `healthcheck.out.log`
+gap 23:14:18Z → 23:49:46Z (35m28s). Kickstarted inline via
+`launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all`;
+next tick landed at 23:49:46Z, `last_healthy_at` refreshed.
+Sixty-second recurrence — same macOS-sleep-cadence-slip signature as
+43–61. Per the 51st entry, still NOT re-dispatching a third
+`server-patch` for the `events.py` live-probe gate; workspace-push
+meta-bug continues to trap that fix in the runtime clone. Owner
+action on the workspace-push meta-bug remains the true unblock.)
+
+2026-08-03 ~23:49Z (job `d8cbf7aa`, atlas twin of the baseball-bingo
+diagnose immediately above — both fired for the same 35m28s cadence
+slip). Atlas answered `/` HTTP 200 in 110ms on port 8791; all three
+launchd processes healthy (main PID 64303, dash-scheduler 62602,
+pm-edge 62600). `last_healthy_at` stamp 23:14:18Z vs diagnosis probe
+23:49:33Z (35m15s stale, seven missed 5-min ticks past the 20-min
+threshold). `healthcheck.out.log` gap 23:14:18Z → 23:49:46Z
+(35m28s). pmset log confirms Mini entered Maintenance Sleep at
+2026-08-03 19:33:05 -0400 (23:33:05Z) and DarkWoke at 19:48:39 -0400
+(23:48:39Z) — the sleep window overlaps the missed ticks. No inline
+kickstart needed: the concurrent baseball-bingo twin (`24bb4633`)
+had already kickstarted healthcheck-all, and this diagnose's own
+manual `bash scripts/healthcheck-all.sh` invocation ticked in the
+same 23:49:44-46Z window (atlas last_healthy_at refreshed to <5s).
+Sixty-third recurrence — twin-fires-per-slip pattern continues; per
+the 51st entry, still NOT re-dispatching a third `server-patch` for
+the `events.py` live-probe gate; workspace-push meta-bug continues
+to trap that fix in the runtime clone. Owner action on the
+workspace-push meta-bug remains the true unblock.)
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
