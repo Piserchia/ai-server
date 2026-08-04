@@ -84,3 +84,16 @@ decision this week. Keep it under 15 lines — it lands in Telegram.
   confusing psycopg error, not a clear "missing env" one.
 - **Warnings vs the rubric**: `gaps --status filed` prints structured log
   lines to stderr; the JSON-ish table is stdout. Parse stdout only.
+- **Date the scorecard from `date -u +%F`, never from memory** — the first
+  live run (2026-08-04) stamped its report a week in the future (2026-08-11).
+- **Verify deploy state before claiming "pending deploy"**: compare
+  `git -C "$HOME/Library/Application Support/ai-server/projects/atlas" log -1
+  --format=%h` against `origin/master`. The first live run declared the
+  living-loops arc frozen-pending-deploy minutes after it had been deployed
+  and verified.
+- **Every write goes to the dev clone — `$ATLAS`-style paths in docs are the
+  RUNTIME clone, read-only.** The first live run duplicated its CHANGELOG
+  entry into the runtime clone's tracked file, which blocked that evening's
+  redeploy at the ff-only pull (incident 2026-08-04). If you must read
+  runtime state, read it; never edit, and never resolve a relative write
+  path against anything but `~/Documents/repos/atlas`.
