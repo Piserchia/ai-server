@@ -10,7 +10,7 @@ permission_mode: acceptEdits
 required_tools: [Read, Bash, Glob, Grep]
 max_turns: 30
 privilege_class: read-only
-context_files: [".context/SKILLS_REGISTRY.md", ".context/SYSTEM.md"]
+context_files: [".context/SKILLS_REGISTRY.md", ".context/SYSTEM.md", "src/runner/retrospective.py"]
 tags: [retrospective, needs-projects-mcp, needs-dispatch-mcp]
 ---
 
