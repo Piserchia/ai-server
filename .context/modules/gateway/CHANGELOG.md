@@ -2,6 +2,25 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-06 — register opus-4-8 + fable-5 in _MODEL_ALIASES; review_flagged notify branch
+
+**Files changed**: `src/gateway/telegram_bot.py`.
+
+- `_MODEL_ALIASES` gained `opus-4-8→claude-opus-4-8` and `fable`/`fable-5→
+  claude-fable-5`. The skill-contract test derives its allowlist as
+  `VALID_MODELS = set(_MODEL_ALIASES.values())`, so a SKILL.md referencing a
+  model absent here fails `test_skill_contracts.py` — and the atlas-loop
+  skills (atlas-build/evaluate/gap-scout/refresh-knowledge) now use these
+  newer models. **This was caught by the prod deploy's pytest gate, not
+  dev** (a `pytest … | tail` misread hid the 7 failures locally — read the
+  FULL summary line for gate-sensitive runs). Bare-name defaults
+  (`opus`→4-7 etc.) left unchanged — moving `opus`→4-8 broke 5 flag-parser
+  tests that pin the default, so newer models are explicit versioned
+  aliases only.
+- (Committed with 74be877) new `review_flagged` branch in the tasks:notify
+  consumer — surfaces a post-session code-review blocker in-thread (⚠️)
+  since post_review now actually fires.
+
 ## 2026-07-30 — /health: parse the epoch runner heartbeat (status semantics unchanged)
 
 **Files changed**: `src/gateway/web.py` — new pure helper

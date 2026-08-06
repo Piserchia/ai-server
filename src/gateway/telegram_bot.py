@@ -114,10 +114,18 @@ def _error_safe(handler):
 _FLAG_RE = re.compile(r"--(\w+)=(\S+)")
 
 # Model alias expansion — accepts short names on the command line
+# Aliases for the /task --model=<x> flag; VALID_MODELS (the skill-contract
+# test's allowlist) is derived from the VALUES here, so any model a SKILL.md
+# may reference must appear as a value. Bare-name defaults (opus/sonnet/haiku)
+# are left on their established targets — explicit versioned aliases are added
+# for newer models (opus-4-8, fable-5) rather than moving the defaults.
 _MODEL_ALIASES = {
     "opus": "claude-opus-4-7",
+    "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
+    "fable": "claude-fable-5",
+    "fable-5": "claude-fable-5",
     "sonnet": "claude-sonnet-4-6",
     "sonnet-4-6": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
