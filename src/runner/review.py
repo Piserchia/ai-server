@@ -178,6 +178,36 @@ def get_git_diff(cwd: Path, ref: str = "HEAD~1") -> str:
         return ""
 
 
+def head_commit_epoch(cwd: Path) -> int | None:
+    """Committer epoch of HEAD in `cwd`, or None (not a repo / no commits)."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%ct"],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return None
+        out = result.stdout.strip()
+        return int(out) if out else None
+    except Exception:
+        return None
+
+
+def is_stale_head(head_epoch: int | None, job_started_epoch: float | None,
+                  slack_seconds: int = 120) -> bool:
+    """True when the checkout's HEAD predates the job's start: nothing this
+    job produced is at HEAD (the workspace's canonical ff-sync failed, or the
+    session never committed), so a HEAD~1 review would grade someone else's
+    commit and stamp review_outcome on the wrong diff (INV-13 wrong-diff
+    guard). Unknown epochs fail open — the diff-empty check still applies."""
+    if head_epoch is None or job_started_epoch is None:
+        return False
+    return head_epoch < (job_started_epoch - slack_seconds)
+
+
 async def run_code_review(
     parent_job_id: str,
     diff: str,
@@ -186,6 +216,10 @@ async def run_code_review(
     """
     Run a code-review sub-agent on the given diff. Returns ReviewOutcome.
     Logs events to the parent job's audit log.
+
+    The reviewer model/effort are FIXED here (opus-4-7/high), deliberately
+    not taken from the reviewed skill's own frontmatter — a skill must not be
+    able to choose, let alone downgrade, the reviewer that grades its diffs.
 
     This is synchronous in the sense that the caller awaits the result —
     the parent job's final status depends on it.
@@ -244,10 +278,10 @@ async def run_code_review(
 
     except Exception as exc:
         # The review could not run. Do NOT fall through to changes_requested —
-        # that does not gate the job, so an SDK hiccup would let an unreviewed
-        # diff ship (INV-13). Return `error`, which the caller gates like a
-        # blocker (→ awaiting_user for a human look).
-        logger.warning("code review could not run: %s (gating as error)", exc)
+        # that reads as a benign verdict. Return `error`, which the flag-only
+        # caller records + surfaces loudly (post_review_flagged) rather than
+        # letting an unreviewable diff pass silently (INV-13).
+        logger.warning("code review could not run: %s (recording as error)", exc)
         final_text = f"Review could not run: {exc}"
         outcome = ReviewOutcome.error
 

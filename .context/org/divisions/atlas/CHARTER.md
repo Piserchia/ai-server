@@ -18,14 +18,21 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-portfolio` | worker | content | Portfolio interaction / Q&A |
 | `atlas-chat` | worker | content | Atlas conversational interface |
 | `atlas-redeploy` | worker | prod-operator | Deploy atlas (bespoke pipeline; `project-redeploy` generalizes it) |
-| `atlas-evaluate` | worker | content | Weekly scorecard + data_gaps triage + backlog re-route (Mon 11:00) |
-| `atlas-gap-scout` | worker | content | Weekly top-gap free-source spec + live probe (Wed 11:00) |
+| `atlas-evaluate` | worker | content | Weekly loop governor: scorecard + data_gaps triage + build grading + built→live promotion + backlog re-route (Mon 11:00) |
+| `atlas-build` | worker | guarded-writer | Twice-weekly loop builder: top eligible S/M item → workspace-isolated build → gates + code-review LGTM → push → deploy dispatch (Tue+Fri 10:00) |
+| `atlas-gap-scout` | worker | content | Weekly top-gap free-source spec + live probe + builder-acceptance row (Wed 11:00) |
 | `atlas-refresh-knowledge` | worker | content | Monthly knowledge curation + stale-claim re-verify (1st 11:30) |
 
 ## Standards
 
-- Single-writer: commits are born in the atlas dev repo, deployed via
-  `atlas-redeploy`; the runtime clone is pull-only (incident 2026-07-09).
+- Single-writer: commits are born in the atlas dev repo (or the builder's
+  per-job workspace clone, which pushes to the same GitHub master), deployed
+  via `atlas-redeploy`; the runtime clone is pull-only (incident 2026-07-09).
+- The closed improvement loop's binding contracts live in the atlas repo:
+  `evaluation/LOOP.md` (state machine, single-writer-per-artifact, recovery
+  matrix, human ceilings). Owner decision 2026-08-04: S/M builds + deploys
+  are autonomous through the gated chain; `[system]`, paid sources,
+  event-map pairs, auth/infra, destructive migrations, new deps stay human.
 - **Open item (owner):** the atlas manifest lists `ANTHROPIC_API_KEY` in
   `env_required`; the server's rule is "never require an API key." Make atlas's
   key boundary explicit / remove the requirement (EVALUATION X2).

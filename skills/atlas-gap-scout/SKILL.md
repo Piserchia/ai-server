@@ -1,22 +1,25 @@
 ---
 name: atlas-gap-scout
 description: Weekly Atlas gap-scout — take the top triaged data gap, research a FREE data source, run the live probe, write an engineer-ready spec, mark the gap SPECCED. Dispatch for the atlas-gap-scout schedule/job_kind, or on demand ("scout a feed for X").
-model: claude-sonnet-4-6
+model: claude-opus-4-8
 effort: medium
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch]
 max_turns: 80
 escalation:
   on_failure:
-    model: claude-opus-4-7
+    model: claude-fable-5
     effort: high
 tags: [atlas, research, scheduled-capable]
 ---
 
 # atlas-gap-scout — top gap → free source → live probe → spec
 
-You are running Atlas's scheduled pipeline-scout job. You RESEARCH and SPEC
-— you never build the pipeline, never run migrations, never deploy.
+You are running Atlas's scheduled pipeline-scout job — stage 2 of the
+closed loop (`evaluation/LOOP.md` binds the handoff contracts). You
+RESEARCH and SPEC — you never build the pipeline, never run migrations,
+never deploy. Your spec is what `atlas-build` (Tue/Fri) builds from,
+unattended — write it for an engineer who cannot ask questions.
 
 ## Ground rules (non-negotiable)
 
@@ -54,10 +57,15 @@ You are running Atlas's scheduled pipeline-scout job. You RESEARCH and SPEC
    the Mini; paste the (truncated) output into the spec's probe row.
 5. **Write back**: the full spec block in `knowledge/<sector>/pipelines.md`
    (source, auth, rate limits → budget, cadence, stale_after, retryability,
-   payload → storage, indicator, failure modes, probe, sources); matrix row
-   → `FEED_SPECCED`; `.venv/bin/atlas-dash gaps-set <id> specced`;
-   `CHANGELOG.md` entry. If the sector CLAUDE.md needs a one-line log
-   append, keep it within the 150-line budget.
+   payload → storage, indicator, failure modes, probe, **builder
+   acceptance**, sources). The `builder acceptance` row is the build's
+   deterministic done-contract (LOOP.md §4.2) — the checks `atlas-build`
+   must pass: rows land in the named table/series, indicator computes,
+   `stale_after` SLO registered in feed_status, matrix flip. A spec without
+   it is NOT `specced`. Then: matrix row → `FEED_SPECCED`;
+   `.venv/bin/atlas-dash gaps-set <id> specced`; `CHANGELOG.md` entry. If
+   the sector CLAUDE.md needs a one-line log append, keep it within the
+   150-line budget.
 6. **Commit + push**: e.g. `docs(scout): spec <feed> free — <gap title>
    FEED_SPECCED (live probe ok)`. Rebase before push; stop and report
    rather than force on repeated conflicts.

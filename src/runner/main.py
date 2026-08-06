@@ -50,7 +50,13 @@ from src.registry.skills import load as load_skill
 from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
 from src.runner.reconcile import reconcile_orphaned_jobs
-from src.runner.review import ReviewOutcome, get_git_diff, run_code_review
+from src.runner.review import (
+    ReviewOutcome,
+    get_git_diff,
+    head_commit_epoch,
+    is_stale_head,
+    run_code_review,
+)
 from src.runner import delivery, quota, session as session_mod, writeback
 
 logger = structlog.get_logger()
@@ -179,6 +185,11 @@ async def _run_with_semaphore(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None
 # Delay before each SELECT attempt; first is immediate, sleeps total ~2s.
 _JOB_FETCH_DELAYS: tuple[float, ...] = (0.0, 0.2, 0.3, 0.5, 1.0)
 
+# Post-session code review (the flag-only second belt) is a nested SDK
+# sub-agent; bound it so a hung reviewer can't pin a concurrency slot. Well
+# under SESSION_TIMEOUT_SECONDS (the session itself is already done here).
+_POST_REVIEW_TIMEOUT_SECONDS = 600
+
 # Ids already given their one requeue. In-memory on purpose: bounded (an id is
 # cleared when its row appears or when it is dropped), and a restart merely
 # grants a rare id one more retry cycle.
@@ -244,6 +255,24 @@ async def _preflight_check(job: Job, log) -> str | None:
     return None  # all checks passed
 
 
+async def _refetch_job(job_id: uuid.UUID, fallback: Job, log) -> Job:
+    """Reload the Job row after the session ran, so post-steps see fields the
+    session wrote in its OWN db transaction — chiefly `resolved_skill`, which
+    the pre-session instance never sees (detached, expire_on_commit=False).
+    Every resolved_skill-keyed post-step (review, writeback, learning gate,
+    escalation config) depends on this; a stale instance made them silent
+    no-ops (post_review: 0/516). Returns the fresh row, or `fallback`
+    unchanged on any DB error (logged — never fatal to the post-step flow)."""
+    try:
+        async with async_session() as s:
+            fresh = await s.get(Job, job_id)
+        return fresh if fresh is not None else fallback
+    except Exception:
+        log.exception("post-session job refresh failed — post-steps see the "
+                      "stale instance (resolved_skill may be missing)")
+        return fallback
+
+
 async def _process_job(job_id: uuid.UUID) -> None:
     job: Job | None = None
     for delay in _JOB_FETCH_DELAYS:
@@ -307,6 +336,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.completed, result=result)
         log.info("job completed")
 
+        # Refresh the ORM instance before the post-steps: resolved_skill is
+        # stamped by the session in a SEPARATE db session, so this pre-session
+        # instance never sees it — which made every resolved_skill-keyed
+        # post-step a silent no-op (post_review NEVER fired for any job:
+        # 0/516 review_outcome, found 2026-08-05).
+        job = await _refetch_job(job_id, job, log)
+
         # Promote deferred dependents whose dependencies are now met — both the
         # task-scoped plan-DAG path and (2026-07-31) task-less depends_on
         # children, so the call runs for EVERY completing job. plans_mod
@@ -321,8 +357,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
         # Code review — runs for skills that opt in via post_review.trigger.
         # Internal skills (leading _, e.g. _evaluate/_writeback) are exempt.
+        # Stamps jobs.review_outcome and flags a blocker/error loudly (a
+        # second belt for owner attention — the merge gate is the in-session
+        # code-review before push; deploy executors carry their own test
+        # gates). It never re-statuses the job. Escalated retries are NOT
+        # exempt (INV-13: the retry's diff ships with the same authority).
         _is_internal_kind = job.kind == "chat" or job.kind.startswith("_")
-        if not _is_internal_kind and not (job.payload or {}).get("escalated_from"):
+        if not _is_internal_kind:
             try:
                 await _maybe_review(job, result)
             except Exception:
@@ -337,7 +378,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
         # Learning extraction — skip chat, all internal skills (any kind starting
         # with "_"), and escalation retries (would double-count).
-        is_internal = job.kind == "chat" or job.kind.startswith("_")
+        is_internal = _is_internal_kind
         is_internal_skill = (job.resolved_skill or "").startswith("_")
         is_escalation = bool((job.payload or {}).get("escalated_from"))
         if not is_internal and not is_internal_skill and not is_escalation:
@@ -347,7 +388,10 @@ async def _process_job(job_id: uuid.UUID) -> None:
             except Exception:
                 log.exception("learning extraction failed (non-fatal)")
 
-        # Task lifecycle — if this job belongs to a task, update task state
+        # Task lifecycle — if this job belongs to a task, update task state.
+        # (Post-review only flags; it never re-statuses the job, so the task
+        # advances normally — a flagged blocker is surfaced via review_outcome
+        # + the task DM from _maybe_review, not by halting the DAG.)
         if job.task_id:
             try:
                 await _update_task_after_job(job, result)
@@ -418,6 +462,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.failed, error=err_str)
         log.exception("job failed")
 
+        # Refresh the ORM instance here too — the session may have stamped
+        # resolved_skill before dying, and _maybe_escalate's level-0 path
+        # reads it for the skill-declared escalation config (same detached-
+        # instance staleness as the completed branch; without this, level-0
+        # escalation silently jumped to self-diagnose for task-kind jobs).
+        job = await _refetch_job(job_id, job, log)
+
         # Escalation: if the skill declares on_failure, enqueue a retry with
         # the escalated model/effort. One level only, guarded by a payload flag.
         try:
@@ -428,8 +479,19 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
 async def _maybe_review(job: Job, result: dict) -> None:
     """
-    After a code-touching session, run the code-review sub-agent on the diff.
-    Stamps jobs.review_outcome. If blocker, changes status to awaiting_user.
+    Second-belt post-session code review. Stamps `jobs.review_outcome` and,
+    on a blocker/error verdict, emits a loud audit event + owner notification.
+    It does NOT halt, un-merge, or re-status the job — the code has already
+    been committed/pushed by the time this runs.
+
+    Why flag, not gate: code-writing skills run an in-session `code-review`
+    subagent BEFORE they push (that is the merge gate), and deploy executors
+    carry their own test gates (red = old code keeps serving). This is the
+    belt-and-suspenders second opinion — its job is to RECORD a verdict
+    (read by /status, the retrospective, and the weekly manager sweeps) and
+    to surface a blocker the first gate missed, not to park a job whose work
+    is already live. (Parking to awaiting_user here only mis-reported the
+    already-sent completion DM and stranded task state — 2026-08-05.)
     """
     skill_name = job.resolved_skill
     if not skill_name:
@@ -444,18 +506,52 @@ async def _maybe_review(job: Job, result: dict) -> None:
 
     # Resolve the cwd the session actually worked in (delivery-aware): for a
     # dev-repo project the code was committed to the dev repo, not the runtime
-    # clone — reviewing the clone would find an empty diff and silently skip
-    # the review gate.
+    # clone — reviewing the clone would find an empty diff and skip the review.
     cwd = await session_mod._resolve_cwd(job, job.resolved_skill)
+
+    # Wrong-diff guard: a workspace job's canonical ff-sync can fail
+    # (dirty/diverged dev clone — routine in multi-machine dev), or the
+    # session may have committed nothing, leaving this checkout's HEAD at an
+    # OLDER commit that isn't this job's work. Reviewing HEAD~1 would then
+    # grade someone else's commit. If HEAD predates the job's start, skip
+    # loudly rather than review the wrong diff.
+    started_epoch = job.started_at.timestamp() if job.started_at else None
+    if is_stale_head(head_commit_epoch(cwd), started_epoch):
+        audit_log.append(str(job.id), "post_review_skipped",
+                         reason="stale_head", cwd=str(cwd))
+        logger.warning("post-review skipped: checkout HEAD predates the job "
+                       "(canonical sync failed or nothing committed)",
+                       job_id=str(job.id)[:8], cwd=str(cwd))
+        return
 
     diff = get_git_diff(cwd)
     if not diff:
+        audit_log.append(str(job.id), "post_review_skipped",
+                         reason="no_diff", cwd=str(cwd))
         logger.debug("no diff for review, skipping", job_id=str(job.id)[:8])
         return
 
-    outcome = await run_code_review(str(job.id), diff, cwd)
+    # Fixed, capable reviewer for everyone — a skill does not get to choose
+    # (let alone downgrade) the reviewer that grades its own diffs.
+    # Timeout-bounded: post_review is a nested SDK sub-agent and, now that it
+    # actually fires (was 0/516), a hung reviewer would otherwise pin this
+    # job's concurrency-semaphore slot indefinitely while /health still reads
+    # healthy. A timeout is a skip (infra issue, not a code verdict), not a
+    # blocker — the flag-only belt never wedges the runner.
+    try:
+        outcome = await asyncio.wait_for(
+            run_code_review(str(job.id), diff, cwd),
+            timeout=_POST_REVIEW_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        audit_log.append(str(job.id), "post_review_skipped",
+                         reason="timeout", cwd=str(cwd))
+        logger.warning("post-review timed out after %ss — skipping (flag-only "
+                       "second belt never wedges the runner)",
+                       _POST_REVIEW_TIMEOUT_SECONDS, job_id=str(job.id)[:8])
+        return
 
-    # Stamp review_outcome on the job
+    # Stamp review_outcome on the job (leave status = completed).
     async with session_scope() as s:
         await s.execute(
             update(Job).where(Job.id == job.id).values(
@@ -464,13 +560,26 @@ async def _maybe_review(job: Job, result: dict) -> None:
         )
 
     if outcome in (ReviewOutcome.blocker, ReviewOutcome.error):
-        # blocker = review found a serious issue; error = review couldn't run
-        # (fail closed — INV-13: an unreviewable diff must not ship silently).
-        msg = ("Code review flagged a blocker. Check the audit log."
-               if outcome == ReviewOutcome.blocker
-               else "Code review could not run — manual review needed. Check the audit log.")
-        logger.warning("code review gate", job_id=str(job.id)[:8], outcome=outcome.value)
-        await _finish_job(job.id, JobStatus.awaiting_user, error=msg)
+        # blocker = review found a serious issue; error = review couldn't run.
+        # Surface it loudly: audit event (read by the retrospective + manager
+        # sweeps), a warning, and a task DM when this job belongs to a task.
+        audit_log.append(str(job.id), "post_review_flagged", outcome=outcome.value)
+        logger.warning("post-review flagged a %s — job left completed; the "
+                       "diff is already pushed, this is the after-the-fact "
+                       "second belt", outcome.value, job_id=str(job.id)[:8])
+        if job.task_id:
+            try:
+                # Plain text — the tasks:notify consumer's review_flagged
+                # branch adds the ⚠️ prefix (matching every other branch).
+                await _notify_task(
+                    job.task_id, "review_flagged", job_id=str(job.id),
+                    text=(f"Post-session code review flagged a "
+                          f"{outcome.value} on job {str(job.id)[:8]} "
+                          f"({skill_name}). The change is already pushed — "
+                          f"review the diff and the audit log."))
+            except Exception:
+                logger.exception("review-flag task notify failed for %s",
+                                 str(job.id)[:8])
 
 
 async def _verify_writeback(job: Job, result: dict) -> None:
@@ -1094,8 +1203,10 @@ async def _finish_job(
         # INV-9: never overwrite a user cancellation. The cancel listener may set
         # `cancelled` in the race window before a session finishes; without this
         # guard the trailing _finish_job(completed) would silently resurrect the
-        # job as completed. (completed→awaiting_user, e.g. a review blocker, is
-        # still allowed — only `cancelled` is protected.)
+        # job as completed. Other completed→X transitions (e.g. the multi-turn
+        # task flow flipping to awaiting_user via task_question) stay allowed —
+        # only `cancelled` is protected. (Post-review no longer parks; it
+        # flags while the job stays completed — 2026-08-05.)
         result_proxy = await s.execute(
             update(Job)
             .where(Job.id == job_id)

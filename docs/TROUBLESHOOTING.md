@@ -9,6 +9,35 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: `jobs.review_outcome` is NULL for every job / post-review "never runs"
+
+### Root cause (fixed 2026-08-05 — keep for the pattern)
+
+`_process_job` post-steps that key on `job.resolved_skill` were reading the
+ORM instance loaded BEFORE `run_session`; the session stamps
+`resolved_skill` via a separate DB session, so the detached instance never
+saw it and `_maybe_review` returned early — for every job since inception
+(0/516). Fixed by refetching the Job row after completion. **The pattern to
+watch**: any post-step reading a column the session wrote must use the
+refreshed instance, not the pre-session one — a stale attr on a detached
+instance fails silently, not loudly.
+
+### Diagnostics
+
+```bash
+psql assistant -c "SELECT review_outcome, count(*) FROM jobs WHERE
+  resolved_skill IN ('app-patch','server-patch','atlas-build') GROUP BY 1;"
+# all-NULL after 2026-08-05 deploy = regression; check audit log for
+# post_review_skipped events (reason=stale_head is the wrong-diff guard,
+# not a regression — it means the canonical ff-sync failed or nothing
+# was committed). A blocker/error verdict is a `post_review_flagged` audit
+# event + `review_flagged` task DM; the job stays `completed` (post_review
+# FLAGS, it does not park — the merge gate is the in-session code-review
+# before the push, not this after-the-fact second belt).
+```
+
+---
+
 ## Symptom: `/task` submitted, shows "queued", then `failed` quickly with generic error
 
 ### Quick triage commands

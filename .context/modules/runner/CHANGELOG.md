@@ -2,6 +2,102 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-05 — post-review resurrected (0/516 → live) + escalation refetch
+
+**Files changed**: `src/runner/main.py`, `src/runner/review.py`,
+`tests/test_review.py`, `scripts/seed-schedules.sh`.
+
+Found by the closed-loop arc's own code review (three rounds — the first two
+rounds' more ambitious "review gates the deferred deploy child" design was
+scoped OUT after review kept finding holes in the deep promotion-ordering
+surgery it required; the deploy is already gated by the builder's in-session
+`code-review` subagent + `atlas_redeploy`'s pytest gates, so post_review
+stays a SECOND belt that flags, exactly like app-patch/server-patch).
+
+1. **post_review had NEVER fired — 0 of 516 jobs** (INV-13's second belt was
+   dead since inception): `_maybe_review` read `job.resolved_skill` off the
+   ORM instance loaded BEFORE `run_session`, but the session stamps
+   `resolved_skill` via a separate DB session — the detached instance never
+   sees it, so `skill_name` was always `None` and the review returned early.
+   Fix: `_process_job` refetches the Job row right after `_finish_job(
+   completed)`; every resolved_skill-keyed post-step (review, writeback
+   gate, learning gate) now sees the stamped value. Same refetch on the
+   FAILURE path so level-0 `escalation.on_failure` reads the real skill
+   (it was silently jumping to self-diagnose for task-kind jobs).
+2. **Wrong-diff guard**: reviewing `HEAD~1` is wrong when the workspace's
+   `sync_canonical` ff failed (routine on a dirty/diverged dev clone) or the
+   session committed nothing — the review would grade someone else's commit.
+   `review.head_commit_epoch` + `is_stale_head` (pure, tested): HEAD older
+   than `job.started_at - 120s` → skip with audit event
+   `post_review_skipped` (reason=stale_head or no_diff).
+3. **`post_review.reviewer_model`/`reviewer_effort` were dead keys**
+   (reviewer hardcoded opus-4-7 for everyone): `run_code_review` takes
+   optional `model`/`effort`, wired from the skill's post_review dict;
+   defaults unchanged.
+4. **post_review FLAGS, it does not park** (the design the review rounds
+   converged on): activating post_review surfaced that the old
+   blocker→`awaiting_user` park was buggy dead code — it published a SECOND
+   `jobs:done` after the completion DM already fired (owner told "completed"
+   on a blocker), stranded task state, and let writeback/learning run on a
+   parked diff. And it bought nothing: the review runs AFTER the code is
+   committed/pushed, so parking can't un-merge — the real merge gate is each
+   skill's IN-SESSION `code-review` subagent before the push. So
+   `_maybe_review` now stamps `review_outcome` (job stays `completed`), and
+   on blocker/error emits a `post_review_flagged` audit event + a
+   `review_flagged` task DM (new additive branch in telegram_bot's
+   tasks:notify consumer). Surfaced by `review_outcome` in /status, the
+   retrospective, and the weekly manager sweep. No `awaiting_user`, no
+   task-advance skip, no double-publish.
+5. **Reviewer is FIXED (opus-4-7/high), not skill-chosen**: `run_code_review`
+   dropped the `reviewer_model`/`reviewer_effort` passthrough — a skill must
+   not be able to downgrade the reviewer that grades its own diffs.
+   atlas-build's frontmatter reviewer keys were removed (they were the only
+   caller trying to set them).
+6. **`_refetch_job` helper** dedupes the identical post-session refetch used
+   by both the success and failure paths (one place to change the refresh
+   semantics).
+7. **seed-schedules.sh**: every upsert value is a psql bound variable
+   (`-v n/c/k/d/p/nx`) inside a quoted heredoc (nothing bash-expands — a
+   payload with a quote or `$()` can no longer break seeding); empty
+   next-slot → NOW() via `COALESCE(NULLIF(:'nx','')::timestamptz, NOW())`;
+   new `job_payload` column carried via `COALESCE(EXCLUDED.job_payload,
+   schedules.job_payload)` so out-of-band scoping survives re-seeds.
+
+Deliberately NOT changed (reviewed across four rounds and scoped out):
+promotion ordering is untouched — `promote_deferred_for` runs
+unconditionally on completion as before; the deploy child is dispatched
+immediately by atlas-build (no `depends_on`-on-review); `session.py`,
+`plans.py`, `workspaces.py` are unchanged from HEAD (an earlier round's
+"review gates the deferred deploy child" machinery — ReviewGate,
+blocks_dependents, retained-workspace review, promotion reorder,
+fail_taskless_dependents — was fully reverted: it required deep
+promotion-ordering surgery that kept generating bugs, and the deploy is
+already gated by the in-session review + the executor's test gates).
+post_review runs under `_POST_REVIEW_TIMEOUT_SECONDS` (600s) — now that it
+actually fires, a hung reviewer sub-agent can't pin a concurrency slot while
+/health stays green; a timeout is an audited skip, not a verdict. The
+reviewed diff is the canonical checkout's `HEAD~1` (unchanged, pre-existing):
+the `is_stale_head` guard rejects an OLDER foreign HEAD but not a NEWER one,
+so on the multi-writer atlas canonical a foreign commit landing between the
+build's push and the ff-sync can be mis-graded — low harm now that
+post_review only FLAGS (a rare mis-stamp the evaluator/owner dismisses),
+never gates. Failure-path escalation now reads the real `resolved_skill`, so
+a failed atlas-build escalates into a stronger-model REBUILD (its own resume
+check completes-transitions-only on already-pushed work, so no duplication)
+instead of a read-only self-diagnose — an improvement.
+
+Follow-up backlog: task-less deferred dependents of a terminally-failed job
+aren't cascade-failed (pre-existing, unrelated); a task-less job flagged by
+post_review has no chat_id so its `review_flagged` DM is dropped — the audit
+event + review_outcome still record it, and the weekly atlas-evaluate now
+reads `review_outcome` for each build to surface a flag as a backlog item.
+
+**Verify**: `pipenv run pytest tests/test_review.py -q` (25 passed;
+TestStaleHeadGuard covers the wrong-diff guard); full suite green; after the
+next deploy, `psql assistant -c "SELECT review_outcome, count(*) FROM jobs
+WHERE resolved_skill IN ('app-patch','server-patch','atlas-build') GROUP BY
+1;"` should start showing non-NULL outcomes (the 0/516 symptom clears).
+
 ## 2026-07-31 — MCP tools joined allowed_tools (the second dispatch blocker)
 
 **Files changed**: `src/runner/session.py` — the MCP injection block now

@@ -8,6 +8,8 @@ from src.runner.review import (
     _parse_outcome,
     format_structured_review,
     get_git_diff,
+    head_commit_epoch,
+    is_stale_head,
     outcome_from_structured,
 )
 
@@ -89,3 +91,31 @@ class TestGetGitDiff:
 
     def test_nonexistent_directory_returns_empty(self):
         assert get_git_diff(Path("/nonexistent/path/abc123")) == ""
+
+
+class TestStaleHeadGuard:
+    """Wrong-diff guard (INV-13, 2026-08-05): post-review must not grade a
+    checkout whose HEAD predates the job — that diff is someone else's."""
+
+    def test_head_older_than_job_start_is_stale(self):
+        assert is_stale_head(head_epoch=1_000_000, job_started_epoch=1_000_000 + 3600)
+
+    def test_head_newer_than_job_start_is_fresh(self):
+        assert not is_stale_head(head_epoch=1_000_000 + 60, job_started_epoch=1_000_000)
+
+    def test_slack_absorbs_clock_wobble(self):
+        # HEAD 60s before job start is inside the 120s slack — not stale.
+        assert not is_stale_head(head_epoch=1_000_000 - 60, job_started_epoch=1_000_000)
+        # Just past the slack boundary → stale.
+        assert is_stale_head(head_epoch=1_000_000 - 121, job_started_epoch=1_000_000)
+
+    def test_unknown_epochs_fail_open(self):
+        # Unknown HEAD or start → not stale; the empty-diff check still guards.
+        assert not is_stale_head(None, 1_000_000)
+        assert not is_stale_head(1_000_000, None)
+        assert not is_stale_head(None, None)
+
+    def test_head_commit_epoch_non_repo_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assert head_commit_epoch(Path(tmp)) is None
+

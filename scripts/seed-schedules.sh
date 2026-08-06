@@ -20,17 +20,29 @@ print(nxt.replace(tzinfo=timezone.utc).isoformat())
 }
 
 upsert() {
-    local name="$1" cron="$2" kind="$3" desc="$4"
-    local nxt next_sql
+    # args: name cron kind desc [payload-json]
+    # payload (optional, e.g. '{"project_slug":"atlas"}') is copied onto every
+    # job the schedule enqueues — how a scheduled skill gets project scoping
+    # (delivery-contract cwd + workspace isolation need job.payload.project_slug).
+    # EVERY value reaches SQL as a psql bound variable (-v + :'x'), and the
+    # heredoc delimiter is quoted so bash expands nothing — quotes/$() in any
+    # arg can't break seeding or the shell (review 2026-08-05). Empty payload
+    # → NULL via NULLIF; empty next-slot → NOW() via COALESCE. On conflict,
+    # COALESCE keeps an existing payload when this script doesn't declare one
+    # (out-of-band scoping survives re-seeds; declared payloads still win).
+    local name="$1" cron="$2" kind="$3" desc="$4" payload="${5:-}"
+    local nxt
     nxt=$(next_slot "$cron")
-    if [ -n "$nxt" ]; then next_sql="'$nxt'"; else next_sql="NOW()"; fi
-    psql assistant -v ON_ERROR_STOP=1 <<SQL
-INSERT INTO schedules (id, name, cron_expression, job_kind, job_description, paused, next_run_at, created_at)
-VALUES (gen_random_uuid(), '$name', '$cron', '$kind', '$desc', false, $next_sql, NOW())
+    psql assistant -v ON_ERROR_STOP=1 \
+        -v n="$name" -v c="$cron" -v k="$kind" -v d="$desc" \
+        -v p="$payload" -v nx="$nxt" <<'SQL'
+INSERT INTO schedules (id, name, cron_expression, job_kind, job_description, job_payload, paused, next_run_at, created_at)
+VALUES (gen_random_uuid(), :'n', :'c', :'k', :'d', NULLIF(:'p','')::jsonb, false, COALESCE(NULLIF(:'nx','')::timestamptz, NOW()), NOW())
 ON CONFLICT (name) DO UPDATE SET
     cron_expression = EXCLUDED.cron_expression,
     job_kind = EXCLUDED.job_kind,
-    job_description = EXCLUDED.job_description;
+    job_description = EXCLUDED.job_description,
+    job_payload = COALESCE(EXCLUDED.job_payload, schedules.job_payload);
 SQL
 }
 
@@ -55,11 +67,16 @@ upsert 'system-manager-monthly' '0 7 1 * *' 'system-manager' 'Monthly CEO org re
 upsert 'research-report-weekly' '0 13 * * 1' 'research-report' 'Weekly research report'
 
 # ── Atlas living loops (staged from atlas integrations/ai-server, 2026-08-03) ─
-# Weekly evaluate (Mon) triages the data_gaps ledger; gap-scout (Wed) specs the
-# top triaged gap from a FREE source; refresh-knowledge (monthly) curates +
-# re-verifies. 11:00-hour slots dodge the 12:00 daily-brief and Sunday sweeps.
-upsert 'atlas-evaluate'          '0 11 * * 1'  'atlas-evaluate'          'atlas-evaluate: weekly project scorecard + data_gaps triage + backlog re-route (skills/atlas-evaluate)'
-upsert 'atlas-gap-scout'         '0 11 * * 3'  'atlas-gap-scout'         'atlas-gap-scout: weekly top-gap free-source research + live probe + engineer-ready spec (skills/atlas-gap-scout)'
+# The closed loop (atlas evaluation/LOOP.md, owner decision 2026-08-04):
+# Mon evaluate (governor: triage, grade builds, built→live) → Tue build #1 →
+# Wed gap-scout (spec) → Fri build #2 → Sun report sweep → Mon grades.
+# 10:00/11:00 slots dodge the 06:00 managers, 12:00 daily-brief, Sunday sweeps.
+# atlas-build carries job_payload.project_slug so the runner scopes it to the
+# atlas dev repo (delivery contract) and gives it a per-job workspace clone
+# (isolation: workspace) — the doc loops run unscoped in the shared dev clone.
+upsert 'atlas-evaluate'          '0 11 * * 1'  'atlas-evaluate'          'atlas-evaluate: weekly project scorecard + data_gaps triage + build grading + built-to-live promotion + backlog re-route (skills/atlas-evaluate)'
+upsert 'atlas-build'             '0 10 * * 2,5' 'atlas-build'            'atlas-build: twice-weekly top eligible backlog item -> isolated workspace build -> gates -> push -> gated deploy dispatch (skills/atlas-build)' '{"project_slug":"atlas"}'
+upsert 'atlas-gap-scout'         '0 11 * * 3'  'atlas-gap-scout'         'atlas-gap-scout: weekly top-gap free-source research + live probe + engineer-ready spec with builder acceptance (skills/atlas-gap-scout)'
 upsert 'atlas-refresh-knowledge' '30 11 1 * *' 'atlas-refresh-knowledge' 'atlas-refresh-knowledge: monthly knowledge curation + stale-claim reverification + gaps-sync (skills/atlas-refresh-knowledge)'
 
 echo "Schedules seeded."
