@@ -24,9 +24,19 @@ tags: [atlas, momentum, research, scheduled-capable]
 
 You are running Momentum-Lab's weekly research cycle. `momentum/evaluation/PROTOCOL.md`
 in the Atlas repo is the binding contract — read it in full this run, plus
-`momentum/docs/POWERS.md` §4 (adoption gate), `evaluation/LOOP.md` §6 (the human
-ceilings, incl. both momentum ceilings), and the required-reading lists of every
-momo agent you invoke. You orchestrate the fleet; you do not do their jobs yourself.
+`momentum/docs/POWERS.md` §4 (adoption gate) and `evaluation/LOOP.md` §6 (the human
+ceilings, incl. both momentum ceilings). You orchestrate the fleet; you do not do
+their jobs yourself.
+
+**Reading boundary + time budget (2026-08-07, from the first smoke run):** the
+session ceiling is 30 minutes and the first run spent ALL of it reading. Your
+FULL reads are exactly the three above. Do NOT read the momo knowledge docs
+(`momentum/skills/MARKET_KNOWLEDGE.md`, `STATS_KNOWLEDGE.md`, `DATA_QUALITY.md`)
+or charter required-reading lists yourself — those belong to the momo agents you
+spawn, in their own contexts; skim a charter's frontmatter only to know who does
+what. Budget: bootstrap ≤5 min, reading ≤8 min, the cycle gets the rest. If you
+are 15 minutes in and the cycle has not started, START IT with what you have —
+PROTOCOL.md is the only mandatory full read.
 
 ## Ground rules (non-negotiable)
 

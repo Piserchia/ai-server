@@ -454,6 +454,18 @@ async def _process_job(job_id: uuid.UUID) -> None:
         await _finish_job(job_id, JobStatus.failed, error="Session timed out")
         log.warning("job timeout")
 
+        # Timeouts escalate like any other failure. This branch used to
+        # return without _maybe_escalate, making every session timeout a
+        # silent dead end system-wide (no retry, no self-diagnose) — found
+        # by the atlas-momo-research smoke run 2026-08-07, which timed out
+        # and produced no escalation child. Same refetch rationale as the
+        # generic branch: the session may have stamped resolved_skill.
+        job = await _refetch_job(job_id, job, log)
+        try:
+            await _maybe_escalate(job)
+        except Exception:
+            log.exception("escalation attempt failed (non-fatal)")
+
     except Exception as exc:
         from src.runner.audit_index import categorize_error
         err_str = str(exc)[:500]

@@ -9,6 +9,30 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: a job times out and nothing follows — no retry, no self-diagnose
+
+### Root cause (fixed 2026-08-07)
+
+`_process_job`'s `asyncio.TimeoutError` branch failed the job and returned
+WITHOUT the escalation post-step — unlike the generic `except Exception`
+branch. Every `Session timed out` failure was a dead end regardless of the
+skill's `escalation.on_failure` config. Fixed by mirroring the generic
+branch (refetch + `_maybe_escalate`); `tests/test_timeout_escalation.py`
+pins the contract. **The pattern to watch** (3rd instance now: post_review
+0/516, task-less deploy DMs, this): a post-step added to one branch of
+`_process_job` and silently missing from a sibling branch. When adding a
+post-step, grep every `except` in `_process_job`.
+
+### Diagnostics
+
+```bash
+# timed-out jobs with no escalation child:
+psql assistant -c "SELECT LEFT(j.id::text,8), j.resolved_skill FROM jobs j
+  WHERE j.error_message='Session timed out'
+  AND NOT EXISTS (SELECT 1 FROM jobs c
+    WHERE c.payload->>'escalated_from' = j.id::text);"
+```
+
 ## Symptom: a runtime doc written in production never shows up on `origin/runtime-learnings`
 
 ### Root cause (diagnosed 2026-08-07)

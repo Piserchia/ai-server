@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-07 — session timeouts now escalate (timeout branch was a silent dead end)
+
+**Files changed**: `src/runner/main.py`, `tests/test_timeout_escalation.py` (new).
+
+**Why**: `_process_job`'s `asyncio.TimeoutError` handler failed the job and
+returned without `_refetch_job` + `_maybe_escalate` — every session timeout,
+for every skill, produced no escalation retry and no level-1 self-diagnose.
+Found live by the first `atlas-momo-research` smoke run (job `d21b5498`,
+timed out at the 30-min ceiling; its declared opus-5/xhigh escalation never
+spawned). Same missing-post-step class as the 0/516 post_review bug.
+
+**Fix**: timeout branch now mirrors the generic failure branch (refetch →
+escalate, exception-guarded). New hermetic AST contract test pins all three
+awaits (`_finish_job`, `_refetch_job`, `_maybe_escalate`) in the handler.
+
+**Verify**: `pytest tests/test_timeout_escalation.py` (3 passed) + full suite.
+
 ## 2026-08-05 — post-review resurrected (0/516 → live) + escalation refetch
 
 **Files changed**: `src/runner/main.py`, `src/runner/review.py`,
