@@ -65,8 +65,10 @@ This must run before the pull so no runtime-written docs can be lost.
 ```bash
 cd "$SRV"
 BEFORE=$(git rev-parse --short HEAD)
-git stash push --include-untracked=no -m "server-deploy doc drift $(date -u +%F)" \
+git stash push -m "server-deploy doc drift $(date -u +%F)" \
   -- .context docs/Troubleshooting.md skills 2>/dev/null || true
+# (tracked changes only — git stash's default; --include-untracked=no is
+# invalid syntax and errored on every run, observed 2026-08-07)
 git pull --ff-only
 AFTER=$(git rev-parse --short HEAD)
 git stash pop 2>/dev/null || true   # conflict → see rule below
