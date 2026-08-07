@@ -1,14 +1,14 @@
 ---
 name: atlas-evaluate
 description: Weekly Atlas project evaluation — score the dashboard against the rubric, triage the data_gaps ledger, grade shipped builds, promote built→live with evidence, re-route the backlog. Dispatch for the atlas-evaluate schedule/job_kind, or on demand ("evaluate atlas", "what should atlas build next").
-model: claude-fable-5
+model: claude-opus-5
 effort: high
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 60
 escalation:
   on_failure:
-    model: claude-fable-5
+    model: claude-opus-5
     effort: xhigh
 tags: [atlas, evaluation, scheduled-capable]
 ---

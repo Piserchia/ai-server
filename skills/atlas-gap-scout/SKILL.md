@@ -8,7 +8,7 @@ required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch]
 max_turns: 80
 escalation:
   on_failure:
-    model: claude-fable-5
+    model: claude-opus-5
     effort: high
 tags: [atlas, research, scheduled-capable]
 ---

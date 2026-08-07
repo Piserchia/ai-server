@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-07 — register opus-5 in _MODEL_ALIASES (atlas loop de-fabled)
+
+**Files changed**: `src/gateway/telegram_bot.py`.
+
+**Why**: owner decision — the atlas loop's fable-5 slots (atlas-evaluate
+primary+escalation, atlas-build/atlas-gap-scout escalations) drew from the
+credit balance rather than the plan's included allotment; all swapped to
+`claude-opus-5` (smoke-tested `claude -p --model claude-opus-5` PASS on
+subscription auth 2026-08-07). VALID_MODELS derives from this map's values,
+so the new SKILL.md model id must be registered or the deploy pytest gate
+fails (2026-08-06 lesson). Explicit versioned alias `opus-5` only — bare
+`opus` stays pinned to 4-7 (5 flag-parser tests pin it).
+
+**Verify**: full pytest suite green incl. `test_skill_contracts.py`;
+`_MODEL_ALIASES["opus-5"] == "claude-opus-5"`.
+
 ## 2026-08-06 — register opus-4-8 + fable-5 in _MODEL_ALIASES; review_flagged notify branch
 
 **Files changed**: `src/gateway/telegram_bot.py`.

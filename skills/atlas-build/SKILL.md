@@ -12,7 +12,7 @@ post_review:
   trigger: always
 escalation:
   on_failure:
-    model: claude-fable-5
+    model: claude-opus-5
     effort: xhigh
 role: worker
 division: atlas

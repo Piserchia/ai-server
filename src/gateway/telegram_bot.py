@@ -118,9 +118,10 @@ _FLAG_RE = re.compile(r"--(\w+)=(\S+)")
 # test's allowlist) is derived from the VALUES here, so any model a SKILL.md
 # may reference must appear as a value. Bare-name defaults (opus/sonnet/haiku)
 # are left on their established targets — explicit versioned aliases are added
-# for newer models (opus-4-8, fable-5) rather than moving the defaults.
+# for newer models (opus-5, opus-4-8, fable-5) rather than moving the defaults.
 _MODEL_ALIASES = {
     "opus": "claude-opus-4-7",
+    "opus-5": "claude-opus-5",
     "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
