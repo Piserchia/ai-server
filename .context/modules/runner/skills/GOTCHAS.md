@@ -190,3 +190,14 @@ These are not actual process crashes. Always inspect matched lines before flaggi
 **Root cause**: `from src.runner import quota` in AST gives `module = "src.runner"`, which maps to shorthand `runner`. But the declared dep is `runner.quota`. The lint check must handle package-level imports as covering their submodules.
 
 **Fix**: In `check_module_graph_imports()`, when import target is a package prefix of any declared dep, skip the warning.
+
+## post_review review_text is truncated at 2000 chars (2026-08-07)
+
+The `code_review_done` audit event (and everything downstream: the governor's
+`review_outcome` read, any human reading the jsonl) stores at most ~2000 chars
+of the reviewer's findings — job `22aaf95d` (atlas-momo-research cycle #1) got
+`changes_requested` with the "Issues to address" list cut off mid-first-item.
+Consumers should treat a truncated review as PARTIAL findings: the governor
+(or a fix session) should re-run a review on the actual diff rather than
+assume the visible issues are the complete list. Follow-up worth routing:
+store the full text to a sidecar file and keep the event as a pointer.
