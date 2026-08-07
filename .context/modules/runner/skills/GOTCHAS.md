@@ -14,6 +14,40 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-08-03 — server-patch skill silently drops the commit/push step (ROOT CAUSE: max_turns=60 exhausted)
+
+**ROOT CAUSE CONFIRMED (2026-08-03, job `2e92aaae`)**: `max_turns: 60` in `skills/server-patch/SKILL.md` is too low for typical server-patch sessions that read substantial context before coding.
+
+Precise audit trail:
+- **`5dfebb42`**: session used exactly 60 `tool_use` events (Bash:23, Read:16, Grep:13, Glob:4, Edit:4) exhausting `max_turns` during the test-run phase — BEFORE any `git commit`. Final line in summary: "Now run the full test suite:". No commit, no push. Workspace cleaned up with `keep=False` (no exception), commits GC'd.
+- **`2bfb6d20`**: session reached `git commit` at turn ~59 then invoked the code-review subagent on turn 60 (the final allowed turn). Code-review returned its verdict but the parent had 0 turns left to execute step 8A (checkout main, merge, push). Session ended; workspace GC'd. Commit `4330b2f` existed only in the workspace clone — never pushed.
+
+Both `workspace_synced: ok=true, detail="canonical fast-forwarded from origin"` are misleading: `sync_canonical` saw commits from OTHER concurrent pushes to origin/main and fast-forwarded those, not the events.py fix.
+
+**The fix**: Increase `max_turns` in `skills/server-patch/SKILL.md` from 60 to ≥90. This is a **protected path** (server-patch SKILL.md) — requires a PR + owner approval. A targeted server-patch for this one change should complete within 60 turns (it's a one-line edit, small context surface).
+
+**Do NOT re-dispatch server-patch for events.py live-probe gate** until `max_turns` is increased and that PR is merged and deployed. Then retry with confidence.
+
+_Evidence: jobs `5dfebb42` (60 tool_use events, no commit), `2bfb6d20` (67 total: 59 parent + 8 subagent, commit on turn 59 but no turns left to merge/push). Investigation job: `2e92aaae`._
+
+## 2026-08-03 — Health check event trigger fires based on stale timestamp without live probe
+
+`_check_project_health` in `src/runner/events.py:300` evaluates only the `projects.last_healthy_at` DB timestamp to decide whether to enqueue a self-diagnose job — it performs no live HTTP probe. When `healthcheck-all.sh` misses multiple 5-minute launchd ticks (e.g., a 21-minute gap), the timestamp ages past the threshold and a false-positive self-diagnose is enqueued even though the service returns HTTP 200. This has occurred 48 times across atlas and baseball-bingo. The fix is to add a live-probe gate (curl/httpx to `http://localhost:<port><healthcheck_path>` with 3s timeout) before enqueuing; skip the enqueue on 200. See `docs/TROUBLESHOOTING.md:1322` for the patch spec.
+
+_Evidence: job `b0efa36e`_
+
+## 2026-08-02 — Aged healthcheck timestamp triggers false-positive "unhealthy" alert after macOS sleep
+
+The event trigger `_check_project_health` in `src/runner/events.py` fires an alert when `scripts/healthcheck-all.sh` misses its 5-minute launchd cadence (typically due to macOS sleep/throttle on the Mini). The database `last_healthy_at` timestamp ages past 20 minutes, causing the trigger to assume the service is down—but the service is actually healthy (HTTP 200, all launchd PIDs running).
+
+Trap: The natural response is to restart, which would be the ONLY real downtime of the incident.
+
+Diagnosis: `psql assistant -c "SELECT slug, last_healthy_at, NOW() - last_healthy_at AS age FROM projects"` (check timestamp age) + `curl http://localhost:8791/` (verify service responds) + verify launchd PIDs with `pgrep -f atlas`.
+
+Prevention: Replace timestamp-based event triggers with direct HTTP probes, or add a Redis `healthcheck:last_run` gate to avoid firing when the cadence itself missed a window (not when the service went down). This is a medium-risk server-code change in `src/runner/events.py`.
+
+_Evidence: job `a480b1ee` (applied manually by self-diagnose `6c281518` after `_learning_apply` job `30d66555` hit max_turns:6)_
+
 ## 2026-07-11 — Runner auto-continue hijacks session without task_complete
 
 When the runner's auto-continue feature is enabled, it will resume a session by injecting a follow-up prompt ("Continue to the next phase of the plan.") even when the previous job never emitted a `task_complete` event. This causes the agent to re-enter an earlier plan phase, duplicate work, or make conflicting changes. The symptom is a job whose description is "Continue to the next phase of the plan." but whose audit log shows no `task_complete` in the preceding job. Fix: ensure every job that auto-continue may follow emits an explicit `task_complete` (or `task_stop`) before finishing; alternatively, gate auto-continue on the presence of that event in the prior job's audit log.

@@ -97,6 +97,140 @@ TestStaleHeadGuard covers the wrong-diff guard); full suite green; after the
 next deploy, `psql assistant -c "SELECT review_outcome, count(*) FROM jobs
 WHERE resolved_skill IN ('app-patch','server-patch','atlas-build') GROUP BY
 1;"` should start showing non-NULL outcomes (the 0/516 symptom clears).
+## 2026-08-03 — P4/P5 phase continuation: max_turns root-cause confirmed, two server-patch jobs dispatched (job `2e92aaae`)
+
+**Files changed**: `.context/modules/runner/skills/GOTCHAS.md` (root-cause diagnosis appended),
+`docs/superpowers/plans/2026-07-28-management-hierarchy.md` (P4/P5 status updated).
+**Why**: Investigation of the "Continue to the next phase of the plan" task. Confirmed root cause
+of the server-patch workspace-push meta-bug: `max_turns: 60` is exhausted by context-reading +
+coding + test-running before the session reaches the commit/push phase. Job `5dfebb42` hit exactly
+60 tool_use events during tests (no commit). Job `2bfb6d20` committed on turn ~59 and used its
+last turn to invoke code-review — 0 turns left to execute step 8A merge/push. Dispatched two
+follow-up server-patch jobs: `388681d6` (max_turns fix, PR mode — protected path) and `98e3eb75`
+(P5 management surfaces: /proposals command + dashboard rollup, autonomous merge lane).
+**Side effects**: P4 (guards.py privilege guardrails) remains blocked until `388681d6` PR is
+merged and deployed; then a new server-patch for P4 can complete within the increased turn budget.
+
+## 2026-08-03 — Second server-patch attempt also failed to land; baseball-bingo diagnose #44 (job `a629fb94`, ~18:23Z)
+
+**Files changed**: `.context/modules/runner/CHANGELOG.md` (this entry) +
+`.context/modules/runner/skills/GOTCHAS.md` (occurrence tick). No code
+touched. Baseball-bingo `/healthz` returned 200 in ~1ms, uvicorn PID 71682
+up 3d14h, `projects.last_healthy_at` = 54s stale (fresh) at diagnosis
+time — same cadence-slip false positive as the previous 43 baseball-bingo
+recurrences (88 total across atlas+bingo). **Critical**: the second
+server-patch attempt `2bfb6d20-dedf-43a1-96dd-ce36e3a35956` (completed
+2026-08-03 12:55Z) ALSO failed to land on origin/main — `git log
+origin/main -- src/runner/events.py` still shows `197f239` as the latest
+touch. Audit summary shows the session wrote the patch, added 13 passing
+tests, updated CHANGELOG, and was about to trigger code-review, but no
+commit ever reached origin. Two consecutive server-patch attempts have
+now produced no on-disk change; the fix is being re-lost each time. Not
+re-dispatching from this diagnose — pattern indicates a defect in the
+server-patch skill's commit/push handoff (workspace GC before push, or
+code-review sub-agent returning without merging back). Recommend human
+review of the server-patch skill flow before spending a third Opus
+session on the same fix. Concurrent atlas twin `fa287ee8` running in
+same dispatch window (queued-but-unresolved dedup race still open).
+
+## 2026-08-03 — Fiftieth false-positive self-diagnose + prior server-patch never committed (baseball-bingo, ~12:41Z, job `61e9de7d`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only. Baseball-bingo answered
+`/healthz` 200 in 17ms and `/` 200 in 6ms on port 8790, uvicorn PID 71686
+healthy. DB `last_healthy_at` was 20m38s stale at diagnosis due to another
+`healthcheck-all` cadence slip (12:21:07Z → 12:41:41Z, four missed ticks);
+natural launchd tick refreshed it 3s after this diagnose picked up.
+Concurrent atlas twin `7a19aaf7` running in the same dispatch window —
+queued-but-unresolved dedup race still active. **Critical finding**:
+prior server-patch `5dfebb42` (dispatched at the 49th recurrence) DID
+edit `src/runner/events.py` and DID add 6 passing tests to
+`tests/test_pure_functions.py`, but the session ended without committing
+or pushing — `workspace_synced` recorded only `canonical fast-forwarded
+from origin`, no local commits existed, and `git log origin/main --
+src/runner/events.py` still shows `197f239` as the latest touch (pre-patch).
+The workspace was GC'd and the fix is lost. Re-dispatched fresh
+`server-patch` job `2bfb6d20-dedf-43a1-96dd-ce36e3a35956` at ~12:44Z with
+explicit COMMIT-AND-PUSH-BEFORE-EXIT + INV-13 code-review instructions.
+Secondary bug observed but not fixed here: the workspace guard hook
+mis-fired on a benign `find` command containing the protected-path
+substring — worth tightening the destructive-command classifier.
+
+## 2026-08-03 — Forty-seventh false-positive self-diagnose (baseball-bingo, ~11:53Z, job `db9c2625`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only — appended forty-seventh
+recurrence of the `events.py:_check_project_health` false positive.
+baseball-bingo answered `/healthz` 200 in 4.0ms and `/` 200 in 4.5ms on
+port 8790, project PID 71682 healthy. Two back-to-back `healthcheck-all`
+cadence slips this window (11:08:32Z → 11:29:06Z, then 11:29:06Z →
+11:50:48Z, each ~20-min / four missed 5-min ticks), the second fired the
+trigger; natural launchd 11:50:48Z tick had already refreshed
+`last_healthy_at` to 2m54s old before this diagnose loaded, so no inline
+kickstart needed. Runner behavior unchanged. The `events.py` live-probe
+gate + the `healthcheck-all.sh` psql-exit-status surfacing remain the
+correct prevention (server-patch, Phase 5) — un-landed after 47
+recurrences.
+
+## 2026-08-03 — Forty-second false-positive self-diagnose (atlas, ~09:42Z, job `3e813db1`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only — appended forty-second
+recurrence of the `_check_project_health` false positive as the atlas twin
+of the concurrent baseball-bingo diagnose `daa80e8a` (both fired by the
+same event tick, same 08:49:17Z → 09:25:51Z 36-min `healthcheck-all.sh`
+slip + a silent psql UPDATE loss on the 09:25:51Z tick that left
+`projects.last_healthy_at` at 09:09:21Z despite a `checked=2 healthy=2`
+summary). Atlas answered `/` 200 in 43ms on port 8791; all three atlas
+launchd processes stayed running (PIDs 24233/81428/81432). No inline
+kickstart needed — the natural launchd 09:43 tick self-caught-up.
+Runner behavior unchanged. Also noted in TROUBLESHOOTING for follow-up:
+a real, unrelated app bug is visible in the atlas project log
+(`invalid input syntax for type uuid: "AAPL"` in the Next.js
+`/api/atlas/{assets,candles}` routes) — separate from healthcheck and
+should be triaged in an atlas deploy, not here. The `events.py`
+live-probe gate + a companion fix to stop `psql ... > /dev/null 2>&1`
+in `scripts/healthcheck-all.sh` remain the correct prevention
+(server-patch, Phase 5).
+
+## 2026-08-02 — Recurring false-positive self-diagnose (bingo, ~17:58Z, job `67d9a2bc`)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only — appended sixteenth
+recurrence of the `_check_project_health` false-positive symptom. Same
+`healthcheck-all.sh` cadence-slip signature as the prior fifteen: last
+successful tick 17:35:54Z, then a 21-min gap that pushed
+`projects.last_healthy_at` past the 20-min unhealthy threshold in
+`src/runner/events.py:_check_project_health`. Direct probes returned 200 on
+`/healthz`, `/`, and `/static/app.js`; project PID 71682 was healthy;
+healthcheck-all had already self-resumed at 17:57:09Z before the diagnose
+ran, so no inline kickstart was needed. No server code changed — the
+prevention patch (gate the trigger on a fresh direct probe, or trust a
+`healthcheck:last_run` freshness key) still requires `server-patch` (Phase
+5). Runner behavior unchanged.
+
+## 2026-08-02 — Applied stranded learning + refined `_learning_apply` root cause
+
+**Files changed**: `.context/modules/runner/skills/GOTCHAS.md` — inserted the
+"Aged healthcheck timestamp triggers false-positive unhealthy alert" gotcha
+(from evidence job `a480b1ee`) that `_learning_apply` job `30d66555`
+tried but failed to write when it hit `max_turns:6`. Also updated
+`docs/TROUBLESHOOTING.md` with the deeper root cause: `session.py` passes
+only `job.description` as the user prompt, so the skill's "Payload you will
+receive" section is aspirational — the model never sees `payload.module` and
+has to infer it, burning turns before it can Edit. Three fixes proposed
+(inline payload into description, append payload block in session.py for
+internal skill kinds, or bump max_turns to 10) — all server-code, medium
+risk, deferred to server-patch. Diagnosed by self-diagnose job `6c281518`.
+
+## 2026-08-01 — Restored missing APPEND_ENTRIES_BELOW marker in runner/skills/PATTERNS.md
+
+**Files changed**: `.context/modules/runner/skills/PATTERNS.md` — inserted the
+standard `<!-- APPEND_ENTRIES_BELOW -->` marker that every other module's
+skills/*.md file has. This file pre-dated the seed convention and had never
+been re-seeded, which caused `_learning_apply` job `912237f7` to hit
+max_turns while the model wandered checking other modules' files instead of
+following its own Step 3 fallback ("if the marker is missing, just append at
+end"). Also applied the learning that failed job was trying to write (about
+`context_files` frontmatter injection, evidence job `64644863`). See
+Troubleshooting entry for the failure mode. Diagnosed by self-diagnose job
+`f13d03a6`.
 
 ## 2026-07-31 — MCP tools joined allowed_tools (the second dispatch blocker)
 

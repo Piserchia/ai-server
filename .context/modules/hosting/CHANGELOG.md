@@ -2,6 +2,103 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-03 — healthcheck-all cadence-slip false positive (atlas, 61st recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended).
+
+**Why**: self-diagnose fired for atlas unhealthy (`last_healthy_at`
+20m31s stale at fire, stamp 22:03:19Z vs probe 22:23:50Z), though
+`/` returned HTTP 200 in 64ms on port 8791 and all three launchd
+processes (atlas / dash-scheduler / pm-edge, PIDs 24233 / 81428 /
+81432) were healthy. `healthcheck.out.log` gap 22:03:19Z →
+22:24:01Z = 20m42s / four missed 5-min ticks — the same
+macOS-sleep-cadence-slip pattern as recurrences 43–60. No concurrent
+baseball-bingo twin observed this slip.
+
+**Fix**: `launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all`.
+Cadence resumed with a tick at 22:24:01Z; atlas `last_healthy_at`
+refreshed to <1s at 22:24:00Z. Very-low-risk auto-apply per the
+self-diagnose skill.
+
+**Still blocked**: the events.py live-probe gate that would zero
+these false positives is trapped in the runtime clone by the
+workspace-push meta-bug (`src/runner/workspaces.py`) — see
+TROUBLESHOOTING.md entries 51–60. Not re-dispatching another
+server-patch until the meta-bug is unblocked.
+
+Job: `348ec5db`.
+
+## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 59th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended as
+59th entry, dispatch-window twin of the atlas 58th entry immediately
+above).
+
+**Why**: self-diagnose fired for baseball-bingo unhealthy
+(`last_healthy_at` 21m09s stale at fire) though `/healthz` returned 200
+and `/` returned 200 on port 8790 (PID 71682, uvicorn stable for 3d16h).
+`healthcheck.out.log` gap 19:19:46Z → 19:41:16Z (four missed 5-min ticks,
+macOS-sleep-cadence-slip signature). The concurrent atlas twin diagnose
+(job `2c663dd3`, enqueued 13ms earlier) had already kickstarted
+`com.assistant.healthcheck-all` at 19:41:16Z before this baseball-bingo
+job probed, so no additional kickstart was needed; a manual
+`healthcheck-all.sh` run also refreshed baseball-bingo `last_healthy_at`
+to <1min old. Historical anyio `TaskHandle` ImportError bursts in
+`project.baseball-bingo.err.log` re-confirmed as stale (July 30 pre-restart
+PID 3619); anyio 4.14.2 exports `TaskHandle` correctly at current
+interpreter state. Prevention (events.py live-probe gate) still blocked
+by the workspace-push meta-bug — owner action remains the unblock.
+
+## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 44th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;
+44+ occurrences counter bumped from 43+).
+
+**Why**: self-diagnose fired for baseball-bingo unhealthy (`last_healthy_at`
+age 21m09s at fire) though `/healthz` returned 200 in 6.1ms and `/` returned
+200 in 5.4ms with full HTML on port 8790 (PID 71682 healthy).
+`healthcheck.out.log` gap 13:47:17Z → 14:08:28Z (21-min slip, four missed
+5-min ticks). `com.assistant.healthcheck-all` was not actively running (PID
+`-`); kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`.
+Cadence resumed 14:29:52Z, both baseball-bingo and atlas `last_healthy_at`
+refreshed to 7s old (single kickstart, both projects refreshed —
+shared-cadence pattern reinforced). No prevention patch landed yet;
+`events.py` live-probe gate and `healthcheck-all.sh` psql-exit-status
+surfacing both remain un-landed.
+
+## 2026-08-03 — healthcheck-all cadence-slip false positive (atlas, 39th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;
+39+ occurrences counter bumped from 38+).
+
+**Why**: `_check_project_health` in `runner/events.py` fired for atlas
+(`last_healthy_at` age 35m at fire time) though the project answered
+`/` HTTP 200 in 74ms on port 8791. `healthcheck.out.log` last tick
+06:08:09Z — seven missed 5-min ticks in a row (06:13/18/23/28/33/38/43).
+Kickstarted `gui/$(id -u)/com.assistant.healthcheck-all` inline;
+cadence resumed 06:44:14Z, both atlas and baseball-bingo
+`last_healthy_at` refreshed to ~2s. All three atlas launchd processes
+(atlas / atlas-dash-scheduler / atlas-pm-edge, PIDs 24233/81428/81432)
+were up continuously — same PID trio as recurrences 35–38, confirming
+no atlas restart was needed. The prevention patch (live-probe gate in
+`events.py:_check_project_health`) still un-landed — spec captured in
+TROUBLESHOOTING.md and referenced in prior CHANGELOG entries.
+
+## 2026-08-03 — healthcheck-all cadence-slip false positive (baseball-bingo, 27th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended;
+27+ occurrences counter bumped).
+
+**Why**: `_check_project_health` in `runner/events.py` fired for
+baseball-bingo (`last_healthy_at` age 21m43s) though the project answered
+`/healthz` 200 in 8.5ms. `healthcheck.out.log` last tick 23:59:21Z —
+four missed 5-min ticks in a row. Kickstarted
+`gui/$(id -u)/com.assistant.healthcheck-all` inline; cadence resumed
+00:21:19Z, `last_healthy_at` refreshed to 3s. No project restart
+needed (that would be the only real downtime of the incident). The
+prevention patch (live-probe gate in `events.py` `_check_project_health`)
+remains unimplemented — job `f74b7415`.
+
 ## 2026-07-31 — Atlas goes GitHub-canonical; first live delivery contract (Phase E, atlas half)
 
 **Files changed**: `.context/PROJECTS_REGISTRY.md` (atlas source + delivery
