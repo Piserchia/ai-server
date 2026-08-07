@@ -15,7 +15,7 @@ role: worker
 division: platform-ops
 privilege_class: read-only
 tags: [operations, deploy, dispatch, needs-dispatch-mcp]
-context_files: [".context/SYSTEM.md", "SERVER.md"]
+context_files: [".context/SYSTEM.md", "SERVER.md", "skills/server-deploy/SKILL.md"]
 escalation:
   on_failure:
     model: claude-opus-4-7
