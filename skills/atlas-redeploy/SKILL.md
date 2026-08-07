@@ -76,6 +76,22 @@ cd "$ATLAS/dashboard" && .venv/bin/python -m pytest -q     # must be green
 cd "$ATLAS/pmedge" && .venv/bin/python -m pytest -q        # must be green
 ```
 
+Momentum gate — DETERMINISTIC path check, same pattern as the web build
+(added 2026-08-07 with the momentum vertical; manifest.yml declares this
+gate but this skill is the executor, so it must live here too):
+
+```bash
+if git -C "$ATLAS" diff --name-only "$BEFORE..$AFTER" | grep -q '^momentum/'; then
+  cd "$ATLAS/momentum" || exit 1
+  if [ ! -x .venv/bin/python ]; then    # self-heal: venv is an allowed runtime-clone write
+    python3.12 -m venv .venv && .venv/bin/pip install -q -e '.[dev]'
+  fi
+  .venv/bin/python -m pytest -q         # must be green
+else
+  echo "no momentum/ changes in range — momentum gate skipped"
+fi
+```
+
 **Any failure → STOP. Do not build, do not restart.** Summary = the failing output + the
 commit range, so the fix lands in the dev repo first.
 

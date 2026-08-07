@@ -22,6 +22,7 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-build` | worker | guarded-writer | Twice-weekly loop builder: top eligible S/M item → workspace-isolated build → gates + code-review LGTM → push → deploy dispatch (Tue+Fri 10:00) |
 | `atlas-gap-scout` | worker | content | Weekly top-gap free-source spec + live probe + builder-acceptance row (Wed 11:00) |
 | `atlas-refresh-knowledge` | worker | content | Monthly knowledge curation + stale-claim re-verify (1st 11:30) |
+| `atlas-momo-research` | worker | guarded-writer | Weekly Momentum-Lab research cycle: one governed hypothesis cycle in a workspace clone under momentum/evaluation/PROTOCOL.md; mechanics/IEX-observe until SIP approved (Thu 13:00) |
 
 ## Standards
 
