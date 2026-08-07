@@ -9,6 +9,35 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: a runtime doc written in production never shows up on `origin/runtime-learnings`
+
+### Root cause (diagnosed 2026-08-07)
+
+`scripts/sync-learnings.sh` publishes **tracked modified** doc files only —
+untracked files are deliberately skipped ("untracked skill dirs come through
+new-skill's own commit path"). A prod session that creates a NEW doc file
+inside an EXISTING skill dir (e.g. `skills/atlas-evaluate/GOTCHAS.md`, born
+untracked during the first live evaluator runs) strands forever: the hourly
+timer logs "nothing to publish" while `git status` shows `??` for the file.
+
+### Diagnostics
+
+```bash
+cd "$HOME/Library/Application Support/ai-server"
+git status --short | grep '^??'      # any untracked doc = stranded
+tail -20 volumes/logs/sync-learnings.out.log   # "nothing to publish" ≠ clean
+```
+
+### Fix (rescue pattern)
+
+Commit the file's content in the DEV repo (tracked, with a provenance note),
+push, THEN `rm` the prod untracked copy — in that order, so the next
+deploy's ff-only pull can't collide with the now-tracked path. Never commit
+in prod (pre-commit guard). Related check while you're there: `git log
+--oneline origin/main..origin/runtime-learnings` — the dev-side merge of the
+learnings branch is manual and silently piles up (29 commits between
+07-28 and 08-07).
+
 ## Symptom: `jobs.review_outcome` is NULL for every job / post-review "never runs"
 
 ### Root cause (fixed 2026-08-05 — keep for the pattern)
