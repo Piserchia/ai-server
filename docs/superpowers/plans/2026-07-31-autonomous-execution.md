@@ -1,6 +1,6 @@
 # Autonomous Execution — closing the propose→execute loop (2026-07-31)
 
-> **STATUS: IMPLEMENTED 2026-07-31** (single batch, four workstreams).
+> **STATUS: IMPLEMENTED + DEPLOYED 2026-07-31** (single batch, four workstreams; prod 601a5cd; autopilot live).
 > Owner decision (2026-07-31): human pre-merge approval is removed from the
 > execution path — "agent loops perform the eval and execution"; the owner is
 > notified, and can jump in, but is not a gate. Protected paths remain
