@@ -2,6 +2,23 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-08 — refresh CONTEXT.md: newer model aliases + review_flagged notify branch
+
+**Files created**: none
+**Files changed**: `.context/modules/gateway/CONTEXT.md`
+**Why**: CONTEXT.md was 31d old vs. 0d-old source; two concrete drifts
+addressed. (1) "Flag parsing" now enumerates the newer `_MODEL_ALIASES`
+entries (`opus-5`, `opus-4-8`, `fable`/`fable-5` from 2026-08-06/07
+CHANGELOG entries) and pins the note that bare `opus` still maps to 4-7
+(five flag-parser tests pin that default). (2) "Notifications back to
+user" gains a bullet for the `tasks:notify` consumer's `review_flagged`
+branch (commit 74be877, 2026-08-06) — post-session code-review blockers
+DM in-thread with a ⚠️ prefix so they aren't buried under completion.
+**Side effects**: None (docs-only).
+**Gotchas discovered**: None new; both edits reflect existing source at
+`src/gateway/telegram_bot.py` (`_MODEL_ALIASES` L122–134, `review_flagged`
+handler L1249–1259).
+
 ## 2026-08-07 — register opus-5 in _MODEL_ALIASES (atlas loop de-fabled)
 
 **Files changed**: `src/gateway/telegram_bot.py`.
