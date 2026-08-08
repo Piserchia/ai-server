@@ -40,7 +40,10 @@ the single enqueue/cancel/lookup helper.
 
 `parse_flags()` in `telegram_bot.py` extracts `--model=`, `--effort=`,
 `--permission=`, `--project=`, `--kind=` from the front of a description.
-Model aliases: `opus`, `opus-4-7`, `opus-4-6`, `sonnet`, `haiku`, etc.
+Model aliases: `opus`, `opus-5`, `opus-4-8`, `opus-4-7`, `opus-4-6`,
+`fable`/`fable-5`, `sonnet`, `haiku`, etc. Bare `opus` still maps to
+`claude-opus-4-7` (5 flag-parser tests pin the default); newer models
+(`opus-5`, `opus-4-8`, `fable-5`) are explicit versioned aliases only.
 Flags land in `job.payload` and take precedence over skill frontmatter.
 
 ## Auth
@@ -54,6 +57,11 @@ Flags land in `job.payload` and take precedence over skill frontmatter.
   their job completes. The submitter→chat_id mapping is held in memory (lost
   on bot restart — acceptable tradeoff vs adding a Redis key per job).
 - Quota state change (pause/resume) → periodic notifier DMs all allowed chat IDs.
+- `tasks:notify` consumer handles a `review_flagged` branch (commit 74be877,
+  CHANGELOG 2026-08-06): post-session code-review blockers on an
+  already-completed/pushed job surface in-thread with a ⚠️ prefix (replies
+  to `task.thread_message_id` when set) so they aren't buried under the
+  completion message.
 
 ## Dependencies
 
