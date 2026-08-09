@@ -2,6 +2,39 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-09 — dispatch-mcp normalizes `kind` to canonical hyphenated form
+
+**Files created**: none
+**Files changed**: `src/runner/mcp_dispatch.py`, `tests/test_mcp_tools.py`
+**Why**: 30-day evidence showed `dispatch-mcp` splitting the `kind` column
+between hyphenated and underscored variants (`server_deploy` 11 vs
+`server-deploy` 2; `deploy_director` 8 vs `deploy-director` 14;
+`atlas_redeploy` 4 vs 2; `atlas_portfolio` 4 vs …). Root cause: the tool
+docstring's example values (`'research_report', 'app_patch'`) were
+underscored; LLMs copied them verbatim. Every OTHER caller emits hyphens,
+so retrospective/dashboard metrics grouping by `kind` under-counted each
+affected skill even though skill resolution worked either way (see
+SKILLS_REGISTRY.md's "underscores → dashes" convention).
+**Fix**: (1) docstring examples changed to hyphenated (`'chat',
+'research-report', 'app-patch'`) to stop steering LLMs wrong; (2) new pure
+helper `_normalize_kind(kind)` collapses underscored kinds to their
+canonical hyphenated form before validation and both enqueue paths.
+Internal skills (`_writeback`, `_learning_apply`, `_evaluate` — literal
+filesystem names) are hands-off: any kind starting with `_` is returned
+unchanged. 11 new unit tests in `tests/test_mcp_tools.py::TestNormalizeKind`
+cover the real-world split-kind set plus internal-skill preservation.
+**Side effects**: none for correct callers (already hyphenated). Callers
+that were emitting `server_deploy` etc. now write `server-deploy` — this
+is the whole point (single canonical `kind` per skill in future analytics).
+Existing rows in the DB are not backfilled; only new inserts benefit.
+**Gotchas discovered**: the code snippet suggested in the dispatching
+proposal (`body.replace("_", "-")` inside a leading-`_` branch) would have
+broken the `_learning_apply` skill lookup. The correct rule — verified
+against `skills/_*` directories — is that internal-skill kinds are literal
+filesystem names, so `_` at the start means "leave the whole thing alone."
+The proposal's test expectation (`_learning_apply → _learning_apply`
+unchanged) was right; the code snippet was wrong.
+
 ## 2026-08-07 — session timeouts now escalate (timeout branch was a silent dead end)
 
 **Files changed**: `src/runner/main.py`, `tests/test_timeout_escalation.py` (new).

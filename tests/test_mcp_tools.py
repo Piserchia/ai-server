@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.runner.mcp_dispatch import _validate_enqueue_args
+from src.runner.mcp_dispatch import _normalize_kind, _validate_enqueue_args
 from src.runner.mcp_projects import _format_project, _read_log_tail
 
 
@@ -189,3 +189,69 @@ class TestValidateEnqueueArgs:
     def test_valid_real_kinds(self) -> None:
         for kind in ("task", "research_report", "app_patch", "self_diagnose"):
             assert _validate_enqueue_args(kind, "do something") == []
+
+
+# ── _normalize_kind tests ─────────────────────────────────────────────────
+
+
+class TestNormalizeKind:
+    """Guard the LLM-copy-paste fix: underscore variants → canonical hyphenated.
+
+    Historical evidence (30-day window before 2026-08-09): jobs created by
+    `dispatch-mcp` split their `kind` column between `server_deploy`/`server-deploy`,
+    `deploy_director`/`deploy-director`, etc., because the tool's docstring
+    examples were underscored and LLMs copied them verbatim. Every other caller
+    already emits hyphens; this normalization is the collapse point.
+    """
+
+    def test_underscore_to_hyphen(self) -> None:
+        assert _normalize_kind("server_deploy") == "server-deploy"
+
+    def test_multi_underscore_to_hyphen(self) -> None:
+        assert _normalize_kind("atlas_refresh_knowledge") == "atlas-refresh-knowledge"
+
+    def test_already_hyphenated_unchanged(self) -> None:
+        assert _normalize_kind("server-deploy") == "server-deploy"
+
+    def test_no_separator_unchanged(self) -> None:
+        assert _normalize_kind("task") == "task"
+        assert _normalize_kind("chat") == "chat"
+
+    def test_internal_skill_unchanged(self) -> None:
+        # Internal skills (`skills/_writeback`, `skills/_learning_apply`,
+        # `skills/_evaluate`) use literal underscores on disk — any kind
+        # starting with `_` is returned as-is so its skill lookup still lands.
+        assert _normalize_kind("_learning_apply") == "_learning_apply"
+        assert _normalize_kind("_writeback") == "_writeback"
+        assert _normalize_kind("_evaluate") == "_evaluate"
+
+    def test_empty_string_returned_as_empty(self) -> None:
+        # Validator (called next) rejects; normalize passes it through.
+        assert _normalize_kind("") == ""
+
+    def test_whitespace_only_stripped_to_empty(self) -> None:
+        assert _normalize_kind("   ") == ""
+
+    def test_surrounding_whitespace_stripped(self) -> None:
+        assert _normalize_kind("  server_deploy  ") == "server-deploy"
+
+    def test_non_string_passes_through(self) -> None:
+        # Validator rejects non-strings; don't crash here.
+        assert _normalize_kind(None) is None  # type: ignore[arg-type]
+        assert _normalize_kind(123) == 123  # type: ignore[arg-type]
+
+    def test_real_world_split_kinds_collapse(self) -> None:
+        # The exact 30-day evidence set from the dispatch-mcp split.
+        pairs = [
+            ("server_deploy", "server-deploy"),
+            ("deploy_director", "deploy-director"),
+            ("atlas_redeploy", "atlas-redeploy"),
+            ("atlas_portfolio", "atlas-portfolio"),
+            ("research_report", "research-report"),
+            ("app_patch", "app-patch"),
+            ("self_diagnose", "self-diagnose"),
+        ]
+        for underscored, hyphenated in pairs:
+            assert _normalize_kind(underscored) == hyphenated
+            # Idempotent: hyphenated stays put.
+            assert _normalize_kind(hyphenated) == hyphenated
