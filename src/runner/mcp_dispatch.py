@@ -25,6 +25,33 @@ logger = logging.getLogger(__name__)
 # ── Pure helpers (tested directly) ─────────────────────────────────────────
 
 
+def _normalize_kind(kind: str) -> str:
+    """Canonicalize a job ``kind`` to the hyphenated form used across the server.
+
+    Every non-dispatch caller (web, owner-terminal, deploy-autopilot, eval-fix)
+    emits hyphenated kinds (``server-deploy``, ``research-report``); LLMs
+    invoking the ``enqueue_job`` MCP tool historically copied the underscored
+    example values from the docstring verbatim, splitting metrics that group
+    by ``kind``. This normalization collapses those variants.
+
+    Internal skills (``_writeback``, ``_learning_apply``, ``_evaluate`` — the
+    directories that literally start with an underscore under ``skills/``) are
+    a namespace of their own: they use full underscores, so a kind starting
+    with ``_`` is returned UNCHANGED. Only public/user-facing kinds hyphenate.
+
+    Non-string / empty inputs are returned as-is for the validator to reject.
+    """
+    if not isinstance(kind, str):
+        return kind  # type: ignore[return-value]
+    stripped = kind.strip()
+    if not stripped:
+        return stripped
+    if stripped.startswith("_"):
+        # Internal skill namespace — literal filesystem name, hands off.
+        return stripped
+    return stripped.replace("_", "-")
+
+
 def _validate_enqueue_args(kind: str, description: str) -> list[str]:
     """Validate enqueue arguments. Returns a list of error strings (empty = valid)."""
     errors: list[str] = []
@@ -57,14 +84,14 @@ def create_server(spawning_job=None):
         "Enqueue a new job by kind and description. Returns the new job's ID. "
         "Pass depends_on=[job ids] to defer this job until those complete.",
         {
-            "kind": Annotated[str, "Job kind (e.g. 'task', 'research_report', 'app_patch')"],
+            "kind": Annotated[str, "Job kind (e.g. 'task', 'chat', 'research-report', 'app-patch')"],
             "description": Annotated[str, "Human-readable description of what to do"],
             "payload": Annotated[dict, "Optional extra payload for the job"],
             "depends_on": Annotated[list, "Optional job IDs that must complete first"],
         },
     )
     async def enqueue_job_tool(args: dict[str, Any]) -> dict[str, Any]:
-        kind = args.get("kind", "")
+        kind = _normalize_kind(args.get("kind", ""))
         description = args.get("description", "")
         payload = dict(args.get("payload") or {})
         depends_on = [str(d) for d in (args.get("depends_on") or []) if str(d).strip()]
