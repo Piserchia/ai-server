@@ -17,6 +17,7 @@ session picking up work on this repo, or a human returning after a break.
 | [`EVALUATION_2026-07-10-atlas.md`](EVALUATION_2026-07-10-atlas.md) | Atlas deep-dive: doc verdicts, contract check, ops (July 2026) | Working on atlas |
 | [`superpowers/plans/2026-07-10-eval-remediation.md`](superpowers/plans/2026-07-10-eval-remediation.md) | Executable remediation plan T1–T17 (July 2026) | Executing planned work |
 | [`superpowers/plans/`](superpowers/plans/) | All executable task-by-task implementation plans | Executing planned work |
+| [`superpowers/plans/2026-08-10-model-router.md`](superpowers/plans/2026-08-10-model-router.md) | **PROPOSED** — dynamic multi-provider model router (Codex/Gemini/OpenRouter/local lanes, per-provider failover, INV-21 containment) | Before any cross-provider work; owner sign-off pending |
 | [`PHASE_3_PLAN.md`](PHASE_3_PLAN.md) | Domain + tunnel + Caddy + bingo + market-tracker | **SHIPPED** — historical reference |
 | [`PHASE_4_PLAN.md`](PHASE_4_PLAN.md) | Expansion skills + MCP servers + event triggers | **SHIPPED** — historical reference |
 | [`PHASE_5_PLAN.md`](PHASE_5_PLAN.md) | Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** — historical reference |

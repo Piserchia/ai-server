@@ -96,6 +96,7 @@ projects/<slug>/
 | Read the audit that motivated all of this | `docs/AUDIT_2026-07-12.md` |
 | Understand the management hierarchy (agents-as-org) | `.context/org/ORG.md` (chart + operating model), `.context/org/divisions/<div>/CHARTER.md` (per-division), `docs/superpowers/plans/2026-07-28-management-hierarchy.md` (design + rollout) |
 | Understand the autonomous execution lane (no-approval merge/deploy, read-only+dispatch tier, breaker, autopilot) | `docs/superpowers/plans/2026-07-31-autonomous-execution.md` (design + safety inventory), MISSION.md § M, SYSTEM.md INV-4/INV-20 |
+| Understand the multi-provider model-router plan (Codex/Gemini/OpenRouter/local lanes, INV-21) | `docs/superpowers/plans/2026-08-10-model-router.md` (PROPOSED — owner sign-off pending) |
 
 ## Additions 2026-07-27 (SDK-native overhaul)
 
