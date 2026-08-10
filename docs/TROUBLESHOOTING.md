@@ -9,6 +9,85 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: a job times out and nothing follows — no retry, no self-diagnose
+
+### Root cause (fixed 2026-08-07)
+
+`_process_job`'s `asyncio.TimeoutError` branch failed the job and returned
+WITHOUT the escalation post-step — unlike the generic `except Exception`
+branch. Every `Session timed out` failure was a dead end regardless of the
+skill's `escalation.on_failure` config. Fixed by mirroring the generic
+branch (refetch + `_maybe_escalate`); `tests/test_timeout_escalation.py`
+pins the contract. **The pattern to watch** (3rd instance now: post_review
+0/516, task-less deploy DMs, this): a post-step added to one branch of
+`_process_job` and silently missing from a sibling branch. When adding a
+post-step, grep every `except` in `_process_job`.
+
+### Diagnostics
+
+```bash
+# timed-out jobs with no escalation child:
+psql assistant -c "SELECT LEFT(j.id::text,8), j.resolved_skill FROM jobs j
+  WHERE j.error_message='Session timed out'
+  AND NOT EXISTS (SELECT 1 FROM jobs c
+    WHERE c.payload->>'escalated_from' = j.id::text);"
+```
+
+## Symptom: a runtime doc written in production never shows up on `origin/runtime-learnings`
+
+### Root cause (diagnosed 2026-08-07)
+
+`scripts/sync-learnings.sh` publishes **tracked modified** doc files only —
+untracked files are deliberately skipped ("untracked skill dirs come through
+new-skill's own commit path"). A prod session that creates a NEW doc file
+inside an EXISTING skill dir (e.g. `skills/atlas-evaluate/GOTCHAS.md`, born
+untracked during the first live evaluator runs) strands forever: the hourly
+timer logs "nothing to publish" while `git status` shows `??` for the file.
+
+### Diagnostics
+
+```bash
+cd "$HOME/Library/Application Support/ai-server"
+git status --short | grep '^??'      # any untracked doc = stranded
+tail -20 volumes/logs/sync-learnings.out.log   # "nothing to publish" ≠ clean
+```
+
+### Fix (rescue pattern)
+
+Commit the file's content in the DEV repo (tracked, with a provenance note),
+push, THEN `rm` the prod untracked copy — in that order, so the next
+deploy's ff-only pull can't collide with the now-tracked path. Never commit
+in prod (pre-commit guard). Related check while you're there: `git log
+--oneline origin/main..origin/runtime-learnings` — the dev-side merge of the
+learnings branch is manual and silently piles up (29 commits between
+07-28 and 08-07).
+
+## Symptom: `jobs.review_outcome` is NULL for every job / post-review "never runs"
+
+### Root cause (fixed 2026-08-05 — keep for the pattern)
+
+`_process_job` post-steps that key on `job.resolved_skill` were reading the
+ORM instance loaded BEFORE `run_session`; the session stamps
+`resolved_skill` via a separate DB session, so the detached instance never
+saw it and `_maybe_review` returned early — for every job since inception
+(0/516). Fixed by refetching the Job row after completion. **The pattern to
+watch**: any post-step reading a column the session wrote must use the
+refreshed instance, not the pre-session one — a stale attr on a detached
+instance fails silently, not loudly.
+
+### Diagnostics
+
+```bash
+psql assistant -c "SELECT review_outcome, count(*) FROM jobs WHERE
+  resolved_skill IN ('app-patch','server-patch','atlas-build') GROUP BY 1;"
+# all-NULL after 2026-08-05 deploy = regression; check audit log for
+# post_review_skipped events (reason=stale_head is the wrong-diff guard,
+# not a regression — it means the canonical ff-sync failed or nothing
+# was committed). A blocker/error verdict is a `post_review_flagged` audit
+# event + `review_flagged` task DM; the job stays `completed` (post_review
+# FLAGS, it does not park — the merge gate is the in-session code-review
+# before the push, not this after-the-fact second belt).
+```
 ## Symptom: `_learning_apply` job fails with `error_max_turns: Reached maximum number of turns (6)`
 
 ### Root cause
@@ -286,6 +365,83 @@ On the Mac Mini, `git pull` + restart runner. Verify by submitting a chat (shoul
 ```
 /chat hello
 ```
+
+---
+
+## Symptom: `_writeback` job fails with `error_max_turns: Reached maximum number of turns (6)` after a project-scoped deploy
+
+**Diagnostic**:
+```bash
+# From the failing writeback's audit log:
+grep -E 'job_started|tool_use|job_failed' volumes/audit_log/<writeback_job_id>.jsonl
+# If you see `"cwd": ".../ai-server"` on job_started but the parent's modified files
+# are inside `projects/<slug>/...`, the child ran in the WRONG directory.
+```
+
+### Root cause (diagnosed 2026-08-10, job `56c478cc`)
+
+Two-part bug in `_verify_writeback` (`src/runner/main.py` L597–639) and
+`_resolve_project` (`src/runner/session.py` L679–701):
+
+1. **Wrong cwd**: `_verify_writeback` resolves the parent's cwd (delivery-aware
+   — e.g. `projects/atlas` for atlas_redeploy since `is_deploy=True`) and puts
+   it in the child's `payload["cwd"]`. But the enqueue call only sets
+   `project_id=job.project_id`. When the parent had `project_id=NULL` (as
+   `atlas_redeploy` did in incident `97077ba8`), the child inherits NULL, and
+   `_project_slug(child)` returns None → `_resolve_project` falls back to
+   `settings.server_root`. The `payload["cwd"]` is never read by session
+   startup — it's dead data. The `_writeback` skill launches in the ai-server
+   repo, runs `git status` there, sees a totally different set of modified
+   files (or none), and burns turns discovering the parent's `.superpowers/`
+   files "don't exist".
+2. **Skill budget too tight**: even with the correct cwd, `max_turns: 6` in
+   `skills/_writeback/SKILL.md` barely covers the happy path (status → read
+   summary → read CHANGELOG → edit → git add → commit → final = 7 calls). Any
+   exploration blows the cap. Same class of bug as `_learning_apply` above.
+3. **Second-order problem for dev-repo projects**: even if the child gets a
+   `project_slug`, `_resolve_project(child_job, "_writeback")` sees
+   `is_deploy=False` and routes to the DEV repo for topology `dev-repo`
+   (atlas). But the modified files live in the runtime clone (where the
+   deploy skill ran). The child would still find nothing to write back.
+
+### Fix (medium risk, server-code — must ship from dev repo)
+
+Two changes in `src/runner/main.py::_verify_writeback` + one in
+`src/runner/session.py`:
+
+1. **Propagate the resolved cwd**: switch `_resolve_cwd` → `_resolve_project`
+   to capture `slug` and `is_deploy`, then include them in the payload:
+   ```python
+   cwd, deliv, is_deploy_parent, slug = await session_mod._resolve_project(
+       job, job.resolved_skill)
+   ...
+   payload = {
+       "parent_job_summary": parent_summary,
+       "modified_files": modified,
+       "cwd": str(cwd),
+       "project_slug": slug,             # NEW — makes _project_slug find it
+       "writeback_cwd_override": str(cwd),  # NEW — pinpoint runtime clone
+   }
+   ```
+2. **Honor the override in session cwd resolution**: in
+   `session.py::_resolve_project` (or `_resolve_cwd`), if
+   `job.kind == "_writeback"` and `payload.writeback_cwd_override` is set and
+   the path exists, return that path directly (short-circuit the delivery
+   routing). Rationale: `_writeback` MUST see the same git tree the parent
+   modified. Delivery routing for `_writeback` on dev-repo projects sends it
+   to the wrong tree.
+3. **Bump `max_turns`** in `skills/_writeback/SKILL.md` from 6 → 12. The
+   procedure has a legitimate ~7-call happy path; 6 is a footgun.
+
+### Incidents
+
+- `56c478cc` (2026-08-10) — parent `97077ba8` (`atlas_redeploy`, project_id=NULL)
+  modified `.superpowers/CHANGELOG.runtime-drift-2026-08-04.md` +
+  sdd/briefs/* in `projects/atlas`. Child `_writeback` launched in
+  ai-server root (wrong repo), spent turns 1–6 on `git status`,
+  `ls .superpowers/` (missing), `git log`, `cat audit_log`, `grep atlas`,
+  `ls projects/`, then hit max_turns before ever opening a CHANGELOG.
+  Diagnosed by self-diagnose `9ca7ac39`. Server-code fix pending in dev repo.
 
 ---
 
