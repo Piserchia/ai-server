@@ -762,9 +762,16 @@ async def run_session(job: Job) -> dict[str, Any]:
         try:
             ws = workspaces.create_workspace(job_id, canonical_cwd, settings.workspaces_dir)
             cwd = ws.path
+            # Manifest-declared gitignored secrets (delivery.env_files) — a
+            # clone doesn't carry them, so owner-provisioned credentials
+            # (e.g. atlas's Alpaca keys) must be copied in explicitly.
+            env_files_copied: list[str] = []
+            if deliv is not None and deliv.env_files:
+                env_files_copied = workspaces.provision_env_files(
+                    ws.path, canonical_cwd, deliv.env_files)
             audit_log.append(job_id, "workspace_created",
                              workspace=str(ws.path), canonical=str(canonical_cwd),
-                             isolation=isolation)
+                             isolation=isolation, env_files=env_files_copied)
         except Exception as exc:
             # Fail CLOSED. Guard hooks are keyed to the workspace path, so a
             # workspace-tier skill that can't get its clone would otherwise run

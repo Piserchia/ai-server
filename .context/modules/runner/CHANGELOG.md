@@ -2,6 +2,35 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-10 — workspace env-file provisioning (delivery.env_files)
+
+**Files changed**: `src/runner/workspaces.py`, `src/runner/session.py`,
+`tests/test_workspaces.py`, (registry: `src/registry/manifest.py`,
+`tests/test_manifest.py`).
+
+**Why**: `git clone` doesn't carry gitignored files, so a workspace-tier
+session never saw owner-provisioned credentials — atlas cycle #1 reported
+"No `.env`/credentials exist in this workspace" even after the owner put the
+Alpaca keys in `~/Documents/repos/atlas/.env` exactly as instructed. The
+Thursday `atlas-momo-research` run would have hit the same wall.
+
+**Fix**: projects opt in via manifest `delivery.env_files: [".env"]`;
+`workspaces.provision_env_files` copies each declared file from the canonical
+into the clone right after `create_workspace` (wired in `run_session`, where
+the delivery contract is already resolved). Copied entries are audited on
+`workspace_created.env_files`. Containment: relative in-repo paths only —
+absolute/`~`/`..` rejected at manifest validation AND by the runner-side
+`env_file_violation` belt; symlink sources refused (a repo symlink could
+otherwise smuggle a host file into the session-readable clone). Never raises;
+missing sources are skipped so the consumer fails with its own message.
+Code-review hardening (same day): resolve-containment on BOTH ends — the
+reviewer reproduced a symlinked-parent bypass (`sub/.env`, `sub` → host dir)
+that passed the final-component check; src must resolve inside the canonical
+and dst inside the workspace (dst-side symlinks also refused, else copy2
+writes through a committed symlink to a host path).
+
+**Verify**: `pipenv run pytest` — 1098 passed (13 new).
+
 ## 2026-08-07 — session timeouts now escalate (timeout branch was a silent dead end)
 
 **Files changed**: `src/runner/main.py`, `tests/test_timeout_escalation.py` (new).

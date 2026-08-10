@@ -53,6 +53,11 @@ delivery:                 # (2026-07-27) machine-readable delivery contract —
   runtime_clone: pull-only|writable   # dev-repo ⇒ pull-only (enforced)
   branch: <string>
   deployable: <bool>      # content ⇒ must be false; true ⇒ requires ≥1 gate
+  env_files: [<path>, …]  # (2026-08-10) gitignored secrets (e.g. ".env") copied
+                          # from the canonical checkout into each per-job
+                          # workspace clone. Relative in-repo paths only —
+                          # absolute/~/traversal/symlinks refused (validated in
+                          # manifest.py + runner/workspaces.provision_env_files)
   deploy:
     skill: project-redeploy           # generic engine; or a bespoke skill
     autonomy: gated-auto|human-approval|manual-only

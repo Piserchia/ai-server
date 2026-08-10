@@ -206,3 +206,41 @@ class TestFromDict:
         d = Delivery.from_dict({})
         assert d.topology == "in-place" and not d.is_pull_only
         assert d.dev_repo_path is None
+
+
+class TestEnvFiles:
+    """delivery.env_files — gitignored secrets copied into workspace clones."""
+
+    def _delivery(self, env_files) -> Delivery:
+        return Delivery(
+            topology="dev-repo", dev_repo="~/x", runtime_clone="pull-only",
+            deployable=True,
+            deploy=DeployPolicy(gates=[DeployGate(kind="test", cmd="pytest")]),
+            env_files=env_files,
+        )
+
+    def test_parsed_from_dict(self):
+        d = Delivery.from_dict({"env_files": [".env", "config/.env.local"]})
+        assert d.env_files == [".env", "config/.env.local"]
+
+    def test_default_empty(self):
+        assert Delivery.from_dict({}).env_files == []
+
+    def test_relative_paths_validate(self):
+        self._delivery([".env"]).validate("atlas")  # no raise
+
+    def test_absolute_path_rejected(self):
+        with pytest.raises(ManifestError, match="relative"):
+            self._delivery(["/etc/passwd"]).validate("atlas")
+
+    def test_home_relative_rejected(self):
+        with pytest.raises(ManifestError, match="relative"):
+            self._delivery(["~/.ssh/id_rsa"]).validate("atlas")
+
+    def test_traversal_rejected(self):
+        with pytest.raises(ManifestError, match="traverse"):
+            self._delivery(["../secrets/.env"]).validate("atlas")
+
+    def test_whitespace_rejected(self):
+        with pytest.raises(ManifestError, match="non-empty"):
+            self._delivery([" .env"]).validate("atlas")

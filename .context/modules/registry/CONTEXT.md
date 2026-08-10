@@ -36,6 +36,10 @@ Parsers for the two pieces of external declarative configuration:
 - `load_all() -> list[Manifest]` — all projects, malformed ones skipped with a warning
 - `Manifest` dataclass — slug, name, type, subdomain, port, healthcheck,
   start_command, env, on_update, git, **delivery**, dependencies
+- `Delivery.env_files` (2026-08-10) — list of gitignored in-repo paths (e.g.
+  `.env`) the runner copies from the canonical checkout into each workspace
+  clone. `Delivery.validate` rejects absolute/`~`/`..` entries so a manifest
+  can never pull arbitrary host files into a session-readable workspace.
 - `Delivery` / `DeployPolicy` / `DeployGate` dataclasses — the machine-readable
   delivery contract (2026-07-27). `topology` (dev-repo|in-place|content),
   `dev_repo`, `runtime_clone` (pull-only|writable), `deployable`, and

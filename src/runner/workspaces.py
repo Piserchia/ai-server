@@ -150,6 +150,80 @@ def create_workspace(job_id: str, canonical: Path, base_dir: Path) -> Workspace:
     return Workspace(path=ws_path, canonical=canonical, pushes_to_origin=pushes_to_origin)
 
 
+def env_file_violation(entry: str) -> str | None:
+    """Why this `delivery.env_files` entry may not be provisioned, or None if
+    OK. Pure function.
+
+    Only plain relative in-repo paths are allowed — a manifest must never be
+    able to pull arbitrary host files (~/.ssh/*, /etc/*, keychain exports)
+    into a workspace the session can read. Manifest validation enforces the
+    same rules; this is the runner-side belt.
+    """
+    if not entry or not entry.strip() or entry != entry.strip():
+        return "empty or whitespace-wrapped path"
+    p = Path(entry)
+    if p.is_absolute() or entry.startswith("~"):
+        return "absolute or home-relative paths are not allowed"
+    if ".." in p.parts:
+        return "parent traversal is not allowed"
+    return None
+
+
+def provision_env_files(
+    ws_path: Path, canonical: Path, env_files: list[str],
+) -> list[str]:
+    """Copy manifest-declared gitignored files (secrets like `.env`) from the
+    canonical checkout into the workspace clone.
+
+    `git clone` doesn't carry gitignored files, so a workspace-tier session
+    otherwise never sees owner-provisioned credentials (the Alpaca-keys gap,
+    2026-08-10). Opt-in per project via `delivery.env_files`; called by
+    run_session right after create_workspace. Missing sources are skipped
+    (the consuming code fails with its own clearer message), symlinks are
+    refused (a symlink in the repo could smuggle an arbitrary host file into
+    the readable workspace), and nothing here ever raises. Returns the
+    entries actually copied — audited on the `workspace_created` event.
+    """
+    copied: list[str] = []
+    for raw in env_files or []:
+        entry = str(raw)
+        reason = env_file_violation(entry)
+        if reason:
+            logger.warning("env_files entry %r refused: %s", entry, reason)
+            continue
+        src = canonical / entry
+        dst = ws_path / entry
+        try:
+            if src.is_symlink():
+                logger.warning("env_files entry %r refused: symlinks are not "
+                               "allowed", entry)
+                continue
+            if not src.is_file():
+                logger.info("env_files entry %r not present at canonical — "
+                            "skipped", entry)
+                continue
+            # Resolve-containment (code-review 2026-08-10): a symlinked PARENT
+            # dir (`sub/.env` where `sub` → a host dir) passes both checks
+            # above — resolving catches it. Same on the write side: a
+            # committed symlink in the clone (dir in the path, or dst itself)
+            # would otherwise let copy2 write through to a host path.
+            if not src.resolve().is_relative_to(canonical.resolve()):
+                logger.warning("env_files entry %r refused: resolves outside "
+                               "the canonical", entry)
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.is_symlink() or not dst.parent.resolve().is_relative_to(
+                    ws_path.resolve()):
+                logger.warning("env_files entry %r refused: destination "
+                               "resolves outside the workspace", entry)
+                continue
+            shutil.copy2(src, dst)
+            copied.append(entry)
+        except Exception as exc:  # noqa: BLE001 — provisioning must never kill the job
+            logger.warning("env_files provisioning failed for %r: %s", entry, exc)
+    return copied
+
+
 def sync_canonical(ws: Workspace) -> tuple[bool, str]:
     """After a session pushed from its workspace, fast-forward the canonical.
 

@@ -31,6 +31,9 @@ Manifest schema (see projects/<slug>/manifest.yml):
       runtime_clone: pull-only | writable
       branch: str = "main"
       deployable: bool
+      env_files: [str, ...]    # gitignored files (e.g. ".env") copied from the
+                               # canonical checkout into each workspace clone;
+                               # relative in-repo paths only
       deploy:
         skill: str = "project-redeploy"
         autonomy: gated-auto | human-approval | manual-only
@@ -123,6 +126,11 @@ class Delivery:
     branch: str = "main"
     deployable: bool = True
     deploy: DeployPolicy = field(default_factory=DeployPolicy)
+    # Gitignored files (secrets like ".env") to copy from the canonical
+    # checkout into each per-job workspace clone — `git clone` doesn't carry
+    # them, so without this a workspace session never sees owner-provisioned
+    # credentials. Relative in-repo paths only (validated).
+    env_files: list[str] = field(default_factory=list)
 
     @property
     def is_pull_only(self) -> bool:
@@ -142,6 +150,7 @@ class Delivery:
             branch=str(data.get("branch", "main") or "main"),
             deployable=bool(data.get("deployable", True)),
             deploy=deploy,
+            env_files=[str(e) for e in (data.get("env_files", []) or [])],
         )
 
     def validate(self, slug: str) -> None:
@@ -169,6 +178,17 @@ class Delivery:
         if self.topology == "content" and self.deployable:
             raise ManifestError(
                 f"{slug}: content topology cannot be deployable (nothing to deploy)")
+        for ef in self.env_files:
+            p = Path(ef)
+            if not ef.strip() or ef != ef.strip():
+                raise ManifestError(f"{slug}: delivery.env_files entries must be "
+                                    f"non-empty plain paths (got {ef!r})")
+            if p.is_absolute() or ef.startswith("~"):
+                raise ManifestError(f"{slug}: delivery.env_files must be relative "
+                                    f"in-repo paths (got {ef!r})")
+            if ".." in p.parts:
+                raise ManifestError(f"{slug}: delivery.env_files may not traverse "
+                                    f"out of the repo (got {ef!r})")
         if self.deployable and not self.deploy.gates:
             raise ManifestError(
                 f"{slug}: a deployable project must declare at least one deploy gate "

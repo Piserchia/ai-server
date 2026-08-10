@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-10 — Delivery.env_files: gitignored secrets for workspace clones
+
+**Files changed**: `src/registry/manifest.py`, `tests/test_manifest.py`.
+
+**Why**: workspace clones don't carry gitignored files, so owner-provisioned
+credentials (atlas's Alpaca keys in `.env`) never reached sessions. Projects
+now declare `delivery.env_files: [".env"]` and the runner copies them in
+(`runner/workspaces.provision_env_files` — see runner CHANGELOG same date).
+
+**Schema**: `Delivery.env_files: list[str]`, default empty (fully
+back-compat). `validate` rejects absolute/`~`-relative/`..`-traversing and
+whitespace-wrapped entries so a manifest can never pull arbitrary host files
+into a session-readable workspace.
+
+**Verify**: `pipenv run pytest tests/test_manifest.py` (7 new tests).
+
 ## 2026-07-28 — Management-hierarchy taxonomy fields on SkillConfig
 
 **Files changed**: `src/registry/skills.py` — `SkillConfig` gains `role`
