@@ -72,10 +72,16 @@ PROTOCOL.md is the only mandatory full read.
 ## Close-out
 
 Update `momentum/evaluation/LEDGER.md` (via documentarian), atlas `CHANGELOG.md`,
-and SESSION_HANDOFF per repo CLAUDE.md. Your final message is the job summary Chris
-reads on Telegram: cycle number, hypothesis IDs touched, verdicts with the single
-strongest reason, budget remaining, N lifetime, and the one decision (if any)
-waiting on the owner.
+and SESSION_HANDOFF per repo CLAUDE.md. **Cycle report (website journal,
+2026-08-11)**: the documentarian also writes
+`momentum/evaluation/reports/cycle-NNNN.json` (next NNNN, spec:
+`momentum/evaluation/reports/SPEC.md`) — the honest what-was-tried /
+what-failed / what-the-validator-caught record the Atlas site renders at
+/journal. It must be in the SAME push as the ledger entries (the momentum
+test gate validates it; a malformed report blocks the deploy). Your final
+message is the job summary Chris reads on Telegram: cycle number, hypothesis
+IDs touched, verdicts with the single strongest reason, budget remaining,
+N lifetime, and the one decision (if any) waiting on the owner.
 
 ## Gotchas
 
