@@ -9,6 +9,45 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: a skill "fails" with `error_max_turns` right after successfully dispatching its follow-up
+
+### Root cause (diagnosed 2026-08-11)
+
+A skill whose procedure has grown over time (more audits, more SQL, more
+dedup helpers, then a final `enqueue_job` + summary) can hit its
+`max_turns` ceiling *immediately after* `enqueue_job` returns success —
+before the model gets a turn to emit the final summary text. The job is
+marked `failed` (`error_max_turns`), but the real work (proposal insert +
+child job dispatch) already landed. Instance: `review-and-improve` job
+`42c0265a` (2026-08-11) at `max_turns=30` — 3 of 15 recent runs (20%)
+failed the same way. Same class as the pending `_learning_apply` bump
+proposal `cbe8ff0b` (6→10).
+
+### Diagnostics
+
+```bash
+# Failed jobs whose audit log shows a successful terminal enqueue_job:
+JID=<8-char-prefix>
+tail -20 "volumes/audit_log/${JID}*.jsonl" | grep -E 'enqueue_job|job_failed'
+# If enqueue_job returned a UUID and job_failed(error_max_turns) fires within
+# a turn or two after, it's a summary-cutoff, not a real failure.
+```
+
+Also cross-check the child job actually ran:
+```bash
+psql assistant -c "SELECT id, kind, status FROM jobs WHERE id::text LIKE '<child-id-prefix>%';"
+```
+
+### Fix
+
+Bump the skill's `max_turns` frontmatter by ~50% headroom above the
+observed ceiling. Frontmatter-only bumps are low-risk and land via
+`server-patch` (or a review-and-improve proposal with `change_type=frontmatter-tweak`).
+The runaway risk is bounded by the SDK's hard turn ceiling in
+`src/runner/agents.py` and by the skill's `privilege_class` guard.
+
+---
+
 ## Symptom: a job times out and nothing follows — no retry, no self-diagnose
 
 ### Root cause (fixed 2026-08-07)
