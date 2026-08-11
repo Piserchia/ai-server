@@ -1882,6 +1882,39 @@ graceful-fallback branch in the skill AND a golden test in the dashboard
 package. NaN/inf Decimals are a recurring hazard for finance code — filter
 them at the boundary (`valued_holdings`) rather than defending every consumer.
 
+## Symptom: job status `completed` but the session's work is unfinished — summary ends with "API Error: Stream idle timeout - partial response received"; nothing was pushed; workspace already cleaned
+
+### Diagnose
+
+```bash
+tail -c 500 volumes/audit_log/<job_id>*.summary.md   # ends mid-work with the stream error
+git -C <project dev repo> log --oneline -3            # no push from the session
+```
+
+### Root cause
+
+An SDK stream idle timeout mid-session ends the response stream, but the
+session has already produced final-text chunks, so `_run_in_process` returns
+them and the job completes "successfully" — no exception, no TASK_COMPLETE
+marker, no escalation (the timeout-escalation fix of 2026-08-07 covers
+`asyncio.TimeoutError` session ceilings, not mid-stream API idle timeouts).
+Because the job is `completed`, the workspace clone is cleaned and any
+unpushed commits inside it are lost. First seen: `1ff5ec9a` (2026-08-11,
+atlas-momo-research cycle 2, ~19 min in).
+
+### Fix
+
+Re-dispatch the job — workspace-tier sessions push at the end, so a partial
+run loses only its own work, never corrupts the canonical. Before
+re-dispatching, check whether the partial session DISCOVERED anything that
+should be fixed first (1ff5ec9a found a red test gate; the re-run would have
+hit it again).
+
+Structural follow-up (open): the runner could treat a final text ending in
+`API Error: Stream idle timeout` with no lifecycle marker as a failure so
+escalation + workspace retention kick in. Candidate: `_run_in_process` or
+`extract_text_events` marker-absence heuristic in `runner/session.py`.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
