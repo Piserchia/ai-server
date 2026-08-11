@@ -9,42 +9,75 @@ failures in the wild — it's a living document.
 
 ---
 
-## Symptom: a skill "fails" with `error_max_turns` right after successfully dispatching its follow-up
+## Symptom: `_writeback` fails with `error_max_turns (6)` after every `atlas-redeploy`
 
-### Root cause (diagnosed 2026-08-11)
+### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`)
 
-A skill whose procedure has grown over time (more audits, more SQL, more
-dedup helpers, then a final `enqueue_job` + summary) can hit its
-`max_turns` ceiling *immediately after* `enqueue_job` returns success —
-before the model gets a turn to emit the final summary text. The job is
-marked `failed` (`error_max_turns`), but the real work (proposal insert +
-child job dispatch) already landed. Instance: `review-and-improve` job
-`42c0265a` (2026-08-11) at `max_turns=30` — 3 of 15 recent runs (20%)
-failed the same way. Same class as the pending `_learning_apply` bump
-proposal `cbe8ff0b` (6→10).
+Three defects compound into a loop that burns the 6-turn budget:
 
-### Diagnostics
+1. **Stale untracked scratch dir in a runtime clone.** `projects/atlas/.superpowers/`
+   (SDD briefs + a 63KB runtime-drift CHANGELOG, created July/August, never
+   `.gitignore`d) shows up in `git status --porcelain --untracked-files=all`
+   every deploy. Atlas is dev-repo topology — the runtime clone should be clean,
+   but this scratch state was left behind. See `projects/atlas/.superpowers/`.
+2. **`_is_doc_path` doesn't recognize `.superpowers/`.** `src/runner/writeback.py`
+   `_is_doc_path` classifies `.context/`, `docs/`, `CHANGELOG.md`, `CONTEXT.md`,
+   `SKILL.md`, `skills/`, and top-level `.md` as docs — but not `.superpowers/`.
+   So the untracked scratch is classified as "code changes without a CHANGELOG"
+   and triggers writeback.
+3. **Child `_writeback` session ignores `payload.cwd`.** `_verify_writeback`
+   (main.py:623) correctly enqueues the child with `payload["cwd"]` pointing at
+   `projects/atlas` (the atlas-redeploy parent's cwd), but the child session's
+   `_resolve_cwd` (session.py:704) is project_id-driven — atlas-redeploy has
+   no `project_id` (see `psql`), so the child session starts at server root.
+   The session then spends its whole 6-turn budget hunting for `.superpowers/`
+   (server root → `find` → `projects/atlas`) and reading the 63KB CHANGELOG
+   before it can edit anything. `max_turns: 6` has zero slack.
+
+### Diagnostic
 
 ```bash
-# Failed jobs whose audit log shows a successful terminal enqueue_job:
-JID=<8-char-prefix>
-tail -20 "volumes/audit_log/${JID}*.jsonl" | grep -E 'enqueue_job|job_failed'
-# If enqueue_job returned a UUID and job_failed(error_max_turns) fires within
-# a turn or two after, it's a summary-cutoff, not a real failure.
-```
+# Confirm the recurring failure and scope:
+psql assistant -c "SELECT id, LEFT(description, 120) FROM jobs
+  WHERE resolved_skill='_writeback' AND status='failed'
+  ORDER BY created_at DESC LIMIT 10;"
 
-Also cross-check the child job actually ran:
-```bash
-psql assistant -c "SELECT id, kind, status FROM jobs WHERE id::text LIKE '<child-id-prefix>%';"
+# Look for the offending untracked scratch dir in any runtime clone:
+for d in projects/*/; do
+  [ -d "$d/.git" ] && (cd "$d" && git status --porcelain --untracked-files=all \
+    | grep -E '^\?\? \.superpowers/' && echo "  ↑ in $d")
+done
 ```
 
 ### Fix
 
-Bump the skill's `max_turns` frontmatter by ~50% headroom above the
-observed ceiling. Frontmatter-only bumps are low-risk and land via
-`server-patch` (or a review-and-improve proposal with `change_type=frontmatter-tweak`).
-The runaway risk is bounded by the SDK's hard turn ceiling in
-`src/runner/agents.py` and by the skill's `privilege_class` guard.
+**Immediate (unblocks the loop, low risk)** — decide with owner whether
+`projects/atlas/.superpowers/` is disposable. If yes:
+```bash
+# Option A: gitignore it in the dev repo (~/Documents/repos/atlas) — permanent
+echo '.superpowers/' >> .gitignore  # in dev repo, commit, deploy via atlas-redeploy
+# Option B: delete the runtime clone's stale copy (transient, will not recur if A is done)
+rm -rf 'projects/atlas/.superpowers'
+```
+
+**Server-code (MEDIUM — do in DEV repo `~/Documents/repos/ai-server`)**
+- `src/runner/writeback.py::_is_doc_path` — add `path.startswith(".superpowers/")`
+  to the doc classification (SDD scratch is documentation, not code).
+- `src/runner/session.py` around line 578 — honor `payload.get("cwd")` when it
+  exists and resolves under `settings.server_root`. Post-step children like
+  `_writeback` know the correct cwd; `_resolve_cwd`'s project_id-only lookup
+  loses that signal when the parent has no `project_id`.
+- `skills/_writeback/SKILL.md` frontmatter — raise `max_turns` from 6 to 12.
+  A healthy write-back is git-status → read CHANGELOG → read PROTOCOL → maybe
+  read parent audit log → Edit → commit — 6 turns is the minimum with zero
+  headroom for a large CHANGELOG or a wrong initial cwd.
+
+### Prevention
+
+Add a `pytest` case covering: (a) `.superpowers/` files classified as docs;
+(b) session honors `payload.cwd` under `server_root`. Also consider surfacing
+`_writeback` failures to owner directly — right now they escalate silently to
+`self-diagnose` and don't reach the user.
 
 ---
 
@@ -404,83 +437,6 @@ On the Mac Mini, `git pull` + restart runner. Verify by submitting a chat (shoul
 ```
 /chat hello
 ```
-
----
-
-## Symptom: `_writeback` job fails with `error_max_turns: Reached maximum number of turns (6)` after a project-scoped deploy
-
-**Diagnostic**:
-```bash
-# From the failing writeback's audit log:
-grep -E 'job_started|tool_use|job_failed' volumes/audit_log/<writeback_job_id>.jsonl
-# If you see `"cwd": ".../ai-server"` on job_started but the parent's modified files
-# are inside `projects/<slug>/...`, the child ran in the WRONG directory.
-```
-
-### Root cause (diagnosed 2026-08-10, job `56c478cc`)
-
-Two-part bug in `_verify_writeback` (`src/runner/main.py` L597–639) and
-`_resolve_project` (`src/runner/session.py` L679–701):
-
-1. **Wrong cwd**: `_verify_writeback` resolves the parent's cwd (delivery-aware
-   — e.g. `projects/atlas` for atlas_redeploy since `is_deploy=True`) and puts
-   it in the child's `payload["cwd"]`. But the enqueue call only sets
-   `project_id=job.project_id`. When the parent had `project_id=NULL` (as
-   `atlas_redeploy` did in incident `97077ba8`), the child inherits NULL, and
-   `_project_slug(child)` returns None → `_resolve_project` falls back to
-   `settings.server_root`. The `payload["cwd"]` is never read by session
-   startup — it's dead data. The `_writeback` skill launches in the ai-server
-   repo, runs `git status` there, sees a totally different set of modified
-   files (or none), and burns turns discovering the parent's `.superpowers/`
-   files "don't exist".
-2. **Skill budget too tight**: even with the correct cwd, `max_turns: 6` in
-   `skills/_writeback/SKILL.md` barely covers the happy path (status → read
-   summary → read CHANGELOG → edit → git add → commit → final = 7 calls). Any
-   exploration blows the cap. Same class of bug as `_learning_apply` above.
-3. **Second-order problem for dev-repo projects**: even if the child gets a
-   `project_slug`, `_resolve_project(child_job, "_writeback")` sees
-   `is_deploy=False` and routes to the DEV repo for topology `dev-repo`
-   (atlas). But the modified files live in the runtime clone (where the
-   deploy skill ran). The child would still find nothing to write back.
-
-### Fix (medium risk, server-code — must ship from dev repo)
-
-Two changes in `src/runner/main.py::_verify_writeback` + one in
-`src/runner/session.py`:
-
-1. **Propagate the resolved cwd**: switch `_resolve_cwd` → `_resolve_project`
-   to capture `slug` and `is_deploy`, then include them in the payload:
-   ```python
-   cwd, deliv, is_deploy_parent, slug = await session_mod._resolve_project(
-       job, job.resolved_skill)
-   ...
-   payload = {
-       "parent_job_summary": parent_summary,
-       "modified_files": modified,
-       "cwd": str(cwd),
-       "project_slug": slug,             # NEW — makes _project_slug find it
-       "writeback_cwd_override": str(cwd),  # NEW — pinpoint runtime clone
-   }
-   ```
-2. **Honor the override in session cwd resolution**: in
-   `session.py::_resolve_project` (or `_resolve_cwd`), if
-   `job.kind == "_writeback"` and `payload.writeback_cwd_override` is set and
-   the path exists, return that path directly (short-circuit the delivery
-   routing). Rationale: `_writeback` MUST see the same git tree the parent
-   modified. Delivery routing for `_writeback` on dev-repo projects sends it
-   to the wrong tree.
-3. **Bump `max_turns`** in `skills/_writeback/SKILL.md` from 6 → 12. The
-   procedure has a legitimate ~7-call happy path; 6 is a footgun.
-
-### Incidents
-
-- `56c478cc` (2026-08-10) — parent `97077ba8` (`atlas_redeploy`, project_id=NULL)
-  modified `.superpowers/CHANGELOG.runtime-drift-2026-08-04.md` +
-  sdd/briefs/* in `projects/atlas`. Child `_writeback` launched in
-  ai-server root (wrong repo), spent turns 1–6 on `git status`,
-  `ls .superpowers/` (missing), `git log`, `cat audit_log`, `grep atlas`,
-  `ls projects/`, then hit max_turns before ever opening a CHANGELOG.
-  Diagnosed by self-diagnose `9ca7ac39`. Server-code fix pending in dev repo.
 
 ---
 
@@ -1998,43 +1954,38 @@ graceful-fallback branch in the skill AND a golden test in the dashboard
 package. NaN/inf Decimals are a recurring hazard for finance code — filter
 them at the boundary (`valued_holdings`) rather than defending every consumer.
 
-## Symptom: `atlas-momo-research` fails with `Session timed out` (session-ceiling collision)
+## Symptom: job status `completed` but the session's work is unfinished — summary ends with "API Error: Stream idle timeout - partial response received"; nothing was pushed; workspace already cleaned
 
-### Diagnostic
+### Diagnose
+
 ```bash
-psql assistant -c "SELECT id, status, resolved_effort, EXTRACT(EPOCH FROM (completed_at - started_at)) AS dur_s, error_message, created_at FROM jobs WHERE resolved_skill='atlas-momo-research' ORDER BY created_at DESC LIMIT 10;"
+tail -c 500 volumes/audit_log/<job_id>*.summary.md   # ends mid-work with the stream error
+git -C <project dev repo> log --oneline -3            # no push from the session
 ```
-Look for a cluster where failed rows all land at `dur_s ≈ 1805` (the SDK's
-30-min ceiling) and completed rows land at 1747–1782 s — the skill is chronically
-brushing the wall.
 
 ### Root cause
-The atlas-momo-research skill orchestrates a 5-stage momentum-research fleet
-(analyst → engineer → validator → risk → documentarian) plus mandatory reads
-of PROTOCOL.md, POWERS.md §4, LOOP.md §6. The reading + orchestration
-consistently eats the whole 30-minute session ceiling before the engineer
-stage even starts. Incident 4ccd3a01 (2026-08-11) didn't begin engineer work
-until minute 28. The frontmatter's `on_failure: {model: opus-5, effort: xhigh}`
-retry is a NOOP for this class — the retry hits the same wall-clock ceiling
-regardless of effort level (3 of the last 5 runs failed at 1805 s ± 1 s;
-the xhigh retry after failure 4ccd3a01 also timed out at 1805 s).
+
+An SDK stream idle timeout mid-session ends the response stream, but the
+session has already produced final-text chunks, so `_run_in_process` returns
+them and the job completes "successfully" — no exception, no TASK_COMPLETE
+marker, no escalation (the timeout-escalation fix of 2026-08-07 covers
+`asyncio.TimeoutError` session ceilings, not mid-stream API idle timeouts).
+Because the job is `completed`, the workspace clone is cleaned and any
+unpushed commits inside it are lost. First seen: `1ff5ec9a` (2026-08-11,
+atlas-momo-research cycle 2, ~19 min in).
 
 ### Fix
-Do NOT re-dispatch the same-shape job — it will time out again. Options for
-the skill author:
-1. Enforce the "15-min hard-start" rule as a Bash timer the orchestrator runs
-   itself, not just a paragraph in the skill body.
-2. Split the cycle so each fleet stage dispatches as its own child job, with
-   resumption state carried in `momentum/evaluation/LEDGER.md`.
-3. Change `on_failure` to route to a diagnose/replan skill rather than a
-   same-shape retry, since the timeout is deterministic under the current
-   design.
 
-### Prevention
-For any orchestrator skill whose typical duration is > 25 min: add a
-wall-clock guard early in the skill body that dumps intermediate state and
-dispatches a continuation job before the ceiling fires, so timeouts stop
-being data-loss events.
+Re-dispatch the job — workspace-tier sessions push at the end, so a partial
+run loses only its own work, never corrupts the canonical. Before
+re-dispatching, check whether the partial session DISCOVERED anything that
+should be fixed first (1ff5ec9a found a red test gate; the re-run would have
+hit it again).
+
+Structural follow-up (open): the runner could treat a final text ending in
+`API Error: Stream idle timeout` with no lifecycle marker as a failure so
+escalation + workspace retention kick in. Candidate: `_run_in_process` or
+`extract_text_events` marker-absence heuristic in `runner/session.py`.
 
 ## Adding entries to this file
 
