@@ -85,6 +85,20 @@ N lifetime, and the one decision (if any) waiting on the owner.
 
 ## Gotchas
 
+- **H003 sample is SEALED (E-0008, 2026-08-11)** — frame `ce5818a0…`, sample
+  `2972d0f7…`, `evaluation/runs/H003/PREREGISTERED_symbols.txt`. Before the
+  probe runs, the harness-matches-card work (E-0005: NYSE calendar, Leg B)
+  must ALSO add a pre-registered symbol-normalization treatment: **8 of the
+  30 sealed symbols are current-OTC forms, not listed-period forms** (F-suffix
+  foreign ordinaries APXIF/LSDIF/MPSYF/SHMLF/BRQSF, Y-suffix ADRs
+  SECOY/BPTSY, and TPICQ — a bankruptcy Q via the submissions leg the
+  FTS-only Q-strip never touched; TPI Composites listed as TPIC). Querying
+  the OTC form returns empty-but-200 and falsely counts toward FAIL. The
+  sealed sample file must NOT be edited (its SHA is in the ledger); the
+  normalization is a probe-side mapping whose rule + per-symbol mapping
+  table must be written into the ledger BEFORE the probe runs, and any
+  symbol that cannot be confidently mapped is reported per-symbol as
+  UNMEASURABLE (→ PARTIAL/INCONCLUSIVE), never as absent.
 - `momentum/scripts/decoys/` does not exist yet (import 2026-08-07 shipped the
   cadence rule, not the decoys). Until the decoy library lands, SKIP the decoy
   stage and state loudly in the summary "decoy stage skipped — library not built";
