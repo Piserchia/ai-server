@@ -18,6 +18,7 @@ Four async tasks running in one process:
 ## Public interface
 
 - `src.runner.main.main()` — entry point (via `python -m src.runner.main`).
+- `main.resolve_session_timeout(payload, default, cap=5400)` — pure: per-job session-timeout override via `payload.session_timeout_seconds`, clamped to [60, 5400]; unparseable → default. Added 2026-08-11 after three atlas-momo-research cycle-2 attempts died at the global 30-min ceiling; the web API exposes the field and the momo schedule row carries 3600.
 - `src.runner.session.run_session(job) -> dict` — runs one job; raises `QuotaExhausted` or generic `Exception` on failure.
 - `src.runner.session.interrupt(job_id)` — signal a running session to stop.
 - `src.runner.quota.is_paused()` / `pause_queue(...)` / `clear()` — queue pause state.

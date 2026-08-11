@@ -2,6 +2,24 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-11 — per-job session-timeout override (payload.session_timeout_seconds)
+
+**Files changed**: `src/runner/main.py`, `src/gateway/web.py`,
+`scripts/seed-schedules.sh`, `tests/test_pure_functions.py`.
+
+**Why**: the 30-minute global ceiling killed three consecutive
+atlas-momo-research cycle-2 attempts (jobs 1ff5ec9a stream-timeout,
+bd9d04a1 + escalation 4ccd3a01 both `session_timeout` with real work
+unpushed). Heavy governed lab cycles legitimately need more; the ceiling
+itself must survive.
+
+**Fix**: `resolve_session_timeout(payload, default, cap=5400)` — payload
+override clamped to [60, 5400], garbage falls back to the default. Web API
+gains the optional `session_timeout_seconds` field (validated ge=60 le=5400);
+the momo schedule row now carries 3600 so Thursday's run benefits.
+
+**Verify**: `pipenv run pytest` — 1104 passed (6 new).
+
 ## 2026-08-10 — workspace env-file provisioning (delivery.env_files)
 
 **Files changed**: `src/runner/workspaces.py`, `src/runner/session.py`,

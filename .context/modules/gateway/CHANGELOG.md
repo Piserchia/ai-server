@@ -2,6 +2,12 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-11 — CreateJobRequest.session_timeout_seconds (optional)
+
+`POST /api/jobs` accepts `session_timeout_seconds` (60..5400) → forwarded in
+job payload; the runner clamps identically (`main.resolve_session_timeout`).
+Motivated by momo-cycle timeouts — see runner CHANGELOG same date.
+
 ## 2026-08-07 — register opus-5 in _MODEL_ALIASES (atlas loop de-fabled)
 
 **Files changed**: `src/gateway/telegram_bot.py`.

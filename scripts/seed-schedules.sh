@@ -78,7 +78,7 @@ upsert 'atlas-evaluate'          '0 11 * * 1'  'atlas-evaluate'          'atlas-
 upsert 'atlas-build'             '0 10 * * 2,5' 'atlas-build'            'atlas-build: twice-weekly top eligible backlog item -> isolated workspace build -> gates -> push -> gated deploy dispatch (skills/atlas-build)' '{"project_slug":"atlas"}'
 upsert 'atlas-gap-scout'         '0 11 * * 3'  'atlas-gap-scout'         'atlas-gap-scout: weekly top-gap free-source research + live probe + engineer-ready spec with builder acceptance (skills/atlas-gap-scout)'
 upsert 'atlas-refresh-knowledge' '30 11 1 * *' 'atlas-refresh-knowledge' 'atlas-refresh-knowledge: monthly knowledge curation + stale-claim reverification + gaps-sync (skills/atlas-refresh-knowledge)'
-upsert 'atlas-momo-research'     '0 13 * * 4'  'atlas-momo-research'     'atlas-momo-research: weekly Momentum-Lab governed research cycle -> workspace clone, PROTOCOL.md binding, mechanics/IEX-observe until SIP approved (skills/atlas-momo-research)' '{"project_slug":"atlas"}'
+upsert 'atlas-momo-research'     '0 13 * * 4'  'atlas-momo-research'     'atlas-momo-research: weekly Momentum-Lab governed research cycle -> workspace clone, PROTOCOL.md binding, mechanics/IEX-observe until SIP approved (skills/atlas-momo-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 
 echo "Schedules seeded."
 echo ""

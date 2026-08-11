@@ -9,7 +9,8 @@ On startup, before the loops begin, reconcile_orphaned_jobs() fails any job left
 in 'running' by a previous process that died mid-job (see runner/reconcile.py).
 
 Run: `python -m src.runner.main`
-Stop: SIGTERM. In-flight jobs finish within session_timeout_seconds.
+Stop: SIGTERM. In-flight jobs finish within their resolved session timeout
+(global default, or the per-job payload override capped at 5400s).
 
 Auth check on startup: refuses to start if ANTHROPIC_API_KEY is set (INV-3) or if
 the Agent SDK cannot resolve a Claude Code CLI (bundled inside the SDK package,
@@ -183,6 +184,30 @@ async def _run_with_semaphore(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None
 # once, then drop for good.
 
 # Delay before each SELECT attempt; first is immediate, sleeps total ~2s.
+# Hard ceiling on per-job session-timeout extension. A payload can raise the
+# global default for a legitimately heavy session (atlas-momo-research cycles
+# — three cycle-2 attempts died at the 30-min ceiling, 2026-08-11) but can
+# never disable the ceiling entirely.
+SESSION_TIMEOUT_CAP_SECONDS = 5400
+
+
+def resolve_session_timeout(payload: dict | None, default: int,
+                            cap: int = SESSION_TIMEOUT_CAP_SECONDS) -> int:
+    """Effective session timeout for a job. Pure function.
+
+    `payload.session_timeout_seconds` overrides the global default, clamped
+    to [60, cap]; missing or unparseable values fall back to the default.
+    """
+    try:
+        raw = (payload or {}).get("session_timeout_seconds")
+        if raw is None:
+            return default
+        val = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(60, min(val, cap))
+
+
 _JOB_FETCH_DELAYS: tuple[float, ...] = (0.0, 0.2, 0.3, 0.5, 1.0)
 
 # Post-session code review (the flag-only second belt) is a nested SDK
@@ -331,7 +356,8 @@ async def _process_job(job_id: uuid.UUID) -> None:
     try:
         result = await asyncio.wait_for(
             session_mod.run_session(job),
-            timeout=settings.session_timeout_seconds,
+            timeout=resolve_session_timeout(
+                job.payload, settings.session_timeout_seconds),
         )
         await _finish_job(job_id, JobStatus.completed, result=result)
         log.info("job completed")

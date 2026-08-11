@@ -315,3 +315,34 @@ class TestServerDirective:
         result = _build_server_directive(cfg, settings.server_root)
         assert "docs/TROUBLESHOOTING.md" in result
         assert "Read these files first" in result
+
+
+# ── resolve_session_timeout (per-job ceiling override, 2026-08-11) ──────────
+
+
+class TestResolveSessionTimeout:
+    def _f(self, payload, default=1800, cap=5400):
+        from src.runner.main import resolve_session_timeout
+        return resolve_session_timeout(payload, default, cap)
+
+    def test_no_payload_uses_default(self):
+        assert self._f(None) == 1800
+        assert self._f({}) == 1800
+
+    def test_override_applies(self):
+        assert self._f({"session_timeout_seconds": 3600}) == 3600
+
+    def test_cap_clamps(self):
+        # A payload can raise the ceiling but never disable it.
+        assert self._f({"session_timeout_seconds": 999999}) == 5400
+
+    def test_floor_clamps(self):
+        assert self._f({"session_timeout_seconds": 1}) == 60
+
+    def test_string_int_accepted(self):
+        assert self._f({"session_timeout_seconds": "2700"}) == 2700
+
+    def test_garbage_falls_back(self):
+        assert self._f({"session_timeout_seconds": "forever"}) == 1800
+        assert self._f({"session_timeout_seconds": None}) == 1800
+        assert self._f({"session_timeout_seconds": [1]}) == 1800

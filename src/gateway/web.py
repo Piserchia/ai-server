@@ -75,6 +75,10 @@ class CreateJobRequest(BaseModel):
         default=None, description="default|acceptEdits|bypassPermissions|plan"
     )
     project_slug: str | None = None
+    session_timeout_seconds: int | None = Field(
+        default=None, ge=60, le=5400,
+        description="per-job session-timeout override (runner clamps to the "
+                    "same cap; heavyweight lab cycles need >30 min)")
 
 
 class JobOut(BaseModel):
@@ -216,6 +220,8 @@ async def create_job(req: CreateJobRequest) -> JobOut:
         payload["permission_mode"] = req.permission_mode
     if req.project_slug:
         payload["project_slug"] = req.project_slug
+    if req.session_timeout_seconds:
+        payload["session_timeout_seconds"] = req.session_timeout_seconds
 
     job = await enqueue_job(
         req.description,
