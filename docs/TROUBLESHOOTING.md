@@ -1998,6 +1998,44 @@ graceful-fallback branch in the skill AND a golden test in the dashboard
 package. NaN/inf Decimals are a recurring hazard for finance code — filter
 them at the boundary (`valued_holdings`) rather than defending every consumer.
 
+## Symptom: `atlas-momo-research` fails with `Session timed out` (session-ceiling collision)
+
+### Diagnostic
+```bash
+psql assistant -c "SELECT id, status, resolved_effort, EXTRACT(EPOCH FROM (completed_at - started_at)) AS dur_s, error_message, created_at FROM jobs WHERE resolved_skill='atlas-momo-research' ORDER BY created_at DESC LIMIT 10;"
+```
+Look for a cluster where failed rows all land at `dur_s ≈ 1805` (the SDK's
+30-min ceiling) and completed rows land at 1747–1782 s — the skill is chronically
+brushing the wall.
+
+### Root cause
+The atlas-momo-research skill orchestrates a 5-stage momentum-research fleet
+(analyst → engineer → validator → risk → documentarian) plus mandatory reads
+of PROTOCOL.md, POWERS.md §4, LOOP.md §6. The reading + orchestration
+consistently eats the whole 30-minute session ceiling before the engineer
+stage even starts. Incident 4ccd3a01 (2026-08-11) didn't begin engineer work
+until minute 28. The frontmatter's `on_failure: {model: opus-5, effort: xhigh}`
+retry is a NOOP for this class — the retry hits the same wall-clock ceiling
+regardless of effort level (3 of the last 5 runs failed at 1805 s ± 1 s;
+the xhigh retry after failure 4ccd3a01 also timed out at 1805 s).
+
+### Fix
+Do NOT re-dispatch the same-shape job — it will time out again. Options for
+the skill author:
+1. Enforce the "15-min hard-start" rule as a Bash timer the orchestrator runs
+   itself, not just a paragraph in the skill body.
+2. Split the cycle so each fleet stage dispatches as its own child job, with
+   resumption state carried in `momentum/evaluation/LEDGER.md`.
+3. Change `on_failure` to route to a diagnose/replan skill rather than a
+   same-shape retry, since the timeout is deterministic under the current
+   design.
+
+### Prevention
+For any orchestrator skill whose typical duration is > 25 min: add a
+wall-clock guard early in the skill body that dumps intermediate state and
+dispatches a continuation job before the ceiling fires, so timeouts stop
+being data-loss events.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
