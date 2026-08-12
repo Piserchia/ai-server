@@ -6,10 +6,12 @@ effort: medium
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
 max_turns: 20
-# On first run the projects/ideas/ dir doesn't exist yet — the skill body
-# handles bootstrap. Listing these here nudges the session to read them
-# before re-generating ideas on subsequent runs (essential for dedup).
-context_files: ["projects/ideas/history.jsonl"]
+# projects/ideas/history.jsonl is intentionally NOT declared in context_files:
+# projects/*/ is gitignored, so the file is absent in fresh workspace clones
+# and any such declaration fails lint_docs.py's check_context_files_exist gate
+# (see also tests/test_skill_contracts.py::test_context_files_exist). The
+# skill body handles bootstrap and reads history.jsonl explicitly on step 2,
+# so no context_files pre-load is required.
 tags: [creative, scheduled-capable]
 ---
 
