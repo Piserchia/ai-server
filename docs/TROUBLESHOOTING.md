@@ -1956,6 +1956,94 @@ recurrence — same sleep-throttled cadence-slip signature; live-probe
 gate still un-landed. Correction to the 64th entry: the twin DID fire,
 just outside its dispatch window.)
 
+2026-08-13 ~21:10:28Z (job `73d48aac`, atlas answered `/` 200 in 37ms on
+port 8791; `last_healthy_at` was 0.99m old at diagnosis. Back-to-back
+duplicate atlas fire from the same 54-min slip that produced the 64th
+recurrence: event trigger loop re-evaluated `last_healthy_at` and
+dispatched a second atlas diagnose 4s BEFORE the natural 21:10:32Z
+healthcheck tick refreshed the DB row (my job queued 21:10:28Z, tick
+fired 21:10:32Z), so this session loaded into an already-recovered
+window while the prior diagnose `05fcf87c` was still running its own
+verification. All three atlas launchd processes healthy — main web PID
+76959 (2d+ uptime, `project.atlas.out.log` untouched since Aug 11),
+pm-edge 76965 (2d+), dash-scheduler 5537 (7h+). No inline kickstart
+needed. Sixty-sixth recurrence — same sleep-throttled cadence-slip
+signature; live-probe gate still un-landed. New wrinkle: the event
+trigger's own re-evaluation cadence can re-fire the SAME project
+before either the natural healthcheck tick or the in-flight diagnose
+job closes the loop, so a single slip can produce N atlas diagnoses,
+not just the twin-fires-per-slip pattern documented from the 43rd
+onward. Not re-dispatching a server-patch — workspace-push meta-bug
+blocker per the 51st entry still stands.)
+
+2026-08-13 ~21:46Z (job `8fd47fb6`, baseball-bingo diagnose). At probe
+(21:46:24Z) baseball-bingo answered `/healthz` 200 locally AND publicly
+via Cloudflare tunnel (`https://bingo.chrispiserchia.com/healthz` 200),
+and root `/` 200 on port 8790, PID 73316 (uvicorn 18h52m uptime,
+stable). `last_healthy_at` at diagnosis was 37s old
+(21:45:47Z vs probe 21:46:24Z) — trigger fired based on the pre-recovery
+DB row. `healthcheck.out.log` gap 21:25:37Z → 21:45:48Z (20m11s, three
+missed 5-min ticks) — canonical macOS-sleep-cadence-slip; the 21:45:48Z
+tick reported `checked=2 healthy=2 failed=0` and refreshed
+`last_healthy_at` before this job hit its probes. No inline kickstart
+needed (natural tick already recovered). Sixty-seventh recurrence.
+Historical anyio `TaskHandle` ImportError bursts in
+`project.baseball-bingo.err.log` still present from the July 30
+partial pip-install (pre-restart PID 3619) and still not relevant —
+verified `from anyio._core._tasks import TaskHandle` succeeds cleanly
+at anyio 4.14.2 in the shared venv, and the FileResponse code path
+(which was the failure signature) returned 200 on root `/`. Per the
+51st entry, still NOT re-dispatching `server-patch` for the events.py
+live-probe gate — workspace-push meta-bug blocker per the 51st entry
+still stands.)
+
+2026-08-13 ~21:45:38Z (job `5338ceff`, atlas diagnose — twin of the
+baseball-bingo `8fd47fb6` entry immediately above from the SAME
+21:25:37Z → 21:45:48Z slip). Atlas answered `/` 200 in 22.9ms on
+port 8791; `last_healthy_at` refreshed to 21:45:47Z by the natural
+21:45:48Z tick just 10s AFTER my job was queued and 9s BEFORE this
+session loaded, so diagnosis dropped into an already-recovered
+window. All three atlas launchd processes healthy — main web PID
+76959, pm-edge 76965, dash-scheduler 5537, launchd `state =
+running` for each. This is the SECOND slip in ~90 min (the first,
+20:16:59Z → 21:10:32Z, produced recurrences 64/65/66); today
+demonstrates that N-diagnoses-per-slip (66th wrinkle) and
+multiple-slips-per-day now compound. Noted but out of scope for
+self-diagnose (both are pre-existing app-level issues, NOT the
+trigger cause): (a) `project.atlas.err.log` shows recurring
+`invalid input syntax for type uuid: "AAPL"` from
+`/api/atlas/assets` and `/api/atlas/candles` — the route handlers
+are treating a ticker symbol as a UUID column ($1); (b)
+dash-scheduler APScheduler is missing 15-min interval jobs by
+3–12 minutes with "maximum number of running instances reached (1)"
+during the sleep windows. Filed for a future atlas-patch cycle to
+pick up. Sixty-eighth recurrence — same sleep-throttled
+cadence-slip signature; live-probe gate still un-landed. Not
+re-dispatching a server-patch — workspace-push meta-bug blocker
+per the 51st entry still stands.); 2026-08-13 ~22:31Z (job
+`34ada940`, baseball-bingo answered `/healthz` 200,
+`last_healthy_at` age ~30m at diagnosis — `healthcheck.out.log`
+last tick 22:00:52Z with prior gap 20:16→21:10 (54 min) and
+21:25→21:45 (20 min) both matching macOS sleep windows; project
+PID 73320 healthy with 19h37m uptime; healthcheck-all invoked
+inline and resumed at 22:31:44Z. Sixty-ninth recurrence, same
+signature.); 2026-08-13 ~22:32Z (job `ab5c009a`, atlas diagnose —
+twin of `34ada940` from the SAME 22:00:52Z → 22:32:49Z (~32m)
+slip). Atlas answered `/` 200 in 51.7ms on port 8791;
+`last_healthy_at` age ~31m at diagnosis (22:00:52Z DB row vs
+probe 22:32:03Z). All three atlas launchd services healthy —
+main web PID 76959, pm-edge 76965, dash-scheduler 5537, all with
+2d+ uptime and launchd `state = running`. Inline
+`launchctl kickstart -k gui/<uid>/com.assistant.healthcheck-all`
+resumed the timer at 22:32:49Z and `last_healthy_at` refreshed
+to 7.75s. Seventieth recurrence — canonical
+sleep-throttled-cadence-slip; live-probe gate still un-landed.
+Two-diagnoses-per-slip (baseball-bingo 69th + atlas 70th from
+the shared 22:00→22:32 slip) — matches the twin-fires-per-slip
+pattern from the 43rd onward. Not re-dispatching a server-patch
+— workspace-push meta-bug blocker per the 51st entry still
+stands.)
+
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
 ### Diagnostic
