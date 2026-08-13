@@ -9,17 +9,22 @@ failures in the wild — it's a living document.
 
 ---
 
-## Symptom: `_writeback` fails with `error_max_turns (6)` after every `atlas-redeploy`
+## Symptom: `_writeback` fails with `error_max_turns (6)` after atlas jobs
 
-### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`)
+### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`; 3rd occurrence 2026-08-13, job `dc5fad7d` — parent was `atlas-momo-research`, not `atlas-redeploy`)
 
-Three defects compound into a loop that burns the 6-turn budget:
+Three defects compound into a loop that burns the 6-turn budget. Any atlas skill
+(dev-repo topology OR workspace-isolation) whose parent has no `project_id` can
+trigger it — 3rd instance was `atlas-momo-research` (isolation=workspace).
 
 1. **Stale untracked scratch dir in a runtime clone.** `projects/atlas/.superpowers/`
    (SDD briefs + a 63KB runtime-drift CHANGELOG, created July/August, never
    `.gitignore`d) shows up in `git status --porcelain --untracked-files=all`
    every deploy. Atlas is dev-repo topology — the runtime clone should be clean,
    but this scratch state was left behind. See `projects/atlas/.superpowers/`.
+   *(2026-08-13 note: dc5fad7d was NOT triggered by `.superpowers/` — payload
+   pointed at the dev repo `~/Documents/repos/atlas`, where `momentum/…` files
+   were staged. Defects #2 and #3 still applied.)*
 2. **`_is_doc_path` doesn't recognize `.superpowers/`.** `src/runner/writeback.py`
    `_is_doc_path` classifies `.context/`, `docs/`, `CHANGELOG.md`, `CONTEXT.md`,
    `SKILL.md`, `skills/`, and top-level `.md` as docs — but not `.superpowers/`.
@@ -27,12 +32,25 @@ Three defects compound into a loop that burns the 6-turn budget:
    and triggers writeback.
 3. **Child `_writeback` session ignores `payload.cwd`.** `_verify_writeback`
    (main.py:623) correctly enqueues the child with `payload["cwd"]` pointing at
-   `projects/atlas` (the atlas-redeploy parent's cwd), but the child session's
-   `_resolve_cwd` (session.py:704) is project_id-driven — atlas-redeploy has
-   no `project_id` (see `psql`), so the child session starts at server root.
-   The session then spends its whole 6-turn budget hunting for `.superpowers/`
-   (server root → `find` → `projects/atlas`) and reading the 63KB CHANGELOG
-   before it can edit anything. `max_turns: 6` has zero slack.
+   the parent's cwd (`projects/atlas` for atlas-redeploy; `~/Documents/repos/atlas`
+   for atlas-momo-research), but the child session's `_resolve_cwd`
+   (session.py:704) is project_id-driven — the atlas parents have no
+   `project_id` (see `psql`), so the child session starts at server root.
+   The session then spends its whole 6-turn budget hunting for the referenced
+   files (grep/ls/cat against the WRONG git tree) before it can edit anything.
+   `max_turns: 6` has zero slack. In dc5fad7d's audit log the child ran
+   `git status` in server root and found unrelated modifications
+   (`docs/TROUBLESHOOTING.md`, `docs/superpowers/plans/…`,
+   `skills/atlas-momo-research/SKILL.md`), then burned turns exploring
+   `projects/atlas` and reading the parent's summary before hitting the ceiling.
+
+### Status (2026-08-13)
+
+**Not yet fixed** — three failures across three days (`56c478cc`, `fc483ddb`,
+`dc5fad7d`). The immediate remediation (delete `projects/atlas/.superpowers`
+in the dev repo + `.gitignore` it) doesn't cover the 3rd-instance path
+(workspace-isolated parents). The server-code fixes below are the durable
+answer and should be prioritized in the dev repo.
 
 ### Diagnostic
 
