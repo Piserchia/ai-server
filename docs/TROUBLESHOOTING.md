@@ -1927,6 +1927,35 @@ the `events.py` live-probe gate; workspace-push meta-bug continues
 to trap that fix in the runtime clone. Owner action on the
 workspace-push meta-bug remains the true unblock.)
 
+2026-08-13 ~21:10Z (job `05fcf87c`, atlas answered `/` 200 in 58ms on
+port 8791, `last_healthy_at` age at diagnosis was ~33m but the DB row
+had already self-refreshed to 17:10:32-04 (~3m old) by the time the
+diagnose loaded — `healthcheck.out.log` shows a clean 54-min gap
+20:16:59Z → 21:10:32Z (ten missed 5-min ticks in a row, all prior runs
+reported `checked=2 healthy=2 failed=0`), all three atlas launchd
+processes healthy (PIDs 76959/5537/76965), `project.atlas.out.log`
+untouched since Aug 11 confirming the Next.js process hasn't restarted.
+Sixty-fourth recurrence — same sleep-throttled cadence-slip signature
+as the 62nd/63rd; still no live-probe gate in `events.py` (workspace-push
+meta-bug remains the true blocker per the 51st entry). No inline
+kickstart needed this time — natural 21:10:32Z tick resumed cadence
+before the diagnose loaded. Twin baseball-bingo diagnose was NOT
+dispatched this window despite the same DB staleness, per the 39th
+entry's asymmetric-fire observation.)
+
+2026-08-13 ~21:15Z (job `b4f341f0`, baseball-bingo answered `/healthz` 200
+in 2.4ms and `/` 200 in 5.8ms on port 8790; `last_healthy_at` stamp
+21:10:32Z, ~4m40s old at diagnosis and refreshing normally. Same
+54-min slip 20:16:59Z → 21:10:32Z as the atlas 64th entry above — this
+IS the delayed baseball-bingo twin the atlas entry noted as "NOT
+dispatched"; the trigger fired ~5 min after the natural resume, so
+diagnosis loaded into an already-recovered window. Project PID 73316
+healthy, launchd `state = running`, uvicorn log shows a recent clean
+restart to PID 73320. No inline kickstart needed. Sixty-fifth
+recurrence — same sleep-throttled cadence-slip signature; live-probe
+gate still un-landed. Correction to the 64th entry: the twin DID fire,
+just outside its dispatch window.)
+
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
 ### Diagnostic
