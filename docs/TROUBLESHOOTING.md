@@ -2042,7 +2042,20 @@ Two-diagnoses-per-slip (baseball-bingo 69th + atlas 70th from
 the shared 22:00→22:32 slip) — matches the twin-fires-per-slip
 pattern from the 43rd onward. Not re-dispatching a server-patch
 — workspace-push meta-bug blocker per the 51st entry still
-stands.)
+stands.); 2026-08-14 ~00:29Z (job `b8bf801f`, baseball-bingo
+answered `/healthz` 200 in 8.8ms and `/` 200 in 3.5ms on port
+8790; `last_healthy_at` age 36m30s at diagnosis
+(2026-08-13T23:53:03Z DB stamp vs probe 00:29:33Z);
+`healthcheck.out.log` last write matched exactly at 19:53 local
+(7 missed 5-min ticks). `com.assistant.healthcheck-all` PID `-`,
+kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`;
+cadence resumed at 00:29:45Z and `last_healthy_at` refreshed to
+7.2s. Seventy-first recurrence — same
+sleep-throttled-cadence-slip signature; live-probe gate still
+un-landed. Baseball-bingo-only fire in the dispatch window at
+diagnosis time; no concurrent atlas twin observed. Not
+re-dispatching a server-patch — workspace-push meta-bug blocker
+per the 51st entry still stands.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
