@@ -2055,7 +2055,22 @@ sleep-throttled-cadence-slip signature; live-probe gate still
 un-landed. Baseball-bingo-only fire in the dispatch window at
 diagnosis time; no concurrent atlas twin observed. Not
 re-dispatching a server-patch — workspace-push meta-bug blocker
-per the 51st entry still stands.)
+per the 51st entry still stands.); 2026-08-14 ~00:34Z (job
+`e597c566`, atlas twin arriving late for the same 23:53Z → 00:29Z
+sleep-slip gap that produced recurrence #71 — atlas answered `/`
+200 in 34ms on port 8791, all three atlas launchd services healthy
+with PIDs 76959 (web) / 5537 (dash-scheduler) / 76965 (pm-edge).
+`pmset -g log` confirmed DarkWake at 20:28:54 local — Mac was
+asleep from ~19:53 to 20:28. `last_healthy_at` had already
+refreshed to 4m17s at diagnosis time (healthcheck-all self-recovered
+at 00:29:45Z), then kickstarted inline anyway and re-refreshed to
+3s. Seventy-second recurrence — canonical
+sleep-throttled-cadence-slip; concurrent baseball-bingo twin was
+recurrence #71 from the SAME slip window, confirming
+twin-fires-per-slip pattern remains active even when the twins
+land in different diagnose jobs 5+ minutes apart. Live-probe gate
+still un-landed; not re-dispatching a server-patch — workspace-push
+meta-bug blocker per the 51st entry still stands.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
