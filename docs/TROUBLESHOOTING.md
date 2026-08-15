@@ -758,6 +758,75 @@ a synthetic string, always check `tests/` for real DB calls first.
 
 ---
 
+## Symptom: self-diagnose fires "project <slug> unhealthy 20+ min" but the project is actually up
+
+### Root cause (diagnosed 2026-08-15, job `11028b1d`)
+
+`projects.last_healthy_at` is only ever updated by `scripts/healthcheck-all.sh`
+running on its 5-min launchd timer (`com.assistant.healthcheck-all`,
+`StartInterval=300`). **launchd's `StartInterval` does NOT fire while the Mac
+is asleep** — the run is skipped, not queued, and the next fire happens on the
+next 5-min boundary after wake. So any sleep > 20 min makes every project look
+"unhealthy" to the event trigger, even though nothing is wrong.
+
+Signal that this is the cause (not a real outage):
+- `last_healthy_at` is stale by the same amount for **every** project (they
+  share the healthcheck run; a real outage hits one project at a time).
+- `tail volumes/logs/healthcheck.out.log` shows a gap in the periodic
+  `checked=N healthy=N failed=0` lines matching the sleep window.
+- `pmset -g log | grep -E 'Sleep|Wake' | tail -20` shows a wake event just
+  before now — the trigger fired on the first evaluation after wake, before
+  the next scheduled healthcheck run.
+- The project's own process is up (`launchctl list | grep <slug>` shows a live
+  PID, `ps -p <pid> -o etime` shows uptime crossing the "outage"), and the
+  healthcheck probe passes now (`curl -sf http://localhost:<port>/`).
+- No entries for the project in `volumes/logs/healthcheck.log` — that file
+  only gets FAIL lines when the probe actually fails.
+
+### Diagnostics
+
+```bash
+# All projects stale by ~identical amounts = system-wide, not per-project
+psql assistant -c "SELECT slug, NOW() - last_healthy_at AS stale FROM projects ORDER BY slug;"
+# Gap in periodic runs = launchd didn't fire
+tail -20 "$PROJECT_ROOT/volumes/logs/healthcheck.out.log"
+# Sleep/wake events framing the gap
+pmset -g log 2>/dev/null | grep -E "Sleep|Wake|sessionTerminated" | tail -20
+# Project process actually up
+launchctl list | grep com.assistant.project.<slug>
+curl -sf -o /dev/null -w "HTTP %{http_code}\n" http://localhost:<port>/
+```
+
+### Fix (auto-applicable — very low risk)
+
+Just re-fire the healthcheck; there is nothing to fix in the project or the
+script. `last_healthy_at` refreshes within seconds and the false-positive
+condition clears.
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all
+sleep 5
+psql assistant -c "SELECT slug, NOW() - last_healthy_at AS stale FROM projects ORDER BY slug;"
+```
+
+**Do NOT** treat this as an outage: don't restart the project, don't touch
+`atlas-redeploy`, don't dispatch `app-patch`. The single kick is the whole fix.
+
+### Follow-up ideas (not applied yet — deliberate, low value)
+
+- Make `healthcheck-all` also register a `RunAtLoad` or wake trigger so the
+  first post-wake run happens immediately. Trade-off: adds one extra run per
+  service load and per wake; only worth it if false positives become noisy.
+- Have the self-diagnose event rule also check "did healthcheck-all run in the
+  last 10 min?" before firing — suppresses the whole class. Trade-off:
+  couples the trigger to launchd log parsing.
+
+For now, the false positive is rare enough (only when sleep >20 min AND the
+trigger evaluates before the first post-wake healthcheck) that documenting
+the fast-recognition pattern here is enough.
+
+---
+
 ## Symptom: cloudflared tunnel shows "tls: internal error" connecting to Caddy
 
 **Root cause**: Caddy's `tls internal` generates self-signed certs via a local CA. The root cert can't be installed into the macOS trust store without `sudo`, so TLS handshakes fail even with `noTLSVerify: true` in cloudflared config (the error is server-side, not client-side).
@@ -2070,6 +2139,24 @@ recurrence #71 from the SAME slip window, confirming
 twin-fires-per-slip pattern remains active even when the twins
 land in different diagnose jobs 5+ minutes apart. Live-probe gate
 still un-landed; not re-dispatching a server-patch — workspace-push
+meta-bug blocker per the 51st entry still stands.); 2026-08-15 ~04:56Z
+(job `3e5c85b1`, baseball-bingo answered `/healthz` 200 on port 8790,
+uvicorn PID 73320 (parent 73316) up since 2026-08-13. DB `last_healthy_at`
+was 04:22:37Z, i.e. 34m stale at diagnosis fire; `healthcheck.out.log`
+last tick 04:22:38Z (six missed 5-min ticks in a row: 04:27/32/37/42/47/52).
+Concurrent `list_projects` showed atlas frozen at the SAME 04:22:37Z
+stamp — canonical shared-cadence fingerprint. `com.assistant.healthcheck-all`
+`state = not running` (idle between ticks, `last exit code = 0`, `runs = 8277`)
+so kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`;
+cadence resumed at 04:58:11Z and BOTH baseball-bingo and atlas
+`last_healthy_at` refreshed to <1s. Also re-verified the historical anyio
+`TaskHandle` ImportError traces surfaced by `read_project_logs` — anyio
+4.14.2 in the shared venv exports `TaskHandle` cleanly; these traces are
+stale from a pre-restart PID and NOT the source of this fire. Seventy-third
+recurrence — canonical sleep-throttled-cadence-slip; twin-fires-per-slip
+pattern held (atlas was silent this event tick but showed the same
+04:22:37Z fingerprint in `list_projects`). Live-probe gate STILL un-landed
+after 73 recurrences; not re-dispatching a server-patch — workspace-push
 meta-bug blocker per the 51st entry still stands.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
