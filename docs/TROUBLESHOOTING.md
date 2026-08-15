@@ -725,6 +725,45 @@ _First occurrence 2026-07-13: job `1719a807` (_evaluate for parent
 started same second, died 8s later at 18:29:28 — the runner's own
 scheduled restart landed inside the evaluator's session._
 
+**Variant seen 2026-08-15 (`self-diagnose` for skill `server-deploy`)**:
+the same SIGTERM wave can also kill (a) the `server-deploy` job **itself**
+and (b) any escalation child spawned by its "failed" status. Job
+`2ccbb3c2` (server_deploy, dispatched by deploy-director `d6025510`)
+completed every operational step through step 4 (learnings published,
+`3b7bbc9..5bba05c` fast-forward pulled, `pipenv sync --dev` clean, `pytest
+-q` 1104 passed / 1 skipped, schedules seeded, web+bot kickstarted,
+`curl /health` = 200, detached runner-restart scheduled). ~20s later
+the `nohup sleep 20 && launchctl kickstart -k …runner` fired, SIGTERM'd
+the runner's own process group, and the still-writing summary turn died
+with exit 143. Startup reconciliation marked `2ccbb3c2` failed AND spawned
+escalation child `e394853d` (auto-retry of server-deploy). The new runner
+had barely started that child (7s of audit-log activity) when it too was
+marked failed / `orphaned` — startup reconciliation of the SAME restart
+sweep, or it was still mid-init when reconciliation ran. Event trigger
+then fires self-diagnose for skill `server-deploy` seeing 2 "failed" jobs
+in <2 min. **Both failures are spurious**: deploy succeeded, HEAD matches
+origin/main, all services PID-alive, health=200. Escalation retry is
+wasted work (would have no-op'd since HEAD is already at the target).
+
+Verification for this variant:
+
+```bash
+cd "/Users/alfredbot.ai.butler/Library/Application Support/ai-server" \
+  && git log --oneline -3 && curl -sf http://localhost:8080/health \
+  && launchctl list | grep 'com.assistant.\(runner\|web\|bot\)'
+```
+
+If HEAD matches the range the deploy-director said should be deployed,
+health returns 200, and all three services show a PID, close the
+diagnose with no action.
+
+**Additional prevention** (beyond the three above): mark
+`server-deploy`-produced exit-143 failures with a distinct
+`error_category` (e.g. `deploy_restart_sigterm`) so reconciliation does
+NOT auto-spawn an escalation retry for them. The retry cannot succeed
+(HEAD is already at target) and only adds to the false-positive count
+that triggers self-diagnose.
+
 ---
 
 ## Symptom: self-diagnose fires for Telegram handler with error "boom"
