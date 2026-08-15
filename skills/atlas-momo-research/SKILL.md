@@ -10,10 +10,6 @@ isolation: workspace
 subagents: [code-review]
 post_review:
   trigger: always
-escalation:
-  on_failure:
-    model: claude-opus-5
-    effort: xhigh
 role: worker
 division: atlas
 privilege_class: guarded-writer
