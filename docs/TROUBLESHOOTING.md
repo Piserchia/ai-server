@@ -1837,6 +1837,33 @@ the `events.py` live-probe gate; workspace-push meta-bug continues
 to trap that fix in the runtime clone. Owner action on the
 workspace-push meta-bug remains the true unblock.)
 
+2026-08-17 ~13:44Z (job `488aa3f2`, atlas + baseball-bingo twin fire,
+**14-hour gap variant** — biggest slip on record for this signature).
+Ops-manager weekly review flagged both projects `stale_for=14:13` at
+09:44 EDT (13:44Z). At diagnosis (~14:00Z) atlas answered `/` HTTP 200
+on port 8791 (PID 3278, next-server, started 09:43 EDT) and
+baseball-bingo answered both `/healthz` and `/` HTTP 200 on port 8790
+(PID 3289, uvicorn, same start). `healthcheck.out.log` gap
+2026-08-16T23:31:04Z → 2026-08-17T13:48:18Z = **14h17m** / roughly 172
+missed 5-min ticks — overnight-sleep window on the Mini, an order of
+magnitude longer than the usual 20-35 min slip. Cadence had already
+resumed on its own by diagnosis time (three consecutive ticks
+13:48/13:53/13:58Z, then 14:03Z DB stamp fresh at <20s); no kickstart
+was needed — services never went down, only the healthcheck did. Also
+re-verified the historical anyio `TaskHandle` ImportError in
+`project.baseball-bingo.err.log` (traces from PID 3619, pre-restart)
+is stale: current shared `ai-server-bpzo5SVu` venv imports
+`anyio._core._tasks.TaskHandle` cleanly (anyio 4.14.2). Sixty-fourth
+recurrence — same signature as 43-63 but new long-gap flavor. Per the
+51st entry, still NOT re-dispatching a third `server-patch` for the
+`events.py` live-probe gate; workspace-push meta-bug continues to trap
+that fix in the runtime clone. Owner action on the workspace-push
+meta-bug remains the true unblock. (Sub-finding: 14h gap likely means
+`com.assistant.healthcheck-all` deferred its StartInterval across a
+long Mini sleep; if this cadence becomes chronic, migrate the launchd
+label from StartInterval to StartCalendarInterval + `RunAtLoad` to
+force a wake-up tick, OR add a `caffeinate`-driven watchdog.)
+
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
 ### Diagnostic
