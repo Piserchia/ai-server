@@ -30,6 +30,7 @@ projects/*/
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
 
 # IDE
 .idea/
