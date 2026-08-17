@@ -764,6 +764,22 @@ NOT auto-spawn an escalation retry for them. The retry cannot succeed
 (HEAD is already at target) and only adds to the false-positive count
 that triggers self-diagnose.
 
+**Repeat occurrence 2026-08-17** (self-diagnose `05772d5c`): identical
+signature — server_deploy `3b80c02a` (deploy-director `b0a7915f`, docs-only
+range `0a376a6..e1c30b7`) completed every step (learnings published, ff
+pull to e1c30b7, `pipenv sync --dev` clean, `pytest -q` 1104 passed,
+schedules seeded, web+bot kickstarted, `curl /health` = 200, detached
+runner-restart scheduled). ~20s later the SIGTERM wave killed the parent
+mid-summary (exit 143) AND the escalation child `8b414346` was marked
+`orphaned` before it could do anything meaningful. Post-state matches all
+"deploy actually succeeded" conditions: HEAD=`e1c30b7`=`origin/main`,
+web=200, runner/web/bot PIDs 23012/22979/22981. No action taken.
+Prevention items (1)–(3) above and the `deploy_restart_sigterm`
+error_category proposal remain unimplemented — this is now the **third**
+recorded occurrence (2026-07-13 `_evaluate` variant, 2026-08-15 variant,
+2026-08-17). Prevention work should be prioritized: every occurrence
+burns ~30–60k tokens on a spurious self-diagnose session.
+
 ---
 
 ## Symptom: self-diagnose fires for Telegram handler with error "boom"
