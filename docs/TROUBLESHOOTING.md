@@ -1915,6 +1915,40 @@ Structural follow-up (open): the runner could treat a final text ending in
 escalation + workspace retention kick in. Candidate: `_run_in_process` or
 `extract_text_events` marker-absence heuristic in `runner/session.py`.
 
+## Symptom: a hand-queued job sits in `status='queued'` forever; runner log says `malformed job_id in queue`
+
+**Seen:** 2026-08-17, dispatching an `atlas-redeploy` by hand.
+
+**Cause.** `psql -tAc "INSERT ... RETURNING id"` prints **two** lines: the returned
+id AND the command tag `INSERT 0 1`. Capturing it with `$(...)` and stripping only
+spaces leaves the tag glued on, so the value pushed to Redis is
+`8a2b9326-...\nINSERT01`. The runner reads it, fails to parse a UUID, logs
+`malformed job_id in queue` and drops it. The DB row is fine and stays `queued`
+forever, which reads as "the runner is wedged" when nothing is wrong with it.
+
+**Fix.** Strip all whitespace, not just spaces, and take the first line:
+
+```bash
+JOB_ID=$(psql assistant -tAc "INSERT ... RETURNING id;" | head -1 | tr -d '[:space:]')
+```
+
+Or split the operations: `INSERT` first, then `SELECT id FROM jobs WHERE ...` to read
+it back — `SELECT` has no command tag in `-tA` mode.
+
+**Recovering a stuck job.** The row is intact; just re-queue it. No need to
+re-insert (a second row would deploy twice):
+
+```bash
+JOB_ID=$(psql assistant -tAc "SELECT id FROM jobs WHERE kind='<kind>' AND status='queued' ORDER BY created_at DESC LIMIT 1" | tr -d '[:space:]')
+redis-cli rpush jobs:queue "$JOB_ID"
+```
+
+**Note the runner behaved correctly** — it rejected the malformed id and logged it
+rather than crashing or half-running. The only defect is on the dispatch side, and
+the diagnostic is in `volumes/logs/runner.out.log` in the **production** checkout
+(`~/Library/Application Support/ai-server`), not the dev repo's `runner.log`, which
+is stale.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
