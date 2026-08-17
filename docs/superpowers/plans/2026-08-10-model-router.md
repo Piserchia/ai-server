@@ -5,8 +5,9 @@
 > if Anthropic raised prices I wouldn't be stuck paying or risking the
 > project dying. Think Codex free/cheap tiers, GPT, etc."
 >
-> Status: **PROPOSED** — needs owner sign-off before R0 (amends MISSION.md,
-> a protected path; also adds provider keys to `.env`, which is auth config).
+> Status: **APPROVED 2026-08-17** — all four open decisions answered by the
+> owner (§10). MISSION.md §Non-goals amended the same day. R0 may start.
+> Provider keys remain owner-added by hand; sessions never write them.
 
 ## 1. Goal
 
@@ -274,15 +275,32 @@ deliberate: the writer's vendor never reviews its own lane's diffs.
   fails, the chain simply starts at gemini-free — the design doesn't depend
   on local.
 
-## 10. Open decisions for the owner
+## 10. Owner decisions — ANSWERED 2026-08-17
 
-1. **MISSION amendment** (§3) — required before anything ships. Y/N.
-2. **ChatGPT account tier** for Codex: start Free ($0, probing only) or
-   Plus ($20/mo) once R3 canaries look good?
-3. **Metered cap**: allow a small OpenRouter credit budget (e.g. $5/mo hard
-   cap) as burst insurance, or free-tiers-only?
-4. **Gemini key tier**: unpaid key (250/day Flash) vs personal-account
-   OAuth (~1000/day) — the latter touches a Google account, owner call.
+1. **MISSION amendment** — **APPROVED.** The non-goal "Not cross-provider —
+   Anthropic only" is replaced by "Cross-provider by policy, not by default:
+   Anthropic remains the trust anchor for review/evaluate/server-code lanes;
+   other providers serve routable lanes under INV-21 containment." Applied to
+   `MISSION.md` on 2026-08-17. INV-3 unchanged.
+2. **ChatGPT tier for Codex** — **Start Free.** $0, probing only. Revisit after
+   R3 canaries show whether Codex actually carries load. Rationale: the router
+   exists to remove single-vendor cost exposure, so paying a second vendor
+   before there is evidence would be the wrong shape.
+3. **Metered OpenRouter budget** — **DECLINED. Free tiers only ($0).** No
+   metered spend is authorised. This is a deliberate acceptance of risk #1
+   (free-tier churn: delistings, quota rugs): a free-only chain can lose a link
+   exactly when failover is needed.
+   **Consequence to design around, not to re-litigate:** every chain must still
+   terminate in an included-cost provider (Haiku subscription, or local), and
+   breakers must turn a churned free tier into a *logged degradation* rather
+   than a silent gap. R1's provider-health telemetry is therefore load-bearing
+   rather than nice-to-have — if a free tier disappears, the ledger of record
+   must say so out loud. Revisit only if telemetry shows chains terminating in
+   degradation often enough to matter.
+4. **Gemini key tier** — **Unpaid API key (250/day Flash).** A standalone
+   revocable key, not personal-account OAuth: the utility lanes (LLM routing,
+   learning classifier) fit inside 250/day, and a key keeps the credential
+   surface narrower than an account.
 
 ## 11. NOT in this plan
 

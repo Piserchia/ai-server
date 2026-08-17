@@ -189,7 +189,12 @@ router-reachable, never scheduled.
 - Not multi-user
 - Not a replacement for Claude Code on your laptop
 - Not a continuous silent self-improver — batched, proposed, reviewed
-- Not cross-provider — Anthropic only
+- Cross-provider **by policy, not by default**: Anthropic remains the trust
+  anchor for the review, evaluate, and server-code lanes; other providers serve
+  routable lanes under INV-21 containment. (Amended 2026-08-17 by owner
+  decision, replacing "Not cross-provider — Anthropic only"; see
+  `docs/superpowers/plans/2026-08-10-model-router.md`. INV-3 is unchanged:
+  Anthropic work stays subscription-only and `ANTHROPIC_API_KEY` stays banned.)
 - Not fine-tuning — use what Anthropic ships
 
 ## Phase map (shipped vs planned)
