@@ -23,6 +23,7 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-gap-scout` | worker | content | Weekly top-gap free-source spec + live probe + builder-acceptance row (Wed 11:00) |
 | `atlas-refresh-knowledge` | worker | content | Monthly knowledge curation + stale-claim re-verify (1st 11:30) |
 | `atlas-momo-research` | worker | guarded-writer | Weekly Momentum-Lab research cycle: one governed hypothesis cycle in a workspace clone under momentum/evaluation/PROTOCOL.md; mechanics/IEX-observe until SIP approved (Thu 13:00) |
+| `atlas-momo-drift` | worker | guarded-writer | Monthly Momentum-Lab retention-drift point (E-0028): anchored probe in a workspace clone, one dated JSON committed, data-only; monitoring not experiment (1st 13:30) |
 
 ## Standards
 
