@@ -152,6 +152,50 @@ in prod (pre-commit guard). Related check while you're there: `git log
 learnings branch is manual and silently piles up (29 commits between
 07-28 and 08-07).
 
+## Symptom: a TRACKED prod doc edit is never published — log says "non-doc drift"
+
+### Root cause (diagnosed 2026-08-17)
+
+Distinct from the untracked case above: the file IS tracked and IS modified,
+but its path is outside `ALLOWLIST` in `scripts/sync-learnings.sh` (line 35).
+The allowlist is `.context/*.md`, `.context/modules/*/*.md`,
+`.context/modules/*/skills/*.md`, `skills/*/*.md`, and the two
+`Troubleshooting.md` spellings — **and nothing else**. So a prod session that
+edits any of these strands its work forever:
+
+- `docs/superpowers/plans/*.md`  ← observed: 17 lines of P4/P5 status written
+  2026-08-03, still unpublished 2026-08-17 (14 days, ~330 hourly runs)
+- `docs/*.md` other than TROUBLESHOOTING (`README.md`, `EVALUATION_*.md`, …)
+- `MISSION.md`, `CLAUDE.md`, any top-level `*.md`
+- `.context/org/**` below the `modules/` pattern
+
+The hourly timer keeps succeeding — it publishes the allowlisted files and
+logs the rest as a non-fatal `WARNING`. Exit code stays 0, so nothing alerts.
+**"sync-learnings is green" does not mean "prod has no stranded work."**
+
+### Diagnostics
+
+```bash
+cd "$HOME/Library/Application Support/ai-server"
+git status --short                      # tracked ' M' outside the allowlist = stranded
+grep -c "non-doc drift" volumes/logs/sync-learnings.out.log   # how long it's been warning
+git diff --stat                         # what is actually sitting there
+```
+
+### Fix (rescue pattern)
+
+Same as above but simpler, since the file is tracked: capture the diff in
+prod (`git diff -- <path> > /tmp/drift.patch`), `git apply --3way` it in the
+DEV repo, commit with a provenance note, push. The next deploy's ff-only
+pull then reconciles prod's working tree.
+
+**Open gap (not fixed):** widening `ALLOWLIST` would let prod auto-publish
+plan/MISSION edits, which cuts against the single-writer topology's intent —
+it's a deliberate decision, not an oversight to patch blindly. Until someone
+decides, the WARNING is the only signal, and it is log-only. Consider either
+(a) an explicit owner decision to add `docs/superpowers/plans/*.md`, or
+(b) making non-doc drift older than N days a heartbeat/alert condition.
+
 ## Symptom: `jobs.review_outcome` is NULL for every job / post-review "never runs"
 
 ### Root cause (fixed 2026-08-05 — keep for the pattern)

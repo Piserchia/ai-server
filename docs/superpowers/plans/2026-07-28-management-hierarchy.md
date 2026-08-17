@@ -3,6 +3,8 @@
 > **STATUS: P1–P3 SHIPPED** (P1 foundation + gap-auditor 2026-07-28; P2
 > remaining managers + P3 first connector 2026-07-30). Open rollout phases:
 > privilege guardrails (P4) and management surfaces (P5).
+> **2026-08-03**: P4 blocked on `max_turns` fix (see § P4 notes). P5 dispatched
+> as `server-patch` job. P4 order of operations documented in § Rollout phases.
 
 **Goal (owner, 2026-07-28):** build a *hierarchy of manager agents* so the
 system manages itself. A top-level CEO agent dictates what the system should be
@@ -110,8 +112,23 @@ charters (via `server-patch`, gated).
   divisions) remains planned — lower priority.
 - **P4: privilege guardrails.** Implement the `prod-operator` allowlist guard;
   the `content` write-scope guard. Fix atlas `ANTHROPIC_API_KEY` boundary.
+  **Status (2026-08-03):** Blocked by `max_turns=60` meta-bug in
+  `skills/server-patch/SKILL.md` (protected path). Two prior server-patch
+  sessions for the related `events.py` live-probe gate both silently dropped
+  their commits when they hit the 60-turn budget before reaching the merge/push
+  step. P4's `guards.py` changes are also a protected path and will need a PR
+  regardless. Order of operations:
+  1. First: server-patch PR to raise `max_turns` to 90 in `server-patch/SKILL.md`
+     (one-line change, fits in 60 turns) → owner merge → deploy.
+  2. Then: server-patch PR for `guards.py` (prod-operator + content guards) +
+     `session.py` wiring. Now has enough turns to complete.
+  3. Separately: app-patch to fix atlas manifest `ANTHROPIC_API_KEY` field.
+  See `.context/modules/runner/skills/GOTCHAS.md` for the precise diagnosis.
 - **P5: management surfaces.** `/proposals` view; a division-scoped
   quality/rating rollup on the dashboard so the feedback loops are visible.
+  **Status (2026-08-03):** Dispatched as `server-patch` job (no protected paths
+  touched; autonomous merge lane eligible). Targets: `/proposals` Telegram
+  command, proposals list on web dashboard, division-scoped quality rollup.
 
 ## NOT in scope
 
