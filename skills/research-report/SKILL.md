@@ -10,6 +10,7 @@ escalation:
   on_failure:
     model: claude-opus-4-7
     effort: high
+context_files: [".context/SYSTEM.md"]
 tags: [research, writing, scheduled-capable]
 ---
 
