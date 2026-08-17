@@ -9,6 +9,96 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: `_writeback` fails with `error_max_turns (6)` after atlas jobs
+
+### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`; 3rd occurrence 2026-08-13, job `dc5fad7d` — parent was `atlas-momo-research`, not `atlas-redeploy`)
+
+Three defects compound into a loop that burns the 6-turn budget. Any atlas skill
+(dev-repo topology OR workspace-isolation) whose parent has no `project_id` can
+trigger it — 3rd instance was `atlas-momo-research` (isolation=workspace).
+
+1. **Stale untracked scratch dir in a runtime clone.** `projects/atlas/.superpowers/`
+   (SDD briefs + a 63KB runtime-drift CHANGELOG, created July/August, never
+   `.gitignore`d) shows up in `git status --porcelain --untracked-files=all`
+   every deploy. Atlas is dev-repo topology — the runtime clone should be clean,
+   but this scratch state was left behind. See `projects/atlas/.superpowers/`.
+   *(2026-08-13 note: dc5fad7d was NOT triggered by `.superpowers/` — payload
+   pointed at the dev repo `~/Documents/repos/atlas`, where `momentum/…` files
+   were staged. Defects #2 and #3 still applied.)*
+2. **`_is_doc_path` doesn't recognize `.superpowers/`.** `src/runner/writeback.py`
+   `_is_doc_path` classifies `.context/`, `docs/`, `CHANGELOG.md`, `CONTEXT.md`,
+   `SKILL.md`, `skills/`, and top-level `.md` as docs — but not `.superpowers/`.
+   So the untracked scratch is classified as "code changes without a CHANGELOG"
+   and triggers writeback.
+3. **Child `_writeback` session ignores `payload.cwd`.** `_verify_writeback`
+   (main.py:623) correctly enqueues the child with `payload["cwd"]` pointing at
+   the parent's cwd (`projects/atlas` for atlas-redeploy; `~/Documents/repos/atlas`
+   for atlas-momo-research), but the child session's `_resolve_cwd`
+   (session.py:704) is project_id-driven — the atlas parents have no
+   `project_id` (see `psql`), so the child session starts at server root.
+   The session then spends its whole 6-turn budget hunting for the referenced
+   files (grep/ls/cat against the WRONG git tree) before it can edit anything.
+   `max_turns: 6` has zero slack. In dc5fad7d's audit log the child ran
+   `git status` in server root and found unrelated modifications
+   (`docs/TROUBLESHOOTING.md`, `docs/superpowers/plans/…`,
+   `skills/atlas-momo-research/SKILL.md`), then burned turns exploring
+   `projects/atlas` and reading the parent's summary before hitting the ceiling.
+
+### Status (2026-08-13)
+
+**Not yet fixed** — three failures across three days (`56c478cc`, `fc483ddb`,
+`dc5fad7d`). The immediate remediation (delete `projects/atlas/.superpowers`
+in the dev repo + `.gitignore` it) doesn't cover the 3rd-instance path
+(workspace-isolated parents). The server-code fixes below are the durable
+answer and should be prioritized in the dev repo.
+
+### Diagnostic
+
+```bash
+# Confirm the recurring failure and scope:
+psql assistant -c "SELECT id, LEFT(description, 120) FROM jobs
+  WHERE resolved_skill='_writeback' AND status='failed'
+  ORDER BY created_at DESC LIMIT 10;"
+
+# Look for the offending untracked scratch dir in any runtime clone:
+for d in projects/*/; do
+  [ -d "$d/.git" ] && (cd "$d" && git status --porcelain --untracked-files=all \
+    | grep -E '^\?\? \.superpowers/' && echo "  ↑ in $d")
+done
+```
+
+### Fix
+
+**Immediate (unblocks the loop, low risk)** — decide with owner whether
+`projects/atlas/.superpowers/` is disposable. If yes:
+```bash
+# Option A: gitignore it in the dev repo (~/Documents/repos/atlas) — permanent
+echo '.superpowers/' >> .gitignore  # in dev repo, commit, deploy via atlas-redeploy
+# Option B: delete the runtime clone's stale copy (transient, will not recur if A is done)
+rm -rf 'projects/atlas/.superpowers'
+```
+
+**Server-code (MEDIUM — do in DEV repo `~/Documents/repos/ai-server`)**
+- `src/runner/writeback.py::_is_doc_path` — add `path.startswith(".superpowers/")`
+  to the doc classification (SDD scratch is documentation, not code).
+- `src/runner/session.py` around line 578 — honor `payload.get("cwd")` when it
+  exists and resolves under `settings.server_root`. Post-step children like
+  `_writeback` know the correct cwd; `_resolve_cwd`'s project_id-only lookup
+  loses that signal when the parent has no `project_id`.
+- `skills/_writeback/SKILL.md` frontmatter — raise `max_turns` from 6 to 12.
+  A healthy write-back is git-status → read CHANGELOG → read PROTOCOL → maybe
+  read parent audit log → Edit → commit — 6 turns is the minimum with zero
+  headroom for a large CHANGELOG or a wrong initial cwd.
+
+### Prevention
+
+Add a `pytest` case covering: (a) `.superpowers/` files classified as docs;
+(b) session honors `payload.cwd` under `server_root`. Also consider surfacing
+`_writeback` failures to owner directly — right now they escalate silently to
+`self-diagnose` and don't reach the user.
+
+---
+
 ## Symptom: a job times out and nothing follows — no retry, no self-diagnose
 
 ### Root cause (fixed 2026-08-07)
@@ -635,6 +725,61 @@ _First occurrence 2026-07-13: job `1719a807` (_evaluate for parent
 started same second, died 8s later at 18:29:28 — the runner's own
 scheduled restart landed inside the evaluator's session._
 
+**Variant seen 2026-08-15 (`self-diagnose` for skill `server-deploy`)**:
+the same SIGTERM wave can also kill (a) the `server-deploy` job **itself**
+and (b) any escalation child spawned by its "failed" status. Job
+`2ccbb3c2` (server_deploy, dispatched by deploy-director `d6025510`)
+completed every operational step through step 4 (learnings published,
+`3b7bbc9..5bba05c` fast-forward pulled, `pipenv sync --dev` clean, `pytest
+-q` 1104 passed / 1 skipped, schedules seeded, web+bot kickstarted,
+`curl /health` = 200, detached runner-restart scheduled). ~20s later
+the `nohup sleep 20 && launchctl kickstart -k …runner` fired, SIGTERM'd
+the runner's own process group, and the still-writing summary turn died
+with exit 143. Startup reconciliation marked `2ccbb3c2` failed AND spawned
+escalation child `e394853d` (auto-retry of server-deploy). The new runner
+had barely started that child (7s of audit-log activity) when it too was
+marked failed / `orphaned` — startup reconciliation of the SAME restart
+sweep, or it was still mid-init when reconciliation ran. Event trigger
+then fires self-diagnose for skill `server-deploy` seeing 2 "failed" jobs
+in <2 min. **Both failures are spurious**: deploy succeeded, HEAD matches
+origin/main, all services PID-alive, health=200. Escalation retry is
+wasted work (would have no-op'd since HEAD is already at the target).
+
+Verification for this variant:
+
+```bash
+cd "/Users/alfredbot.ai.butler/Library/Application Support/ai-server" \
+  && git log --oneline -3 && curl -sf http://localhost:8080/health \
+  && launchctl list | grep 'com.assistant.\(runner\|web\|bot\)'
+```
+
+If HEAD matches the range the deploy-director said should be deployed,
+health returns 200, and all three services show a PID, close the
+diagnose with no action.
+
+**Additional prevention** (beyond the three above): mark
+`server-deploy`-produced exit-143 failures with a distinct
+`error_category` (e.g. `deploy_restart_sigterm`) so reconciliation does
+NOT auto-spawn an escalation retry for them. The retry cannot succeed
+(HEAD is already at target) and only adds to the false-positive count
+that triggers self-diagnose.
+
+**Repeat occurrence 2026-08-17** (self-diagnose `05772d5c`): identical
+signature — server_deploy `3b80c02a` (deploy-director `b0a7915f`, docs-only
+range `0a376a6..e1c30b7`) completed every step (learnings published, ff
+pull to e1c30b7, `pipenv sync --dev` clean, `pytest -q` 1104 passed,
+schedules seeded, web+bot kickstarted, `curl /health` = 200, detached
+runner-restart scheduled). ~20s later the SIGTERM wave killed the parent
+mid-summary (exit 143) AND the escalation child `8b414346` was marked
+`orphaned` before it could do anything meaningful. Post-state matches all
+"deploy actually succeeded" conditions: HEAD=`e1c30b7`=`origin/main`,
+web=200, runner/web/bot PIDs 23012/22979/22981. No action taken.
+Prevention items (1)–(3) above and the `deploy_restart_sigterm`
+error_category proposal remain unimplemented — this is now the **third**
+recorded occurrence (2026-07-13 `_evaluate` variant, 2026-08-15 variant,
+2026-08-17). Prevention work should be prioritized: every occurrence
+burns ~30–60k tokens on a spurious self-diagnose session.
+
 ---
 
 ## Symptom: self-diagnose fires for Telegram handler with error "boom"
@@ -665,6 +810,75 @@ performing the real insertion. All 18 tests in the module still pass.
 manually invoked self-diagnose with a synthetic payload" — that was wrong.
 The trigger was always the test suite itself. When self-diagnose lands on
 a synthetic string, always check `tests/` for real DB calls first.
+
+---
+
+## Symptom: self-diagnose fires "project <slug> unhealthy 20+ min" but the project is actually up
+
+### Root cause (diagnosed 2026-08-15, job `11028b1d`)
+
+`projects.last_healthy_at` is only ever updated by `scripts/healthcheck-all.sh`
+running on its 5-min launchd timer (`com.assistant.healthcheck-all`,
+`StartInterval=300`). **launchd's `StartInterval` does NOT fire while the Mac
+is asleep** — the run is skipped, not queued, and the next fire happens on the
+next 5-min boundary after wake. So any sleep > 20 min makes every project look
+"unhealthy" to the event trigger, even though nothing is wrong.
+
+Signal that this is the cause (not a real outage):
+- `last_healthy_at` is stale by the same amount for **every** project (they
+  share the healthcheck run; a real outage hits one project at a time).
+- `tail volumes/logs/healthcheck.out.log` shows a gap in the periodic
+  `checked=N healthy=N failed=0` lines matching the sleep window.
+- `pmset -g log | grep -E 'Sleep|Wake' | tail -20` shows a wake event just
+  before now — the trigger fired on the first evaluation after wake, before
+  the next scheduled healthcheck run.
+- The project's own process is up (`launchctl list | grep <slug>` shows a live
+  PID, `ps -p <pid> -o etime` shows uptime crossing the "outage"), and the
+  healthcheck probe passes now (`curl -sf http://localhost:<port>/`).
+- No entries for the project in `volumes/logs/healthcheck.log` — that file
+  only gets FAIL lines when the probe actually fails.
+
+### Diagnostics
+
+```bash
+# All projects stale by ~identical amounts = system-wide, not per-project
+psql assistant -c "SELECT slug, NOW() - last_healthy_at AS stale FROM projects ORDER BY slug;"
+# Gap in periodic runs = launchd didn't fire
+tail -20 "$PROJECT_ROOT/volumes/logs/healthcheck.out.log"
+# Sleep/wake events framing the gap
+pmset -g log 2>/dev/null | grep -E "Sleep|Wake|sessionTerminated" | tail -20
+# Project process actually up
+launchctl list | grep com.assistant.project.<slug>
+curl -sf -o /dev/null -w "HTTP %{http_code}\n" http://localhost:<port>/
+```
+
+### Fix (auto-applicable — very low risk)
+
+Just re-fire the healthcheck; there is nothing to fix in the project or the
+script. `last_healthy_at` refreshes within seconds and the false-positive
+condition clears.
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all
+sleep 5
+psql assistant -c "SELECT slug, NOW() - last_healthy_at AS stale FROM projects ORDER BY slug;"
+```
+
+**Do NOT** treat this as an outage: don't restart the project, don't touch
+`atlas-redeploy`, don't dispatch `app-patch`. The single kick is the whole fix.
+
+### Follow-up ideas (not applied yet — deliberate, low value)
+
+- Make `healthcheck-all` also register a `RunAtLoad` or wake trigger so the
+  first post-wake run happens immediately. Trade-off: adds one extra run per
+  service load and per wake; only worth it if false positives become noisy.
+- Have the self-diagnose event rule also check "did healthcheck-all run in the
+  last 10 min?" before firing — suppresses the whole class. Trade-off:
+  couples the trigger to launchd log parsing.
+
+For now, the false positive is rare enough (only when sleep >20 min AND the
+trigger evaluates before the first post-wake healthcheck) that documenting
+the fast-recognition pattern here is enough.
 
 ---
 
@@ -1836,6 +2050,433 @@ the 51st entry, still NOT re-dispatching a third `server-patch` for
 the `events.py` live-probe gate; workspace-push meta-bug continues
 to trap that fix in the runtime clone. Owner action on the
 workspace-push meta-bug remains the true unblock.)
+
+2026-08-13 ~21:10Z (job `05fcf87c`, atlas answered `/` 200 in 58ms on
+port 8791, `last_healthy_at` age at diagnosis was ~33m but the DB row
+had already self-refreshed to 17:10:32-04 (~3m old) by the time the
+diagnose loaded — `healthcheck.out.log` shows a clean 54-min gap
+20:16:59Z → 21:10:32Z (ten missed 5-min ticks in a row, all prior runs
+reported `checked=2 healthy=2 failed=0`), all three atlas launchd
+processes healthy (PIDs 76959/5537/76965), `project.atlas.out.log`
+untouched since Aug 11 confirming the Next.js process hasn't restarted.
+Sixty-fourth recurrence — same sleep-throttled cadence-slip signature
+as the 62nd/63rd; still no live-probe gate in `events.py` (workspace-push
+meta-bug remains the true blocker per the 51st entry). No inline
+kickstart needed this time — natural 21:10:32Z tick resumed cadence
+before the diagnose loaded. Twin baseball-bingo diagnose was NOT
+dispatched this window despite the same DB staleness, per the 39th
+entry's asymmetric-fire observation.)
+
+2026-08-13 ~21:15Z (job `b4f341f0`, baseball-bingo answered `/healthz` 200
+in 2.4ms and `/` 200 in 5.8ms on port 8790; `last_healthy_at` stamp
+21:10:32Z, ~4m40s old at diagnosis and refreshing normally. Same
+54-min slip 20:16:59Z → 21:10:32Z as the atlas 64th entry above — this
+IS the delayed baseball-bingo twin the atlas entry noted as "NOT
+dispatched"; the trigger fired ~5 min after the natural resume, so
+diagnosis loaded into an already-recovered window. Project PID 73316
+healthy, launchd `state = running`, uvicorn log shows a recent clean
+restart to PID 73320. No inline kickstart needed. Sixty-fifth
+recurrence — same sleep-throttled cadence-slip signature; live-probe
+gate still un-landed. Correction to the 64th entry: the twin DID fire,
+just outside its dispatch window.)
+
+2026-08-13 ~21:10:28Z (job `73d48aac`, atlas answered `/` 200 in 37ms on
+port 8791; `last_healthy_at` was 0.99m old at diagnosis. Back-to-back
+duplicate atlas fire from the same 54-min slip that produced the 64th
+recurrence: event trigger loop re-evaluated `last_healthy_at` and
+dispatched a second atlas diagnose 4s BEFORE the natural 21:10:32Z
+healthcheck tick refreshed the DB row (my job queued 21:10:28Z, tick
+fired 21:10:32Z), so this session loaded into an already-recovered
+window while the prior diagnose `05fcf87c` was still running its own
+verification. All three atlas launchd processes healthy — main web PID
+76959 (2d+ uptime, `project.atlas.out.log` untouched since Aug 11),
+pm-edge 76965 (2d+), dash-scheduler 5537 (7h+). No inline kickstart
+needed. Sixty-sixth recurrence — same sleep-throttled cadence-slip
+signature; live-probe gate still un-landed. New wrinkle: the event
+trigger's own re-evaluation cadence can re-fire the SAME project
+before either the natural healthcheck tick or the in-flight diagnose
+job closes the loop, so a single slip can produce N atlas diagnoses,
+not just the twin-fires-per-slip pattern documented from the 43rd
+onward. Not re-dispatching a server-patch — workspace-push meta-bug
+blocker per the 51st entry still stands.)
+
+2026-08-13 ~21:46Z (job `8fd47fb6`, baseball-bingo diagnose). At probe
+(21:46:24Z) baseball-bingo answered `/healthz` 200 locally AND publicly
+via Cloudflare tunnel (`https://bingo.chrispiserchia.com/healthz` 200),
+and root `/` 200 on port 8790, PID 73316 (uvicorn 18h52m uptime,
+stable). `last_healthy_at` at diagnosis was 37s old
+(21:45:47Z vs probe 21:46:24Z) — trigger fired based on the pre-recovery
+DB row. `healthcheck.out.log` gap 21:25:37Z → 21:45:48Z (20m11s, three
+missed 5-min ticks) — canonical macOS-sleep-cadence-slip; the 21:45:48Z
+tick reported `checked=2 healthy=2 failed=0` and refreshed
+`last_healthy_at` before this job hit its probes. No inline kickstart
+needed (natural tick already recovered). Sixty-seventh recurrence.
+Historical anyio `TaskHandle` ImportError bursts in
+`project.baseball-bingo.err.log` still present from the July 30
+partial pip-install (pre-restart PID 3619) and still not relevant —
+verified `from anyio._core._tasks import TaskHandle` succeeds cleanly
+at anyio 4.14.2 in the shared venv, and the FileResponse code path
+(which was the failure signature) returned 200 on root `/`. Per the
+51st entry, still NOT re-dispatching `server-patch` for the events.py
+live-probe gate — workspace-push meta-bug blocker per the 51st entry
+still stands.)
+
+2026-08-13 ~21:45:38Z (job `5338ceff`, atlas diagnose — twin of the
+baseball-bingo `8fd47fb6` entry immediately above from the SAME
+21:25:37Z → 21:45:48Z slip). Atlas answered `/` 200 in 22.9ms on
+port 8791; `last_healthy_at` refreshed to 21:45:47Z by the natural
+21:45:48Z tick just 10s AFTER my job was queued and 9s BEFORE this
+session loaded, so diagnosis dropped into an already-recovered
+window. All three atlas launchd processes healthy — main web PID
+76959, pm-edge 76965, dash-scheduler 5537, launchd `state =
+running` for each. This is the SECOND slip in ~90 min (the first,
+20:16:59Z → 21:10:32Z, produced recurrences 64/65/66); today
+demonstrates that N-diagnoses-per-slip (66th wrinkle) and
+multiple-slips-per-day now compound. Noted but out of scope for
+self-diagnose (both are pre-existing app-level issues, NOT the
+trigger cause): (a) `project.atlas.err.log` shows recurring
+`invalid input syntax for type uuid: "AAPL"` from
+`/api/atlas/assets` and `/api/atlas/candles` — the route handlers
+are treating a ticker symbol as a UUID column ($1); (b)
+dash-scheduler APScheduler is missing 15-min interval jobs by
+3–12 minutes with "maximum number of running instances reached (1)"
+during the sleep windows. Filed for a future atlas-patch cycle to
+pick up. Sixty-eighth recurrence — same sleep-throttled
+cadence-slip signature; live-probe gate still un-landed. Not
+re-dispatching a server-patch — workspace-push meta-bug blocker
+per the 51st entry still stands.); 2026-08-13 ~22:31Z (job
+`34ada940`, baseball-bingo answered `/healthz` 200,
+`last_healthy_at` age ~30m at diagnosis — `healthcheck.out.log`
+last tick 22:00:52Z with prior gap 20:16→21:10 (54 min) and
+21:25→21:45 (20 min) both matching macOS sleep windows; project
+PID 73320 healthy with 19h37m uptime; healthcheck-all invoked
+inline and resumed at 22:31:44Z. Sixty-ninth recurrence, same
+signature.); 2026-08-13 ~22:32Z (job `ab5c009a`, atlas diagnose —
+twin of `34ada940` from the SAME 22:00:52Z → 22:32:49Z (~32m)
+slip). Atlas answered `/` 200 in 51.7ms on port 8791;
+`last_healthy_at` age ~31m at diagnosis (22:00:52Z DB row vs
+probe 22:32:03Z). All three atlas launchd services healthy —
+main web PID 76959, pm-edge 76965, dash-scheduler 5537, all with
+2d+ uptime and launchd `state = running`. Inline
+`launchctl kickstart -k gui/<uid>/com.assistant.healthcheck-all`
+resumed the timer at 22:32:49Z and `last_healthy_at` refreshed
+to 7.75s. Seventieth recurrence — canonical
+sleep-throttled-cadence-slip; live-probe gate still un-landed.
+Two-diagnoses-per-slip (baseball-bingo 69th + atlas 70th from
+the shared 22:00→22:32 slip) — matches the twin-fires-per-slip
+pattern from the 43rd onward. Not re-dispatching a server-patch
+— workspace-push meta-bug blocker per the 51st entry still
+stands.); 2026-08-14 ~00:29Z (job `b8bf801f`, baseball-bingo
+answered `/healthz` 200 in 8.8ms and `/` 200 in 3.5ms on port
+8790; `last_healthy_at` age 36m30s at diagnosis
+(2026-08-13T23:53:03Z DB stamp vs probe 00:29:33Z);
+`healthcheck.out.log` last write matched exactly at 19:53 local
+(7 missed 5-min ticks). `com.assistant.healthcheck-all` PID `-`,
+kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`;
+cadence resumed at 00:29:45Z and `last_healthy_at` refreshed to
+7.2s. Seventy-first recurrence — same
+sleep-throttled-cadence-slip signature; live-probe gate still
+un-landed. Baseball-bingo-only fire in the dispatch window at
+diagnosis time; no concurrent atlas twin observed. Not
+re-dispatching a server-patch — workspace-push meta-bug blocker
+per the 51st entry still stands.); 2026-08-14 ~00:34Z (job
+`e597c566`, atlas twin arriving late for the same 23:53Z → 00:29Z
+sleep-slip gap that produced recurrence #71 — atlas answered `/`
+200 in 34ms on port 8791, all three atlas launchd services healthy
+with PIDs 76959 (web) / 5537 (dash-scheduler) / 76965 (pm-edge).
+`pmset -g log` confirmed DarkWake at 20:28:54 local — Mac was
+asleep from ~19:53 to 20:28. `last_healthy_at` had already
+refreshed to 4m17s at diagnosis time (healthcheck-all self-recovered
+at 00:29:45Z), then kickstarted inline anyway and re-refreshed to
+3s. Seventy-second recurrence — canonical
+sleep-throttled-cadence-slip; concurrent baseball-bingo twin was
+recurrence #71 from the SAME slip window, confirming
+twin-fires-per-slip pattern remains active even when the twins
+land in different diagnose jobs 5+ minutes apart. Live-probe gate
+still un-landed; not re-dispatching a server-patch — workspace-push
+meta-bug blocker per the 51st entry still stands.); 2026-08-15 ~04:56Z
+(job `3e5c85b1`, baseball-bingo answered `/healthz` 200 on port 8790,
+uvicorn PID 73320 (parent 73316) up since 2026-08-13. DB `last_healthy_at`
+was 04:22:37Z, i.e. 34m stale at diagnosis fire; `healthcheck.out.log`
+last tick 04:22:38Z (six missed 5-min ticks in a row: 04:27/32/37/42/47/52).
+Concurrent `list_projects` showed atlas frozen at the SAME 04:22:37Z
+stamp — canonical shared-cadence fingerprint. `com.assistant.healthcheck-all`
+`state = not running` (idle between ticks, `last exit code = 0`, `runs = 8277`)
+so kickstarted inline via `gui/$(id -u)/com.assistant.healthcheck-all`;
+cadence resumed at 04:58:11Z and BOTH baseball-bingo and atlas
+`last_healthy_at` refreshed to <1s. Also re-verified the historical anyio
+`TaskHandle` ImportError traces surfaced by `read_project_logs` — anyio
+4.14.2 in the shared venv exports `TaskHandle` cleanly; these traces are
+stale from a pre-restart PID and NOT the source of this fire. Seventy-third
+recurrence — canonical sleep-throttled-cadence-slip; twin-fires-per-slip
+pattern held (atlas was silent this event tick but showed the same
+04:22:37Z fingerprint in `list_projects`). Live-probe gate STILL un-landed
+after 73 recurrences; not re-dispatching a server-patch — workspace-push
+meta-bug blocker per the 51st entry still stands.); 2026-08-15 ~05:39Z
+(job `065de0d5`, baseball-bingo answered `/healthz` HTTP 200 on port 8790,
+uvicorn PID 73316 up since 2026-08-13. DB `last_healthy_at` was 05:18:47Z
+at trigger fire, i.e. ~20m stale; `healthcheck.out.log` had TWO adjacent
+sleep-slip gaps: 04:22:38Z → 04:58:11Z (35 min, six missed 5-min ticks)
+AND 05:18:47Z → 05:39:05Z (20 min, three missed ticks — the one that
+crossed the 20-min threshold and fired this trigger). `pmset -g log`
+showed sleep/wake assertion churn at 01:35 local + subsequent
+MaintenanceWake / DarkWake events consistent with overnight sleep windows.
+By the time this diagnose job's probes ran, the natural 05:39:05Z tick
+had already refreshed `last_healthy_at` to <30s old (verified via a
+second `mcp__projects__get_project` call — no kickstart needed). The
+stale ImportError tracebacks for `anyio._core._tasks.TaskHandle` in the
+tail of `read_project_logs` are again NOT the source: anyio 4.14.2 in
+the shared venv exports `TaskHandle` cleanly, and the tail's LAST lines
+are `Uvicorn running on http://127.0.0.1:8790` on PID 73320 (child of
+73316) — the traces are historical from a pre-restart PID. Seventy-fourth
+recurrence — canonical sleep-throttled-cadence-slip; the twin-fires
+pattern didn't fire (atlas was healthy at the same instant per
+`healthcheck.out.log` `checked=2 healthy=2 failed=0`). Live-probe gate
+STILL un-landed after 74 recurrences; not re-dispatching a server-patch —
+workspace-push meta-bug blocker per the 51st entry still stands.);
+2026-08-15 ~05:38Z (job `2c7f5606`, atlas answered `/` HTTP 200 in 38ms on
+port 8791; all three atlas launchd services healthy — main web PID 76959
+(uptime 3d 15h), pm-edge PID 76965 (uptime 3d 15h), dash-scheduler PID 46672
+(uptime 19h). DB `last_healthy_at` at diagnosis fire matched the shared
+frozen 01:39:05-04 (05:39:05Z) stamp across BOTH atlas and baseball-bingo —
+canonical shared-cadence fingerprint. `pmset -g log` confirmed
+`Entering Sleep state due to 'Dark Wake Thermal Emergency'` at
+2026-08-15 01:19:59-04 (05:19:59Z) with Wake at 01:35:20-04 (05:35:20Z) —
+Mac was asleep ~15m 21s bracketing the 20-min unhealthy threshold. By the
+time this diagnose job's probes ran, the natural 01:39:05-04 healthcheck-all
+tick had already refreshed `last_healthy_at` to <1s, so no kickstart was
+needed (staleness ~1m 50s at report time, well within the 5-min cadence).
+This is the SECOND self-diagnose fire in the same 2-hour window: prior
+job `11028b1d` at 00:56Z resolved the earlier post-sleep gap, then a fresh
+sleep at 01:20Z produced another 20-min stale window before the trigger's
+20-min dedup expired. Seventy-fifth recurrence — canonical
+sleep-throttled-cadence-slip; live-probe gate STILL un-landed; not
+re-dispatching a server-patch — workspace-push meta-bug blocker per the
+51st entry still stands.); 2026-08-15 ~06:10Z (job `410359b5`,
+baseball-bingo answered `/healthz` HTTP 200 in 1.3ms on port 8790,
+uvicorn PID 73320 up 2d 3h 38m since 2026-08-13. DB `last_healthy_at`
+was 05:49:08Z at trigger fire, i.e. ~21m stale;
+`healthcheck.out.log` shows THREE adjacent 20-min sleep-slip gaps:
+04:22:38Z→04:58:11Z (35m, 6 missed ticks), 05:18:47Z→05:39:05Z (20m,
+3 missed), and 05:49:09Z→06:09:58Z (20m, 3 missed — the one that
+crossed the 20-min threshold and fired this trigger).
+`com.assistant.healthcheck-all` `state = not running`, `last exit code
+= 0`, `runs = 8288` (normal idle-between-ticks). By the time this
+diagnose job probed, the natural 06:09:58Z tick had already refreshed
+`last_healthy_at`; then I ran `bash scripts/healthcheck-all.sh` inline
+to force `last_healthy_at → 06:31:21Z` (<1s) so the event trigger
+wouldn't refire within its dedup window. Re-verified `TaskHandle`
+imports cleanly at anyio 4.14.2 in the shared venv; the ImportError
+tracebacks in the `read_project_logs` tail are stale from a
+pre-restart PID (log ends with `Uvicorn running on
+http://127.0.0.1:8790` on PID 73320), NOT the source of this fire.
+Seventy-sixth recurrence — canonical sleep-throttled-cadence-slip;
+twin-fires-per-slip didn't fire (atlas healthy at same
+06:09:58Z tick, `checked=2 healthy=2 failed=0`). Live-probe gate
+STILL un-landed after 76 recurrences; not re-dispatching a
+server-patch — workspace-push meta-bug blocker per the 51st entry
+still stands.); 2026-08-15 ~07:07Z (job `6f12c18f`, baseball-bingo
+answered `/healthz` HTTP 200 with `{"status":"ok"}` on port 8790,
+uvicorn PID 73320 up 2d 4h 27m since 2026-08-13, launchctl label
+`com.assistant.project.baseball-bingo` PID 73316 stable. DB
+`last_healthy_at` was 06:46:25Z at trigger fire, i.e. ~21m stale;
+`healthcheck.out.log` shows a single 20m 44s sleep-slip gap
+06:46:26Z → 07:07:10Z (3 missed 5-min ticks — the one that crossed
+the 20-min threshold and fired this trigger). By the time this
+diagnose probed, the natural 07:07:10Z tick had already refreshed
+`last_healthy_at`; I then ran `bash scripts/healthcheck-all.sh`
+inline once to force `last_healthy_at → 07:07:31Z` (<1s) so the
+event trigger wouldn't refire within its dedup window. Re-verified
+`from anyio._core._tasks import TaskHandle` succeeds cleanly at
+anyio 4.14.2 in the shared venv; the ImportError tracebacks in the
+`read_project_logs` tail are stale from a pre-restart PID (log
+ends with `Uvicorn running on http://127.0.0.1:8790` on PID 73320),
+NOT the source of this fire. Seventy-seventh recurrence — canonical
+sleep-throttled-cadence-slip; twin-fires-per-slip didn't fire
+(atlas healthy at same 07:07:10Z tick, `checked=2 healthy=2
+failed=0`). Live-probe gate STILL un-landed after 77 recurrences;
+not re-dispatching a server-patch — workspace-push meta-bug
+blocker per the 51st entry still stands.); 2026-08-17 ~13:43Z
+(job `675f7269`, atlas answered `/` HTTP 200 in 70ms on port
+8791, all three launchd services healthy with PIDs
+3251/3245/3252 (com.assistant.project.atlas / .atlas-dash-scheduler
+/ .atlas-pm-edge). DB `last_healthy_at` was 2026-08-16T23:31:04Z
+at trigger fire — a ~14 h 12 min stale window. `healthcheck.out.log`
+shows a single massive gap 2026-08-16T23:31:04Z → 2026-08-17T13:48:18Z
+(~170 missed 5-min ticks — by far the longest slip on record,
+consistent with the Mini being asleep from ~23:31Z until the
+user woke it around 13:48Z). Trigger enqueued at 13:43:36Z, 4m42s
+BEFORE the first post-wake tick landed at 13:48:18Z, exact
+signature of the "trigger fires on the first post-wake evaluation
+before the resumed poller ticks" wrinkle documented at the top of
+this section. By the time this diagnose ran, the 13:48:18Z natural
+tick had already refreshed `last_healthy_at` to ~4m old; I then
+ran `bash scripts/healthcheck-all.sh` inline once to force
+`last_healthy_at → 13:53:42Z` (<1s) so the event trigger wouldn't
+refire within its dedup window. App-level noise in
+`project.atlas.err.log` — a UUID cast error from an `/api/atlas/candles`
+call passing `"AAPL"` where the route expects a UUID — is unrelated
+to the trigger (root `/` returns 200 and healthcheck is `/`);
+tracked as a separate app-code issue, not dispatched from this
+diagnose. Seventy-eighth recurrence — canonical sleep-throttled-
+cadence-slip, first observation of a full overnight-sleep slip
+(~14 h) rather than the early-morning power-throttle slips that
+produced 43–77. Live-probe gate STILL un-landed after 78
+recurrences; not re-dispatching a server-patch — workspace-push
+meta-bug blocker per the 51st entry still stands.); 2026-08-17
+~13:52Z (job `ca9acd12`, baseball-bingo answered `/healthz` HTTP
+200 in 1.3ms on port 8790 AND `GET /` static-asset codepath 200
+— the FileResponse → anyio.to_thread path that historically
+threw `TaskHandle` ImportError works cleanly now. launchctl
+label `com.assistant.project.baseball-bingo` PID 3253 stable.
+DB `last_healthy_at` was 13:48:18Z at trigger fire — same
+overnight sleep-slip gap as the 78th entry above (2026-08-16
+T23:31:04Z → 2026-08-17T13:48:18Z, ~14h 17m, ≈171 missed 5-min
+ticks). This is the twin-fire against baseball-bingo of the SAME
+slip event that fired atlas as the 78th above — confirming the
+"twin-fires-per-slip" wrinkle when both watched projects cross
+the 20-min threshold together on wake. Natural 13:48:18Z +
+13:53:19Z ticks already refreshed `last_healthy_at`; ran
+`bash scripts/healthcheck-all.sh` inline once to force
+`last_healthy_at → 13:53:47Z` (<1s) so the trigger wouldn't
+refire within its dedup window. Re-verified `from
+anyio._core._tasks import TaskHandle` succeeds cleanly at
+anyio 4.14.2 in the shared venv AND `anyio.to_thread.run_sync`
+completes cleanly in a fresh interpreter; the six `TaskHandle`
+ImportError tracebacks in the `read_project_logs` tail are
+stale from a pre-restart PID (log ends with `Uvicorn running on
+http://127.0.0.1:8790` on PID 3289), NOT the source of this
+fire. Seventy-ninth recurrence — canonical sleep-throttled-
+cadence-slip, twin-fire pair with the 78th entry above (first
+observed twin-fire on an overnight-sleep slip). Live-probe gate
+STILL un-landed after 79 recurrences; not re-dispatching a
+server-patch — workspace-push meta-bug blocker per the 51st
+entry still stands.); 2026-08-17 ~13:44Z (job `a1ed0243`, atlas
+answered `/` HTTP 200 in 27ms on port 8791, all three launchd
+services healthy — same PIDs 3251/3245/3252 as the 78th above.
+DB `last_healthy_at` was already refreshed to 13:53:47Z (~3.6m
+old) by the prior 78th-entry job (`675f7269`) at the moment this
+diagnose probed. **New wrinkle observed: intra-slip trigger
+storm** — the same overnight sleep-slip that fired 78 and 79
+above also enqueued the event trigger every minute at 13:43,
+13:44, 13:45, 13:46, and 13:47Z (5 stacked atlas self-diagnose
+jobs plus one manually-enqueued twin-diagnose `task`), because
+each 60s trigger tick before the first post-wake healthcheck
+poll landed at 13:48:18Z still saw `last_healthy_at` >20 min
+stale. This confirms the "trigger fires on the first post-wake
+evaluation before the resumed poller ticks" wrinkle from the
+78th above extends to N-per-slip fires whenever the poller lag
+exceeds the trigger's dedup window, not just twin fires across
+projects. Cancelled the three duplicate downstream queued
+self-diagnose siblings (`fb57a1b0`, `a3313fa0`, `3b4f54a3`) via
+`UPDATE jobs SET status='cancelled'` with a note pointing at
+this job — runner main.py:312 skips non-queued rows, so cancelled
+siblings drop cleanly when their Redis pop lands. Left the
+manually-enqueued sibling `488aa3f2` alone (it's a human-worded
+twin-diagnose task, not an autonomous trigger duplicate).
+Eightieth recurrence — canonical sleep-throttled-cadence-slip,
+intra-slip trigger-storm sibling of the 78th above (5 stacked
+atlas fires + 1 baseball-bingo twin from the same slip). Live-
+probe gate STILL un-landed after 80 recurrences; not re-
+dispatching a server-patch — workspace-push meta-bug blocker
+per the 51st entry still stands. **Trigger cadence itself is
+worth revisiting**: firing every 60s on the same stale
+`last_healthy_at` produces N-per-slip queue amplification. A
+1–2 min self-suppress after enqueue (or checking whether a
+running/queued self-diagnose for the same slug already exists
+before enqueuing another) would collapse this class to a
+single fire per slip event.); 2026-08-17 ~13:57Z (job
+`800e476c`, baseball-bingo probed via curl: `/healthz` 200,
+`/` 200, `/static/app.js` 200, `/api/games` 200 — the
+FileResponse → anyio.to_thread codepath that historically
+threw `TaskHandle` ImportError works cleanly now. launchctl
+label `com.assistant.project.baseball-bingo` PID 3253 stable,
+python worker PID 3289, both ~14.5 min old — meaning the
+process launched at ~13:43Z (during the same overnight
+sleep-throttled slip that fired 78/79/80 above), and its
+startup crash-loop caused the 20+ min unhealthy window that
+triggered THIS diagnose. Once uvicorn stabilized on the
+current PID, `last_healthy_at` refreshed to 13:53:47Z (~4m
+old at probe time). Re-verified `from anyio._core._tasks
+import TaskHandle` succeeds cleanly at anyio 4.14.2 in the
+shared venv; the ImportError bursts in
+`project.baseball-bingo.err.log` remain the July 30 stale
+tracebacks documented since the 41st recurrence, not the
+source of this trigger. DB queue shows the intra-slip
+trigger-storm wrinkle noted in the 80th also fired here:
+sibling self-diagnose jobs `43b047db` and `cbf1f87a` still
+`queued` alongside my `running` `800e476c`, plus a
+manually-enqueued `task` `488aa3f2` — three redundant
+sibling diagnoses that will each rediscover a healthy
+project. Eighty-first recurrence — canonical
+sleep-throttled-cadence-slip against baseball-bingo,
+intra-slip trigger-storm confirmed to affect
+baseball-bingo just as it did atlas in the 80th. Not
+cancelling the sibling diagnoses this time — they'll each
+land the same "healthy, no action" finding and the audit
+trail of intra-slip amplification is itself the point.
+Live-probe gate still un-landed after 81 recurrences;
+not re-dispatching a server-patch — workspace-push meta-bug
+blocker per the 51st entry still stands. The self-suppress
+suggestion from the 80th entry (skip enqueue if a
+running/queued self-diagnose for the same slug exists) would
+have collapsed this baseball-bingo storm to a single fire.);
+2026-08-17 ~13:59Z (job `cbf1f87a`, baseball-bingo — the exact
+sibling `cbf1f87a` that the 81st entry (job `800e476c`) named
+as "still queued" when it filed. Confirming that sibling
+prediction: probed baseball-bingo via curl at 13:59:39Z,
+`/healthz` returned HTTP 200 with `{"status":"ok"}`, `/` HTTP
+200, and `python -c "import anyio._backends._asyncio"` succeeds
+cleanly in the shared venv (`TaskHandle` exports as expected
+at line 204 of `anyio/_core/_tasks.py`, anyio 4.14.2). DB
+`last_healthy_at` was 2026-08-17T13:58:19Z at diagnosis time
+(~80s old — the natural healthcheck cadence resumed after
+uvicorn stabilized on PID 3289 following the ~13:43Z startup
+crash-loop noted in the 81st entry). No action needed —
+project self-recovered before this sibling ran. Sibling
+`43b047db` still queued behind this one at diagnosis time
+will file the 83rd. Eighty-second recurrence — canonical
+intra-slip trigger-storm follow-up, exactly as the 81st
+predicted; the self-suppress guard (skip enqueue if a
+running/queued self-diagnose for the same slug exists)
+suggested in the 80th/81st would have collapsed
+80/81/82 (and 83) to a single fire. Live-probe gate STILL
+un-landed after 82 recurrences; still not re-dispatching
+server-patch — workspace-push meta-bug blocker per the
+51st entry still stands.); 2026-08-17 ~14:03Z (job
+`43b047db`, baseball-bingo — the exact third sibling that
+the 81st entry (job `800e476c`) named as "still queued"
+alongside `cbf1f87a` when it filed, and that the 82nd
+(job `cbf1f87a`) then named as "still queued behind this
+one at diagnosis time will file the 83rd." Confirming both
+sibling predictions in a single fire: probed baseball-bingo
+via curl at 14:03:1Xz, 5/5 `/healthz` returned HTTP 200,
+`/` HTTP 200, and the FileResponse-static-path probe
+returned HTTP 200 — the anyio.to_thread codepath that
+historically threw `TaskHandle` ImportError works cleanly.
+DB `last_healthy_at` was 2026-08-17T14:03:20Z at diagnosis
+time (~4s old — the natural healthcheck cadence has fully
+resumed on the ~5m tick, no longer drifting from the
+~13:43Z uvicorn crash-loop window). Shared-venv anyio
+still 4.14.2 with `TaskHandle` exported cleanly; no
+package churn between the 82nd and this fire. No action
+needed — project self-recovered before this sibling ran,
+as predicted. Sibling `488aa3f2` is a human-worded
+twin-diagnose task still `running` (not an autonomous
+trigger duplicate — kept alive per the 80th entry's
+convention). Eighty-third recurrence — canonical
+intra-slip trigger-storm terminal sibling, exactly as
+the 81st AND 82nd predicted; the self-suppress guard
+(skip enqueue if a running/queued self-diagnose for the
+same slug exists) suggested in the 80th/81st/82nd would
+have collapsed 80/81/82/83 to a single fire. Live-probe
+gate STILL un-landed after 83 recurrences; still not
+re-dispatching server-patch — workspace-push meta-bug
+blocker per the 51st entry still stands. The trigger-storm
+sibling chain has now self-documented its own predicted
+tail across three consecutive fires — sufficient evidence
+that the self-suppress guard IS the right next fix
+whenever the workspace-push meta-bug unblocks it.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 

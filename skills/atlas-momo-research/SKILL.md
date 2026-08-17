@@ -113,3 +113,17 @@ N lifetime, and the one decision (if any) waiting on the owner.
   and must not be applied.
 - While `momentum/config/data_windows.yaml` is null, `momo gate` and the test
   suite still run fine — the SIP gate blocks EFFICACY claims, not mechanics work.
+- **Session-ceiling collision (2026-08-11, incident 4ccd3a01)** — 3 of the last
+  5 runs failed at exactly ~1805 s (the 30-min SDK ceiling); the two
+  completions came in at 1747–1782 s. The fleet workflow (analyst → engineer →
+  validator → risk → documentarian) plus PROTOCOL.md + POWERS.md §4 +
+  LOOP.md §6 reading routinely eats the whole budget before the engineer stage
+  starts (4ccd3a01 didn't begin engineer work until minute 28). The
+  `on_failure: xhigh` escalation policy is a NOOP for this class — the retry
+  hits the same wall-clock ceiling. Two mitigations for whoever next authors
+  this skill: (a) enforce the "15-min hard-start" rule by making it a Bash
+  timer check the orchestrator runs itself, not a suggestion; (b) split the
+  cycle so each fleet stage dispatches as its own child job with resumption
+  state in the ledger, freeing the parent from having to fit all five stages
+  in one session. Do NOT just retry the same shape — see incident notes in
+  `docs/TROUBLESHOOTING.md` §atlas-momo-research session-ceiling.
