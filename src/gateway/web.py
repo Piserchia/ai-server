@@ -12,6 +12,7 @@ Endpoints:
 - GET  /api/projects               — list projects
 - GET  /api/quota                  — { paused, reset_at, reason }
 - GET  /api/retrospective/context  — context consumption rollup
+- GET  /api/telemetry/schedules    — per-schedule reliability rollup (runs, success rate, failure streak, durations)
 - GET  /api/tasks                  — list tasks
 - GET  /api/tasks/{id}             — task + turns
 
@@ -24,7 +25,7 @@ import asyncio
 import json
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -38,7 +39,7 @@ from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_STREAM, KEY_RUNNER_HEARTBEAT, QUEUE_JOBS, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
-from src.models import Job, JobKind, JobStatus, Project, Task, TaskStatus, TaskTurn
+from src.models import Job, JobKind, JobStatus, Project, Schedule, Task, TaskStatus, TaskTurn
 from src.runner import quota, retrospective
 
 app = FastAPI(title="Assistant gateway", version="0.1.0")
@@ -164,6 +165,151 @@ def health_verdict(
     runner_ok = heartbeat_age is not None and heartbeat_age <= stale_after
     healthy = db_ok and redis_ok and runner_ok
     return runner_ok, healthy
+
+
+#: Terminal job statuses that count as a schedule "run" for telemetry.
+#: queued/running are in-flight, not evidence about reliability either way.
+_TERMINAL_FOR_TELEMETRY = {"completed", "failed", "cancelled"}
+
+
+def schedule_rollup(
+    schedules: list[dict],
+    jobs: list[dict],
+    window_days: int = 30,
+) -> list[dict]:
+    """Pure. Per-schedule health folded from its kind's recent jobs.
+
+    ``schedules``: dicts with id/name/cron_expression/paused/next_run_at.
+    ``jobs``: dicts with schedule_id/status/created_at/started_at/completed_at,
+    pre-filtered to the window and ordered NEWEST FIRST (the fold relies on
+    the ordering for last-run and streak semantics; it does not re-sort).
+
+    Jobs are matched to their schedule by ``schedule_id`` — the column the
+    scheduler stamps on every job it enqueues — NEVER by kind (review
+    2026-08-17): kinds are dispatchable by hand via POST /api/jobs and
+    Telegram, so a kind-join lets a manually re-run-and-cancelled job reset a
+    schedule's failing streak, and two schedules sharing a kind would count
+    each other's runs. No NULL-schedule_id fallback either: that would
+    readmit exactly the manual jobs the join exists to exclude, and the
+    stamping predates every row a 30d window can see.
+
+    Semantics chosen for the owner's question ("is the machine that runs the
+    lab healthy?"), not for dashboards' sake:
+      - last_* comes from the newest TERMINAL job — an in-flight run tells
+        you nothing about reliability yet.
+      - consecutive_failures counts the failed streak from the newest
+        terminal run backwards; it resets on completed AND on cancelled
+        (a cancel is an operator action, not a reliability signal, but it
+        does end a streak's evidential value).
+      - in_flight counts EVERY non-terminal job (queued, running,
+        awaiting_user, deferred, ...): a run parked in awaiting_user for
+        days is precisely the stuck state this section exists to surface,
+        and counting only status=='running' would hide it (review
+        2026-08-17).
+      - durations only exist where both started_at and completed_at do; a
+        job that died before starting has no duration, not a zero one.
+    """
+    jobs_by_schedule: dict[str, list[dict]] = {}
+    for j in jobs:
+        jobs_by_schedule.setdefault(str(j["schedule_id"]), []).append(j)
+
+    out: list[dict] = []
+    for sch in schedules:
+        kind_jobs = jobs_by_schedule.get(str(sch["id"]), [])
+        terminal = [j for j in kind_jobs if j["status"] in _TERMINAL_FOR_TELEMETRY]
+        completed = [j for j in terminal if j["status"] == "completed"]
+        failed = [j for j in terminal if j["status"] == "failed"]
+
+        durations = [
+            (j["completed_at"] - j["started_at"]).total_seconds()
+            for j in terminal
+            if j.get("started_at") and j.get("completed_at")
+        ]
+
+        streak = 0
+        for j in terminal:  # newest first
+            if j["status"] == "failed":
+                streak += 1
+            else:
+                break
+
+        last = terminal[0] if terminal else None
+        last_duration = None
+        if last and last.get("started_at") and last.get("completed_at"):
+            last_duration = round((last["completed_at"] - last["started_at"]).total_seconds(), 1)
+
+        out.append({
+            "name": sch["name"],
+            "cron": sch["cron_expression"],
+            "paused": bool(sch.get("paused")),
+            "next_run_at": sch.get("next_run_at"),
+            "window_days": window_days,
+            "runs": len(terminal),
+            "completed": len(completed),
+            "failed": len(failed),
+            "success_rate": round(len(completed) / len(terminal), 3) if terminal else None,
+            "consecutive_failures": streak,
+            "last_status": last["status"] if last else None,
+            "last_finished_at": last.get("completed_at") if last else None,
+            "last_duration_s": last_duration,
+            "avg_duration_s": round(sum(durations) / len(durations), 1) if durations else None,
+            "in_flight": len(kind_jobs) - len(terminal),
+        })
+    # Attention-first: failing streaks on top, then paused last, then by name.
+    out.sort(key=lambda r: (-r["consecutive_failures"], r["paused"], r["name"]))
+    return out
+
+
+@app.get("/api/telemetry/schedules", dependencies=[Depends(_check_auth)])
+async def schedule_telemetry(window_days: int = 30) -> list[dict]:
+    """Per-schedule reliability rollup — observability for the scheduled fleet.
+
+    One row per schedules-table row: run counts, success rate, failure streak,
+    and durations folded from the last ``window_days`` of that kind's jobs.
+    The fold itself is the pure ``schedule_rollup`` above.
+    """
+    window_days = max(1, min(window_days, 365))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    async with async_session() as s:
+        sch_rows = (await s.execute(select(Schedule))).scalars().all()
+        ids = [x.id for x in sch_rows]
+        jobs_rows = []
+        if ids:
+            # Column select on purpose: the dashboard polls this every 60s and
+            # a full select(Job) would drag payload/result JSON blobs along
+            # for every scheduled job in the window (review 2026-08-17).
+            jq = (
+                select(
+                    Job.schedule_id, Job.status,
+                    Job.created_at, Job.started_at, Job.completed_at,
+                )
+                .where(Job.schedule_id.in_(ids), Job.created_at >= cutoff)
+                .order_by(Job.created_at.desc())
+            )
+            jobs_rows = list(await s.execute(jq))
+    return schedule_rollup(
+        [
+            {
+                "id": x.id,
+                "name": x.name,
+                "cron_expression": x.cron_expression,
+                "paused": x.paused,
+                "next_run_at": x.next_run_at.isoformat() if x.next_run_at else None,
+            }
+            for x in sch_rows
+        ],
+        [
+            {
+                "schedule_id": r.schedule_id,
+                "status": r.status,
+                "created_at": r.created_at,
+                "started_at": r.started_at,
+                "completed_at": r.completed_at,
+            }
+            for r in jobs_rows
+        ],
+        window_days,
+    )
 
 
 @app.get("/health")
@@ -536,6 +682,10 @@ _INDEX_HTML = """<!DOCTYPE html>
   <div id="projects" hx-get="/api/projects" hx-trigger="load, every 30s"
        hx-swap="innerHTML">Loading...</div>
 
+  <h2>Schedules</h2>
+  <div id="schedules" hx-get="/api/telemetry/schedules" hx-trigger="load, every 60s"
+       hx-swap="innerHTML">Loading...</div>
+
   <script>
     document.getElementById("submit-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -567,6 +717,8 @@ _INDEX_HTML = """<!DOCTYPE html>
           target.innerHTML = renderJobs(data);
         } else if (target.id === "projects" && Array.isArray(data)) {
           target.innerHTML = renderProjects(data);
+        } else if (target.id === "schedules" && Array.isArray(data)) {
+          target.innerHTML = renderSchedules(data);
         } else if (target.id === "quota-banner") {
           renderQuota(data);
         }
@@ -604,6 +756,29 @@ _INDEX_HTML = """<!DOCTYPE html>
         body: JSON.stringify({ rating: n }),
       });
       htmx.trigger("#jobs", "load");
+    }
+
+    function renderSchedules(rows) {
+      if (!rows.length) return "<p>No schedules.</p>";
+      return `<table>
+        <tr><th>Schedule</th><th>Cron</th><th>Last run</th><th>30d</th>
+            <th>Streak</th><th>Duration</th><th>Next</th></tr>
+        ${rows.map(r => `<tr>
+          <td>${esc(r.name)}${r.paused ? ' <span class="badge cancelled">paused</span>' : ''}${
+            r.in_flight ? ` <span class="badge running">${r.in_flight} in flight</span>` : ''}</td>
+          <td>${esc(r.cron)}</td>
+          <td>${r.last_status
+            ? `<span class="badge ${r.last_status}">${r.last_status}</span> ${
+                r.last_finished_at ? r.last_finished_at.slice(0, 16).replace('T', ' ') : ''}`
+            : '—'}</td>
+          <td>${r.runs ? `${r.completed}/${r.runs} ok (${Math.round((r.success_rate ?? 0) * 100)}%)` : 'no runs'}</td>
+          <td>${r.consecutive_failures
+            ? `<span class="badge failed">${r.consecutive_failures} failing</span>` : '—'}</td>
+          <td>${r.last_duration_s != null ? r.last_duration_s + 's' : '—'}${
+            r.avg_duration_s != null ? ` (avg ${r.avg_duration_s}s)` : ''}</td>
+          <td>${r.next_run_at ? r.next_run_at.slice(0, 16).replace('T', ' ') : '—'}</td>
+        </tr>`).join("")}
+      </table>`;
     }
 
     function renderProjects(rows) {

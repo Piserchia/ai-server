@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-17 — /api/telemetry/schedules + dashboard Schedules section
+
+- New pure fold `schedule_rollup(schedules, jobs, window_days)` and thin
+  endpoint `GET /api/telemetry/schedules`: one row per schedules-table row
+  with terminal-run counts, success rate, consecutive-failure streak,
+  last/avg durations, in-flight count, over a clamped window (default
+  30d). Jobs join by `schedule_id` (the column the scheduler stamps),
+  NEVER by kind, and with no NULL fallback — kinds are hand-dispatchable,
+  so a kind-join would let a manual re-run-and-cancel reset a schedule's
+  failing streak (code-review finding, fixed pre-merge). `in_flight`
+  counts every non-terminal status including awaiting_user/deferred, so a
+  run parked for days is visible instead of reading healthy-and-idle
+  (second review finding). Column-select instead of full ORM rows so the
+  60s dashboard poll doesn't drag payload/result JSON along (third).
+  Semantics pinned by tests/test_schedule_telemetry.py (15 tests):
+  in-flight runs are not evidence, cancels end a streak without counting
+  as success, manual jobs are invisible to schedule stats, absent
+  timestamps yield absent durations (never zero), no runs → success_rate
+  null (not 0% or 100%). Failing streaks sort first, paused last.
+- Dashboard gains a Schedules section (htmx, 60s refresh) rendering the
+  rollup — observability item 4 of 4 (atlas ledger E-0027 context).
+
 ## 2026-08-11 — CreateJobRequest.session_timeout_seconds (optional)
 
 `POST /api/jobs` accepts `session_timeout_seconds` (60..5400) → forwarded in

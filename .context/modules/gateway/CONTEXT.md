@@ -21,7 +21,8 @@ the single enqueue/cancel/lookup helper.
 - FastAPI: `/health`, `/api/jobs` (GET/POST), `/api/jobs/{id}` (GET/DELETE),
   `/api/jobs/{id}/rate` (POST), `/api/jobs/{id}/stream` (SSE),
   `/api/projects`, `/api/projects/public`, `/api/quota`,
-  `/api/retrospective/context`, `/api/tasks`, `/api/tasks/{id}`
+  `/api/retrospective/context`, `/api/telemetry/schedules`, `/api/tasks`,
+  `/api/tasks/{id}`
 - `GET /health` — unauthenticated liveness probe. Returns **200** only when the
   runner heartbeat (`heartbeat:runner` in Redis, written every loop) is fresher than
   `runner_heartbeat_stale_seconds` (default 90s) AND Postgres + Redis are reachable;
