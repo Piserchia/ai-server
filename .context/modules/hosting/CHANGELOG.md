@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-17 — healthcheck-all cadence-slip false positive (atlas + baseball-bingo twin, 64th recurrence, 14-hour gap variant)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence 64 appended); `.context/modules/hosting/skills/GOTCHAS.md` (diagnostic-procedure entry).
+
+**Why**: ops-manager weekly review flagged atlas + baseball-bingo `stale_for=14:13` at 2026-08-17 09:44 EDT and dispatched self-diagnose (job `488aa3f2`). Investigation showed both services were serving HTTP 200 the entire time (atlas PID 3278 on 8791, baseball-bingo PID 3289 on 8790, both started 09:43 EDT). Real cause was a **14-hour `healthcheck.out.log` gap** (2026-08-16T23:31:04Z → 2026-08-17T13:48:18Z) — the `com.assistant.healthcheck-all` launchd StartInterval slipped across the Mini's overnight sleep window, freezing `projects.last_healthy_at`. Cadence had already self-recovered by diagnosis time (three back-to-back 5-min ticks landed and DB stamp refreshed to <20s old). No restart was needed or attempted. Also re-confirmed the historical anyio `TaskHandle` ImportError in `project.baseball-bingo.err.log` is stale (traces from PID 3619, pre-restart); the shared `ai-server-bpzo5SVu` venv imports `anyio._core._tasks.TaskHandle` cleanly today.
+
+**Fix**: none applied — the underlying `events.py` live-probe gate (which would zero these false positives) is still trapped by the workspace-push meta-bug per the 51st TROUBLESHOOTING entry. Owner action on that meta-bug remains the true unblock. Left a sub-finding in TROUBLESHOOTING that if the long-gap flavor becomes chronic, migrating `com.assistant.healthcheck-all` from `StartInterval` to `StartCalendarInterval + RunAtLoad` (or a `caffeinate`-driven watchdog) would force a wake-up tick — worth a follow-up server-patch if it re-fires.
+
+Job: `488aa3f2-10c3-4910-a737-0add165bd796`.
+
 ## 2026-08-03 — healthcheck-all cadence-slip false positive (atlas, 61st recurrence)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended).

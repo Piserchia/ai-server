@@ -14,6 +14,20 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-08-17 — before restarting an "unhealthy" project, prove it's the app and not the healthcheck monitor
+
+`projects.last_healthy_at` staleness is NOT proof the service is down — it only means `scripts/healthcheck-all.sh` (launchd, 5-min interval) hasn't successfully probed it recently. macOS-sleep-cadence-slips of the healthcheck launchd label have caused this false positive **64 times** (docs/TROUBLESHOOTING.md "cadence-slip" entries 43-64; job `488aa3f2` was the biggest — 14h gap across overnight sleep). Restarting a running app on this signal churns state and hides the real bug (the monitor).
+
+Before any restart in response to a stale `last_healthy_at`, run this three-line differential:
+```bash
+curl -sf -o /dev/null -w "%{http_code}\n" http://localhost:$PORT$HEALTHCHECK   # 200 → app fine
+lsof -nP -iTCP:$PORT -sTCP:LISTEN                                              # listener present?
+tail -5 <ai-server>/volumes/logs/healthcheck.out.log                           # 5-min cadence intact?
+```
+If curl=200 and lsof shows a listener but healthcheck.out.log timestamps aren't ~5 min apart, the launchd monitor is the problem — either it will self-recover on the next tick, or `launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all` (host-tier; not runnable from workspace-clone sessions).
+
+**Second gotcha, same incident**: baseball-bingo's `start_command` runs `/Users/.../virtualenvs/ai-server-bpzo5SVu/bin/python -m uvicorn ...` — i.e. it shares the ai-server runner's pipenv. Any partial pip churn in the runner venv can break bingo's ASGI request path (a mid-install anyio state caused a `TaskHandle` ImportError burst on 2026-07-30 that's still preserved in `project.baseball-bingo.err.log`). If bingo starts ImportError-ing again after a runner dep bump, the fix is a full re-install of the runner venv, not touching baseball-bingo. Long-term: give bingo its own venv.
+
 ## 2026-07-12 — launchd -15 exit codes with active PIDs are normal
 
 When `launchctl list` shows a last-exit code of `-15` (SIGTERM) alongside an active PID, this is **not** an anomaly. It means launchd sent SIGTERM to gracefully stop the previous instance before restarting it; the current process is running normally. Only treat a non-zero exit code as a crash indicator when column 1 (the PID) is `-`, meaning the process is not currently running. Flagging `-15` exits with active PIDs as anomalies during upkeep audits produces false positives.
