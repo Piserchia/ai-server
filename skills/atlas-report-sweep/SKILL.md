@@ -10,6 +10,7 @@ escalation:
   on_failure:
     model: claude-opus-4-7
     effort: high
+context_files: [".context/SYSTEM.md", "skills/atlas-report/SKILL.md"]
 tags: [atlas, finance, research, scheduled-capable]
 ---
 
