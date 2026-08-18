@@ -29,14 +29,37 @@ All from `ATLAS="$HOME/Library/Application Support/ai-server/projects/atlas"`.
 
 ```bash
 cd "$ATLAS"
+STATE_DIR="$HOME/Library/Application Support/ai-server/volumes/state"
+MARKER="$STATE_DIR/deployed-sha-atlas"
 BEFORE=$(git rev-parse --short HEAD)
 git pull --ff-only    # ff-only: a non-ff means the runtime clone diverged — STOP and report
 AFTER=$(git rev-parse --short HEAD)
-git log --oneline "$BEFORE..$AFTER"
+# First use: seed the marker from BEFORE — the pre-pull state IS the last
+# deployed state, so red-gated runs before the first green one can't
+# re-strand their ranges behind a later run's BEFORE (review catch
+# 2026-08-18: red run, then green run, both markerless, would have
+# reproduced the incident and made it permanent).
+[ -s "$MARKER" ] || { mkdir -p "$STATE_DIR"; git rev-parse "$BEFORE" > "$MARKER"; }
+# Range base = the last SUCCESSFULLY deployed SHA, not this pull's start point.
+# A gate-failed deploy advances the clone without shipping, so BEFORE..AFTER
+# would silently drop that run's paths from every later check (2026-08-17
+# incident: web/ was pulled by a red-gated run; the next deploy's range had no
+# web/ so the build was skipped — stale bundle behind a green healthcheck).
+RANGE_BASE=$BEFORE
+if [ -s "$MARKER" ] && git merge-base --is-ancestor "$(cat "$MARKER")" "$AFTER" 2>/dev/null; then
+  RANGE_BASE=$(cat "$MARKER")
+fi
+git log --oneline "$RANGE_BASE..$AFTER"
 ```
 
-If `BEFORE == AFTER`: report "already up to date" and stop (nothing to deploy). Never
-`git reset`/`checkout --force`; a dirty tree or divergence is a finding, not an obstacle.
+If the undeployed range is empty (`git rev-parse "$RANGE_BASE"` equals
+`git rev-parse "$AFTER"`): report "already deployed" and stop. `BEFORE == AFTER`
+alone is NOT a reason to stop — when the marker lags the clone, a previous run
+pulled these commits but never shipped them, and this deploy proceeds over
+`RANGE_BASE..AFTER` (that no-op-pull recovery is the point of the marker).
+The marker always exists past the seed line above, and a failed run never
+moves it — so consecutive red runs accumulate into one honest range. Never `git reset`/`checkout --force`; a dirty tree or
+divergence is a finding, not an obstacle.
 
 **If the pull refuses (divergence or dirty tree), the report MUST include the evidence**
 so the human can decide in one round-trip:
@@ -64,7 +87,8 @@ dbmate --migrations-dir db/migrations up      # idempotent; applies anything new
 
 ### 3. Dependencies + test gates (the deploy gate)
 
-Only reinstall when inputs changed between BEFORE..AFTER (check `git diff --name-only`):
+Only reinstall when inputs changed in the undeployed range (check
+`git diff --name-only "$RANGE_BASE..$AFTER"`):
 - `dashboard/pyproject.toml` changed → `dashboard/.venv/bin/pip install -e "./dashboard[dev,feeds]" -q`
 - `pmedge/pyproject.toml` changed → same pattern for pmedge
 - `web/package-lock.json` changed → `cd web && npm ci`
@@ -81,7 +105,7 @@ Momentum gate — DETERMINISTIC path check, same pattern as the web build
 gate but this skill is the executor, so it must live here too):
 
 ```bash
-if git -C "$ATLAS" diff --name-only "$BEFORE..$AFTER" | grep -q '^momentum/'; then
+if git -C "$ATLAS" diff --name-only "$RANGE_BASE..$AFTER" | grep -q '^momentum/'; then
   cd "$ATLAS/momentum" || exit 1
   if [ ! -x .venv/bin/python ]; then    # self-heal: venv is an allowed runtime-clone write
     python3.12 -m venv .venv && .venv/bin/pip install -q -e '.[dev]'
@@ -98,7 +122,7 @@ commit range, so the fix lands in the dev repo first.
 ### 4. Build web — DETERMINISTIC check, not judgment
 
 ```bash
-if git -C "$ATLAS" diff --name-only "$BEFORE..$AFTER" | grep -q '^web/'; then
+if git -C "$ATLAS" diff --name-only "$RANGE_BASE..$AFTER" | grep -q '^web/'; then
   cd "$ATLAS/web" && npm run build    # a build failure also stops the deploy
 else
   echo "no web/ changes in range — build skipped"
@@ -111,8 +135,8 @@ needed build ships a stale UI with a green healthcheck (incident 2026-07-10: the
 
 ### 5. Restart + verify
 
-Restart only what the change range touches (web/ → atlas; dashboard/ → atlas-dash-scheduler;
-pmedge/ → atlas-pm-edge; when unsure, all three):
+Restart only what `RANGE_BASE..AFTER` touches (web/ → atlas; dashboard/ →
+atlas-dash-scheduler; pmedge/ → atlas-pm-edge; when unsure, all three):
 
 ```bash
 UID_N=$(id -u)
@@ -128,10 +152,24 @@ Any service NOT RUNNING or a non-200 → tail its err log
 (`~/Library/Application Support/ai-server/volumes/logs/project.atlas*.err.log`), include the
 tail in the summary, and flag the deploy DEGRADED.
 
+Only when every gate ran green, every restarted service is RUNNING, and the
+healthcheck returned 200, advance the deployed marker — a failed or DEGRADED
+deploy leaves it untouched so the next run re-covers the same range
+(re-running gates/builds over an already-shipped range is idempotent and
+cheap; silently skipping an unshipped one is the incident):
+
+```bash
+mkdir -p "$STATE_DIR"
+git rev-parse HEAD > "$MARKER"
+```
+
 ### 6. Summary
 
-One paragraph: BEFORE→AFTER commits deployed, gates run + results, services restarted,
-healthcheck code. If stopped at a gate: what failed and where to look.
+One paragraph: RANGE_BASE→AFTER commits deployed (note when the base came from
+the marker rather than this pull's BEFORE — that means a prior run's undeployed
+work shipped now), gates run + results, services restarted, healthcheck code,
+and whether the marker advanced. If stopped at a gate: what failed and where
+to look.
 
 ## Hard rules
 
@@ -157,6 +195,12 @@ edit blocks every future deploy. Changelog entries for atlas belong in the DEV r
   crash output after a restart.
 - **Build is deterministic, not judgment** (step 4): run the exact `grep '^web/'` check on
   the range; skipping a needed build ships a stale UI (incident 2026-07-10).
+- **A gate-failed deploy consumes the pull, not the marker** (2026-08-17): the
+  clone advances even when the gates go red, so path checks anchored on the
+  current pull would miss the failed run's changes forever after. That is why
+  every range in this skill is `RANGE_BASE..AFTER` (marker-anchored) and the
+  marker only moves on a fully green deploy. A no-op pull with a lagging
+  marker is a real deploy, not "already up to date".
 - **Runtime-born commits block deploys**: any `git commit` made inside `projects/atlas`
   (instead of a development clone that pushes to GitHub) will cause the next `--ff-only`
   pull to refuse — a process violation; do NOT force-push or reset — stop, report, let the

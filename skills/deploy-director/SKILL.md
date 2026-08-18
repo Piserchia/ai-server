@@ -93,7 +93,16 @@ project's own layout, gates from its `delivery:` contract.
 - **Divergence**: target checkout ahead of its upstream → STOP and report
   (single-writer violation; a human decision, never yours to bulldoze).
 - **Already-deployed**: empty range → report "nothing to deploy" and stop.
-  Do not dispatch a no-op.
+  Do not dispatch a no-op. EXCEPTION for project targets (2026-08-18): an
+  empty upstream range is NOT proof of nothing-to-deploy — a previous
+  executor run may have pulled and then failed a gate, leaving the clone at
+  upstream HEAD with the work unshipped. Also read the executor's last-green
+  marker `~/Library/Application Support/ai-server/volumes/state/deployed-sha-<slug>`
+  (atlas: `deployed-sha-atlas`); if it exists and differs from the runtime
+  clone's HEAD, the true pending range is `<marker>..HEAD` inside the clone —
+  summarize from THAT range — the target remains eligible for dispatch
+  through the normal steps below (the executor anchors its own checks on the
+  same marker and will ship the stranded work).
 - **Double-dispatch guard**: `psql assistant -c "SELECT id, kind, resolved_skill,
   status FROM jobs WHERE (kind IN ('server-deploy','server_deploy','project-redeploy','project_redeploy','atlas-redeploy','atlas_redeploy')
   OR resolved_skill IN ('server-deploy','project-redeploy','atlas-redeploy'))

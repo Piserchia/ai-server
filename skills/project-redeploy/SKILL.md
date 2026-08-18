@@ -68,13 +68,32 @@ Only continue past this step when the contract tells you what to restart.
 
 ```bash
 cd "$P"
+STATE_DIR="$HOME/Library/Application Support/ai-server/volumes/state"
+MARKER="$STATE_DIR/deployed-sha-<slug>"
 BEFORE=$(git rev-parse --short HEAD)
 git pull --ff-only          # ff-only: a non-ff means the clone diverged — STOP, report
 AFTER=$(git rev-parse --short HEAD)
-git log --oneline "$BEFORE..$AFTER"
+# First use: seed the marker from BEFORE — the pre-pull state IS the last
+# deployed state, so red-gated runs before the first green one can't
+# re-strand their ranges behind a later run's BEFORE (review catch 2026-08-18).
+[ -s "$MARKER" ] || { mkdir -p "$STATE_DIR"; git rev-parse "$BEFORE" > "$MARKER"; }
+# Range base = the last SUCCESSFULLY deployed SHA (marker), not this pull's
+# start point: a gate-failed deploy advances the clone without shipping, and
+# BEFORE..AFTER would silently drop that run's paths from the dep/build/restart
+# checks (atlas incident 2026-08-17 — stale bundle behind a green healthcheck).
+RANGE_BASE=$BEFORE
+if [ -s "$MARKER" ] && git merge-base --is-ancestor "$(cat "$MARKER")" "$AFTER" 2>/dev/null; then
+  RANGE_BASE=$(cat "$MARKER")
+fi
+git log --oneline "$RANGE_BASE..$AFTER"
 ```
 
-If `BEFORE == AFTER`: report "already up to date" and stop. If the pull refuses
+If the undeployed range is empty (`git rev-parse "$RANGE_BASE"` equals
+`git rev-parse "$AFTER"`): report "already deployed" and stop. `BEFORE == AFTER`
+alone is NOT a reason to stop — a lagging marker means a previous run pulled
+commits but never shipped them, and this deploy proceeds over
+`RANGE_BASE..AFTER`. The marker always exists past the seed line above, and a
+failed run never moves it — consecutive red runs accumulate into one range. If the pull refuses
 (divergence or a dirty tree), that is a **finding, not an obstacle** — never
 `git reset`/`checkout --force`. Include the evidence so a human can resolve in
 one round-trip:
@@ -99,11 +118,11 @@ set -a; [ -f .env ] && source .env; set +a
 
 A pulled change may add a dependency; a build/test gate that runs without it
 red-gates with no way to self-heal. Reinstall ONLY when a dependency file
-changed in `BEFORE..AFTER` (read the project's `start_command`/build gate to
+changed in `RANGE_BASE..AFTER` (read the project's `start_command`/build gate to
 find the right interpreter/venv — projects vary):
 
 ```bash
-CHANGED=$(git diff --name-only "$BEFORE..$AFTER")
+CHANGED=$(git diff --name-only "$RANGE_BASE..$AFTER")
 # Node (front-end): a changed lockfile → clean install in the web dir.
 echo "$CHANGED" | grep -qE '(^|/)package(-lock)?\.json$' && (cd "<web dir from manifest>" && npm ci)
 # Python: a changed dep manifest → install into the project's OWN venv
@@ -121,12 +140,13 @@ freshly-cloned runtime clone counts as "changed" — install + build once.
 For each entry in `delivery.deploy.gates`, in order:
 
 - **`kind: test`** — run its `cmd`. Non-zero exit → **STOP the deploy**, do not
-  build, do not restart. Summary = the failing output + the `BEFORE..AFTER`
-  range, so the fix lands upstream first.
+  build, do not restart. Summary = the failing output + the
+  `RANGE_BASE..AFTER` range, so the fix lands upstream first. The marker does
+  not move — the next deploy re-covers this same range.
 - **`kind: build`** — if it has `when_paths`, run the build **only if** one of
   those paths changed in range; otherwise skip it and say so:
   ```bash
-  if git diff --name-only "$BEFORE..$AFTER" | grep -qE '^(web/|frontend/)'; then
+  if git diff --name-only "$RANGE_BASE..$AFTER" | grep -qE '^(web/|frontend/)'; then
     <build cmd>       # a build failure also STOPS the deploy
   else
     echo "no matching paths changed in range — build skipped"
@@ -140,7 +160,7 @@ For each entry in `delivery.deploy.gates`, in order:
 
 ### 4. Restart — only the affected services
 
-Restart only services whose inputs changed in `BEFORE..AFTER` when you can tell;
+Restart only services whose inputs changed in `RANGE_BASE..AFTER` when you can tell;
 when unsure, restart all of `delivery.deploy.services`. Labels are
 `gui/$(id -u)/com.assistant.project.<service>`:
 
@@ -171,10 +191,21 @@ the actual change (curl the route you expect to have changed and grep the
 response for the new behavior) — a green healthcheck with stale behavior is a
 FAIL, not a pass.
 
+Only when every gate ran green, the restarted services are RUNNING, and every
+healthcheck met its `expect`, advance the deployed marker; a failed or
+DEGRADED deploy leaves it untouched so the next run re-covers the range:
+
+```bash
+mkdir -p "$STATE_DIR"
+git rev-parse HEAD > "$MARKER"
+```
+
 ### 6. Summary (this becomes the job summary)
 
-One paragraph: `BEFORE→AFTER` deployed, each gate run + its result, which
-services restarted, and the healthcheck code. If you stopped at a gate: exactly
+One paragraph: `RANGE_BASE→AFTER` deployed (note when the base came from the
+marker — a prior run's undeployed work shipped now), each gate run + its
+result, which services restarted, the healthcheck code, and whether the marker
+advanced. If you stopped at a gate: exactly
 what failed and where to look. Include the evidence commands + their output —
 the acceptance evaluator re-checks claims.
 
@@ -183,6 +214,8 @@ the acceptance evaluator re-checks claims.
 - [ ] `--ff-only` pull; divergence reported, never forced
 - [ ] Every declared gate run in order; a red test/build STOPPED the deploy
 - [ ] Path-gated builds decided by the exact `when_paths` grep (outcome pasted)
+- [ ] All ranges anchored on `RANGE_BASE` (deployed marker), never bare `BEFORE`;
+      marker advanced only on a fully green deploy
 - [ ] Only `com.assistant.project.*` services restarted (never runner/bot/web)
 - [ ] Healthcheck code captured; DEGRADED flagged on any non-expected status
 - [ ] No tracked-file writes/commits in the runtime clone
@@ -204,6 +237,11 @@ the acceptance evaluator re-checks claims.
   services and a `web/`-gated Next.js build; until its manifest carries an
   explicit `delivery.deploy` block, keep using `atlas-redeploy`. New dev-repo
   projects should use this skill via their manifest contract.
+- **A gate-failed deploy consumes the pull, not the marker** (atlas incident
+  2026-08-17): the clone advances even on red gates, so ranges anchored on the
+  current pull silently drop the failed run's paths. Anchor on the
+  `deployed-sha-<slug>` marker; treat a no-op pull with a lagging marker as a
+  real deploy.
 - **Your cwd is the runtime clone** (the runner scopes deploy jobs there) — you
   do not need to `cd` into `projects/<slug>` yourself, but do confirm with
   `pwd` and `git remote -v`.
