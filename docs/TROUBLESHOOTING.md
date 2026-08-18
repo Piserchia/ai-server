@@ -152,6 +152,50 @@ in prod (pre-commit guard). Related check while you're there: `git log
 learnings branch is manual and silently piles up (29 commits between
 07-28 and 08-07).
 
+## Symptom: a TRACKED prod doc edit is never published — log says "non-doc drift"
+
+### Root cause (diagnosed 2026-08-17)
+
+Distinct from the untracked case above: the file IS tracked and IS modified,
+but its path is outside `ALLOWLIST` in `scripts/sync-learnings.sh` (line 35).
+The allowlist is `.context/*.md`, `.context/modules/*/*.md`,
+`.context/modules/*/skills/*.md`, `skills/*/*.md`, and the two
+`Troubleshooting.md` spellings — **and nothing else**. So a prod session that
+edits any of these strands its work forever:
+
+- `docs/superpowers/plans/*.md`  ← observed: 17 lines of P4/P5 status written
+  2026-08-03, still unpublished 2026-08-17 (14 days, ~330 hourly runs)
+- `docs/*.md` other than TROUBLESHOOTING (`README.md`, `EVALUATION_*.md`, …)
+- `MISSION.md`, `CLAUDE.md`, any top-level `*.md`
+- `.context/org/**` below the `modules/` pattern
+
+The hourly timer keeps succeeding — it publishes the allowlisted files and
+logs the rest as a non-fatal `WARNING`. Exit code stays 0, so nothing alerts.
+**"sync-learnings is green" does not mean "prod has no stranded work."**
+
+### Diagnostics
+
+```bash
+cd "$HOME/Library/Application Support/ai-server"
+git status --short                      # tracked ' M' outside the allowlist = stranded
+grep -c "non-doc drift" volumes/logs/sync-learnings.out.log   # how long it's been warning
+git diff --stat                         # what is actually sitting there
+```
+
+### Fix (rescue pattern)
+
+Same as above but simpler, since the file is tracked: capture the diff in
+prod (`git diff -- <path> > /tmp/drift.patch`), `git apply --3way` it in the
+DEV repo, commit with a provenance note, push. The next deploy's ff-only
+pull then reconciles prod's working tree.
+
+**Open gap (not fixed):** widening `ALLOWLIST` would let prod auto-publish
+plan/MISSION edits, which cuts against the single-writer topology's intent —
+it's a deliberate decision, not an oversight to patch blindly. Until someone
+decides, the WARNING is the only signal, and it is log-only. Consider either
+(a) an explicit owner decision to add `docs/superpowers/plans/*.md`, or
+(b) making non-doc drift older than N days a heartbeat/alert condition.
+
 ## Symptom: `jobs.review_outcome` is NULL for every job / post-review "never runs"
 
 ### Root cause (fixed 2026-08-05 — keep for the pattern)
@@ -2476,7 +2520,78 @@ blocker per the 51st entry still stands. The trigger-storm
 sibling chain has now self-documented its own predicted
 tail across three consecutive fires — sufficient evidence
 that the self-suppress guard IS the right next fix
-whenever the workspace-push meta-bug unblocks it.)
+whenever the workspace-push meta-bug unblocks it.);
+2026-08-18 ~07:36Z (job `365acc34`, baseball-bingo answered
+`/healthz` HTTP 200 in 5.7ms and `/` HTTP 200 in 4.8ms on port
+8790; launchctl label `com.assistant.project.baseball-bingo`
+PID 3253 stable. DB `last_healthy_at` was 2026-08-18T07:00:48Z
+at trigger fire — 36m stale; atlas `last_healthy_at` was
+identically frozen at 07:00:49Z, canonical shared-cadence
+fingerprint. `healthcheck.out.log` last successful tick
+07:00:49Z (seven missed 5-min ticks: 07:05/10/15/20/25/30/35).
+`com.assistant.healthcheck-all` PID `-` (idle between ticks per
+usual); kickstarted inline via `launchctl kickstart -k
+gui/$(id -u)/com.assistant.healthcheck-all`, cadence resumed at
+07:36:58Z and BOTH baseball-bingo and atlas `last_healthy_at`
+refreshed to ~4s old. Eighty-fourth recurrence — canonical
+sleep-throttled-cadence-slip; no concurrent atlas twin observed
+in the dispatch window (baseball-bingo-only fire). Live-probe
+gate STILL un-landed after 84 recurrences; not re-dispatching a
+server-patch — workspace-push meta-bug blocker per the 51st
+entry still stands. Self-suppress guard suggested in
+80/81/82/83 remains the highest-value cheap follow-up whenever
+that meta-bug unblocks.);
+2026-08-18 ~07:36Z (atlas self-diagnose, job
+`1f868e37-a526-4a50-a850-6cdc8a835233` — the exact atlas twin the
+84th predicted as "no concurrent atlas twin observed in dispatch
+window". Atlas answered `/` HTTP 200 in 9.2ms on port 8791; all
+three launchd services healthy (PIDs 53835/53837/53839,
+LastExitStatus=-15 legacy SIGTERM). DB `last_healthy_at` was
+2026-08-18T07:00:49Z at diagnose fire — same 07:00:49Z shared-cadence
+freeze as the 84th (seven missed 5-min ticks). This diagnose loaded
+~4s before the 84th's kickstart landed, so the freeze was still
+visible in the DB at my probe time. Kickstarted
+`com.assistant.healthcheck-all` a second time (idempotent);
+`last_healthy_at` refreshed to ~8s old. Eighty-fifth recurrence —
+canonical intra-slip trigger-storm twin, exactly as the 84th
+predicted's-inverse: it saw baseball-bingo only, this atlas fire is
+its concurrent partner arriving on its own trigger-eval loop.
+Self-suppress guard (same-slug running/queued check before enqueue)
+would have collapsed 84/85 to a single fire. Live-probe gate still
+un-landed; not re-dispatching server-patch — workspace-push meta-bug
+per 51st still blocks.);
+2026-08-18 ~08:13Z (atlas self-diagnose, job
+`ef383de8-9e1c-4939-91f6-48f07fa6289a` — enqueued 08:13:46Z, ~51s
+before the 85th's kickstart landed (08:14:37Z). By dispatch
+time (08:16Z) atlas was already green: HTTP 200 in 38ms, all three
+launchd services up, `last_healthy_at` age 2m26s and refreshing
+normally. No new kickstart needed — the 85th's kickstart already
+restored cadence. Eighty-sixth recurrence — pure dispatch-window
+overlap with 85; both fires shared the same 07:00:49Z freeze
+window. Same conclusion: same-slug self-suppress before enqueue
+would have collapsed 85/86 to a single fire; workspace-push
+meta-bug per 51st still blocks the structural fix.);
+2026-08-18 ~08:13Z (job `0e0128e6`, baseball-bingo self-diagnose —
+enqueued 08:13:46Z, same 07:00:49Z freeze window as the 85/86 twins,
+so this is the concurrent baseball-bingo twin of the 86th atlas
+entry immediately above. By probe time (~08:16Z) baseball-bingo was
+already green: `/healthz` HTTP 200 in <1ms x3, `/` HTTP 200 with
+full HTML, `/static/style.css` HTTP 200 on port 8790; launchctl
+label `com.assistant.project.baseball-bingo` PID 3289 stable.
+`healthcheck.out.log` shows the slip 07:00:49 → 07:36:58 (7 missed
+ticks) → 07:53:16 (3 missed) → 08:13:52 (4 missed), then normal
+tick at 08:14:37Z which refreshed both projects to 2m stale — the
+same 85th kickstart the 86th noted. No new kickstart needed.
+Historical `TaskHandle` ImportError bursts in
+`project.baseball-bingo.err.log` remain the July 30 23:40 stale
+tail, unrelated. Eighty-seventh recurrence — canonical
+sleep-throttled-cadence-slip triplet fire (84 baseball / 85 atlas
+kickstart / 86 atlas dispatch-window overlap / 87 baseball
+dispatch-window overlap all from ONE 07:00:49Z freeze). Same-slug
+self-suppress before enqueue would have collapsed 84+87 (both
+baseball-bingo fires) to a single fire; workspace-push meta-bug
+per 51st entry still blocks landing the server-patch structural
+fix.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 

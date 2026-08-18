@@ -2,6 +2,33 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-18 — healthcheck-all cadence-slip false positive (baseball-bingo, 84th recurrence)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended).
+
+**Why**: self-diagnose fired for baseball-bingo unhealthy (`last_healthy_at`
+36m stale at fire, stamp 07:00:48Z vs probe 07:36Z), though `/healthz`
+returned HTTP 200 in 5.7ms and `/` HTTP 200 in 4.8ms on port 8790,
+launchctl label `com.assistant.project.baseball-bingo` PID 3253 stable.
+Atlas `last_healthy_at` was identically frozen at 07:00:49Z — canonical
+shared-cadence fingerprint. `healthcheck.out.log` last successful tick
+07:00:49Z (seven missed 5-min ticks: 07:05/10/15/20/25/30/35).
+`com.assistant.healthcheck-all` idle between ticks (PID `-`).
+
+**Fix**: `launchctl kickstart -k gui/$(id -u)/com.assistant.healthcheck-all`.
+Cadence resumed with a tick at 07:36:58Z; both baseball-bingo and atlas
+`last_healthy_at` refreshed to ~4s old. Very-low-risk auto-apply per the
+self-diagnose skill.
+
+**Still blocked**: the events.py live-probe gate that would zero these
+false positives remains un-landed after 84 recurrences — workspace-push
+meta-bug per TROUBLESHOOTING.md entry 51. Self-suppress guard proposed
+in entries 80–83 (skip enqueue if a running/queued self-diagnose for the
+same slug exists) remains the cheapest follow-up once that meta-bug
+unblocks. Not re-dispatching a server-patch.
+
+Job: `365acc34`.
+
 ## 2026-08-03 — healthcheck-all cadence-slip false positive (atlas, 61st recurrence)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended).
