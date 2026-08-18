@@ -2634,6 +2634,28 @@ the diagnostic is in `volumes/logs/runner.out.log` in the **production** checkou
 (`~/Library/Application Support/ai-server`), not the dev repo's `runner.log`, which
 is stale.
 
+## Symptom: a Python venv under `~/Documents` intermittently loses its editable installs — `ModuleNotFoundError` from console scripts, while `python -c "import pkg"` works from inside the package directory
+
+**Root cause (found 2026-08-18, atlas valuation build):** a sync daemon
+watching `~/Documents` re-flags files inside `.venv/` with the macOS
+`UF_HIDDEN` file flag (see it with `ls -lO`), and CPython >= 3.12.9's
+`site.py` **silently skips hidden `.pth` files** — so editable-install
+finders never load. The cwd masks it when you test from inside the package
+dir (cwd is on `sys.path`), which is why it looks intermittent.
+`chflags nohidden` is reverted by the daemon within seconds; `pip install -e`
+again only works until the next re-flag pass.
+
+**Durable fix:** drop a `sitecustomize.py` into the venv's `site-packages`
+that re-processes any hidden `.pth` files — `site.py` imports
+`sitecustomize` through the normal import system, which ignores the flag.
+Atlas ships this as `scripts/install-venv-sitecustomize.sh` (run it after
+recreating any atlas venv); copy that pattern for any other venv that must
+live under `~/Documents`. Venvs outside `~/Documents` (e.g. the production
+checkout under `~/Library/Application Support`) are unaffected.
+
+**First recorded:** atlas `docs/DEVELOPMENT.md` gotcha 2026-08-10
+("editable installs die silently"), root-caused 2026-08-18.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:
