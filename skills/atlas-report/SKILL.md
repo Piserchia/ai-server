@@ -71,19 +71,25 @@ Skip the single-analyst flow below entirely for stocks. Instead:
      Token: <token>.`
 3. Parse each subagent's 4-line return (LENS/REPORT_ID/EVAL/DETAIL). A
    crashed subagent or `REPORT_ID: NONE` = that lens failed — carry on.
-4. Aggregate IN THIS SESSION under
+4. Re-fetch the packet: `atlas-dash packet <SYMBOL> >
+   /tmp/atlas-packet-agg-<job>.json` — so the aggregate's citable map
+   includes the `biz_*` values from any dossier the business lens just
+   saved. The aggregate's `save-report` uses
+   `--packet-file /tmp/atlas-packet-agg-<job>.json`. The technical lens
+   keeps the ORIGINAL packet file (`/tmp/atlas-packet-<job>.json`).
+5. Aggregate IN THIS SESSION under
    `dashboard/experts_charters/report_aggregator.md` (read it now, plus
-   `dashboard/experts_knowledge/report_aggregator.md` — if that file does
-   not exist yet there are simply no lessons, proceed): read the surviving
-   lens payload files (`/tmp/atlas-bizrep-<token>.json`,
+   the `aggregator_knowledge_path` named in the re-fetched packet JSON —
+   if that file does not exist yet there are simply no lessons, proceed):
+   read the surviving lens payload files (`/tmp/atlas-bizrep-<token>.json`,
    `/tmp/atlas-techrep-<token>.json`), author the aggregate payload, and
    persist with the standard save-report (NO --lens) plus
    `--expert report_aggregator` and `--source-business <id>` /
    `--source-technical <id>` for each lens that returned a report id. A
    missing lens MUST be named in your Limitations section — the evaluator
    checks this.
-5. BOTH lenses failed → no aggregate: fail the job with both DETAIL lines.
-6. Lesson loop on the aggregate: `atlas-dash learn report_aggregator
+6. BOTH lenses failed → no aggregate: fail the job with both DETAIL lines.
+7. Lesson loop on the aggregate: `atlas-dash learn report_aggregator
    "<general rule>"` per evaluator finding, fix, retry (max 2).
 
 ### 2. Author `/tmp/atlas-payload-<job>.json`

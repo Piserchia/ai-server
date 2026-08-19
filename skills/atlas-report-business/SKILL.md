@@ -24,11 +24,16 @@ Your task prompt names the SYMBOL and a file-suffix token. Work from
 2. Follow the charter: freshness discipline (fresh → delta-check only;
    stale/missing → full research within the charter's budget), dossier via
    `business-save` (payload `/tmp/atlas-dossier-<token>.json`; on rejection
-   fix once, then give up honestly), then the lens report via
-   `save-report --symbol <SYMBOL> --lens business
+   fix once, then give up honestly). After a successful `business-save`,
+   re-run `atlas-dash business-context <SYMBOL> >
+   /tmp/atlas-bizctx2-<token>.json` — the dossier you just saved is what
+   makes your researched numbers citable, so save THAT run's `packet`
+   object to `/tmp/atlas-bizpkt-<token>.json` and use it for the lens
+   report: `save-report --symbol <SYMBOL> --lens business
    --payload-file /tmp/atlas-bizrep-<token>.json
    --packet-file /tmp/atlas-bizpkt-<token>.json --model "<your model>"`
-   where the packet file is the `packet` object from business-context.
+   where the packet file is the `packet` object from the POST-SAVE
+   business-context.
 3. Evaluation failed → `atlas-dash learn business_researcher "<general
    rule>"` per finding, fix, retry (max 2).
 4. Your ENTIRE final message is exactly these four lines (the orchestrator
