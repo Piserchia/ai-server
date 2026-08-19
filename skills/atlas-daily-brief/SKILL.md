@@ -11,6 +11,7 @@ escalation:
     model: claude-opus-4-7
     effort: high
 tags: [atlas, finance, scheduled-capable]
+context_files: [".context/SYSTEM.md"]
 ---
 
 # Atlas Daily Brief
