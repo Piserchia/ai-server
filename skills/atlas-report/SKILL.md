@@ -5,11 +5,12 @@ model: claude-sonnet-4-6
 effort: medium
 permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
-max_turns: 30
+max_turns: 40
 escalation:
   on_failure:
     model: claude-opus-4-7
     effort: high
+subagents: [atlas-report-business, atlas-report-technical]
 tags: [atlas, finance, research, scheduled-capable]
 ---
 
@@ -25,7 +26,10 @@ price or indicator value.
 ## Inputs
 
 Parse the target from the job description:
-- `atlas-report: asset <SYMBOL>` (or "report on NVDA") → per-asset report
+- `atlas-report: asset <SYMBOL>` (or "report on NVDA") → per-asset report.
+  **Stocks run the three-lens pipeline** (business + technical subagents,
+  then you aggregate); crypto/commodity assets keep the single-analyst path
+  below unchanged.
 - `atlas-report: sector <stock|crypto|commodity>` (or "crypto sector report") → sector review
 - `atlas-report: portfolio brief` (or "portfolio brief"/"weekly brief") → strategist brief
 - `atlas-report: tax review` (or "tax report"/"tax implications") → tax_researcher over the
@@ -51,6 +55,36 @@ Save the JSON to `/tmp/atlas-packet-<job>.json`. Read BOTH files it names: `char
 correct the charter's defaults; when they conflict, knowledge wins and your Limitations
 section says so). Sector packets flatten indicators to `SYMBOL.indicator` keys — cite them
 exactly in that form.
+
+### 1b. Stock pipeline (asset targets with asset_class = stock ONLY)
+
+Skip the single-analyst flow below entirely for stocks. Instead:
+
+1. You already saved the packet to `/tmp/atlas-packet-<job>.json`. Pick a
+   short token (e.g. the job id fragment).
+2. Dispatch BOTH lens subagents via the Task tool IN ONE MESSAGE (they run
+   in parallel):
+   - `atlas-report-business` with prompt:
+     `Business lens for <SYMBOL>. Token: <token>.`
+   - `atlas-report-technical` with prompt:
+     `Technical lens for <SYMBOL>. Packet: /tmp/atlas-packet-<job>.json.
+     Token: <token>.`
+3. Parse each subagent's 4-line return (LENS/REPORT_ID/EVAL/DETAIL). A
+   crashed subagent or `REPORT_ID: NONE` = that lens failed — carry on.
+4. Aggregate IN THIS SESSION under
+   `dashboard/experts_charters/report_aggregator.md` (read it now, plus
+   `dashboard/experts_knowledge/report_aggregator.md` — if that file does
+   not exist yet there are simply no lessons, proceed): read the surviving
+   lens payload files (`/tmp/atlas-bizrep-<token>.json`,
+   `/tmp/atlas-techrep-<token>.json`), author the aggregate payload, and
+   persist with the standard save-report (NO --lens) plus
+   `--expert report_aggregator` and `--source-business <id>` /
+   `--source-technical <id>` for each lens that returned a report id. A
+   missing lens MUST be named in your Limitations section — the evaluator
+   checks this.
+5. BOTH lenses failed → no aggregate: fail the job with both DETAIL lines.
+6. Lesson loop on the aggregate: `atlas-dash learn report_aggregator
+   "<general rule>"` per evaluator finding, fix, retry (max 2).
 
 ### 2. Author `/tmp/atlas-payload-<job>.json`
 
@@ -97,8 +131,10 @@ predictions.
 
 ### 5. Summary
 
-One paragraph: target, suggestion + confidence, evaluation score, lessons filed (if any),
-dashboard_gaps filed. Report renders at https://atlas.chrispiserchia.com/reports.
+One paragraph: target, suggestion + confidence, evaluation score(s) — for a
+stock pipeline run also the business outlook, each lens's report id, and any
+lens that failed with its one-line reason — lessons filed, dashboard_gaps
+filed. Report renders at https://atlas.chrispiserchia.com/reports.
 
 ## Failure modes
 
@@ -125,3 +161,9 @@ edit blocks every future deploy. Changelog entries for atlas belong in the DEV r
 - **Promise language fails.** "Will", "guaranteed", "certain" are automatic blockers.
 - **`atlas-dash learn` only takes one rule per call.** Loop over multiple findings; each gets
   its own call. Batch strings are silently truncated.
+- **Pipeline (stocks): lens reports save with `--lens`, the aggregate saves
+  WITHOUT it.** The aggregate must cite at least one `biz_*` key when the
+  business lens ran, and name a missing lens in Limitations — both are
+  evaluator checks.
+- **Subagents return exactly 4 lines** (LENS/REPORT_ID/EVAL/DETAIL). Anything
+  else = treat that lens as failed and aggregate without it.

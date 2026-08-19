@@ -11,7 +11,9 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | Agent | Role | Privilege | Purpose |
 |---|---|---|---|
 | `atlas-manager` | manager | read-only | Weekly atlas review: product/quality/ops gaps → proposals (Thu 06:00) |
-| `atlas-report` | worker | content | Single expert report |
+| `atlas-report` | worker | content | Single expert report (stocks: three-lens pipeline) |
+| `atlas-report-business` | worker | content | Business lens subagent of the atlas-report stock pipeline (dispatched via Task tool, not scheduled) |
+| `atlas-report-technical` | worker | content | Technical lens subagent of the atlas-report stock pipeline (dispatched via Task tool, not scheduled) |
 | `atlas-report-sweep` | worker | content | Weekly full report pass |
 | `atlas-scout` | worker | content | Prediction-market / opportunity scan |
 | `atlas-daily-brief` | worker | content | Daily portfolio brief |
