@@ -2,6 +2,194 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-21 — self-diagnose: dedup-bug finding in events.py (no code change here)
+
+**Files changed**: `docs/TROUBLESHOOTING.md` only (recurrence-note append).
+
+**Why**: while diagnosing recurrence #92 of the well-known "project 'X'
+unhealthy 20+ min but actually up" false positive, discovered a second
+bug that amplifies the noise: `_check_project_health` and
+`_check_skill_failures` in `src/runner/events.py` dedup by filtering
+`Job.resolved_skill == "self-diagnose"`, but queued jobs have
+`resolved_skill IS NULL` (the runner only sets it when the job starts
+running). Result: while the first self-diagnose sits in the queue,
+subsequent 60-s event cycles do not see it and spawn duplicates.
+Observed here: six duplicate diagnoses (three per project) queued for
+baseball-bingo + atlas from a single cadence slip.
+
+**Action this session**: (a) cancelled four duplicate queued
+self-diagnose jobs via direct `UPDATE jobs SET status='cancelled'`
+(safe — queued jobs are skipped in `main._process_job` line 312 if
+status ≠ 'queued'); (b) appended recurrence #92 note to
+`docs/TROUBLESHOOTING.md` naming the dedup bug; (c) dispatched
+`server-patch` job `8e92bc2b-47e4-462d-8bc9-0fafea620c5b` to change
+both dedup queries to filter by `Job.kind == "self-diagnose"` (set at
+INSERT, never NULL).
+
+**No `src/runner/events.py` changes here** — this is a prod checkout,
+server code is committed only in the dev repo via the dispatched
+server-patch. This entry publishes to `runtime-learnings` via the
+hourly sync-learnings timer.
+
+## 2026-08-11 — per-job session-timeout override (payload.session_timeout_seconds)
+
+**Files changed**: `src/runner/main.py`, `src/gateway/web.py`,
+`scripts/seed-schedules.sh`, `tests/test_pure_functions.py`.
+
+**Why**: the 30-minute global ceiling killed three consecutive
+atlas-momo-research cycle-2 attempts (jobs 1ff5ec9a stream-timeout,
+bd9d04a1 + escalation 4ccd3a01 both `session_timeout` with real work
+unpushed). Heavy governed lab cycles legitimately need more; the ceiling
+itself must survive.
+
+**Fix**: `resolve_session_timeout(payload, default, cap=5400)` — payload
+override clamped to [60, 5400], garbage falls back to the default. Web API
+gains the optional `session_timeout_seconds` field (validated ge=60 le=5400);
+the momo schedule row now carries 3600 so Thursday's run benefits.
+
+**Verify**: `pipenv run pytest` — 1104 passed (6 new).
+
+## 2026-08-10 — workspace env-file provisioning (delivery.env_files)
+
+**Files changed**: `src/runner/workspaces.py`, `src/runner/session.py`,
+`tests/test_workspaces.py`, (registry: `src/registry/manifest.py`,
+`tests/test_manifest.py`).
+
+**Why**: `git clone` doesn't carry gitignored files, so a workspace-tier
+session never saw owner-provisioned credentials — atlas cycle #1 reported
+"No `.env`/credentials exist in this workspace" even after the owner put the
+Alpaca keys in `~/Documents/repos/atlas/.env` exactly as instructed. The
+Thursday `atlas-momo-research` run would have hit the same wall.
+
+**Fix**: projects opt in via manifest `delivery.env_files: [".env"]`;
+`workspaces.provision_env_files` copies each declared file from the canonical
+into the clone right after `create_workspace` (wired in `run_session`, where
+the delivery contract is already resolved). Copied entries are audited on
+`workspace_created.env_files`. Containment: relative in-repo paths only —
+absolute/`~`/`..` rejected at manifest validation AND by the runner-side
+`env_file_violation` belt; symlink sources refused (a repo symlink could
+otherwise smuggle a host file into the session-readable clone). Never raises;
+missing sources are skipped so the consumer fails with its own message.
+Code-review hardening (same day): resolve-containment on BOTH ends — the
+reviewer reproduced a symlinked-parent bypass (`sub/.env`, `sub` → host dir)
+that passed the final-component check; src must resolve inside the canonical
+and dst inside the workspace (dst-side symlinks also refused, else copy2
+writes through a committed symlink to a host path).
+
+**Verify**: `pipenv run pytest` — 1098 passed (13 new).
+
+## 2026-08-07 — session timeouts now escalate (timeout branch was a silent dead end)
+
+**Files changed**: `src/runner/main.py`, `tests/test_timeout_escalation.py` (new).
+
+**Why**: `_process_job`'s `asyncio.TimeoutError` handler failed the job and
+returned without `_refetch_job` + `_maybe_escalate` — every session timeout,
+for every skill, produced no escalation retry and no level-1 self-diagnose.
+Found live by the first `atlas-momo-research` smoke run (job `d21b5498`,
+timed out at the 30-min ceiling; its declared opus-5/xhigh escalation never
+spawned). Same missing-post-step class as the 0/516 post_review bug.
+
+**Fix**: timeout branch now mirrors the generic failure branch (refetch →
+escalate, exception-guarded). New hermetic AST contract test pins all three
+awaits (`_finish_job`, `_refetch_job`, `_maybe_escalate`) in the handler.
+
+**Verify**: `pytest tests/test_timeout_escalation.py` (3 passed) + full suite.
+
+## 2026-08-05 — post-review resurrected (0/516 → live) + escalation refetch
+
+**Files changed**: `src/runner/main.py`, `src/runner/review.py`,
+`tests/test_review.py`, `scripts/seed-schedules.sh`.
+
+Found by the closed-loop arc's own code review (three rounds — the first two
+rounds' more ambitious "review gates the deferred deploy child" design was
+scoped OUT after review kept finding holes in the deep promotion-ordering
+surgery it required; the deploy is already gated by the builder's in-session
+`code-review` subagent + `atlas_redeploy`'s pytest gates, so post_review
+stays a SECOND belt that flags, exactly like app-patch/server-patch).
+
+1. **post_review had NEVER fired — 0 of 516 jobs** (INV-13's second belt was
+   dead since inception): `_maybe_review` read `job.resolved_skill` off the
+   ORM instance loaded BEFORE `run_session`, but the session stamps
+   `resolved_skill` via a separate DB session — the detached instance never
+   sees it, so `skill_name` was always `None` and the review returned early.
+   Fix: `_process_job` refetches the Job row right after `_finish_job(
+   completed)`; every resolved_skill-keyed post-step (review, writeback
+   gate, learning gate) now sees the stamped value. Same refetch on the
+   FAILURE path so level-0 `escalation.on_failure` reads the real skill
+   (it was silently jumping to self-diagnose for task-kind jobs).
+2. **Wrong-diff guard**: reviewing `HEAD~1` is wrong when the workspace's
+   `sync_canonical` ff failed (routine on a dirty/diverged dev clone) or the
+   session committed nothing — the review would grade someone else's commit.
+   `review.head_commit_epoch` + `is_stale_head` (pure, tested): HEAD older
+   than `job.started_at - 120s` → skip with audit event
+   `post_review_skipped` (reason=stale_head or no_diff).
+3. **`post_review.reviewer_model`/`reviewer_effort` were dead keys**
+   (reviewer hardcoded opus-4-7 for everyone): `run_code_review` takes
+   optional `model`/`effort`, wired from the skill's post_review dict;
+   defaults unchanged.
+4. **post_review FLAGS, it does not park** (the design the review rounds
+   converged on): activating post_review surfaced that the old
+   blocker→`awaiting_user` park was buggy dead code — it published a SECOND
+   `jobs:done` after the completion DM already fired (owner told "completed"
+   on a blocker), stranded task state, and let writeback/learning run on a
+   parked diff. And it bought nothing: the review runs AFTER the code is
+   committed/pushed, so parking can't un-merge — the real merge gate is each
+   skill's IN-SESSION `code-review` subagent before the push. So
+   `_maybe_review` now stamps `review_outcome` (job stays `completed`), and
+   on blocker/error emits a `post_review_flagged` audit event + a
+   `review_flagged` task DM (new additive branch in telegram_bot's
+   tasks:notify consumer). Surfaced by `review_outcome` in /status, the
+   retrospective, and the weekly manager sweep. No `awaiting_user`, no
+   task-advance skip, no double-publish.
+5. **Reviewer is FIXED (opus-4-7/high), not skill-chosen**: `run_code_review`
+   dropped the `reviewer_model`/`reviewer_effort` passthrough — a skill must
+   not be able to downgrade the reviewer that grades its own diffs.
+   atlas-build's frontmatter reviewer keys were removed (they were the only
+   caller trying to set them).
+6. **`_refetch_job` helper** dedupes the identical post-session refetch used
+   by both the success and failure paths (one place to change the refresh
+   semantics).
+7. **seed-schedules.sh**: every upsert value is a psql bound variable
+   (`-v n/c/k/d/p/nx`) inside a quoted heredoc (nothing bash-expands — a
+   payload with a quote or `$()` can no longer break seeding); empty
+   next-slot → NOW() via `COALESCE(NULLIF(:'nx','')::timestamptz, NOW())`;
+   new `job_payload` column carried via `COALESCE(EXCLUDED.job_payload,
+   schedules.job_payload)` so out-of-band scoping survives re-seeds.
+
+Deliberately NOT changed (reviewed across four rounds and scoped out):
+promotion ordering is untouched — `promote_deferred_for` runs
+unconditionally on completion as before; the deploy child is dispatched
+immediately by atlas-build (no `depends_on`-on-review); `session.py`,
+`plans.py`, `workspaces.py` are unchanged from HEAD (an earlier round's
+"review gates the deferred deploy child" machinery — ReviewGate,
+blocks_dependents, retained-workspace review, promotion reorder,
+fail_taskless_dependents — was fully reverted: it required deep
+promotion-ordering surgery that kept generating bugs, and the deploy is
+already gated by the in-session review + the executor's test gates).
+post_review runs under `_POST_REVIEW_TIMEOUT_SECONDS` (600s) — now that it
+actually fires, a hung reviewer sub-agent can't pin a concurrency slot while
+/health stays green; a timeout is an audited skip, not a verdict. The
+reviewed diff is the canonical checkout's `HEAD~1` (unchanged, pre-existing):
+the `is_stale_head` guard rejects an OLDER foreign HEAD but not a NEWER one,
+so on the multi-writer atlas canonical a foreign commit landing between the
+build's push and the ff-sync can be mis-graded — low harm now that
+post_review only FLAGS (a rare mis-stamp the evaluator/owner dismisses),
+never gates. Failure-path escalation now reads the real `resolved_skill`, so
+a failed atlas-build escalates into a stronger-model REBUILD (its own resume
+check completes-transitions-only on already-pushed work, so no duplication)
+instead of a read-only self-diagnose — an improvement.
+
+Follow-up backlog: task-less deferred dependents of a terminally-failed job
+aren't cascade-failed (pre-existing, unrelated); a task-less job flagged by
+post_review has no chat_id so its `review_flagged` DM is dropped — the audit
+event + review_outcome still record it, and the weekly atlas-evaluate now
+reads `review_outcome` for each build to surface a flag as a backlog item.
+
+**Verify**: `pipenv run pytest tests/test_review.py -q` (25 passed;
+TestStaleHeadGuard covers the wrong-diff guard); full suite green; after the
+next deploy, `psql assistant -c "SELECT review_outcome, count(*) FROM jobs
+WHERE resolved_skill IN ('app-patch','server-patch','atlas-build') GROUP BY
+1;"` should start showing non-NULL outcomes (the 0/516 symptom clears).
 ## 2026-08-03 — P4/P5 phase continuation: max_turns root-cause confirmed, two server-patch jobs dispatched (job `2e92aaae`)
 
 **Files changed**: `.context/modules/runner/skills/GOTCHAS.md` (root-cause diagnosis appended),

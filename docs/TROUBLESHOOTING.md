@@ -2631,7 +2631,65 @@ recurrences; not re-dispatching a server-patch — workspace-push
 meta-bug blocker per the 51st entry still stands. Same-slug
 self-suppress guard (skip enqueue if a running/queued self-
 diagnose for the same slug exists) suggested in 80/81/82/83
-would have collapsed 88+89 to a single fire.)
+would have collapsed 88+89 to a single fire.);
+2026-08-21 ~06:39Z (job `010fc470-8229-4b2f-9fbb-40695bbc1581`,
+baseball-bingo self-diagnose — service healthy at probe: local
+`/healthz` HTTP 200, public `https://bingo.chrispiserchia.com/healthz`
+HTTP 200, launchd `com.assistant.project.baseball-bingo` PID 3253
+running, `last_healthy_at` 2m 28s old (well inside 5-min cadence).
+`read_project_logs` tail again surfaced the stale-tail `TaskHandle`
+ImportError bursts; re-verified `from anyio._core._tasks import
+TaskHandle` succeeds cleanly at anyio 4.14.2 in the shared venv, so
+those tracebacks are historical and unrelated. Trigger fired on the
+20-min-unhealthy rule despite the healthcheck stamp being fresh —
+canonical false-positive. No kickstart or restart needed. Ninetieth
+recurrence — same class as 88/89; live-probe gate (skip event
+dispatch when a same-slug live probe returns 200 within the window)
+STILL un-landed, workspace-push meta-bug blocker per 51st entry
+still stands.)
+2026-08-21 ~06:41Z (job `a840df05-0b9d-4be2-a39a-ec4daa15d17f`,
+baseball-bingo self-diagnose fired on the 20-min-unhealthy rule —
+service healthy at probe: local `/healthz` HTTP 200 in 2.7ms, `/`
+HTTP 200 in 2.8ms on port 8790, launchd
+`com.assistant.project.baseball-bingo` PID 3253 running 3d16h,
+`last_healthy_at` 4m13s old at probe time (well inside the 5-min
+cadence). `healthcheck.out.log` shows the trigger window: 04:36:33Z
+→ 04:56:58Z (20-min slip / four missed ticks), then 04:56:58Z →
+05:58:25Z (61-min slip / twelve missed ticks — the biggest gap in
+the recent record), then 05:58:25Z → 06:37:09Z (39-min slip / seven
+missed ticks), before the 5-min cadence naturally resumed at
+06:42:11Z. Classic Mac Mini early-morning sleep/power throttling
+compound slip; healthcheck-all self-recovered before diagnose loaded,
+no inline kickstart needed. Ninety-first recurrence — same false-
+positive class as 88/89/90; live-probe gate (skip event dispatch
+when a same-slug live probe returns 200 within the window) and
+same-slug self-suppress guard BOTH still un-landed. Notable this
+window: no concurrent atlas diagnose observed for the same slip
+despite atlas sharing the exact same `last_healthy_at` staleness at
+trigger evaluation time.)
+2026-08-21 ~06:34–06:36Z (jobs `4c45434d-72a7-47c6-b8ae-d40b16a280a2`,
+`dd004d53`, `ab4641c9` for baseball-bingo AND `502df665`, `e4061bcf`,
+`f5baa449` for atlas — SIX queued in a burst instead of the usual
+twin fire, three per project). Same cadence-slip false positive: at
+run-time both projects healthy — bingo `/healthz` HTTP 200 in 1.4ms,
+atlas `/` HTTP 200 in 70ms, `last_healthy_at` 2.7 min old for both.
+NEW ROOT-CAUSE FINDING (recurrence #92 and dedup-bug discovery):
+`src/runner/events.py:_check_project_health` (and
+`_check_skill_failures`) dedup by filtering
+`Job.resolved_skill == "self-diagnose"` — but queued jobs have
+`resolved_skill IS NULL` (the runner only sets it when the job
+starts running). So while a self-diagnose job sits in the queue
+waiting for the runner to pick it up, subsequent 60-s event cycles
+DON'T see it and spawn duplicates. Here the event loop fired at
+:34, :35, :36 for both slugs — six jobs, three per slug — before
+the :34 job started running and populated `resolved_skill`. Fix:
+change the dedup query to filter by `Job.kind == "self-diagnose"`
+(set at INSERT time, never NULL) instead of `Job.resolved_skill`.
+Non-immediate action this session: 4 duplicate queued diagnoses
+cancelled via direct `UPDATE jobs SET status='cancelled'` (safe:
+queued jobs skip in `main._process_job:312` if status ≠ 'queued'),
+server-patch dispatched for the events.py fix. Ninety-second
+recurrence.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
