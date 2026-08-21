@@ -14,6 +14,40 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-08-21 — Event-trigger dedup: filter by Job.kind, not Job.resolved_skill
+
+**Trap**: `Job.resolved_skill` is NULL for every queued job. The runner only
+populates `resolved_skill` when it *starts* running a job (via `_process_job`
+after the router resolves the skill). Any DB query that filters by
+`resolved_skill == "self-diagnose"` (or any other skill name) SILENTLY MISSES
+every queued instance of that skill.
+
+**Where this bit us**: `src/runner/events.py` `_check_skill_failures` and
+`_check_project_health` both used
+`Job.resolved_skill == "self-diagnose"` for their dedup lookback. Between the
+first event-triggered enqueue and the runner picking that job off the queue
+(a 20-min window at MAX_CONCURRENT_JOBS=4 saturation), each 60-s event cycle
+saw ZERO existing diagnoses for the same target and re-enqueued. On
+2026-08-21 06:34–06:36Z this spawned six duplicates (three per project) for
+baseball-bingo + atlas from one cadence-slip false-positive.
+
+**Fix**: filter by `Job.kind == "self-diagnose"`. `kind` is set at INSERT in
+`gateway/jobs.py:enqueue_job` and is never NULL — visible to dedup the moment
+the row commits.
+
+**Rule of thumb**: any dedup / rate-limit / "already-enqueued?" query in the
+event loop, scheduler, or an escalation guard MUST filter on `Job.kind`, not
+`Job.resolved_skill`. Use `resolved_skill` only when you actually need the
+router's decision (retrospective, learning classifier, review dedup on
+completed work). Corollary: this also means `Job.kind` stores whatever string
+the caller passes (usually the hyphenated skill slug — the `JobKind` enum's
+underscore values are NOT the source of truth for dedup filters; match the
+literal that `enqueue_job(kind=...)` writes).
+
+_Evidence: recurrence #92 of the "project 'X' unhealthy 20+ min but actually
+up" false positive (docs/TROUBLESHOOTING.md line 1175). Fix commit lands on
+`server-patch/events-dedup-by-kind`._
+
 ## 2026-08-03 — server-patch skill silently drops the commit/push step (ROOT CAUSE: max_turns=60 exhausted)
 
 **ROOT CAUSE CONFIRMED (2026-08-03, job `2e92aaae`)**: `max_turns: 60` in `skills/server-patch/SKILL.md` is too low for typical server-patch sessions that read substantial context before coding.

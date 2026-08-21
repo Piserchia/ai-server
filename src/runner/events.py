@@ -232,10 +232,14 @@ async def _check_skill_failures() -> None:
             for row in result.fetchall()
         ]
 
-        # Recent self-diagnose jobs (for dedup)
+        # Recent self-diagnose jobs (for dedup).
+        # Filter by Job.kind — set at INSERT time; Job.resolved_skill is NULL
+        # while queued and would let 60-s cycles re-spawn duplicates for the
+        # same target until the first one starts running (2026-08-21 incident:
+        # six duplicate diagnoses for baseball-bingo + atlas).
         result = await s.execute(
             select(Job.description, Job.created_at)
-            .where(Job.resolved_skill == "self-diagnose")
+            .where(Job.kind == "self-diagnose")
             .where(Job.created_at >= window)
         )
         existing = [
@@ -310,9 +314,11 @@ async def _check_project_health() -> None:
             for row in result.fetchall()
         ]
 
+        # Dedup by Job.kind — set at INSERT time; Job.resolved_skill is NULL
+        # while queued (see _check_skill_failures for the same rationale).
         result = await s.execute(
             select(Job.description, Job.created_at)
-            .where(Job.resolved_skill == "self-diagnose")
+            .where(Job.kind == "self-diagnose")
             .where(Job.created_at >= dedup_window)
         )
         existing = [

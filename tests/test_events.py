@@ -53,6 +53,29 @@ class TestSkillDiagnose:
         result = _should_trigger_skill_diagnose(failures, existing)
         assert result == []
 
+    def test_queued_diagnose_with_null_resolved_skill_still_dedups(self):
+        # Regression (2026-08-21): the DB dedup query used to filter by
+        # Job.resolved_skill=='self-diagnose', but resolved_skill is NULL until
+        # the runner starts running the job. That meant queued self-diagnose
+        # jobs were invisible to dedup, and each 60-s event cycle spawned
+        # another duplicate for the same target. The pure function must not
+        # reintroduce that reliance: it dedupes off description alone. This
+        # test constructs the exact shape a queued Job produces
+        # (resolved_skill=None) and confirms it still suppresses the trigger.
+        failures = [
+            {"resolved_skill": "research-report", "created_at": NOW - timedelta(minutes=2)},
+            {"resolved_skill": "research-report", "created_at": NOW - timedelta(minutes=5)},
+        ]
+        existing = [
+            {
+                "description": "Self-diagnose: skill 'research-report' failed",
+                "created_at": NOW - timedelta(minutes=1),
+                "resolved_skill": None,  # queued, not yet picked up
+            },
+        ]
+        result = _should_trigger_skill_diagnose(failures, existing)
+        assert result == []
+
     def test_different_skills_independent(self):
         failures = [
             {"resolved_skill": "research-report", "created_at": NOW - timedelta(minutes=2)},
@@ -112,6 +135,30 @@ class TestProjectDiagnose:
         ]
         existing = [
             {"description": "Self-diagnose: project 'market-tracker' has been unhealthy", "created_at": NOW - timedelta(minutes=5)},
+        ]
+        result = _should_trigger_project_diagnose(projects, existing)
+        assert result == []
+
+    def test_queued_diagnose_with_null_resolved_skill_still_dedups(self):
+        # Regression (2026-08-21, recurrence #92 of the "project 'X'
+        # unhealthy 20+ min but actually up" false positive): the DB dedup
+        # query filtered by Job.resolved_skill=='self-diagnose', which is
+        # NULL until the runner picks the job off the queue. Result: six
+        # duplicate diagnoses (three per project) spawned for baseball-bingo
+        # + atlas from a single cadence-slip event. The fix filters by
+        # Job.kind (set at INSERT). This test locks in that a queued-shaped
+        # dict (resolved_skill=None) still dedupes correctly at the pure
+        # layer — if the DB query is ever narrowed again, the amplifier
+        # returns.
+        projects = [
+            {"slug": "baseball-bingo", "type": "service", "last_healthy_at": NOW - timedelta(minutes=25)},
+        ]
+        existing = [
+            {
+                "description": "Self-diagnose: project 'baseball-bingo' has been unhealthy",
+                "created_at": NOW - timedelta(minutes=1),
+                "resolved_skill": None,  # queued, not yet picked up
+            },
         ]
         result = _should_trigger_project_diagnose(projects, existing)
         assert result == []
