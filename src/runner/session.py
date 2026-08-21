@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -459,6 +460,104 @@ _DEFAULT_BUDGET = 200_000
 def estimate_context_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token. Pure function."""
     return len(text) // 4
+
+
+# ── API-terminal session detection (2026-08-21) ────────────────────────────
+#
+# The bundled Claude CLI, on an Anthropic-side 5xx (e.g. 529 Overloaded) or a
+# request timeout, emits the failure as a plain TextBlock ("API Error: 529
+# Overloaded. ...") and returns a ResultMessage whose usage dict is all-zeros
+# and whose `is_error` is not usefully set — the SDK's normal error-parity
+# check (`is_error AND no text`) below therefore does NOT trigger, so we
+# happily record the job as `completed`. Escalation.on_failure never fires,
+# self-diagnose is never enqueued, and the schedule's last_run_at looks
+# healthy. Job 143c8cfb (atlas-evaluate, 2026-08-17 13:48Z) is the flag case:
+# the summary is literally the CLI banner, ran 200s with zero output — and
+# the atlas governor was silently dark for 10 days as a result.
+#
+# The classifier is deliberately conservative: BOTH the banner shape AND
+# empty usage must hold before we reclassify a completed session as failed.
+
+_API_TERMINAL_BANNER = re.compile(
+    r"""
+    ^\s*
+    (?:
+        # "API Error: 529 Overloaded", "API Error: 500 Internal Server ...",
+        # "API Error: 503 Service Unavailable", "API Error: Request timed
+        # out ...", "API Error: Overloaded".
+        API\s*Error\s*:\s*
+        (?:5\d\d\b|Request\s*timed\s*out\b|Overloaded\b|overloaded_error\b)
+        |
+        # SDK error-type prefixes: "Error: overloaded_error", "Error:
+        # internal_server_error", "Error: api_error".
+        Error\s*:\s*
+        (?:overloaded_error|internal_server_error|api_error)\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# CLI banner bodies are short (~1-3 sentences). Anything longer is
+# overwhelmingly a real skill summary that legitimately leads with the phrase
+# (e.g. a self-diagnose report). Keeps the classifier conservative.
+_API_TERMINAL_MAX_SUMMARY_LEN = 800
+
+
+def is_api_terminal_summary(summary: str | None) -> bool:
+    """True when the session's final text is *only* the bundled Claude CLI's
+    Anthropic-side terminal banner (e.g. "API Error: 529 Overloaded. ...").
+
+    Pure function. Matches only 5xx / timeout / overloaded / api_error /
+    internal_server_error shapes anchored at the start of the summary; caps
+    the total length to filter out legitimate summaries that lead with the
+    phrase. Never matches 4xx client errors (those are our bug, not the API's).
+    """
+    if not summary:
+        return False
+    text = summary.strip()
+    if not text or len(text) > _API_TERMINAL_MAX_SUMMARY_LEN:
+        return False
+    return bool(_API_TERMINAL_BANNER.match(text))
+
+
+_USAGE_TOKEN_KEYS: tuple[str, ...] = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
+def usage_is_empty(usage: dict | None) -> bool:
+    """True when a session's usage dict shows no real work.
+
+    Pure function. Considers input / output / cache-read / cache-creation
+    tokens; a real session (even a trivial one) consumes at least the
+    system-prompt input, so all-zero across the four is the SDK's signature
+    for "we never actually made it through a live Anthropic call". Missing
+    or non-integer values count as zero (SDK versions vary).
+    """
+    if not usage:
+        return True
+    for key in _USAGE_TOKEN_KEYS:
+        try:
+            if int(usage.get(key) or 0) > 0:
+                return False
+        except (TypeError, ValueError):
+            continue
+    return True
+
+
+def is_api_terminal_session(summary: str | None, usage: dict | None) -> bool:
+    """Combined predicate: the session's final text is an API-terminal
+    banner AND usage shows no work. Pure function.
+
+    Both signals must hold. A banner shape alone can appear in a legitimate
+    report; empty usage alone would over-trigger for edge cases we can't
+    audit here. The intersection is the specific SDK failure mode that hid
+    a 529 as `completed` for job 143c8cfb (2026-08-17).
+    """
+    return is_api_terminal_summary(summary) and usage_is_empty(usage)
 
 
 def context_budget_fraction(
@@ -947,7 +1046,26 @@ async def _run_in_process(
                                 f"{err_text[:500] or 'no output'}"
                             )
 
-        return "\n".join(final_text_chunks).strip(), usage
+        summary_text = "\n".join(final_text_chunks).strip()
+
+        # API-terminal shape check (2026-08-21): the SDK sometimes lets an
+        # Anthropic-side 5xx / timeout through as a plain TextBlock + a
+        # ResultMessage with all-zero usage and is_error unset — the branch
+        # above never triggers, and the session records `completed` with
+        # no real work. Classifying this as a failure engages the existing
+        # escalation.on_failure retry (opus/xhigh) and the self-diagnose
+        # chain. Job 143c8cfb (atlas-evaluate, 2026-08-17) proved the hole:
+        # a 200s session whose summary was literally "API Error: 529
+        # Overloaded. ..." → completed → atlas governor silently dark for
+        # 10 days. See `is_api_terminal_session` above for the (deliberately
+        # conservative) predicate: banner-shape AND empty usage both required.
+        if is_api_terminal_session(summary_text, usage):
+            raise RuntimeError(
+                f"API terminal error (session produced no work): "
+                f"{summary_text[:300]}"
+            )
+
+        return summary_text, usage
     finally:
         _running_sessions.pop(job_id, None)
 
