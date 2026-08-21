@@ -2591,7 +2591,47 @@ dispatch-window overlap all from ONE 07:00:49Z freeze). Same-slug
 self-suppress before enqueue would have collapsed 84+87 (both
 baseball-bingo fires) to a single fire; workspace-push meta-bug
 per 51st entry still blocks landing the server-patch structural
-fix.)
+fix.);
+2026-08-21 ~01:05Z (job `06961584`, baseball-bingo self-diagnose —
+baseball-bingo answered `/healthz` HTTP 200 in 4.8ms and `/` HTTP 200
+in 4.6ms on port 8790, `last_healthy_at` age 37m23s at diagnosis time
+— `healthcheck.out.log` last tick 00:28:20Z (37-min slip past the
+5-min cadence, i.e. seven missed 5-min ticks in a row), project
+healthy. Twin `last_healthy_at` staleness for atlas (age 37m22s) but
+no concurrent atlas diagnose fired in the dispatch window at
+diagnosis time. Kickstarted healthcheck-all inline via
+`gui/$(id -u)/com.assistant.healthcheck-all` and cadence resumed at
+01:05:54Z — both baseball-bingo and atlas `last_healthy_at`
+refreshed to ~21s old. Eighty-eighth recurrence — canonical
+sleep-throttled-cadence-slip; live-probe gate STILL un-landed after
+88 recurrences; not re-dispatching a server-patch — workspace-push
+meta-bug per 51st entry still blocks landing the structural fix.);
+2026-08-21 ~01:05Z (atlas self-diagnose, job
+`1205176d-3624-4c43-8a5b-243c01dc6c88` — the concurrent atlas twin
+the 88th above declared "no concurrent atlas diagnose fired in the
+dispatch window at diagnosis time". Both self-diagnose triggers
+fired at 01:05:12Z from the same 00:28:20Z freeze; the 88th's DB
+query for concurrent siblings happened before my row was
+`running`, hence the mistaken "no twin" claim. Atlas answered `/`
+HTTP 200 in 71ms on port 8791; all three launchd services healthy
+(PIDs 71563/71565/73262 for `com.assistant.project.atlas /
+.atlas-dash-scheduler / .atlas-pm-edge`, LastExitStatus=-15 legacy
+SIGTERM). `com.assistant.healthcheck-all` state=not running,
+runs=981, last exit code=0 (idle between ticks per usual, NOT
+wedged). DB `last_healthy_at` was 01:05:54Z at my probe (43s
+stale), refreshed by the 88th's inline kickstart of
+`com.assistant.healthcheck-all`; identical stamps on atlas and
+baseball-bingo confirm the canonical shared-cadence fingerprint.
+No new kickstart needed — 88th already restored cadence. Eighty-
+ninth recurrence — canonical intra-slip trigger-storm twin,
+exactly the same class as 85/86 (dispatch-window overlap where
+one twin kickstarts and the other arrives seconds later on
+already-fresh data). Live-probe gate STILL un-landed after 89
+recurrences; not re-dispatching a server-patch — workspace-push
+meta-bug blocker per the 51st entry still stands. Same-slug
+self-suppress guard (skip enqueue if a running/queued self-
+diagnose for the same slug exists) suggested in 80/81/82/83
+would have collapsed 88+89 to a single fire.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
@@ -2726,6 +2766,77 @@ checkout under `~/Library/Application Support`) are unaffected.
 
 **First recorded:** atlas `docs/DEVELOPMENT.md` gotcha 2026-08-10
 ("editable installs die silently"), root-caused 2026-08-18.
+
+## Symptom: `chat` skill fails with `error_max_turns: Reached maximum number of turns (3)` on a question that mentions taking action
+
+### Root cause (2026-08-20, job `267dd425`)
+
+The `chat` skill was designed to be tool-less ("Do not invoke tools" in its
+Procedure, `required_tools: []` in frontmatter, `max_turns: 3`). But its
+frontmatter also had `permission_mode: default`, which under the SDK does NOT
+block tool USE at the schema layer — it puts each tool call through the
+interactive approval gate. In a headless runner session there is no user to
+answer that prompt, so every call returns `is_error: true` with
+`result_preview: "This command requires approval"` (or the multi-op variant).
+
+When a user's message reads like a diagnostic/action request and gets routed
+to `chat` anyway (e.g. `Is the server down? Can you fix`), the model tries to
+help by running `curl` / `launchctl` — the approval gate rejects every
+attempt, the model retries with a different command, and `max_turns: 3`
+exhausts in ~3 seconds. The session ends with `error_max_turns`, event
+detector escalates to `self-diagnose`.
+
+The runtime side of this was already learned in
+`review-and-improve/SKILL.md` line 382 ("plan mode blocks MCP tool calls,
+proven live"): `permission_mode: plan` is the SDK's way to disallow tool
+use entirely at the schema layer. That is exactly what a text-only skill
+wants.
+
+### Diagnostic
+
+```bash
+# Find recent chat failures matching this pattern:
+psql assistant -c "SELECT id, LEFT(description, 80), error_message
+  FROM jobs
+  WHERE kind='chat' AND status='failed' AND error_message LIKE '%error_max_turns%'
+  ORDER BY created_at DESC LIMIT 10;"
+
+# Confirm the tool-approval symptom in an offending job's audit log:
+JOB=<uuid>
+grep -E 'requires approval|error_max_turns' \
+  "volumes/audit_log/${JOB}.jsonl"
+```
+
+### Fix
+
+Change the offending skill's `permission_mode` from `default` to `plan`.
+Applied to `skills/chat/SKILL.md` on 2026-08-20. `plan` mode blocks all
+tool USE at the SDK layer; the model responds with text only, which is
+what a conversational skill wants. Text-only skills to audit if this
+recurs elsewhere: any skill whose frontmatter is
+`permission_mode: default` + `required_tools: []` should be `plan`
+instead (as of 2026-08-20: `skills/plan/`, `skills/_evaluate/`,
+`skills/restore/` all still have `permission_mode: default` — check them
+if similar `error_max_turns (N)` regressions surface).
+
+### Prevention
+
+Two options if this pattern recurs:
+
+1. **Skill-frontmatter lint**: extend `scripts/lint_docs.py` to flag any
+   SKILL.md with `permission_mode: default` + `required_tools: []` +
+   "Do not invoke tools" (or equivalent) in the Procedure — that
+   combination is always the same class of bug.
+2. **Router smarts**: teach `llm_router` that messages containing
+   `fix|down|broken|why did|debug` should never route to `chat` even if
+   they read conversationally — they belong to `self-diagnose` or a
+   `/task` invocation. The router already knows about these keywords for
+   other classes; this is a small addition, not a redesign.
+
+Neither is required to close this incident; the skill-frontmatter change
+above fixes the immediate `error_max_turns` failure by making chat
+degrade gracefully to "I can't run commands, use `/task ...`" per step 5
+of its Procedure.
 
 ## Adding entries to this file
 
