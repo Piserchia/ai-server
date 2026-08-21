@@ -2,6 +2,67 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-21 — API-terminal sessions reclassified as failed (was silently completed)
+
+**Agent task**: server-patch — job 143c8cfb (atlas-evaluate, 2026-08-17 13:48Z)
+ran ~200s, produced zero output, and recorded status=`completed` with a summary
+that was literally "API Error: 529 Overloaded. This is a server-side issue,
+usually temporary — try again in a moment. If it persists, check
+status.claude.com." Because the job did not fail, `escalation.on_failure`
+never fired, no self-diagnose was enqueued, the schedule's `last_run_at`
+looked healthy, and the Telegram completion card looked normal. The atlas
+governor was silently dark for 10 days as a result.
+
+**Files changed**:
+- `src/runner/session.py` — three pure classifiers (`is_api_terminal_summary`,
+  `usage_is_empty`, `is_api_terminal_session`) + a raise in `_run_in_process`
+  when the completed-shape session matches BOTH signals (banner AND empty
+  usage). The RuntimeError falls into the existing `_process_job` exception
+  path, which fails the job and calls `_maybe_escalate` — engaging the
+  skill's on_failure retry (opus/xhigh) and, if that also fails, the L1→L2
+  self-diagnose escalation.
+- `tests/test_api_terminal.py` — 37-case regression suite that pins the
+  verbatim (summary, usage) pair from job 143c8cfb, exercises 5xx / timeout
+  / overloaded / overloaded_error / internal_server_error / api_error
+  banner shapes, and confirms conservative behaviour (4xx does NOT match,
+  long summaries that lead with the phrase do NOT match, banner-with-real-
+  usage does NOT match).
+
+**Why the SDK let this through**: the bundled Claude CLI, on an Anthropic
+5xx or timeout, emits the failure as a plain `TextBlock` inside an
+`AssistantMessage` and returns a `ResultMessage` whose `usage` dict is
+all-zero and whose `is_error` is not usefully set. The existing
+"is_error AND no text" fallback (session.py) therefore never triggered —
+there WAS text (the banner). Now we look at the two-signal shape
+independent of `is_error`, and raise before the caller records
+`job_completed`.
+
+**Why "conservative" matters**: the classifier requires BOTH the banner
+shape AND all-zero usage. A skill that legitimately produces a summary
+mentioning "API error" (e.g. a self-diagnose report on this very
+incident) does NOT trigger — the banner regex is anchored at start-of-
+string with a 800-char cap, and any tokens consumed disqualifies the
+call. A skill that hit a genuine API 5xx on its FIRST turn (empty usage)
+DOES trigger, which is exactly the escalation-eligible shape.
+
+**Side effects**: none for the happy path. Sessions that used to be
+recorded as `completed` while dying on Anthropic 5xx / overloaded /
+request-timed-out now record as `failed` with `error_category="quota"`
+(the classifier in `audit_index.categorize_error` maps "overloaded"
+to quota — semantically adjacent, and does NOT trip queue-pause because
+pause is only triggered by `QuotaExhausted`, not by category labels).
+Escalation and self-diagnose paths engage automatically.
+
+**Gotchas discovered**: the SDK's `ResultMessage.is_error` is not a
+reliable "did this session actually succeed?" flag for Anthropic-side
+5xx — it can be False (or unset) even when the CLI has already printed
+its own error banner as text. Any future "did the session succeed?"
+logic has to look at the SHAPE of the final text + usage, not just at
+`is_error`. Added to `.context/modules/runner/skills/GOTCHAS.md`.
+
+**Verify**: `POSTGRES_DSN=<dummy> pipenv run pytest tests/` — 1182 passed,
+1 skipped, 2 warnings. `tests/test_api_terminal.py` — 37 passed.
+
 ## 2026-08-21 — event-trigger dedup: filter by Job.kind not Job.resolved_skill
 
 **Agent task**: fix duplicate self-diagnose spawning during the 20-min window

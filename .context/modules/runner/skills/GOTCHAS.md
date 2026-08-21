@@ -14,6 +14,41 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-08-21 — `ResultMessage.is_error` is NOT a reliable "session succeeded" flag
+
+**Trap**: The bundled Claude CLI, on an Anthropic-side 5xx (e.g. 529
+Overloaded) or a request timeout, emits the failure as a plain `TextBlock`
+inside an `AssistantMessage` — the visible "API Error: 529 Overloaded. This
+is a server-side issue, usually temporary — try again in a moment. ..."
+banner — and then returns a `ResultMessage` whose `usage` dict is all
+zeros AND whose `is_error` is NOT usefully set (either False or the
+session's earlier is_error-and-no-text guard doesn't trip because there IS
+text, just error text).
+
+**Where it bit us**: Job 143c8cfb (atlas-evaluate, 2026-08-17 13:48Z) ran
+200s, its summary was verbatim the 529 banner above, and it was recorded
+as `completed`. Because it did not fail, `escalation.on_failure` never
+fired, no self-diagnose was enqueued, `schedules.last_run_at` looked
+healthy, and the Telegram summary looked normal. The atlas governor was
+silently dark for 10 days as a result.
+
+**Fix**: `runner/session.py` now runs a two-signal shape check in
+`_run_in_process` before returning: `is_api_terminal_summary(summary)`
+(banner-shape regex anchored to start-of-string, 800-char cap) AND
+`usage_is_empty(usage)` (all four token counters zero). When both hold,
+raise RuntimeError; the existing `_process_job` exception path fails the
+job and calls `_maybe_escalate`. Two signals, not one, keeps the classifier
+conservative — a self-diagnose report that mentions "API error" in its
+prose is not caught (it will have real usage and/or exceed the length
+cap).
+
+**For future work here**: any new "did the session succeed?" logic must
+inspect the final-text SHAPE + `usage` shape, not just `ResultMessage.is_error`.
+The `is_error` field is best-effort on the SDK side.
+
+**Regression pin**: `tests/test_api_terminal.py::TestIsApiTerminalSession::test_job_143c8cfb_full_shape_classified`
+tests the verbatim (summary, usage) pair from job 143c8cfb.
+
 ## 2026-08-21 — Event-trigger dedup: filter by Job.kind, not Job.resolved_skill
 
 **Trap**: `Job.resolved_skill` is NULL for every queued job. The runner only
