@@ -2,6 +2,48 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-21 — event-trigger dedup: filter by Job.kind not Job.resolved_skill
+
+**Agent task**: fix duplicate self-diagnose spawning during the 20-min window
+between an event-triggered enqueue and the runner picking that job up.
+
+**Files changed**:
+- `src/runner/events.py` — `_check_skill_failures` + `_check_project_health`
+  dedup queries now filter existing self-diagnose jobs by `Job.kind ==
+  "self-diagnose"` (set at INSERT by `enqueue_job`) instead of
+  `Job.resolved_skill == "self-diagnose"` (NULL until the runner starts the
+  job).
+- `tests/test_events.py` — two new regression tests
+  (`TestSkillDiagnose::test_queued_diagnose_with_null_resolved_skill_still_dedups`,
+  `TestProjectDiagnose::test_queued_diagnose_with_null_resolved_skill_still_dedups`)
+  that construct queued-shape dicts with `resolved_skill=None` and confirm
+  the pure functions still dedupe.
+
+**Why**: on 2026-08-21 06:34–06:36Z a single cadence-slip false-positive on
+`healthcheck-all` spawned SIX duplicate self-diagnose jobs (three per project)
+for baseball-bingo + atlas. Root cause: the DB dedup query keyed off
+`Job.resolved_skill`, which the runner only populates when it *starts* running
+a job. While a self-diagnose sat queued, the next 60-s event cycle couldn't
+see it and re-enqueued. Filtering by `Job.kind` — set at INSERT and never
+NULL — closes the window. This is recurrence #92 of the well-known "project
+'X' unhealthy 20+ min but actually up" false positive (docs/TROUBLESHOOTING.md
+line 1175); the live-probe gate proposed there is a separate (still
+un-landed) prevention. This patch only fixes the duplication amplifier.
+
+**Side effects**: none — the query is strictly widened to include the same
+jobs it always meant to include (queued + running + terminal self-diagnose
+jobs in the dedup window). No caller changed.
+
+**Gotchas discovered**: `enqueue_job(kind=...)` writes the raw string into
+`Job.kind`; the `JobKind` enum has `self_diagnose = "self_diagnose"`
+(underscore), but every event/escalation callsite passes `"self-diagnose"`
+(hyphen). The stored value is the hyphenated string — the enum is not the
+source of truth for dedup filters. Anyone adding a new event-trigger dedup
+query must match the hyphenated literal.
+
+**Verify**: `POSTGRES_DSN=<dummy> pipenv run pytest tests/` — 1145 passed, 1
+skipped, 2 warnings. `tests/test_events.py` — 46 passed (2 new).
+
 ## 2026-08-11 — per-job session-timeout override (payload.session_timeout_seconds)
 
 **Files changed**: `src/runner/main.py`, `src/gateway/web.py`,
