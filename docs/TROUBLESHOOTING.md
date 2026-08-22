@@ -2656,6 +2656,36 @@ checkout under `~/Library/Application Support`) are unaffected.
 **First recorded:** atlas `docs/DEVELOPMENT.md` gotcha 2026-08-10
 ("editable installs die silently"), root-caused 2026-08-18.
 
+## Symptom: a scheduled job's Telegram summary looks normal and `jobs.status='completed'`, but the skill produced no output — no commit, no scorecard entry, half a checklist done
+
+Two documented faces of one class ("terminal-but-recorded-completed"), both first
+seen on `atlas-evaluate`:
+
+1. **API-terminal banner (2026-08-17, job 143c8cfb)** — the session died on
+   `API Error: 529 Overloaded` after ~200s with all-zero usage; the banner text
+   became the summary and the job recorded `completed`. `escalation.on_failure`
+   never fired and `schedules.last_run_at` read healthy — the atlas governor was
+   silently dark for 10 days. FIXED 2026-08-21 (`cf00b8b`, merged `64de48c`):
+   `src/runner/session.py` reclassifies banner-with-zero-usage sessions as
+   FAILED (`error_category="quota"`, label only). Regression:
+   `tests/test_api_terminal.py`.
+2. **Mid-checklist clean stop (2026-08-21, job 75b30b8b)** — the model simply
+   ended its turn after a tool result, 82 tool calls in, with real usage and no
+   final message; the SDK saw a clean end, the runner recorded `completed`. Not
+   covered by the `cf00b8b` classifier (deliberately — real usage disqualifies).
+
+### Fix
+For an affected job: check the real artifacts (for atlas-evaluate: SCORECARD/
+BACKLOG commits, `data_gaps` transitions), then re-enqueue with the remaining
+work spelled out in the description.
+
+### Prevention
+Job status is not proof of output. Watchdogs must check artifacts:
+`atlas-manager` (2026-08-21) now cross-checks the governor's summary shape AND
+`evaluation/SCORECARD.md` commit age. A general acceptance check for
+schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
+open follow-up.
+
 ## Adding entries to this file
 
 When you hit a new failure, append a section here in this shape:

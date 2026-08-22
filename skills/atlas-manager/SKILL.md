@@ -5,7 +5,7 @@ model: claude-opus-4-7
 effort: high
 permission_mode: acceptEdits
 required_tools: [Read, Glob, Grep, Bash]
-max_turns: 25
+max_turns: 30
 role: manager
 division: atlas
 privilege_class: read-only
@@ -55,17 +55,20 @@ key boundary matters).
 ### 2. Evaluate (division-scoped, read-only)
 Gather evidence about YOUR roster only (`atlas-report`, `atlas-report-sweep`,
 `atlas-scout`, `atlas-daily-brief`, `atlas-portfolio`, `atlas-chat`,
-`atlas-redeploy`, and the living loops: `atlas-evaluate`, `atlas-build`,
-`atlas-gap-scout`, `atlas-refresh-knowledge` — fully unattended, so their
-failures surface ONLY here; the closed-loop contracts + recovery matrix are
-atlas `evaluation/LOOP.md`, and the weekly evaluate run does its own
-stuck-state sweeps — your job is noticing when THAT loop itself goes quiet):
+`atlas-redeploy`, the living loops: `atlas-evaluate`, `atlas-build`,
+`atlas-gap-scout`, `atlas-refresh-knowledge`, and the momentum lane:
+`atlas-momo-research`, `atlas-momo-drift` — the loops are fully unattended, so
+their failures surface ONLY here; the closed-loop contracts + recovery matrix
+are atlas `evaluation/LOOP.md`, and the weekly evaluate run does its own
+stuck-state sweeps — your job is noticing when THAT loop itself goes quiet.
+`atlas-evaluate` polices only the four loop schedules and explicitly disclaims
+the rest, so you are the ONLY automated observer of the momentum lane):
 
 ```bash
 # outcomes for your division's skills over the last 14 days
 psql assistant -c "SELECT resolved_skill, status, review_outcome, user_rating,
   LEFT(error_message,80) FROM jobs
-  WHERE resolved_skill IN ('atlas-report','atlas-report-sweep','atlas-scout','atlas-daily-brief','atlas-portfolio','atlas-chat','atlas-redeploy','atlas-evaluate','atlas-build','atlas-gap-scout','atlas-refresh-knowledge')
+  WHERE resolved_skill IN ('atlas-report','atlas-report-sweep','atlas-scout','atlas-daily-brief','atlas-portfolio','atlas-chat','atlas-redeploy','atlas-evaluate','atlas-build','atlas-gap-scout','atlas-refresh-knowledge','atlas-momo-research','atlas-momo-drift')
     AND created_at > NOW() - INTERVAL '14 days' ORDER BY created_at DESC LIMIT 40;"
 # cadence: daily brief + weekly sweep actually scheduled and unpaused?
 psql assistant -c "SELECT name, cron_expression, paused FROM schedules
@@ -78,7 +81,20 @@ git -C projects/atlas log --oneline '@{u}..HEAD' 2>/dev/null | head -5
 grep -n 'ANTHROPIC_API_KEY' projects/atlas/manifest.yml 2>/dev/null
 # migration path: does the atlas manifest carry a delivery contract yet?
 grep -n '^delivery:' projects/atlas/manifest.yml 2>/dev/null
+# GOVERNOR LIVENESS (incident 2026-08-17): a `completed` atlas-evaluate job is
+# NOT proof it produced output — the 08-17 run died on a 529 API error after
+# ~200s, was recorded completed (escalation never fired), and the loop ran
+# ungoverned for 10 days. Check the last governor runs' summaries for
+# API-error shapes AND that the evaluation artifacts actually moved:
+psql assistant -c "SELECT LEFT(id::text,8), status, completed_at::date,
+  LEFT(result->>'summary',120) AS summary FROM jobs
+  WHERE resolved_skill IN ('atlas-evaluate','atlas-momo-research')
+  ORDER BY created_at DESC LIMIT 6;"
+git -C projects/atlas log -1 --format='%ci %h %s' -- evaluation/SCORECARD.md
 ```
+A SCORECARD last touched >8 days ago, or an evaluate summary that reads like
+an API error, means the governor is down: make it your TOP finding and
+dispatch a catch-up `atlas-evaluate` job (put the reason in the description).
 Also read: `projects/atlas/CLAUDE.md` + `README.md` (atlas keeps its docs
 there and under `projects/atlas/docs/` — it has NO `.context/CONTEXT.md`), the
 latest `docs/EVALUATION_*.md` (open Atlas items), and the roster skills
@@ -142,3 +158,9 @@ query, file, or log line behind it.
   whether the AGENTS and their feedback loops work, not whether a market call
   was right.
 - Bash is read-only here: `SELECT`/`git log`/`grep`/`curl` a healthcheck only.
+- **`completed` ≠ produced output** (incident 2026-08-17): a session that dies
+  on an API-level error (529 Overloaded) can be recorded `completed` with the
+  error text as its whole summary — `escalation.on_failure` never fires and
+  `schedules.last_run_at` reads healthy. Judge the governor by its artifacts
+  (SCORECARD/BACKLOG commit dates, gap-ledger transitions), never by job
+  status alone.
