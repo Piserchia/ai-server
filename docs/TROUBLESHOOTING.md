@@ -2669,10 +2669,18 @@ seen on `atlas-evaluate`:
    `src/runner/session.py` reclassifies banner-with-zero-usage sessions as
    FAILED (`error_category="quota"`, label only). Regression:
    `tests/test_api_terminal.py`.
-2. **Mid-checklist clean stop (2026-08-21, job 75b30b8b)** — the model simply
-   ended its turn after a tool result, 82 tool calls in, with real usage and no
-   final message; the SDK saw a clean end, the runner recorded `completed`. Not
-   covered by the `cf00b8b` classifier (deliberately — real usage disqualifies).
+2. **Mid-checklist clean stop (2026-08-21 job 75b30b8b, again 2026-08-22 job
+   a15b3165)** — the session ended cleanly right after a tool result, ~80-82
+   tool calls in, with real usage and no final message; recorded `completed`.
+   Both runs were atlas-evaluate (`max_turns: 60`) and both stopped at the
+   same ~80-tool-call mark far below any wall-clock limit — consistent with
+   the turn ceiling being exhausted WITHOUT the SDK surfacing
+   `error_max_turns` (contrast the 2026-08-04 daily-brief failure, which did
+   surface it and was correctly recorded failed). Mitigated by raising
+   atlas-evaluate to `max_turns: 120` (2026-08-22). Not covered by the
+   `cf00b8b` classifier (deliberately — real usage disqualifies). Open
+   runner follow-up: treat a clean end whose last event is a tool result
+   (no final assistant text) as suspect — flag or fail it.
 
 ### Fix
 For an affected job: check the real artifacts (for atlas-evaluate: SCORECARD/
