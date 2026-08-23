@@ -2,34 +2,112 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
-## 2026-08-21 — self-diagnose: dedup-bug finding in events.py (no code change here)
+## 2026-08-23 — Second variant of session_id collision bug documented (`_learning_apply` preflight rejection)
 
-**Files changed**: `docs/TROUBLESHOOTING.md` only (recurrence-note append).
+**Agent task**: self-diagnose — escalation `b8767cb3` for failed `_learning_apply` job `46acc317` (parent 18257848). Root cause is the known `Session ID … is already in use` bug (TROUBLESHOOTING.md §468), but this instance widens the diagnosis: the first attempt was **preflight-rejected** by quota (`rate_limit_status: rejected` → `job_requeued_for_quota`) BEFORE any Claude work ran, and yet the SDK subprocess still created the session file on disk. When the retry fired ~1h37m later, it collided. Unlike the atlas-report variant (48ad692d), no deliverable existed to salvage. Remediation: manually appended the intended PATTERN entry to `.context/modules/runner/skills/PATTERNS.md`, updated TROUBLESHOOTING.md to note the preflight-rejection variant + `_learning_apply` failure mode. Fix still requires server-patch (Phase 5): rotate `session_id` on any requeue (quota preflight OR post-work `QuotaExhausted`), or short-circuit-on-`already-in-use` in `session._run_in_process`. Total `Session ID … is already in use` hits in `runner.err.log` still 22 (this incident is entry #22).
 
-**Why**: while diagnosing recurrence #92 of the well-known "project 'X'
-unhealthy 20+ min but actually up" false positive, discovered a second
-bug that amplifies the noise: `_check_project_health` and
-`_check_skill_failures` in `src/runner/events.py` dedup by filtering
-`Job.resolved_skill == "self-diagnose"`, but queued jobs have
-`resolved_skill IS NULL` (the runner only sets it when the job starts
-running). Result: while the first self-diagnose sits in the queue,
-subsequent 60-s event cycles do not see it and spawn duplicates.
-Observed here: six duplicate diagnoses (three per project) queued for
-baseball-bingo + atlas from a single cadence slip.
+## 2026-08-21 — API-terminal sessions reclassified as failed (was silently completed)
 
-**Action this session**: (a) cancelled four duplicate queued
-self-diagnose jobs via direct `UPDATE jobs SET status='cancelled'`
-(safe — queued jobs are skipped in `main._process_job` line 312 if
-status ≠ 'queued'); (b) appended recurrence #92 note to
-`docs/TROUBLESHOOTING.md` naming the dedup bug; (c) dispatched
-`server-patch` job `8e92bc2b-47e4-462d-8bc9-0fafea620c5b` to change
-both dedup queries to filter by `Job.kind == "self-diagnose"` (set at
-INSERT, never NULL).
+**Agent task**: server-patch — job 143c8cfb (atlas-evaluate, 2026-08-17 13:48Z)
+ran ~200s, produced zero output, and recorded status=`completed` with a summary
+that was literally "API Error: 529 Overloaded. This is a server-side issue,
+usually temporary — try again in a moment. If it persists, check
+status.claude.com." Because the job did not fail, `escalation.on_failure`
+never fired, no self-diagnose was enqueued, the schedule's `last_run_at`
+looked healthy, and the Telegram completion card looked normal. The atlas
+governor was silently dark for 10 days as a result.
 
-**No `src/runner/events.py` changes here** — this is a prod checkout,
-server code is committed only in the dev repo via the dispatched
-server-patch. This entry publishes to `runtime-learnings` via the
-hourly sync-learnings timer.
+**Files changed**:
+- `src/runner/session.py` — three pure classifiers (`is_api_terminal_summary`,
+  `usage_is_empty`, `is_api_terminal_session`) + a raise in `_run_in_process`
+  when the completed-shape session matches BOTH signals (banner AND empty
+  usage). The RuntimeError falls into the existing `_process_job` exception
+  path, which fails the job and calls `_maybe_escalate` — engaging the
+  skill's on_failure retry (opus/xhigh) and, if that also fails, the L1→L2
+  self-diagnose escalation.
+- `tests/test_api_terminal.py` — 37-case regression suite that pins the
+  verbatim (summary, usage) pair from job 143c8cfb, exercises 5xx / timeout
+  / overloaded / overloaded_error / internal_server_error / api_error
+  banner shapes, and confirms conservative behaviour (4xx does NOT match,
+  long summaries that lead with the phrase do NOT match, banner-with-real-
+  usage does NOT match).
+
+**Why the SDK let this through**: the bundled Claude CLI, on an Anthropic
+5xx or timeout, emits the failure as a plain `TextBlock` inside an
+`AssistantMessage` and returns a `ResultMessage` whose `usage` dict is
+all-zero and whose `is_error` is not usefully set. The existing
+"is_error AND no text" fallback (session.py) therefore never triggered —
+there WAS text (the banner). Now we look at the two-signal shape
+independent of `is_error`, and raise before the caller records
+`job_completed`.
+
+**Why "conservative" matters**: the classifier requires BOTH the banner
+shape AND all-zero usage. A skill that legitimately produces a summary
+mentioning "API error" (e.g. a self-diagnose report on this very
+incident) does NOT trigger — the banner regex is anchored at start-of-
+string with a 800-char cap, and any tokens consumed disqualifies the
+call. A skill that hit a genuine API 5xx on its FIRST turn (empty usage)
+DOES trigger, which is exactly the escalation-eligible shape.
+
+**Side effects**: none for the happy path. Sessions that used to be
+recorded as `completed` while dying on Anthropic 5xx / overloaded /
+request-timed-out now record as `failed` with `error_category="quota"`
+(the classifier in `audit_index.categorize_error` maps "overloaded"
+to quota — semantically adjacent, and does NOT trip queue-pause because
+pause is only triggered by `QuotaExhausted`, not by category labels).
+Escalation and self-diagnose paths engage automatically.
+
+**Gotchas discovered**: the SDK's `ResultMessage.is_error` is not a
+reliable "did this session actually succeed?" flag for Anthropic-side
+5xx — it can be False (or unset) even when the CLI has already printed
+its own error banner as text. Any future "did the session succeed?"
+logic has to look at the SHAPE of the final text + usage, not just at
+`is_error`. Added to `.context/modules/runner/skills/GOTCHAS.md`.
+
+**Verify**: `POSTGRES_DSN=<dummy> pipenv run pytest tests/` — 1182 passed,
+1 skipped, 2 warnings. `tests/test_api_terminal.py` — 37 passed.
+
+## 2026-08-21 — event-trigger dedup: filter by Job.kind not Job.resolved_skill
+
+**Agent task**: fix duplicate self-diagnose spawning during the 20-min window
+between an event-triggered enqueue and the runner picking that job up.
+
+**Files changed**:
+- `src/runner/events.py` — `_check_skill_failures` + `_check_project_health`
+  dedup queries now filter existing self-diagnose jobs by `Job.kind ==
+  "self-diagnose"` (set at INSERT by `enqueue_job`) instead of
+  `Job.resolved_skill == "self-diagnose"` (NULL until the runner starts the
+  job).
+- `tests/test_events.py` — two new regression tests
+  (`TestSkillDiagnose::test_queued_diagnose_with_null_resolved_skill_still_dedups`,
+  `TestProjectDiagnose::test_queued_diagnose_with_null_resolved_skill_still_dedups`)
+  that construct queued-shape dicts with `resolved_skill=None` and confirm
+  the pure functions still dedupe.
+
+**Why**: on 2026-08-21 06:34–06:36Z a single cadence-slip false-positive on
+`healthcheck-all` spawned SIX duplicate self-diagnose jobs (three per project)
+for baseball-bingo + atlas. Root cause: the DB dedup query keyed off
+`Job.resolved_skill`, which the runner only populates when it *starts* running
+a job. While a self-diagnose sat queued, the next 60-s event cycle couldn't
+see it and re-enqueued. Filtering by `Job.kind` — set at INSERT and never
+NULL — closes the window. This is recurrence #92 of the well-known "project
+'X' unhealthy 20+ min but actually up" false positive (docs/TROUBLESHOOTING.md
+line 1175); the live-probe gate proposed there is a separate (still
+un-landed) prevention. This patch only fixes the duplication amplifier.
+
+**Side effects**: none — the query is strictly widened to include the same
+jobs it always meant to include (queued + running + terminal self-diagnose
+jobs in the dedup window). No caller changed.
+
+**Gotchas discovered**: `enqueue_job(kind=...)` writes the raw string into
+`Job.kind`; the `JobKind` enum has `self_diagnose = "self_diagnose"`
+(underscore), but every event/escalation callsite passes `"self-diagnose"`
+(hyphen). The stored value is the hyphenated string — the enum is not the
+source of truth for dedup filters. Anyone adding a new event-trigger dedup
+query must match the hyphenated literal.
+
+**Verify**: `POSTGRES_DSN=<dummy> pipenv run pytest tests/` — 1145 passed, 1
+skipped, 2 warnings. `tests/test_events.py` — 46 passed (2 new).
 
 ## 2026-08-11 — per-job session-timeout override (payload.session_timeout_seconds)
 

@@ -471,6 +471,40 @@ Then improve the quota detection in `src/runner/quota.py:detect_quota_error` to 
 
 Recurring bug — 22 hits in `volumes/logs/runner.err.log` at time of diagnosis.
 
+**Also affects preflight-rejected jobs, not just post-work QuotaExhausted.**
+Second confirmed instance 2026-08-23: `_learning_apply` child job `46acc317`
+(escalation `b8767cb3`). Preflight `rate_limit_status: rejected` fired
+BEFORE any Claude work was possible — yet the session file
+`~/.claude/projects/-Users-...-ai-server/46acc317-....jsonl` was created
+anyway (the SDK subprocess spawns and registers the session_id even when
+the run is aborted on quota preflight). Retry ~1h37m later hit the same
+`Session ID … is already in use` collision. Unlike the atlas case, no
+deliverable existed to salvage — the learning was applied manually as
+remediation. Same fix options (rotate session_id or short-circuit-on-
+already-in-use) apply to both variants.
+
+**Third confirmed instance 2026-08-23** (same batch): `_learning_apply`
+child job `b96a4976` (escalation `f50705a0`, parent `fd233e64` atlas-report
+META). Identical shape to `46acc317` — preflight quota-reject at 16:23:49
+registered the session file, retry at 18:00:20 hit
+`Session ID b96a4976-… is already in use`. No deliverable to salvage; the
+learning was applied manually to `skills/atlas-report/GOTCHAS.md`
+("Subagent text-format mismatch ≠ file write failure"). The same batch
+of resumed `_learning_apply` jobs at 18:00:20 (`46acc317`, `b96a4976`,
+`15ffc401`) all failed identically — confirming this is deterministic for
+any job whose first attempt hit preflight rejection. Live counter:
+`grep -c "Session ID .* is already in use" volumes/logs/runner.err.log`
+= 22 as of last diagnosis run.
+
+**Fourth confirmed instance (same 18:00:20 batch, re-diagnosed 2026-08-23
+by escalation `7613573f` for `15ffc401`)**: identical shape to `46acc317` /
+`b96a4976`. Payload was `module=project`, so `_learning_apply` would have
+short-circuited per its SKILL.md ("skip applying — log a note and exit")
+even if the session had been allowed to spawn — no deliverable to salvage.
+Orphan CLI session state for `15ffc401` was cleaned by the escalation
+(`~/.claude/projects/…/15ffc401-….jsonl`,
+`~/.claude/session-env/15ffc401-…/`) — hygiene only, does not fix the bug.
+
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
    16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
