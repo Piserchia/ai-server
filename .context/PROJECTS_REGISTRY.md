@@ -14,6 +14,7 @@
 | `baseball-bingo` | service | `bingo.chrispiserchia.com` (:8790) | iOS | native-web | `github.com/Piserchia/baseball-bingo` | 3 |
 | `market-tracker` | **RETIRED** | ~~`market-tracker.chrispiserchia.com`~~ | — | — | `github.com/Piserchia/market-tracker` (archived) | — |
 | `atlas` | service | `atlas.chrispiserchia.com` (:8791, CF Access gated) | web | native-web | `github.com/Piserchia/atlas` (canonical, private; Mini dev clone `~/Documents/repos/atlas`) | — |
+| `content-forge` | service | `content-forge.chrispiserchia.com` (:8792, CF Access gated) | web | native-web | `projects/content-forge/` (own repo, in-place bootstrap 2026-08-23; local-only, canonical remote TBD) | — |
 | `research` | content | (not hosted) | — | — | `projects/research/` (own repo; DR mirror `github.com/alfredbot-ai-butler/research`, private) | 2 |
 | `research-deep` | content | (not hosted) | — | — | `projects/research-deep/` (own repo; DR mirror `github.com/alfredbot-ai-butler/research-deep`, private) | 6 |
 | `ideas` | content | (not hosted) | — | — | `projects/ideas/` (own repo; DR mirror `github.com/alfredbot-ai-butler/ideas`, private) | 6 |
@@ -53,6 +54,7 @@ A manifest with no block derives a legacy `in-place` default, so enforcement is
 |---|---|---|---|
 | `atlas` | dev-repo (GitHub `Piserchia/atlas` canonical; Mini dev clone `~/Documents/repos/atlas`; runtime clone pull-only, origin = GitHub) | yes · gated-auto | **ACTIVE 2026-07-31** — block live in manifest; first project on the contract (owner-directed migration) |
 | `baseball-bingo` | dev-repo (promote from in-place) | yes · gated-auto | **pending** — requires re-homing the canonical to `~/Documents/repos/baseball-bingo` (live site; owner-gated, backup-branch first) |
+| `content-forge` | in-place (bootstrapped 2026-08-23) | yes · human-approval | **in-place** — served from the prod checkout; built in `~/Documents/repos/ai-server/projects/content-forge` (local-only). Re-homing to a dev-repo topology with a GitHub canonical is an owner-gated follow-up. |
 | `research` / `research-deep` / `ideas` | content | no | pending (no manifest today; optional) |
 
 Until a block is added a project runs exactly as before. Atlas's block is
