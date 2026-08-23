@@ -18,6 +18,9 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-scout` | worker | content | Prediction-market / opportunity scan |
 | `atlas-daily-brief` | worker | content | Daily portfolio brief |
 | `atlas-portfolio` | worker | content | Portfolio interaction / Q&A |
+| `atlas-k401-review` | worker | content | Weekly 401k review: per-holding fan-out + adversarial pass → k401_review report; recommendations only, no order path (Sat 13:00) |
+| `atlas-k401-holding` | worker | content | Per-holding 401k analyst subagent (dispatched via Task tool, not scheduled) |
+| `atlas-k401-adversary` | worker | content | Adversarial reviewer subagent of the 401k review (dispatched via Task tool, not scheduled) |
 | `atlas-chat` | worker | content | Atlas conversational interface |
 | `atlas-redeploy` | worker | prod-operator | Deploy atlas (bespoke pipeline; `project-redeploy` generalizes it) |
 | `atlas-evaluate` | worker | content | Weekly loop governor: scorecard + data_gaps triage + build grading + built→live promotion + backlog re-route (Mon 11:00) |

@@ -80,6 +80,10 @@ upsert 'atlas-gap-scout'         '0 11 * * 3'  'atlas-gap-scout'         'atlas-
 upsert 'atlas-refresh-knowledge' '30 11 1 * *' 'atlas-refresh-knowledge' 'atlas-refresh-knowledge: monthly knowledge curation + stale-claim reverification + gaps-sync (skills/atlas-refresh-knowledge)'
 upsert 'atlas-momo-research'     '0 13 * * 4'  'atlas-momo-research'     'atlas-momo-research: weekly Momentum-Lab governed research cycle -> workspace clone, PROTOCOL.md binding, mechanics/IEX-observe until SIP approved (skills/atlas-momo-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 upsert 'atlas-momo-drift'        '30 13 1 * *' 'atlas-momo-drift'        'atlas-momo-drift: monthly retention-drift point (atlas ledger E-0028) -> anchored probe via drift_probe.py in workspace clone, commit the ONE dated JSON, push; monitoring not experiment (skills/atlas-momo-drift)' '{"project_slug":"atlas"}'
+# atlas-k401-review is a REPORT job against the runtime clone (atlas-report
+# family): no project_slug payload, no workspace clone. Sat 13:00 is clear of
+# every loop slot (Mon/Tue/Wed/Fri), Thu momo, Sun report sweep, 12:00 brief.
+upsert 'atlas-k401-review'       '0 13 * * 6'  'atlas-k401-review'       'atlas-k401-review: weekly 401k holdings review -> per-holding analyst fan-out + adversarial pass -> k401_review report via atlas-dash save-report --k401; recommendations only (skills/atlas-k401-review)'
 
 echo "Schedules seeded."
 echo ""
