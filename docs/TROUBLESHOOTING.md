@@ -465,6 +465,80 @@ Then improve the quota detection in `src/runner/quota.py:detect_quota_error` to 
 
 ---
 
+## Symptom: Job fails with `exit code 1 / Error: Session ID <uuid> is already in use` immediately after a quota pause/resume
+
+### Root cause (diagnosed 2026-08-23, job `48ad692d` — atlas-report for NOW, self-diagnose escalation `3a508167`)
+
+Recurring bug — 22 hits in `volumes/logs/runner.err.log` at time of diagnosis.
+
+Sequence:
+1. Job runs to actual completion (in the 48ad692d case: business lens saved
+   16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
+   100.00, learn entry filed) — all deliverables persisted to the atlas DB.
+2. A post-work API call (e.g. the `atlas-dash learn …` invocation) trips the
+   five-hour rate limit. `quota.QuotaExhausted` fires in `_process_job`
+   (`src/runner/main.py:427-439`).
+3. The exception handler pauses the queue, LPUSHes the SAME `job_id` back on
+   `QUEUE_JOBS`, and sets Job.status=`queued`.
+4. When the pause lifts (~30s later in this case; the pause was actually short
+   because reset was near), the runner pops the same job_id and calls
+   `session.run_session(job)`.
+5. Claude Code SDK uses `job_id` as the `session_id` for the subprocess. The
+   bundled CLI has already registered that session_id from step 1 and rejects:
+   `Error: Session ID 48ad692d-... is already in use.` → exit 1 → job marked
+   `failed` → self-diagnose escalation spawned.
+
+Net effect: the job's real work already succeeded and is persisted, but the
+Job row shows `failed` and an escalation fires. Telegram/UI shows a red
+failure for a job whose deliverable is live.
+
+### Diagnostic
+
+```bash
+# Confirm session-ID collision is the actual failure mode:
+grep -c "Session ID .* is already in use" volumes/logs/runner.err.log
+
+# For a specific job, check if it was requeued after quota:
+grep -E "job_requeued_for_quota|Session ID <job_id_prefix>" \
+    volumes/audit_log/<job_id>.jsonl volumes/logs/runner.err.log
+
+# Verify the actual deliverable landed (atlas example):
+psql "$DATABASE_URL" -c "SELECT id, kind, title, created_at FROM reports \
+    WHERE asset_id=(SELECT id FROM assets WHERE symbol='<SYMBOL>') \
+    AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC;"
+```
+
+### Fix (server-patch, not yet implemented — Phase 5)
+
+Two options, pick one:
+
+1. **Rotate session_id on requeue.** In `src/runner/main.py:427-439`
+   `QuotaExhausted` handler, before LPUSHing, allocate a new `session_id`
+   for the retry (either a fresh column on `Job`, or pass it explicitly to
+   `session.run_session`). Then `session.py` uses `job.session_id or job.id`
+   for the Claude Code subprocess.
+2. **Detect completion before requeue.** If the job's writeback/deliverable
+   has already landed (e.g. Job.result populated, or skill-specific "already
+   saved" check), mark `succeeded` instead of requeueing. Less general.
+
+Also worth doing regardless: catch the specific `"Session ID ... is already
+in use"` error string in `session._run_in_process` and treat as "session
+already ran to completion — mark job succeeded, skip re-invocation."
+
+### Immediate remediation for a stuck job
+
+If you've verified the deliverable is on disk:
+```bash
+psql assistant -c "UPDATE jobs SET status='succeeded', \
+    error_message=NULL, completed_at=NOW() \
+    WHERE id='<job_id>' AND status='failed';"
+# Cancel the spurious escalation:
+psql assistant -c "UPDATE jobs SET status='cancelled' \
+    WHERE id='<escalation_child_job_id>' AND status IN ('queued','running');"
+```
+
+---
+
 ## Symptom: `_writeback` child jobs spawning on every job (noisy)
 
 **Diagnostic**:
@@ -2520,176 +2594,7 @@ blocker per the 51st entry still stands. The trigger-storm
 sibling chain has now self-documented its own predicted
 tail across three consecutive fires — sufficient evidence
 that the self-suppress guard IS the right next fix
-whenever the workspace-push meta-bug unblocks it.);
-2026-08-18 ~07:36Z (job `365acc34`, baseball-bingo answered
-`/healthz` HTTP 200 in 5.7ms and `/` HTTP 200 in 4.8ms on port
-8790; launchctl label `com.assistant.project.baseball-bingo`
-PID 3253 stable. DB `last_healthy_at` was 2026-08-18T07:00:48Z
-at trigger fire — 36m stale; atlas `last_healthy_at` was
-identically frozen at 07:00:49Z, canonical shared-cadence
-fingerprint. `healthcheck.out.log` last successful tick
-07:00:49Z (seven missed 5-min ticks: 07:05/10/15/20/25/30/35).
-`com.assistant.healthcheck-all` PID `-` (idle between ticks per
-usual); kickstarted inline via `launchctl kickstart -k
-gui/$(id -u)/com.assistant.healthcheck-all`, cadence resumed at
-07:36:58Z and BOTH baseball-bingo and atlas `last_healthy_at`
-refreshed to ~4s old. Eighty-fourth recurrence — canonical
-sleep-throttled-cadence-slip; no concurrent atlas twin observed
-in the dispatch window (baseball-bingo-only fire). Live-probe
-gate STILL un-landed after 84 recurrences; not re-dispatching a
-server-patch — workspace-push meta-bug blocker per the 51st
-entry still stands. Self-suppress guard suggested in
-80/81/82/83 remains the highest-value cheap follow-up whenever
-that meta-bug unblocks.);
-2026-08-18 ~07:36Z (atlas self-diagnose, job
-`1f868e37-a526-4a50-a850-6cdc8a835233` — the exact atlas twin the
-84th predicted as "no concurrent atlas twin observed in dispatch
-window". Atlas answered `/` HTTP 200 in 9.2ms on port 8791; all
-three launchd services healthy (PIDs 53835/53837/53839,
-LastExitStatus=-15 legacy SIGTERM). DB `last_healthy_at` was
-2026-08-18T07:00:49Z at diagnose fire — same 07:00:49Z shared-cadence
-freeze as the 84th (seven missed 5-min ticks). This diagnose loaded
-~4s before the 84th's kickstart landed, so the freeze was still
-visible in the DB at my probe time. Kickstarted
-`com.assistant.healthcheck-all` a second time (idempotent);
-`last_healthy_at` refreshed to ~8s old. Eighty-fifth recurrence —
-canonical intra-slip trigger-storm twin, exactly as the 84th
-predicted's-inverse: it saw baseball-bingo only, this atlas fire is
-its concurrent partner arriving on its own trigger-eval loop.
-Self-suppress guard (same-slug running/queued check before enqueue)
-would have collapsed 84/85 to a single fire. Live-probe gate still
-un-landed; not re-dispatching server-patch — workspace-push meta-bug
-per 51st still blocks.);
-2026-08-18 ~08:13Z (atlas self-diagnose, job
-`ef383de8-9e1c-4939-91f6-48f07fa6289a` — enqueued 08:13:46Z, ~51s
-before the 85th's kickstart landed (08:14:37Z). By dispatch
-time (08:16Z) atlas was already green: HTTP 200 in 38ms, all three
-launchd services up, `last_healthy_at` age 2m26s and refreshing
-normally. No new kickstart needed — the 85th's kickstart already
-restored cadence. Eighty-sixth recurrence — pure dispatch-window
-overlap with 85; both fires shared the same 07:00:49Z freeze
-window. Same conclusion: same-slug self-suppress before enqueue
-would have collapsed 85/86 to a single fire; workspace-push
-meta-bug per 51st still blocks the structural fix.);
-2026-08-18 ~08:13Z (job `0e0128e6`, baseball-bingo self-diagnose —
-enqueued 08:13:46Z, same 07:00:49Z freeze window as the 85/86 twins,
-so this is the concurrent baseball-bingo twin of the 86th atlas
-entry immediately above. By probe time (~08:16Z) baseball-bingo was
-already green: `/healthz` HTTP 200 in <1ms x3, `/` HTTP 200 with
-full HTML, `/static/style.css` HTTP 200 on port 8790; launchctl
-label `com.assistant.project.baseball-bingo` PID 3289 stable.
-`healthcheck.out.log` shows the slip 07:00:49 → 07:36:58 (7 missed
-ticks) → 07:53:16 (3 missed) → 08:13:52 (4 missed), then normal
-tick at 08:14:37Z which refreshed both projects to 2m stale — the
-same 85th kickstart the 86th noted. No new kickstart needed.
-Historical `TaskHandle` ImportError bursts in
-`project.baseball-bingo.err.log` remain the July 30 23:40 stale
-tail, unrelated. Eighty-seventh recurrence — canonical
-sleep-throttled-cadence-slip triplet fire (84 baseball / 85 atlas
-kickstart / 86 atlas dispatch-window overlap / 87 baseball
-dispatch-window overlap all from ONE 07:00:49Z freeze). Same-slug
-self-suppress before enqueue would have collapsed 84+87 (both
-baseball-bingo fires) to a single fire; workspace-push meta-bug
-per 51st entry still blocks landing the server-patch structural
-fix.);
-2026-08-21 ~01:05Z (job `06961584`, baseball-bingo self-diagnose —
-baseball-bingo answered `/healthz` HTTP 200 in 4.8ms and `/` HTTP 200
-in 4.6ms on port 8790, `last_healthy_at` age 37m23s at diagnosis time
-— `healthcheck.out.log` last tick 00:28:20Z (37-min slip past the
-5-min cadence, i.e. seven missed 5-min ticks in a row), project
-healthy. Twin `last_healthy_at` staleness for atlas (age 37m22s) but
-no concurrent atlas diagnose fired in the dispatch window at
-diagnosis time. Kickstarted healthcheck-all inline via
-`gui/$(id -u)/com.assistant.healthcheck-all` and cadence resumed at
-01:05:54Z — both baseball-bingo and atlas `last_healthy_at`
-refreshed to ~21s old. Eighty-eighth recurrence — canonical
-sleep-throttled-cadence-slip; live-probe gate STILL un-landed after
-88 recurrences; not re-dispatching a server-patch — workspace-push
-meta-bug per 51st entry still blocks landing the structural fix.);
-2026-08-21 ~01:05Z (atlas self-diagnose, job
-`1205176d-3624-4c43-8a5b-243c01dc6c88` — the concurrent atlas twin
-the 88th above declared "no concurrent atlas diagnose fired in the
-dispatch window at diagnosis time". Both self-diagnose triggers
-fired at 01:05:12Z from the same 00:28:20Z freeze; the 88th's DB
-query for concurrent siblings happened before my row was
-`running`, hence the mistaken "no twin" claim. Atlas answered `/`
-HTTP 200 in 71ms on port 8791; all three launchd services healthy
-(PIDs 71563/71565/73262 for `com.assistant.project.atlas /
-.atlas-dash-scheduler / .atlas-pm-edge`, LastExitStatus=-15 legacy
-SIGTERM). `com.assistant.healthcheck-all` state=not running,
-runs=981, last exit code=0 (idle between ticks per usual, NOT
-wedged). DB `last_healthy_at` was 01:05:54Z at my probe (43s
-stale), refreshed by the 88th's inline kickstart of
-`com.assistant.healthcheck-all`; identical stamps on atlas and
-baseball-bingo confirm the canonical shared-cadence fingerprint.
-No new kickstart needed — 88th already restored cadence. Eighty-
-ninth recurrence — canonical intra-slip trigger-storm twin,
-exactly the same class as 85/86 (dispatch-window overlap where
-one twin kickstarts and the other arrives seconds later on
-already-fresh data). Live-probe gate STILL un-landed after 89
-recurrences; not re-dispatching a server-patch — workspace-push
-meta-bug blocker per the 51st entry still stands. Same-slug
-self-suppress guard (skip enqueue if a running/queued self-
-diagnose for the same slug exists) suggested in 80/81/82/83
-would have collapsed 88+89 to a single fire.);
-2026-08-21 ~06:39Z (job `010fc470-8229-4b2f-9fbb-40695bbc1581`,
-baseball-bingo self-diagnose — service healthy at probe: local
-`/healthz` HTTP 200, public `https://bingo.chrispiserchia.com/healthz`
-HTTP 200, launchd `com.assistant.project.baseball-bingo` PID 3253
-running, `last_healthy_at` 2m 28s old (well inside 5-min cadence).
-`read_project_logs` tail again surfaced the stale-tail `TaskHandle`
-ImportError bursts; re-verified `from anyio._core._tasks import
-TaskHandle` succeeds cleanly at anyio 4.14.2 in the shared venv, so
-those tracebacks are historical and unrelated. Trigger fired on the
-20-min-unhealthy rule despite the healthcheck stamp being fresh —
-canonical false-positive. No kickstart or restart needed. Ninetieth
-recurrence — same class as 88/89; live-probe gate (skip event
-dispatch when a same-slug live probe returns 200 within the window)
-STILL un-landed, workspace-push meta-bug blocker per 51st entry
-still stands.)
-2026-08-21 ~06:41Z (job `a840df05-0b9d-4be2-a39a-ec4daa15d17f`,
-baseball-bingo self-diagnose fired on the 20-min-unhealthy rule —
-service healthy at probe: local `/healthz` HTTP 200 in 2.7ms, `/`
-HTTP 200 in 2.8ms on port 8790, launchd
-`com.assistant.project.baseball-bingo` PID 3253 running 3d16h,
-`last_healthy_at` 4m13s old at probe time (well inside the 5-min
-cadence). `healthcheck.out.log` shows the trigger window: 04:36:33Z
-→ 04:56:58Z (20-min slip / four missed ticks), then 04:56:58Z →
-05:58:25Z (61-min slip / twelve missed ticks — the biggest gap in
-the recent record), then 05:58:25Z → 06:37:09Z (39-min slip / seven
-missed ticks), before the 5-min cadence naturally resumed at
-06:42:11Z. Classic Mac Mini early-morning sleep/power throttling
-compound slip; healthcheck-all self-recovered before diagnose loaded,
-no inline kickstart needed. Ninety-first recurrence — same false-
-positive class as 88/89/90; live-probe gate (skip event dispatch
-when a same-slug live probe returns 200 within the window) and
-same-slug self-suppress guard BOTH still un-landed. Notable this
-window: no concurrent atlas diagnose observed for the same slip
-despite atlas sharing the exact same `last_healthy_at` staleness at
-trigger evaluation time.)
-2026-08-21 ~06:34–06:36Z (jobs `4c45434d-72a7-47c6-b8ae-d40b16a280a2`,
-`dd004d53`, `ab4641c9` for baseball-bingo AND `502df665`, `e4061bcf`,
-`f5baa449` for atlas — SIX queued in a burst instead of the usual
-twin fire, three per project). Same cadence-slip false positive: at
-run-time both projects healthy — bingo `/healthz` HTTP 200 in 1.4ms,
-atlas `/` HTTP 200 in 70ms, `last_healthy_at` 2.7 min old for both.
-NEW ROOT-CAUSE FINDING (recurrence #92 and dedup-bug discovery):
-`src/runner/events.py:_check_project_health` (and
-`_check_skill_failures`) dedup by filtering
-`Job.resolved_skill == "self-diagnose"` — but queued jobs have
-`resolved_skill IS NULL` (the runner only sets it when the job
-starts running). So while a self-diagnose job sits in the queue
-waiting for the runner to pick it up, subsequent 60-s event cycles
-DON'T see it and spawn duplicates. Here the event loop fired at
-:34, :35, :36 for both slugs — six jobs, three per slug — before
-the :34 job started running and populated `resolved_skill`. Fix:
-change the dedup query to filter by `Job.kind == "self-diagnose"`
-(set at INSERT time, never NULL) instead of `Job.resolved_skill`.
-Non-immediate action this session: 4 duplicate queued diagnoses
-cancelled via direct `UPDATE jobs SET status='cancelled'` (safe:
-queued jobs skip in `main._process_job:312` if status ≠ 'queued'),
-server-patch dispatched for the events.py fix. Ninety-second
-recurrence.)
+whenever the workspace-push meta-bug unblocks it.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
@@ -2825,76 +2730,43 @@ checkout under `~/Library/Application Support`) are unaffected.
 **First recorded:** atlas `docs/DEVELOPMENT.md` gotcha 2026-08-10
 ("editable installs die silently"), root-caused 2026-08-18.
 
-## Symptom: `chat` skill fails with `error_max_turns: Reached maximum number of turns (3)` on a question that mentions taking action
+## Symptom: a scheduled job's Telegram summary looks normal and `jobs.status='completed'`, but the skill produced no output — no commit, no scorecard entry, half a checklist done
 
-### Root cause (2026-08-20, job `267dd425`)
+Two documented faces of one class ("terminal-but-recorded-completed"), both first
+seen on `atlas-evaluate`:
 
-The `chat` skill was designed to be tool-less ("Do not invoke tools" in its
-Procedure, `required_tools: []` in frontmatter, `max_turns: 3`). But its
-frontmatter also had `permission_mode: default`, which under the SDK does NOT
-block tool USE at the schema layer — it puts each tool call through the
-interactive approval gate. In a headless runner session there is no user to
-answer that prompt, so every call returns `is_error: true` with
-`result_preview: "This command requires approval"` (or the multi-op variant).
-
-When a user's message reads like a diagnostic/action request and gets routed
-to `chat` anyway (e.g. `Is the server down? Can you fix`), the model tries to
-help by running `curl` / `launchctl` — the approval gate rejects every
-attempt, the model retries with a different command, and `max_turns: 3`
-exhausts in ~3 seconds. The session ends with `error_max_turns`, event
-detector escalates to `self-diagnose`.
-
-The runtime side of this was already learned in
-`review-and-improve/SKILL.md` line 382 ("plan mode blocks MCP tool calls,
-proven live"): `permission_mode: plan` is the SDK's way to disallow tool
-use entirely at the schema layer. That is exactly what a text-only skill
-wants.
-
-### Diagnostic
-
-```bash
-# Find recent chat failures matching this pattern:
-psql assistant -c "SELECT id, LEFT(description, 80), error_message
-  FROM jobs
-  WHERE kind='chat' AND status='failed' AND error_message LIKE '%error_max_turns%'
-  ORDER BY created_at DESC LIMIT 10;"
-
-# Confirm the tool-approval symptom in an offending job's audit log:
-JOB=<uuid>
-grep -E 'requires approval|error_max_turns' \
-  "volumes/audit_log/${JOB}.jsonl"
-```
+1. **API-terminal banner (2026-08-17, job 143c8cfb)** — the session died on
+   `API Error: 529 Overloaded` after ~200s with all-zero usage; the banner text
+   became the summary and the job recorded `completed`. `escalation.on_failure`
+   never fired and `schedules.last_run_at` read healthy — the atlas governor was
+   silently dark for 10 days. FIXED 2026-08-21 (`cf00b8b`, merged `64de48c`):
+   `src/runner/session.py` reclassifies banner-with-zero-usage sessions as
+   FAILED (`error_category="quota"`, label only). Regression:
+   `tests/test_api_terminal.py`.
+2. **Mid-checklist clean stop (2026-08-21 job 75b30b8b, again 2026-08-22 job
+   a15b3165)** — the session ended cleanly right after a tool result, ~80-82
+   tool calls in, with real usage and no final message; recorded `completed`.
+   Both runs were atlas-evaluate (`max_turns: 60`) and both stopped at the
+   same ~80-tool-call mark far below any wall-clock limit — consistent with
+   the turn ceiling being exhausted WITHOUT the SDK surfacing
+   `error_max_turns` (contrast the 2026-08-04 daily-brief failure, which did
+   surface it and was correctly recorded failed). Mitigated by raising
+   atlas-evaluate to `max_turns: 120` (2026-08-22). Not covered by the
+   `cf00b8b` classifier (deliberately — real usage disqualifies). Open
+   runner follow-up: treat a clean end whose last event is a tool result
+   (no final assistant text) as suspect — flag or fail it.
 
 ### Fix
-
-Change the offending skill's `permission_mode` from `default` to `plan`.
-Applied to `skills/chat/SKILL.md` on 2026-08-20. `plan` mode blocks all
-tool USE at the SDK layer; the model responds with text only, which is
-what a conversational skill wants. Text-only skills to audit if this
-recurs elsewhere: any skill whose frontmatter is
-`permission_mode: default` + `required_tools: []` should be `plan`
-instead (as of 2026-08-20: `skills/plan/`, `skills/_evaluate/`,
-`skills/restore/` all still have `permission_mode: default` — check them
-if similar `error_max_turns (N)` regressions surface).
+For an affected job: check the real artifacts (for atlas-evaluate: SCORECARD/
+BACKLOG commits, `data_gaps` transitions), then re-enqueue with the remaining
+work spelled out in the description.
 
 ### Prevention
-
-Two options if this pattern recurs:
-
-1. **Skill-frontmatter lint**: extend `scripts/lint_docs.py` to flag any
-   SKILL.md with `permission_mode: default` + `required_tools: []` +
-   "Do not invoke tools" (or equivalent) in the Procedure — that
-   combination is always the same class of bug.
-2. **Router smarts**: teach `llm_router` that messages containing
-   `fix|down|broken|why did|debug` should never route to `chat` even if
-   they read conversationally — they belong to `self-diagnose` or a
-   `/task` invocation. The router already knows about these keywords for
-   other classes; this is a small addition, not a redesign.
-
-Neither is required to close this incident; the skill-frontmatter change
-above fixes the immediate `error_max_turns` failure by making chat
-degrade gracefully to "I can't run commands, use `/task ...`" per step 5
-of its Procedure.
+Job status is not proof of output. Watchdogs must check artifacts:
+`atlas-manager` (2026-08-21) now cross-checks the governor's summary shape AND
+`evaluation/SCORECARD.md` commit age. A general acceptance check for
+schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
+open follow-up.
 
 ## Adding entries to this file
 
