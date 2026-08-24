@@ -11,7 +11,7 @@ escalation:
     model: claude-opus-4-7
     effort: high
 tags: [atlas, operations, deploy]
-context_files: ["skills/atlas-redeploy/GOTCHAS.md"]
+context_files: ["skills/atlas-redeploy/GOTCHAS.md", ".context/SYSTEM.md"]
 ---
 
 # Atlas Redeploy

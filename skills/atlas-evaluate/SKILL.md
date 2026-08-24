@@ -11,7 +11,7 @@ escalation:
     model: claude-opus-5
     effort: xhigh
 tags: [atlas, evaluation, scheduled-capable]
-context_files: ["skills/atlas-evaluate/GOTCHAS.md"]
+context_files: ["skills/atlas-evaluate/GOTCHAS.md", ".context/SYSTEM.md"]
 ---
 
 # atlas-evaluate — weekly scorecard + gap triage + backlog re-route
