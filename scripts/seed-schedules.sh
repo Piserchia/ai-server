@@ -84,6 +84,18 @@ upsert 'atlas-momo-drift'        '30 13 1 * *' 'atlas-momo-drift'        'atlas-
 # family): no project_slug payload, no workspace clone. Sat 13:00 is clear of
 # every loop slot (Mon/Tue/Wed/Fri), Thu momo, Sun report sweep, 12:00 brief.
 upsert 'atlas-k401-review'       '0 13 * * 6'  'atlas-k401-review'       'atlas-k401-review: weekly 401k holdings review -> per-holding analyst fan-out + adversarial pass -> k401_review report via atlas-dash save-report --k401; recommendations only (skills/atlas-k401-review)'
+# ── Trader vertical (atlas trader/, 0042, 2026-08-26) ──────────────────────
+# PAPER ONLY (atlas trader/CLAUDE.md rule 1). paper = daily executor
+# supervision (workspace clone needs the project_slug payload — without it
+# the runner clones the AI-SERVER repo); research = weekly governed cycle
+# (workspace + 60-min budget); evaluate = weekly governor in the shared dev
+# clone (no payload, atlas-evaluate posture). Slots: 17:30 weekdays is clear
+# of every loop slot + 12:00 brief; Wed 13:00 clear (gap-scout is 11:00);
+# Sun 15:00 is clear of the Sunday-evening report sweep (18:00, atlas-side)
+# and lands before Mon 11:00 atlas-evaluate.
+upsert 'atlas-trader-paper'      '30 17 * * 1-5' 'atlas-trader-paper'    'atlas-trader-paper: daily trader-vertical PAPER run -> deterministic executor in workspace clone, verify trader.runs row + reconciliation, report state/halts; supervisor only, never trades itself (skills/atlas-trader-paper)' '{"project_slug":"atlas"}'
+upsert 'atlas-trader-research'   '0 13 * * 3'  'atlas-trader-research'   'atlas-trader-research: weekly governed trader research cycle -> pre-registered card, deterministic backtest evidence, adversarial validation, ledger + trial-registry close-out under trader/evaluation/PROTOCOL.md (skills/atlas-trader-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
+upsert 'atlas-trader-evaluate'   '0 15 * * 0'  'atlas-trader-evaluate'   'atlas-trader-evaluate: weekly trader governor -> grade the week vs SPY/BIL from DB evidence, lessons, gated stage flips (never live), schedule-liveness sweep (skills/atlas-trader-evaluate)'
 
 echo "Schedules seeded."
 echo ""

@@ -117,6 +117,21 @@ else
 fi
 ```
 
+Trader gate — same deterministic pattern (added 2026-08-26 with the trader
+vertical; manifest.yml declares it, this skill executes it):
+
+```bash
+if git -C "$ATLAS" diff --name-only "$RANGE_BASE..$AFTER" | grep -q '^trader/'; then
+  cd "$ATLAS/trader" || exit 1
+  if [ ! -x .venv/bin/python ]; then    # self-heal: venv is an allowed runtime-clone write
+    python3.12 -m venv .venv && .venv/bin/pip install -q -e '.[dev]'
+  fi
+  .venv/bin/python -m pytest -q         # must be green
+else
+  echo "no trader/ changes in range — trader gate skipped"
+fi
+```
+
 **Any failure → STOP. Do not build, do not restart.** Summary = the failing output + the
 commit range, so the fix lands in the dev repo first.
 

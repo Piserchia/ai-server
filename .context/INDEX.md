@@ -107,6 +107,14 @@ projects/<slug>/
 | Expose a skill as an in-session subagent | `skills/TEMPLATE.md` (frontmatter `subagents:`), `src/runner/agents.py` |
 | See why `docs/CONTAINERS.md` is historical | its header note + git history |
 
+## Additions 2026-08-26 (autonomous trading vertical)
+
+| I need to... | Read these |
+|---|---|
+| Understand the autonomous trading design (evidence base, risk kernel, learning loop, owner ignition) | `docs/superpowers/plans/2026-08-26-autonomous-trading.md`, atlas `plans/trader/DESIGN.md`, atlas `trader/CLAUDE.md` |
+| Work on the trader loop skills | `skills/atlas-trader-{paper,research,evaluate}/SKILL.md` (staged in atlas `integrations/ai-server/`) |
+| Understand how live money would ever be enabled (owner-only) | atlas `trader/GO_LIVE.md` + `trader/CLAUDE.md` rule 1 |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
