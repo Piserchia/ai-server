@@ -115,6 +115,12 @@ projects/<slug>/
 | Work on the trader loop skills | `skills/atlas-trader-{paper,research,evaluate}/SKILL.md` (staged in atlas `integrations/ai-server/`) |
 | Understand how live money would ever be enabled (owner-only) | atlas `trader/GO_LIVE.md` + `trader/CLAUDE.md` rule 1 |
 
+## Additions 2026-08-27 (two new trading bot verticals — PROPOSED)
+
+| I need to... | Read these |
+|---|---|
+| Understand the proposed swing (short-term stock/options) + value (fundamentals/CSP) bot design | `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md` (owner decisions O-1…O-6 pending; nothing implemented) |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
