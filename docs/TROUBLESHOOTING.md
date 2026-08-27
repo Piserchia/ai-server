@@ -2802,7 +2802,68 @@ Job status is not proof of output. Watchdogs must check artifacts:
 schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
 open follow-up.
 
-## Adding entries to this file
+## Symptom: `atlas-momo-research` hits `session_timeout` at 60 min while the engineer probe is still running
+
+### Diagnostic
+
+```bash
+# Confirm the parent hit the ceiling with a background bash still writing:
+grep -c "session_timeout" volumes/audit_log/<job_id>.jsonl
+grep -o '"tool_name": "[^"]*"' volumes/audit_log/<job_id>.jsonl | sort | uniq -c
+# Grep the last tool_use to see WHICH stage the parent was busy-waiting on:
+tail -50 volumes/audit_log/<job_id>.jsonl | grep -o '"description": "[^"]*"'
+```
+
+Signal: the audit log ends with `Bash` `until [ wc -l < ...engineer.output ] -gt N; do sleep 20; done`
+polling loops. That's the parent waiting on the H010-family classifier.
+
+### Root cause (diagnosed 2026-08-27, job `44d1bc6b`)
+
+The atlas-momo-research fleet-workflow-in-one-session shape hits the 60-min
+ceiling as soon as the engineer stage runs a per-row EDGAR probe over the
+full sealed 315-symbol frame. In `44d1bc6b`, the engineer classifier had
+completed 264/315 rows (~84%) at ~7 rows/min when the runner tripped
+`session_timeout_seconds: 3600` at `src/runner/main.py:478`. The instrument
+fixes required by H010 (uncap `MAX_POST_DOCS`, family-equality class match,
+newest-first post-effective sort) increased per-row work above the H009
+baseline that fit inside the 30-min ceiling → 60-min bump of 2026-08-21.
+
+The failure mode is the "remaining open mitigation" documented in the skill's
+own gotchas (`skills/atlas-momo-research/SKILL.md`, session-ceiling
+collision section): the fleet workflow (analyst → documentarian → engineer →
+validator → risk → documentarian) plus PROTOCOL.md reads eat >20 min before
+the engineer stage begins, and a full-frame probe eats the rest.
+
+### Fix (not auto-applied — see Prevention for the durable path)
+
+**Do NOT keep bumping `session_timeout_seconds`.** The runner caps at 5400
+(`SESSION_TIMEOUT_CAP_SECONDS`) — only 30 more minutes — and the skill
+explicitly forbids that path in favour of the child-job split. The immediate
+recovery is:
+
+- Verify the workspace clone was cleaned (`ls volumes/workspaces | grep 44d1bc6b`).
+  If present, inspect for partial engineer output (`momentum/evaluation/runs/H010/`)
+  before it's reaped.
+- Do NOT auto-redispatch: the H010 probe under the current shape will
+  repeat the timeout. A human decision is needed on the split (below) or on
+  parallelizing the probe.
+
+### Prevention (durable, requires skill refactor)
+
+Split the atlas-momo-research cycle into per-stage child jobs with resume
+state in `momentum/evaluation/runs/HNNN/state.json` — the exact mitigation
+the skill's own gotcha names. Two independent knobs:
+
+1. **Split**: `atlas-momo-research` becomes the analyst+documentarian
+   orchestrator; engineer, validator, risk, and closeout dispatch as their
+   own `atlas-momo-<stage>` jobs, each with a fresh session budget.
+2. **Speed**: parallelize the H010 classifier (concurrent EDGAR fetches)
+   under a rate limit — smaller change, keeps single-session pattern
+   viable in mechanics/IEX-observe mode.
+
+Both are medium-risk skill/orchestration changes; neither is a `server-patch`.
+
+
 
 When you hit a new failure, append a section here in this shape:
 

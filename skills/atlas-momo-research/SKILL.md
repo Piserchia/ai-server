@@ -24,15 +24,23 @@ in the Atlas repo is the binding contract — read it in full this run, plus
 ceilings, incl. both momentum ceilings). You orchestrate the fleet; you do not do
 their jobs yourself.
 
-**Reading boundary + time budget (2026-08-07, from the first smoke run):** the
-session ceiling is 30 minutes and the first run spent ALL of it reading. Your
-FULL reads are exactly the three above. Do NOT read the momo knowledge docs
-(`momentum/skills/MARKET_KNOWLEDGE.md`, `STATS_KNOWLEDGE.md`, `DATA_QUALITY.md`)
-or charter required-reading lists yourself — those belong to the momo agents you
-spawn, in their own contexts; skim a charter's frontmatter only to know who does
-what. Budget: bootstrap ≤5 min, reading ≤8 min, the cycle gets the rest. If you
-are 15 minutes in and the cycle has not started, START IT with what you have —
-PROTOCOL.md is the only mandatory full read.
+**Reading boundary + time budget (updated 2026-08-21):** the session
+wall-clock is 60 minutes (schedule payload `session_timeout_seconds: 3600`,
+raised after incident 4ccd3a01 killed three runs at the old 30-min ceiling).
+Your FULL reads are exactly the three above. Do NOT read the momo knowledge
+docs (`momentum/skills/MARKET_KNOWLEDGE.md`, `STATS_KNOWLEDGE.md`,
+`DATA_QUALITY.md`) or charter required-reading lists yourself — those belong
+to the momo agents you spawn, in their own contexts; skim a charter's
+frontmatter only to know who does what. The hard-start rule is a TIMER you
+run, not a suggestion — very first command of the run:
+`date +%s > /tmp/momo-cycle-start` (shell state does not persist between
+commands; the file does). Before each fleet stage:
+`echo elapsed=$(( ($(date +%s) - $(cat /tmp/momo-cycle-start)) / 60 ))min`.
+Budget: bootstrap ≤5 min, reading ≤10 min; if elapsed ≥20 min and the analyst
+stage has not started, START IT with what you have (PROTOCOL.md is the only
+mandatory full read); if elapsed ≥45 min and the validator has not closed,
+stop experimenting and jump to the documentarian close-out — an honest
+INCOMPLETE cycle report that lands beats a timeout that records nothing.
 
 ## Ground rules (non-negotiable)
 
@@ -54,8 +62,12 @@ PROTOCOL.md is the only mandatory full read.
   documentarian. Read-only stages must leave `git status` clean except their
   designated append — check after each; a dirty tree is a PROTOCOL-VIOLATION entry.
 - Decoy cadence: every 4th cycle (per budget.yaml counter), run the validator
-  against a decoy from `momentum/scripts/decoys/` BEFORE the real result. A decoy
-  PASS is logged against the process and escalates. (See Gotchas until decoys land.)
+  against a decoy from `momentum/scripts/decoys/` BEFORE the real result
+  (library live since 2026-08-17 — see its README). The review runs in
+  ISOLATION: a subagent handed the emitted JSON and NO repo access, because
+  the answer key lives in `decoy_library.py`; the clean control D007 must
+  PASS or the round is void. A decoy PASS on a flawed decoy is logged against
+  the process and escalates.
 - Validation-window consultations and anything touching paid data or live money are
   OWNER-ONLY ceilings (`evaluation/LOOP.md` §6) — recommend in the summary, never
   execute, never dispatch.
@@ -95,35 +107,44 @@ N lifetime, and the one decision (if any) waiting on the owner.
   table must be written into the ledger BEFORE the probe runs, and any
   symbol that cannot be confidently mapped is reported per-symbol as
   UNMEASURABLE (→ PARTIAL/INCONCLUSIVE), never as absent.
-- `momentum/scripts/decoys/` does not exist yet (import 2026-08-07 shipped the
-  cadence rule, not the decoys). Until the decoy library lands, SKIP the decoy
-  stage and state loudly in the summary "decoy stage skipped — library not built";
-  do NOT improvise a decoy, and surface the build need in your job summary
-  (and a `data_gaps` filing if pipeline-shaped) — NEVER by editing
-  `evaluation/BACKLOG.md`, which is the evaluator's single-writer artifact.
+- **The decoy library is BUILT (E-0025, landed 2026-08-17)** — the old "skip
+  until it lands" instruction is dead; never skip on that basis again, and
+  never improvise a decoy outside the library (an ad-hoc decoy has no answer
+  key and can't be scored). Cadence, isolation, and scoring rules
+  (`caught_without_naming` does not count as a catch) live in
+  `momentum/scripts/decoys/README.md`. If something is
+  genuinely missing, surface it in your job summary (and a `data_gaps` filing
+  if pipeline-shaped) — NEVER by editing `evaluation/BACKLOG.md`, which is the
+  evaluator's single-writer artifact.
 - The momentum venv may be missing in a fresh workspace clone — bootstrap exactly
   like the dashboard prereq: `cd momentum && python3.12 -m venv .venv &&
   .venv/bin/pip install -e '.[dev]'`.
 - The schedule row for this skill lives in ai-server `scripts/seed-schedules.sh`
   (proposed Thu 13:00 — clear of Mon evaluate / Tue+Fri build / Wed scout / 12:00
-  brief) and MUST carry `'{"project_slug":"atlas"}'` as the payload arg — without
-  it, `isolation: workspace` clones the AI-SERVER repo, not atlas (the runner
+  brief) and MUST carry
+  `'{"project_slug":"atlas","session_timeout_seconds":3600}'` as the payload
+  arg — without `project_slug`,
+  `isolation: workspace` clones the AI-SERVER repo, not atlas (the runner
   scopes workspace clones from `job.payload.project_slug`; see the atlas-build
   row for the exact form). `integrations/ai-server/schedules.sql` is SUPERSEDED
   and must not be applied.
 - While `momentum/config/data_windows.yaml` is null, `momo gate` and the test
   suite still run fine — the SIP gate blocks EFFICACY claims, not mechanics work.
-- **Session-ceiling collision (2026-08-11, incident 4ccd3a01)** — 3 of the last
-  5 runs failed at exactly ~1805 s (the 30-min SDK ceiling); the two
-  completions came in at 1747–1782 s. The fleet workflow (analyst → engineer →
-  validator → risk → documentarian) plus PROTOCOL.md + POWERS.md §4 +
-  LOOP.md §6 reading routinely eats the whole budget before the engineer stage
-  starts (4ccd3a01 didn't begin engineer work until minute 28). The
-  `on_failure: xhigh` escalation policy is a NOOP for this class — the retry
-  hits the same wall-clock ceiling. Two mitigations for whoever next authors
-  this skill: (a) enforce the "15-min hard-start" rule by making it a Bash
-  timer check the orchestrator runs itself, not a suggestion; (b) split the
-  cycle so each fleet stage dispatches as its own child job with resumption
-  state in the ledger, freeing the parent from having to fit all five stages
-  in one session. Do NOT just retry the same shape — see incident notes in
-  `docs/TROUBLESHOOTING.md` §atlas-momo-research session-ceiling.
+- **Session-ceiling collision (2026-08-11, incident 4ccd3a01; RECURRED at
+  60 min on 2026-08-27, job `44d1bc6b`)** — 3 of the 30-min-era runs failed
+  at exactly ~1805 s. The 60-min bump of 2026-08-21 held only until H010:
+  `44d1bc6b` (cycle 0008) hit `session_timeout_seconds: 3600` at ticker
+  264/315 of the H010 engineer probe, because H010's instrument fixes
+  (uncap `MAX_POST_DOCS`, family-equality class match, newest-first
+  post-effective sort) push per-row EDGAR work above what H009 measured
+  under. Fleet stages before the probe still eat >20 min. The
+  `on_failure` escalation stays REMOVED on purpose — a model-tier retry
+  hits the same wall-clock. **Do NOT bump to 5400** (`SESSION_TIMEOUT_CAP_SECONDS`
+  — the runner cap) as a stopgap: +30 min is not durable and undermines
+  the split path below. The durable mitigation is now on the critical
+  path: split the cycle so each fleet stage dispatches as its own child
+  job with resumption state in `momentum/evaluation/runs/HNNN/state.json`.
+  Cheaper stopgap that keeps the single-session shape: parallelize the
+  classifier's EDGAR fetches under a rate limit. See
+  `docs/TROUBLESHOOTING.md` §"atlas-momo-research hits session_timeout at
+  60 min" for the diagnostic recipe.
