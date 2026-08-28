@@ -8,7 +8,7 @@ effort: max
 # readonly guard profile (privilege_class below), not by the mode.
 permission_mode: acceptEdits
 required_tools: [Read, Bash, Glob, Grep]
-max_turns: 30
+max_turns: 45
 privilege_class: read-only
 context_files: [".context/SKILLS_REGISTRY.md", ".context/SYSTEM.md"]
 tags: [retrospective, needs-projects-mcp, needs-dispatch-mcp]
