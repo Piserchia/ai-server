@@ -115,11 +115,11 @@ projects/<slug>/
 | Work on the trader loop skills | `skills/atlas-trader-{paper,research,evaluate}/SKILL.md` (staged in atlas `integrations/ai-server/`) |
 | Understand how live money would ever be enabled (owner-only) | atlas `trader/GO_LIVE.md` + `trader/CLAUDE.md` rule 1 |
 
-## Additions 2026-08-27 (two new trading bot verticals — PROPOSED)
+## Additions 2026-08-27 (two new trading bot verticals — ACCEPTED-DIRECTION, v2 2026-08-30)
 
 | I need to... | Read these |
 |---|---|
-| Understand the proposed swing (short-term stock/options) + value (fundamentals/CSP) bot design | `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md` (owner decisions O-1…O-6 pending; nothing implemented) |
+| Understand the swing (Tradier, ST stock/options) + value (tastytrade, margin-secured puts) bot design — live-small-day-1 posture, scale ladder | `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md` (P0 owner account setup pending; nothing implemented) |
 
 ## Additions 2026-08-30 (atlas advisors — YouTuber persona shadow scoreboard)
 
