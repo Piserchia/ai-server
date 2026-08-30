@@ -119,7 +119,7 @@ projects/<slug>/
 
 | I need to... | Read these |
 |---|---|
-| Understand the swing auto-trader (Tradier, live-small-day-1 + scale ladder) and the value ADVISOR (theses + shadow ledger for the owner's own portfolio — no order path) | `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md` (P0 owner account setup pending; nothing implemented) |
+| Understand the swing auto-trader (Tradier, live-small-day-1 + scale ladder) and the value ADVISOR (theses + shadow ledger for the owner's own portfolio — no order path) | `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md`; implementation plan `docs/superpowers/plans/2026-08-30-trading-bots-implementation.md` |
 
 ## Additions 2026-08-30 (atlas advisors — YouTuber persona shadow scoreboard)
 
