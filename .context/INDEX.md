@@ -121,6 +121,13 @@ projects/<slug>/
 |---|---|
 | Understand the proposed swing (short-term stock/options) + value (fundamentals/CSP) bot design | `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md` (owner decisions O-1…O-6 pending; nothing implemented) |
 
+## Additions 2026-08-30 (atlas advisors — YouTuber persona shadow scoreboard)
+
+| I need to... | Read these |
+|---|---|
+| Understand the advisors vertical (persona minds, shadow books, consensus, digest) | `docs/superpowers/specs/2026-08-30-atlas-advisors-design.md`; atlas `advisors/CLAUDE.md` |
+| Work on the advisors loop skills | `skills/atlas-advisors-{ingest,panel}/SKILL.md` (staged in atlas `integrations/ai-server/`) |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
