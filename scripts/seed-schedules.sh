@@ -97,6 +97,13 @@ upsert 'atlas-trader-paper'      '30 17 * * 1-5' 'atlas-trader-paper'    'atlas-
 upsert 'atlas-trader-research'   '0 13 * * 3'  'atlas-trader-research'   'atlas-trader-research: weekly governed trader research cycle -> pre-registered card, deterministic backtest evidence, adversarial validation, ledger + trial-registry close-out under trader/evaluation/PROTOCOL.md (skills/atlas-trader-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 upsert 'atlas-trader-evaluate'   '0 15 * * 0'  'atlas-trader-evaluate'   'atlas-trader-evaluate: weekly trader governor -> grade the week vs SPY/BIL from DB evidence, lessons, gated stage flips (never live), schedule-liveness sweep (skills/atlas-trader-evaluate)'
 
+# Advisors vertical (YouTuber persona shadow scoreboard, spec 2026-08-30):
+# ingest Mon+Thu 14:00 UTC (clear of 11:00 loop slots, 12:00 brief, 13:00
+# research slots); panel Sat 15:00 UTC (clear of k401 Sat 13:00 and
+# trader-evaluate Sun 15:00). Measurement-only vertical — no order path.
+upsert 'atlas-advisors-ingest'   '0 14 * * 1,4' 'atlas-advisors-ingest'  'atlas-advisors-ingest: twice-weekly advisors ingest -> RSS roster poll, yt-dlp transcripts, schema-validated claim extraction, dossier compaction, liveness row (skills/atlas-advisors-ingest)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
+upsert 'atlas-advisors-panel'    '0 15 * * 6'  'atlas-advisors-panel'    'atlas-advisors-panel: weekly advisors panel -> committed persona-mind emissions, deterministic book rebuild + SPY/BIL marks into advisors.*, weekly digest w/ debate + liveness (skills/atlas-advisors-panel)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
+
 echo "Schedules seeded."
 echo ""
 echo "NOTE: review-and-improve runs via idle-queue trigger in events.py"

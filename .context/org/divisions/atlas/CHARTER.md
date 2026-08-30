@@ -32,6 +32,8 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-trader-paper` | worker | guarded-writer | Daily trader-vertical paper run: execute the deterministic executor in a workspace clone, verify + report; supervisor only, PAPER ONLY (weekdays 17:30) |
 | `atlas-trader-research` | worker | guarded-writer | Weekly trader-vertical research cycle under trader/evaluation/PROTOCOL.md: card → backtest → adversarial validation → ledger + trial registry; additive strategy candidates only (Wed 13:00) |
 | `atlas-trader-evaluate` | worker | guarded-writer | Weekly trader-vertical governor: grade the week vs SPY/BIL from DB evidence, lessons, gated stage flips (never toward live), liveness sweep (Sun 15:00) |
+| `atlas-advisors-ingest` | worker | guarded-writer | Twice-weekly advisors ingest: RSS roster poll, yt-dlp transcripts, schema-validated claim extraction, dossier compaction; measurement-only, no order path (Mon+Thu 14:00) |
+| `atlas-advisors-panel` | worker | guarded-writer | Weekly advisors panel: committed persona-mind emissions, deterministic book rebuild + SPY/BIL marks, digest w/ debate + liveness; measurement-only, graduation notes never wires (Sat 15:00) |
 
 ## Standards
 
