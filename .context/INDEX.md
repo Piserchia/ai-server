@@ -120,6 +120,8 @@ projects/<slug>/
 | I need to... | Read these |
 |---|---|
 | Understand the swing auto-trader (Tradier, live-small-day-1 + scale ladder) and the value ADVISOR (theses + shadow ledger for the owner's own portfolio — no order path) | `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md`; implementation plan `docs/superpowers/plans/2026-08-30-trading-bots-implementation.md` |
+| Work on the swing/value loop skills | `skills/atlas-{swing-supervise,swing-trade,swing-research,swing-evaluate,value-theses,value-monitor,value-research,value-evaluate}/SKILL.md` (staged byte-identical from atlas `integrations/ai-server/`) |
+| Understand how swing live money is gated | atlas `swing/LADDER.md` + `swing/CLAUDE.md` rule 1 (sandbox pin + R22 cap, owner hand-edits only) |
 
 ## Additions 2026-08-30 (atlas advisors — YouTuber persona shadow scoreboard)
 

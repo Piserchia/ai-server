@@ -29,6 +29,14 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-refresh-knowledge` | worker | content | Monthly knowledge curation + stale-claim re-verify (1st 11:30) |
 | `atlas-momo-research` | worker | guarded-writer | Weekly Momentum-Lab research cycle: one governed hypothesis cycle in a workspace clone under momentum/evaluation/PROTOCOL.md; mechanics/IEX-observe until SIP approved (Thu 13:00) |
 | `atlas-momo-drift` | worker | guarded-writer | Monthly Momentum-Lab retention-drift point (E-0028): anchored probe in a workspace clone, one dated JSON committed, data-only; monitoring not experiment (1st 13:30) |
+| `atlas-swing-supervise` | worker | guarded-writer | Morning swing lifecycle run: executor --manage, verify resting exits/R12/R20/R21, report; sandbox-pinned until owner LADDER gate (~09:40 ET, dual DST rows) |
+| `atlas-swing-trade` | worker | guarded-writer | Near-close swing decision run: bounded LLM selection over screener candidates, tighten-only, kernel places OTOCO; no-trade is success (~15:45 ET, dual DST rows) |
+| `atlas-swing-research` | worker | guarded-writer | Weekly swing research cycle: one sealed card, backtest evidence, adversarial validation; additive-only write surface (Fri 13:00) |
+| `atlas-swing-evaluate` | governor | guarded-writer | Weekly swing governor: DB-rows grade vs SPY/BIL, liveness sweep, deterministic demotions, ladder/shakedown memos (Sun 16:00) |
+| `atlas-value-theses` | worker | guarded-writer | Weekly value-advisor deep run: fundamentals screen → gated thesis cards → shadow booking → owner DM; NO ORDER PATH (Mon 15:30 UTC, single row) |
+| `atlas-value-monitor` | worker | guarded-writer | Daily open-thesis lifecycle sweep: invalidations/targets/21-DTE/expiry, shadow curve; alert on change only (weekdays 18:10) |
+| `atlas-value-research` | worker | guarded-writer | Weekly advisor research cycle: one sealed card improving screen/thesis machinery; additive only (Tue 13:00) |
+| `atlas-value-evaluate` | governor | guarded-writer | Weekly advisor governor: shadow-ledger grade vs SPY regime-annotated, process compliance dominates, STOP_READING authority (Sun 17:00) |
 | `atlas-trader-paper` | worker | guarded-writer | Daily trader-vertical paper run: execute the deterministic executor in a workspace clone, verify + report; supervisor only, PAPER ONLY (weekdays 17:30) |
 | `atlas-trader-research` | worker | guarded-writer | Weekly trader-vertical research cycle under trader/evaluation/PROTOCOL.md: card → backtest → adversarial validation → ledger + trial registry; additive strategy candidates only (Wed 13:00) |
 | `atlas-trader-evaluate` | worker | guarded-writer | Weekly trader-vertical governor: grade the week vs SPY/BIL from DB evidence, lessons, gated stage flips (never toward live), liveness sweep (Sun 15:00) |

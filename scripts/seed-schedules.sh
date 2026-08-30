@@ -104,6 +104,33 @@ upsert 'atlas-trader-evaluate'   '0 15 * * 0'  'atlas-trader-evaluate'   'atlas-
 upsert 'atlas-advisors-ingest'   '0 14 * * 1,4' 'atlas-advisors-ingest'  'atlas-advisors-ingest: twice-weekly advisors ingest -> RSS roster poll, yt-dlp transcripts, schema-validated claim extraction, dossier compaction, liveness row (skills/atlas-advisors-ingest)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 upsert 'atlas-advisors-panel'    '0 15 * * 6'  'atlas-advisors-panel'    'atlas-advisors-panel: weekly advisors panel -> committed persona-mind emissions, deterministic book rebuild + SPY/BIL marks into advisors.*, weekly digest w/ debate + liveness (skills/atlas-advisors-panel)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 
+# ── Swing + value verticals (atlas swing/ value/, 0044-0046, 2026-08-30) ───
+# Spec v3: swing = auto-trader on Tradier (SANDBOX-PINNED until the owner
+# LADDER.md funding gate); value = ADVISOR ONLY (no order path; shadow
+# ledger). ET-anchored slots use DUAL MONTH-GATED rows (cron can't track
+# DST): -edt covers Mar-Nov, -est covers Dec-Mar; the executor's off_window
+# guard no-ops the off-season sibling, so exactly one effective run per day.
+# Slots verified free: 13:40/14:40 + 19:45/20:45 weekdays, Fri 13:00,
+# Sun 16:00/17:00, Mon 15:30, 18:10 weekdays. Supervise's window is
+# narrowed to 09:35-10:25 ET so its overlap-month sibling (10:40 ET) falls
+# off_window (code-review 2026-08-30) (map above; Mon 13:00 is
+# research-report, 14:00 Mon/Thu advisors-ingest, Sun 15:00 trader governor).
+upsert 'atlas-swing-supervise-edt' '40 13 * 3-11 1-5' 'atlas-swing-supervise' 'atlas-swing-supervise (EDT rows): morning lifecycle run ~09:40 ET -> executor --manage in workspace clone; verify resting exits/R12/R20/R21; report (skills/atlas-swing-supervise)' '{"project_slug":"atlas"}'
+upsert 'atlas-swing-supervise-est' '40 14 * 1-3,11,12 1-5' 'atlas-swing-supervise' 'atlas-swing-supervise (EST rows): morning lifecycle run ~09:40 ET (skills/atlas-swing-supervise)' '{"project_slug":"atlas"}'
+upsert 'atlas-swing-trade-edt' '45 19 * 3-11 1-5' 'atlas-swing-trade' 'atlas-swing-trade (EDT rows): near-close decision run ~15:45 ET -> screen, bounded LLM selection, kernel submit via executor (skills/atlas-swing-trade)' '{"project_slug":"atlas"}'
+upsert 'atlas-swing-trade-est' '45 20 * 1-3,11,12 1-5' 'atlas-swing-trade' 'atlas-swing-trade (EST rows): near-close decision run ~15:45 ET (skills/atlas-swing-trade)' '{"project_slug":"atlas"}'
+upsert 'atlas-swing-research' '0 13 * * 5' 'atlas-swing-research' 'atlas-swing-research: weekly governed research cycle under swing/evaluation/PROTOCOL.md -> one sealed card, backtest evidence, adversarial validation, ledger close-out (skills/atlas-swing-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
+upsert 'atlas-swing-evaluate' '0 16 * * 0' 'atlas-swing-evaluate' 'atlas-swing-evaluate: weekly swing governor -> DB-rows grade vs SPY/BIL, liveness sweep, deterministic demotions, ladder/shakedown memos (skills/atlas-swing-evaluate)'
+# value-theses: ONE row (code-review 2026-08-30: value has no off_window
+# guard, so dual rows would double-book in the March/November overlap; a
+# weekly advisor doesn't need close-anchored precision — 15:30 UTC is 11:30
+# EDT / 10:30 EST, always mid-morning RTH; weekly.emit is also idempotent
+# per week as a second net).
+upsert 'atlas-value-theses' '30 15 * * 1' 'atlas-value-theses' 'atlas-value-theses: weekly advisor deep run (Mon ~10:30-11:30 ET) -> screen, rule-bounded thesis cards, shadow booking, owner DM (skills/atlas-value-theses)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
+upsert 'atlas-value-monitor' '10 18 * * 1-5' 'atlas-value-monitor' 'atlas-value-monitor: daily open-thesis lifecycle sweep -> invalidations/targets/21-DTE/expiry, shadow curve; alert on change only (skills/atlas-value-monitor)' '{"project_slug":"atlas"}'
+upsert 'atlas-value-research' '0 13 * * 2' 'atlas-value-research' 'atlas-value-research: weekly advisor research cycle under value/evaluation/PROTOCOL.md -> one sealed card, additive improvements (skills/atlas-value-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
+upsert 'atlas-value-evaluate' '0 17 * * 0' 'atlas-value-evaluate' 'atlas-value-evaluate: weekly advisor governor -> shadow-ledger grade vs SPY (regime-annotated), process compliance, STOP_READING verdict authority (skills/atlas-value-evaluate)'
+
 echo "Schedules seeded."
 echo ""
 echo "NOTE: review-and-improve runs via idle-queue trigger in events.py"
