@@ -12,6 +12,7 @@ escalation:
     effort: high
 subagents: [atlas-report-business, atlas-report-technical]
 tags: [atlas, finance, research, scheduled-capable]
+context_files: [".context/SYSTEM.md"]
 ---
 
 # Atlas Report

@@ -2,6 +2,45 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-31 — atlas-report + ops-manager: pre-load `.context/SYSTEM.md` (review-and-improve proposals)
+
+**Agent task**: implement two `review-and-improve` proposals adding
+`context_files` to the highest-usage skill without any (atlas-report, 95
+runs/30d) and to ops-manager (5/5 runs already re-Read SYSTEM.md).
+
+**Files changed**:
+- `skills/atlas-report/SKILL.md` — added `context_files: [".context/SYSTEM.md"]`
+  (skill previously had none; 78%+ of runs Read SYSTEM.md per proposal
+  `f6c24f53-4520-4dbb-95b4-c4a7c03a92c1`, subsumes older `fd162b91-4177-4f1f-a8b2-fae52d69bbd2`).
+- `skills/ops-manager/SKILL.md` — appended `.context/SYSTEM.md` to the
+  existing list (`CHARTER.md`, `MISSION.md`) per proposal
+  `bfa0367e-6561-45ea-817f-3189236b84ae`.
+
+**Why**: `context_files` are pre-loaded into the server directive so the
+session skips a Read tool call it would otherwise make on nearly every
+invocation. Zero behavior change — same file read, one turn earlier.
+
+**Side effects**: none. The runtime validator (`registry/skills.py`) and
+lint (`scripts/lint_docs.py check_context_files_exist`) both accept the
+new paths — `.context/SYSTEM.md` is present in every checkout.
+
+**Held back (recorded for follow-up)**: proposal `f6c24f53` also lists
+`projects/atlas/dashboard/experts_charters/equity_analyst.md` and
+`projects/atlas/dashboard/experts_knowledge/equity_analyst.md` (76% hit
+rate each). Those files live in the atlas project (gitignored under
+`projects/*/`), so they exist in production but NOT in server workspace
+clones — declaring them would fail `check_context_files_exist` in the
+workspace/dev repo even though the runtime would find them. That's a
+separate fix (teach the lint to skip paths under gitignored project
+subdirs) and is left as a follow-up.
+
+**Gotchas discovered**: `check_context_files_exist` uses `REPO_ROOT / cf`
+(the repo where lint runs); `test_context_files_exist` in
+`tests/test_skill_contracts.py` uses `settings.server_root / cf` (the
+production install path). For paths at `.context/`, `skills/`, `src/` they
+agree; for paths under `projects/<slug>/` they diverge because projects
+are gitignored — pull-only, deploy-time-hydrated clones.
+
 ## 2026-08-31 — skills loader fails closed on corrupt frontmatter (EVALUATION_2026-08-30 F1.6)
 
 **Files changed**: `src/registry/skills.py`, `tests/test_registry_failclosed.py`.

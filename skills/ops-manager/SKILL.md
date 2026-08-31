@@ -11,7 +11,7 @@ division: platform-ops
 privilege_class: read-only
 subagents: [gap-auditor]
 tags: [management, division-manager, read-only, needs-dispatch-mcp]
-context_files: [".context/org/divisions/platform-ops/CHARTER.md", "MISSION.md"]
+context_files: [".context/org/divisions/platform-ops/CHARTER.md", "MISSION.md", ".context/SYSTEM.md"]
 ---
 
 # Ops Manager — Platform Ops division
