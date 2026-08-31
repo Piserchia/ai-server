@@ -130,16 +130,21 @@ N lifetime, and the one decision (if any) waiting on the owner.
   and must not be applied.
 - While `momentum/config/data_windows.yaml` is null, `momo gate` and the test
   suite still run fine — the SIP gate blocks EFFICACY claims, not mechanics work.
-- **Session-ceiling collision (2026-08-11, incident 4ccd3a01)** — 3 of the last
-  5 runs failed at exactly ~1805 s (the 30-min SDK ceiling); the two
-  completions came in at 1747–1782 s. The fleet workflow (analyst → engineer →
-  validator → risk → documentarian) plus PROTOCOL.md + POWERS.md §4 +
-  LOOP.md §6 reading routinely eats the whole budget before the engineer stage
-  starts (4ccd3a01 didn't begin engineer work until minute 28). Addressed
-  2026-08-21: the schedule payload now grants `session_timeout_seconds: 3600`
-  and the hard-start rule above is a Bash timer you run yourself. The
-  `on_failure` escalation stays REMOVED on purpose — a model-tier retry hits
-  the same wall-clock. Remaining open mitigation if timeouts recur even at
-  60 min: split the cycle so each fleet stage dispatches as its own child
-  job with resumption state in the ledger, freeing the parent from fitting
-  all five stages in one session.
+- **Session-ceiling collision (2026-08-11, incident 4ccd3a01; RECURRED at
+  60 min on 2026-08-27, job `44d1bc6b`)** — 3 of the 30-min-era runs failed
+  at exactly ~1805 s. The 60-min bump of 2026-08-21 held only until H010:
+  `44d1bc6b` (cycle 0008) hit `session_timeout_seconds: 3600` at ticker
+  264/315 of the H010 engineer probe, because H010's instrument fixes
+  (uncap `MAX_POST_DOCS`, family-equality class match, newest-first
+  post-effective sort) push per-row EDGAR work above what H009 measured
+  under. Fleet stages before the probe still eat >20 min. The
+  `on_failure` escalation stays REMOVED on purpose — a model-tier retry
+  hits the same wall-clock. **Do NOT bump to 5400** (`SESSION_TIMEOUT_CAP_SECONDS`
+  — the runner cap) as a stopgap: +30 min is not durable and undermines
+  the split path below. The durable mitigation is now on the critical
+  path: split the cycle so each fleet stage dispatches as its own child
+  job with resumption state in `momentum/evaluation/runs/HNNN/state.json`.
+  Cheaper stopgap that keeps the single-session shape: parallelize the
+  classifier's EDGAR fetches under a rate limit. See
+  `docs/TROUBLESHOOTING.md` §"atlas-momo-research hits session_timeout at
+  60 min" for the diagnostic recipe.

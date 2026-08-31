@@ -2,6 +2,10 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-23 — Second variant of session_id collision bug documented (`_learning_apply` preflight rejection)
+
+**Agent task**: self-diagnose — escalation `b8767cb3` for failed `_learning_apply` job `46acc317` (parent 18257848). Root cause is the known `Session ID … is already in use` bug (TROUBLESHOOTING.md §468), but this instance widens the diagnosis: the first attempt was **preflight-rejected** by quota (`rate_limit_status: rejected` → `job_requeued_for_quota`) BEFORE any Claude work ran, and yet the SDK subprocess still created the session file on disk. When the retry fired ~1h37m later, it collided. Unlike the atlas-report variant (48ad692d), no deliverable existed to salvage. Remediation: manually appended the intended PATTERN entry to `.context/modules/runner/skills/PATTERNS.md`, updated TROUBLESHOOTING.md to note the preflight-rejection variant + `_learning_apply` failure mode. Fix still requires server-patch (Phase 5): rotate `session_id` on any requeue (quota preflight OR post-work `QuotaExhausted`), or short-circuit-on-`already-in-use` in `session._run_in_process`. Total `Session ID … is already in use` hits in `runner.err.log` still 22 (this incident is entry #22).
+
 ## 2026-08-21 — API-terminal sessions reclassified as failed (was silently completed)
 
 **Agent task**: server-patch — job 143c8cfb (atlas-evaluate, 2026-08-17 13:48Z)

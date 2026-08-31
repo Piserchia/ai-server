@@ -12,6 +12,12 @@ Skills can declare `context_files: [".context/SYSTEM.md"]` (or other context pat
 
 _Evidence: job `64644863`_
 
+## 2026-08-23 — Subagent dossier persistence enables recovery from output formatting failures
+
+When orchestrating multi-stage subagent workflows, design for resilience by persisting intermediate state (dossiers) to disk *before* final output generation. If a subagent fails to format its report (e.g., `indicators_cited` structure error), the workflow doesn't cascade-fail. Recovery pattern: catch the report-generation error, re-fetch the persisted packet, extract the saved keys directly from the dossier, and continue downstream work. This separation of side effects (persistence) from output formatting (validation) prevents total workflow abort on formatting errors.
+
+_Evidence: job `18257848`. Filed manually by self-diagnose escalation `b8767cb3` after the `_learning_apply` child job `46acc317` hit the session-collision bug — see TROUBLESHOOTING.md "Session ID … is already in use"._
+
 ## The pattern: spawn a child job, link via parent_job_id
 
 The runner wraps `run_session` in `_process_job`. After the session terminates

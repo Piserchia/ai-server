@@ -465,6 +465,114 @@ Then improve the quota detection in `src/runner/quota.py:detect_quota_error` to 
 
 ---
 
+## Symptom: Job fails with `exit code 1 / Error: Session ID <uuid> is already in use` immediately after a quota pause/resume
+
+### Root cause (diagnosed 2026-08-23, job `48ad692d` — atlas-report for NOW, self-diagnose escalation `3a508167`)
+
+Recurring bug — 22 hits in `volumes/logs/runner.err.log` at time of diagnosis.
+
+**Also affects preflight-rejected jobs, not just post-work QuotaExhausted.**
+Second confirmed instance 2026-08-23: `_learning_apply` child job `46acc317`
+(escalation `b8767cb3`). Preflight `rate_limit_status: rejected` fired
+BEFORE any Claude work was possible — yet the session file
+`~/.claude/projects/-Users-...-ai-server/46acc317-....jsonl` was created
+anyway (the SDK subprocess spawns and registers the session_id even when
+the run is aborted on quota preflight). Retry ~1h37m later hit the same
+`Session ID … is already in use` collision. Unlike the atlas case, no
+deliverable existed to salvage — the learning was applied manually as
+remediation. Same fix options (rotate session_id or short-circuit-on-
+already-in-use) apply to both variants.
+
+**Third confirmed instance 2026-08-23** (same batch): `_learning_apply`
+child job `b96a4976` (escalation `f50705a0`, parent `fd233e64` atlas-report
+META). Identical shape to `46acc317` — preflight quota-reject at 16:23:49
+registered the session file, retry at 18:00:20 hit
+`Session ID b96a4976-… is already in use`. No deliverable to salvage; the
+learning was applied manually to `skills/atlas-report/GOTCHAS.md`
+("Subagent text-format mismatch ≠ file write failure"). The same batch
+of resumed `_learning_apply` jobs at 18:00:20 (`46acc317`, `b96a4976`,
+`15ffc401`) all failed identically — confirming this is deterministic for
+any job whose first attempt hit preflight rejection. Live counter:
+`grep -c "Session ID .* is already in use" volumes/logs/runner.err.log`
+= 22 as of last diagnosis run.
+
+**Fourth confirmed instance (same 18:00:20 batch, re-diagnosed 2026-08-23
+by escalation `7613573f` for `15ffc401`)**: identical shape to `46acc317` /
+`b96a4976`. Payload was `module=project`, so `_learning_apply` would have
+short-circuited per its SKILL.md ("skip applying — log a note and exit")
+even if the session had been allowed to spawn — no deliverable to salvage.
+Orphan CLI session state for `15ffc401` was cleaned by the escalation
+(`~/.claude/projects/…/15ffc401-….jsonl`,
+`~/.claude/session-env/15ffc401-…/`) — hygiene only, does not fix the bug.
+
+Sequence:
+1. Job runs to actual completion (in the 48ad692d case: business lens saved
+   16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
+   100.00, learn entry filed) — all deliverables persisted to the atlas DB.
+2. A post-work API call (e.g. the `atlas-dash learn …` invocation) trips the
+   five-hour rate limit. `quota.QuotaExhausted` fires in `_process_job`
+   (`src/runner/main.py:427-439`).
+3. The exception handler pauses the queue, LPUSHes the SAME `job_id` back on
+   `QUEUE_JOBS`, and sets Job.status=`queued`.
+4. When the pause lifts (~30s later in this case; the pause was actually short
+   because reset was near), the runner pops the same job_id and calls
+   `session.run_session(job)`.
+5. Claude Code SDK uses `job_id` as the `session_id` for the subprocess. The
+   bundled CLI has already registered that session_id from step 1 and rejects:
+   `Error: Session ID 48ad692d-... is already in use.` → exit 1 → job marked
+   `failed` → self-diagnose escalation spawned.
+
+Net effect: the job's real work already succeeded and is persisted, but the
+Job row shows `failed` and an escalation fires. Telegram/UI shows a red
+failure for a job whose deliverable is live.
+
+### Diagnostic
+
+```bash
+# Confirm session-ID collision is the actual failure mode:
+grep -c "Session ID .* is already in use" volumes/logs/runner.err.log
+
+# For a specific job, check if it was requeued after quota:
+grep -E "job_requeued_for_quota|Session ID <job_id_prefix>" \
+    volumes/audit_log/<job_id>.jsonl volumes/logs/runner.err.log
+
+# Verify the actual deliverable landed (atlas example):
+psql "$DATABASE_URL" -c "SELECT id, kind, title, created_at FROM reports \
+    WHERE asset_id=(SELECT id FROM assets WHERE symbol='<SYMBOL>') \
+    AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC;"
+```
+
+### Fix (server-patch, not yet implemented — Phase 5)
+
+Two options, pick one:
+
+1. **Rotate session_id on requeue.** In `src/runner/main.py:427-439`
+   `QuotaExhausted` handler, before LPUSHing, allocate a new `session_id`
+   for the retry (either a fresh column on `Job`, or pass it explicitly to
+   `session.run_session`). Then `session.py` uses `job.session_id or job.id`
+   for the Claude Code subprocess.
+2. **Detect completion before requeue.** If the job's writeback/deliverable
+   has already landed (e.g. Job.result populated, or skill-specific "already
+   saved" check), mark `succeeded` instead of requeueing. Less general.
+
+Also worth doing regardless: catch the specific `"Session ID ... is already
+in use"` error string in `session._run_in_process` and treat as "session
+already ran to completion — mark job succeeded, skip re-invocation."
+
+### Immediate remediation for a stuck job
+
+If you've verified the deliverable is on disk:
+```bash
+psql assistant -c "UPDATE jobs SET status='succeeded', \
+    error_message=NULL, completed_at=NOW() \
+    WHERE id='<job_id>' AND status='failed';"
+# Cancel the spurious escalation:
+psql assistant -c "UPDATE jobs SET status='cancelled' \
+    WHERE id='<escalation_child_job_id>' AND status IN ('queued','running');"
+```
+
+---
+
 ## Symptom: `_writeback` child jobs spawning on every job (noisy)
 
 **Diagnostic**:
@@ -2695,6 +2803,68 @@ schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
 open follow-up.
 
 ## Adding entries to this file
+## Symptom: `atlas-momo-research` hits `session_timeout` at 60 min while the engineer probe is still running
+
+### Diagnostic
+
+```bash
+# Confirm the parent hit the ceiling with a background bash still writing:
+grep -c "session_timeout" volumes/audit_log/<job_id>.jsonl
+grep -o '"tool_name": "[^"]*"' volumes/audit_log/<job_id>.jsonl | sort | uniq -c
+# Grep the last tool_use to see WHICH stage the parent was busy-waiting on:
+tail -50 volumes/audit_log/<job_id>.jsonl | grep -o '"description": "[^"]*"'
+```
+
+Signal: the audit log ends with `Bash` `until [ wc -l < ...engineer.output ] -gt N; do sleep 20; done`
+polling loops. That's the parent waiting on the H010-family classifier.
+
+### Root cause (diagnosed 2026-08-27, job `44d1bc6b`)
+
+The atlas-momo-research fleet-workflow-in-one-session shape hits the 60-min
+ceiling as soon as the engineer stage runs a per-row EDGAR probe over the
+full sealed 315-symbol frame. In `44d1bc6b`, the engineer classifier had
+completed 264/315 rows (~84%) at ~7 rows/min when the runner tripped
+`session_timeout_seconds: 3600` at `src/runner/main.py:478`. The instrument
+fixes required by H010 (uncap `MAX_POST_DOCS`, family-equality class match,
+newest-first post-effective sort) increased per-row work above the H009
+baseline that fit inside the 30-min ceiling → 60-min bump of 2026-08-21.
+
+The failure mode is the "remaining open mitigation" documented in the skill's
+own gotchas (`skills/atlas-momo-research/SKILL.md`, session-ceiling
+collision section): the fleet workflow (analyst → documentarian → engineer →
+validator → risk → documentarian) plus PROTOCOL.md reads eat >20 min before
+the engineer stage begins, and a full-frame probe eats the rest.
+
+### Fix (not auto-applied — see Prevention for the durable path)
+
+**Do NOT keep bumping `session_timeout_seconds`.** The runner caps at 5400
+(`SESSION_TIMEOUT_CAP_SECONDS`) — only 30 more minutes — and the skill
+explicitly forbids that path in favour of the child-job split. The immediate
+recovery is:
+
+- Verify the workspace clone was cleaned (`ls volumes/workspaces | grep 44d1bc6b`).
+  If present, inspect for partial engineer output (`momentum/evaluation/runs/H010/`)
+  before it's reaped.
+- Do NOT auto-redispatch: the H010 probe under the current shape will
+  repeat the timeout. A human decision is needed on the split (below) or on
+  parallelizing the probe.
+
+### Prevention (durable, requires skill refactor)
+
+Split the atlas-momo-research cycle into per-stage child jobs with resume
+state in `momentum/evaluation/runs/HNNN/state.json` — the exact mitigation
+the skill's own gotcha names. Two independent knobs:
+
+1. **Split**: `atlas-momo-research` becomes the analyst+documentarian
+   orchestrator; engineer, validator, risk, and closeout dispatch as their
+   own `atlas-momo-<stage>` jobs, each with a fresh session budget.
+2. **Speed**: parallelize the H010 classifier (concurrent EDGAR fetches)
+   under a rate limit — smaller change, keeps single-session pattern
+   viable in mechanics/IEX-observe mode.
+
+Both are medium-risk skill/orchestration changes; neither is a `server-patch`.
+
+
 
 When you hit a new failure, append a section here in this shape:
 
