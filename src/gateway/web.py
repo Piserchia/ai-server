@@ -376,6 +376,14 @@ async def health():
 
 @app.post("/api/jobs", dependencies=[Depends(_check_auth)])
 async def create_job(req: CreateJobRequest) -> JobOut:
+    # Telegram /god is the ONLY break-glass door (INV-18). The dispatch MCP
+    # and /task --kind=god are closed; this was the third door — any
+    # unisolated skill that can read WEB_AUTH_TOKEN could have posted a
+    # kind=god job here (review catch, 2026-08-31).
+    if req.kind.strip().lower() == "god":
+        raise HTTPException(
+            status_code=403,
+            detail="kind 'god' is owner-invoked only — use Telegram /god")
     payload = {}
     if req.model:
         payload["model"] = req.model

@@ -69,6 +69,22 @@ class TestBuildSubagents:
         assert set(out) == {"code-review"}
         assert out["code-review"].permissionMode == "plan"
 
+    def test_corrupt_subagent_frontmatter_skipped(self):
+        # load() fails closed (SkillFrontmatterError, 2026-08-31) but a broken
+        # SUBAGENT must not take down the parent session (review catch).
+        from src.registry.skills import SkillFrontmatterError
+
+        catalog = {"code-review": _cfg(name="code-review")}
+
+        def loader(name):
+            if name == "broken":
+                raise SkillFrontmatterError("bad yaml")
+            return catalog.get(name)
+
+        parent = _cfg(name="server-patch", subagents=["broken", "code-review"])
+        out = agents.build_subagents(parent, loader=loader)
+        assert set(out) == {"code-review"}
+
     def test_missing_skill_skipped(self):
         parent = _cfg(subagents=["nope"])
         assert agents.build_subagents(parent, loader=self._loader({})) == {}

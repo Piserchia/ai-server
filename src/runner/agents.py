@@ -29,7 +29,7 @@ import logging
 
 from claude_agent_sdk import AgentDefinition
 
-from src.registry.skills import SkillConfig, load as load_skill
+from src.registry.skills import SkillConfig, SkillFrontmatterError, load as load_skill
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,15 @@ def build_subagents(
         if name.startswith("_"):
             logger.warning("internal skill %s cannot be a subagent — skipped", name)
             continue
-        sub = loader(name)
+        try:
+            sub = loader(name)
+        except SkillFrontmatterError as exc:
+            # load() fails closed on corrupt frontmatter (2026-08-31), but a
+            # broken SUBAGENT must not take down the parent session — skip it,
+            # honoring this function's contract (review catch, 2026-08-31).
+            logger.warning("subagent %r has corrupt frontmatter — skipped: %s",
+                           name, exc)
+            continue
         if sub is None:
             logger.warning("skill %s lists unknown subagent %r — skipped", cfg.name, name)
             continue

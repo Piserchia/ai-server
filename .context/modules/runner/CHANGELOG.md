@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-31 — review catches on the F1 hardening (same session)
+
+The INV-4 code-review pass on the remediation diff found two real holes:
+
+- **BLOCKER — `POST /api/jobs` was a third god door**: `web.create_job`
+  passed `req.kind` through unvalidated, so any unisolated skill able to
+  read `WEB_AUTH_TOKEN` could post `kind=god`. Now 403s with a pointer to
+  Telegram /god (`tests/test_web_god_gate.py`).
+- **MAJOR — corrupt SUBAGENT frontmatter killed the parent**:
+  `agents.build_subagents` didn't catch the new `SkillFrontmatterError`, so
+  one broken subagent skill (e.g. the exact unquoted-`:` class just fixed)
+  would fail every parent that lists it (19 skills list subagents). Now
+  skipped with a warning, matching the function's contract.
+
 ## 2026-08-31 — F2 queue honesty: slot-before-BLPOP, stranded-queued healing, honest /health, launchd-aware run.sh, status constraint (EVALUATION_2026-08-30)
 
 **Files changed**: `src/runner/main.py`, `src/runner/reconcile.py`,
