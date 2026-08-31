@@ -1,6 +1,7 @@
 ---
 name: atlas-chat
-description: Answer a user question about one Atlas report, in-line on the report page — as the same sector expert that authored it, grounded ONLY in the report's own packet, charter, knowledge file, and glossary. Trigger via job description "atlas-chat: report <uuid>".
+description: >-
+  Answer a user question about one Atlas report, in-line on the report page — as the same sector expert that authored it, grounded ONLY in the report's own packet, charter, knowledge file, and glossary. Trigger via job description "atlas-chat: report <uuid>".
 model: claude-sonnet-4-6
 effort: medium
 permission_mode: bypassPermissions

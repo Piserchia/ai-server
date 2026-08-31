@@ -289,6 +289,13 @@ async def cmd_task(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Optional kind override from flags (e.g., --kind=research_deep)
     kind = flags.pop("kind_override", JobKind.task.value)
+    if kind.strip().lower() == "god":
+        # /god is the single break-glass door (2026-08-31,
+        # EVALUATION_2026-08-30 F1.3) — /task must not be a second one.
+        await update.message.reply_text(
+            "`--kind=god` is not accepted on /task — use /god <description> "
+            "for break-glass work.", parse_mode="Markdown")
+        return
     await _create_task_with_job(
         update, chat_id, description,
         kind=kind, flags=flags,
@@ -1272,6 +1279,10 @@ async def _post_init(app: Application) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    # httpx logs one INFO line per getUpdates long-poll (~every 10s, forever).
+    # That was ~46MB of bot.err.log with no rotation (EVALUATION_2026-08-30
+    # F7.3). WARNING keeps real transport errors visible.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     if not settings.telegram_bot_token:
         raise SystemExit("TELEGRAM_BOT_TOKEN is not set. See .env.example.")
 

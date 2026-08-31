@@ -438,6 +438,23 @@ async def _process_job(job_id: uuid.UUID) -> None:
         audit_log.append(str(job_id), "job_requeued_for_quota", reason=exc.reason[:200])
         log.warning("quota exhausted — queue paused, job requeued")
 
+    except session_mod.SkillResolutionError as exc:
+        # Skill contract failure (missing skill for an explicit kind, or
+        # corrupt SKILL.md frontmatter) — terminal, NOT escalated. Running the
+        # job on registry defaults was the F1.6 silent-host hole; a bigger
+        # model would hit the same broken contract (2026-08-31).
+        reason = str(exc)
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category="skill_contract")
+        await _finish_job(job_id, JobStatus.failed, error=f"Skill contract: {reason}")
+        log.warning("skill resolution failed — job terminal", reason=reason)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed",
+                                   text=f"Skill contract failure: {reason}")
+            except Exception:
+                pass
+
     except delivery.DeployRefused as exc:
         # Delivery-contract violation — terminal, NOT escalated (retrying a
         # policy refusal would just re-violate it).

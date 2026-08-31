@@ -60,25 +60,45 @@ def workspace_dir_name(job_id: str, canonical: Path) -> str:
     return f"{str(job_id)[:8]}-{canonical.name}"
 
 
+def _normalize_tier(tier: str | None, *, default: str, unknown: str) -> str | None:
+    """Map a raw tier string to a valid one. Retired tiers map to their
+    successor (`container` → `workspace` — INV-17); unknown strings map to
+    ``unknown`` (fail closed), ``None``/empty to ``default``."""
+    if not tier:
+        return default
+    if tier in _RETIRED_ISOLATION:
+        mapped = _RETIRED_ISOLATION[tier]
+        logger.info("isolation tier %r is retired — running as %r", tier, mapped)
+        return mapped
+    if tier not in VALID_ISOLATION:
+        logger.warning("unknown isolation tier %r — treating as %r", tier, unknown)
+        return unknown
+    return tier
+
+
 def resolve_isolation(
     skill_isolation: str | None,
     payload_isolation: str | None,
 ) -> str:
     """Resolve the effective isolation tier for a job. Pure function.
 
-    Precedence: payload override > skill frontmatter > "none".
-    Retired tiers map to their successor (`container` → `workspace`, whose
-    guard hooks now carry the containment duty — INV-17).
+    Hardened 2026-08-31 (EVALUATION_2026-08-30 F1): the payload can only
+    TIGHTEN isolation, never relax it. A payload may move a job onto the
+    guarded ``workspace`` tier; it can never promote to ``host`` or strip a
+    workspace-tier skill down to ``none`` (that was the unlabeled-god hole —
+    any dispatcher could hand any skill an unguarded live-checkout session).
+    Unknown tiers fail closed to ``workspace`` instead of ``none``.
     """
-    tier = payload_isolation or skill_isolation or "none"
-    if tier in _RETIRED_ISOLATION:
-        mapped = _RETIRED_ISOLATION[tier]
-        logger.info("isolation tier %r is retired — running as %r", tier, mapped)
-        return mapped
-    if tier not in VALID_ISOLATION:
-        logger.warning("unknown isolation tier %r — treating as 'none'", tier)
-        return "none"
-    return tier
+    skill_tier = _normalize_tier(skill_isolation, default="none", unknown="workspace")
+    payload_tier = _normalize_tier(payload_isolation, default=None, unknown="workspace")
+    if payload_tier is None or payload_tier == skill_tier:
+        return skill_tier
+    if payload_tier == "workspace":
+        return "workspace"   # tightening — always allowed
+    logger.warning(
+        "payload isolation override %r ignored (skill tier %r) — payloads may "
+        "only tighten to 'workspace'", payload_isolation, skill_tier)
+    return skill_tier
 
 
 # ── Git operations ──────────────────────────────────────────────────────────

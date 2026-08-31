@@ -1,6 +1,7 @@
 ---
 name: atlas-portfolio
-description: Portfolio manager for Atlas — answers questions about the book AND executes owner-stated transactions ("I sold 0.5 BTC at 64k") through the engine CLI (sell / set-position / add-holding). Trigger via job description "atlas-portfolio: <instruction or question>".
+description: >-
+  Portfolio manager for Atlas — answers questions about the book AND executes owner-stated transactions ("I sold 0.5 BTC at 64k") through the engine CLI (sell / set-position / add-holding). Trigger via job description "atlas-portfolio: <instruction or question>".
 model: claude-sonnet-4-6
 effort: medium
 permission_mode: bypassPermissions

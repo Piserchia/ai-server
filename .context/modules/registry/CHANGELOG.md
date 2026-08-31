@@ -2,6 +2,18 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-31 — skills loader fails closed on corrupt frontmatter (EVALUATION_2026-08-30 F1.6)
+
+**Files changed**: `src/registry/skills.py`, `tests/test_registry_failclosed.py`.
+
+- `_parse_frontmatter` raises `SkillFrontmatterError` on YAML errors or a
+  non-mapping frontmatter block instead of returning `{}` (which made the
+  skill run on registry defaults: full default toolset, acceptEdits,
+  isolation none, default model). `load()` propagates it; `list_all()`
+  logs ERROR and skips the corrupt skill so registry generation survives.
+- Public interface change: callers of `load()` must expect
+  `SkillFrontmatterError` (session maps it to a terminal job failure).
+
 ## 2026-08-10 — Delivery.env_files: gitignored secrets for workspace clones
 
 **Files changed**: `src/registry/manifest.py`, `tests/test_manifest.py`.

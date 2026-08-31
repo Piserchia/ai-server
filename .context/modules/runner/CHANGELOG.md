@@ -2,6 +2,39 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-31 — F1 hardening: fail-closed skill contracts, tighten-only isolation, dispatch guards (EVALUATION_2026-08-30)
+
+**Agent task**: interactive remediation of `docs/EVALUATION_2026-08-30.md` F1.
+
+**Files changed**: `src/registry/skills.py`, `src/runner/session.py`,
+`src/runner/workspaces.py`, `src/runner/mcp_dispatch.py`,
+`src/runner/main.py`, `src/gateway/telegram_bot.py`,
+`tests/test_registry_failclosed.py` (new), `tests/test_workspaces.py`.
+
+- **Registry fails closed**: corrupt SKILL.md frontmatter now raises
+  `SkillFrontmatterError` instead of silently running the skill on registry
+  defaults (full toolset, acceptEdits, isolation none). `list_all()` skips
+  corrupt skills with an ERROR log. Three atlas skills (atlas-chat,
+  atlas-k401-review, atlas-portfolio) had unparseable descriptions (unquoted
+  `"name: arg"` trigger text) and ran defaulted for weeks — descriptions now
+  block-scalar quoted.
+- **`session._resolve_skill` raises `SkillResolutionError`** (terminal, not
+  escalated — new handler in `main._process_job`, error_category
+  `skill_contract`) when an explicit kind's skill is missing or corrupt, and
+  when a router match resolves to a corrupt skill.
+- **`workspaces.resolve_isolation`**: payload may only TIGHTEN isolation
+  (anything → workspace). Payload `host`/`none` relaxation is ignored with a
+  warning; unknown tiers fail closed to `workspace` (was `none`).
+- **Generic unmatched task** (`kind=task`, no skill contract) is forced onto
+  the guarded `workspace` tier (audit event `isolation_forced`). Owner host
+  work goes through /god.
+- **Dispatch MCP**: `enqueue_job` rejects `kind='god'` (owner-invoked only,
+  via Telegram /god) and strips `isolation`/`permission_mode`/`permission`
+  from dispatched payloads (logged). Telegram `/task --kind=god` is rejected
+  with a pointer to /god.
+- **Gateway**: httpx logger raised to WARNING (one INFO line per 10s
+  getUpdates long-poll had grown bot.err.log to ~46MB, F7.3).
+
 ## 2026-08-23 — Second variant of session_id collision bug documented (`_learning_apply` preflight rejection)
 
 **Agent task**: self-diagnose — escalation `b8767cb3` for failed `_learning_apply` job `46acc317` (parent 18257848). Root cause is the known `Session ID … is already in use` bug (TROUBLESHOOTING.md §468), but this instance widens the diagnosis: the first attempt was **preflight-rejected** by quota (`rate_limit_status: rejected` → `job_requeued_for_quota`) BEFORE any Claude work ran, and yet the SDK subprocess still created the session file on disk. When the retry fired ~1h37m later, it collided. Unlike the atlas-report variant (48ad692d), no deliverable existed to salvage. Remediation: manually appended the intended PATTERN entry to `.context/modules/runner/skills/PATTERNS.md`, updated TROUBLESHOOTING.md to note the preflight-rejection variant + `_learning_apply` failure mode. Fix still requires server-patch (Phase 5): rotate `session_id` on any requeue (quota preflight OR post-work `QuotaExhausted`), or short-circuit-on-`already-in-use` in `session._run_in_process`. Total `Session ID … is already in use` hits in `runner.err.log` still 22 (this incident is entry #22).

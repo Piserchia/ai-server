@@ -47,7 +47,21 @@ from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_DONE, CHANNEL_JOB_STREAM, async_session, redis
 from src.models import Job, JobKind, Project
-from src.registry.skills import SkillConfig, load as load_skill
+from src.registry.skills import (
+    SkillConfig,
+    SkillFrontmatterError,
+    load as load_skill,
+)
+
+
+class SkillResolutionError(RuntimeError):
+    """An explicit job kind names a skill that is missing or corrupt.
+
+    Terminal by policy (2026-08-31, EVALUATION_2026-08-30 F1): running the
+    job on registry defaults (full toolset, acceptEdits, no isolation) is the
+    silent-host hole; escalating a contract failure to a bigger model would
+    just re-fail it.
+    """
 from src.runner import agents as agents_mod
 from src.runner import delivery, guards, quota, router, workspaces
 
@@ -586,7 +600,12 @@ async def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
         if matched:
             audit_log.append(str(job.id), "routing_decision",
                              method="rule", skill=matched)
-            return matched, load_skill(matched)
+            try:
+                return matched, load_skill(matched)
+            except SkillFrontmatterError as exc:
+                raise SkillResolutionError(
+                    f"router matched skill '{matched}' but its frontmatter is "
+                    f"corrupt: {exc}") from exc
 
         # LLM fallback (P2) — the router docstring promised this since Phase 4
         try:
@@ -600,7 +619,12 @@ async def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
             audit_log.append(str(job.id), "routing_decision",
                              method="llm", skill=llm_skill,
                              confidence=round(confidence, 3))
-            return llm_skill, load_skill(llm_skill)
+            try:
+                return llm_skill, load_skill(llm_skill)
+            except SkillFrontmatterError as exc:
+                raise SkillResolutionError(
+                    f"LLM router chose skill '{llm_skill}' but its frontmatter "
+                    f"is corrupt: {exc}") from exc
 
         audit_log.append(str(job.id), "routing_decision",
                          method="fallback", skill="")
@@ -610,7 +634,17 @@ async def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
     #   research_report → research-report
     #   _writeback      → _writeback   (leading _ preserved)
     skill_name = job.kind if job.kind.startswith("_") else job.kind.replace("_", "-")
-    return skill_name, load_skill(skill_name)
+    try:
+        cfg = load_skill(skill_name)
+    except SkillFrontmatterError as exc:
+        raise SkillResolutionError(
+            f"skill '{skill_name}' (kind '{job.kind}') has corrupt frontmatter: {exc}"
+        ) from exc
+    if cfg is None:
+        raise SkillResolutionError(
+            f"kind '{job.kind}' names no skill (skills/{skill_name}/SKILL.md missing) "
+            "— refusing to run it as an unlabeled generic session")
+    return skill_name, cfg
 
 
 def _build_options(
@@ -854,6 +888,16 @@ async def run_session(job: Job) -> dict[str, Any]:
         skill_cfg.isolation if skill_cfg else None,
         (job.payload or {}).get("isolation"),
     )
+    # Generic unmatched task: no skill body, full default toolset — the one
+    # session shape with no contract at all. Force the guarded workspace tier
+    # so it gets a throwaway clone + PreToolUse denylist instead of an
+    # unlabeled host session (2026-08-31, EVALUATION_2026-08-30 F1.5).
+    # Owner-driven host work goes through /god, which keeps a skill contract.
+    if skill_cfg is None and isolation != "workspace":
+        audit_log.append(job_id, "isolation_forced",
+                         from_tier=isolation, to_tier="workspace",
+                         reason="generic task has no skill contract")
+        isolation = "workspace"
 
     ws: workspaces.Workspace | None = None
     cwd = canonical_cwd

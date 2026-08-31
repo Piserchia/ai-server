@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-31 — /task --kind=god rejected; httpx log noise cut (EVALUATION_2026-08-30 F1/F7)
+
+- `telegram_bot`: `/task --kind=god` now replies with an error pointing at
+  `/god` instead of creating a break-glass job through the ungated door.
+- `telegram_bot.main()`: httpx logger set to WARNING — the INFO
+  getUpdates line every ~10s had grown `bot.err.log` to ~46MB with no
+  rotation.
+
 ## 2026-08-17 — /api/telemetry/schedules + dashboard Schedules section
 
 - New pure fold `schedule_rollup(schedules, jobs, window_days)` and thin

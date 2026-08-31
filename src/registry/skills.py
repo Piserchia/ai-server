@@ -62,8 +62,22 @@ class SkillConfig:
     privilege_class: str = ""          # read-only | content | guarded-writer | prod-operator | break-glass
 
 
+class SkillFrontmatterError(ValueError):
+    """A SKILL.md frontmatter block exists but cannot be parsed.
+
+    Fail CLOSED (2026-08-31, EVALUATION_2026-08-30 F1.6): before this, a
+    YAML error silently dropped the whole frontmatter and the skill ran on
+    registry defaults — full default toolset, acceptEdits, isolation none,
+    wrong model. Three atlas skills ran that way for weeks undetected.
+    """
+
+
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Return (frontmatter_dict, body). If no frontmatter, return ({}, full_text)."""
+    """Return (frontmatter_dict, body). If no frontmatter, return ({}, full_text).
+
+    Raises SkillFrontmatterError if a frontmatter block is present but does
+    not parse to a YAML mapping — never silently degrade to defaults.
+    """
     if not text.startswith("---"):
         return {}, text
     # Split on the second "---" boundary
@@ -73,13 +87,20 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     _, raw_yaml, body = parts
     try:
         data = yaml.safe_load(raw_yaml) or {}
-    except yaml.YAMLError:
-        data = {}
+    except yaml.YAMLError as exc:
+        raise SkillFrontmatterError(f"frontmatter is not valid YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SkillFrontmatterError(
+            f"frontmatter parsed to {type(data).__name__}, expected a mapping")
     return (data, body.lstrip("\n"))
 
 
 def load(name: str) -> SkillConfig | None:
-    """Load a skill by directory name. Returns None if not found."""
+    """Load a skill by directory name. Returns None if not found.
+
+    Raises SkillFrontmatterError if the skill exists but its frontmatter is
+    corrupt — callers must fail the job, not run it on defaults.
+    """
     path = settings.skills_dir / name / "SKILL.md"
     if not path.exists():
         return None
@@ -123,7 +144,15 @@ def list_all() -> list[SkillConfig]:
     out: list[SkillConfig] = []
     for child in sorted(settings.skills_dir.iterdir()):
         if child.is_dir() and (child / "SKILL.md").exists():
-            cfg = load(child.name)
+            try:
+                cfg = load(child.name)
+            except SkillFrontmatterError as exc:
+                # Listing must not crash registry generation on one bad file,
+                # but the error is loud; execution paths (load via
+                # session._resolve_skill) still fail closed.
+                logger.error("skill '%s' has corrupt frontmatter — excluded "
+                             "from listing: %s", child.name, exc)
+                continue
             if cfg is not None:
                 out.append(cfg)
     return out

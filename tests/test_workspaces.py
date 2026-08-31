@@ -33,9 +33,16 @@ class TestResolveIsolation:
     def test_skill_frontmatter_wins_over_default(self):
         assert resolve_isolation("workspace", None) == "workspace"
 
-    def test_payload_override_wins_over_skill(self):
-        assert resolve_isolation("workspace", "none") == "none"
+    def test_payload_may_only_tighten(self):
+        # Hardened 2026-08-31 (EVALUATION_2026-08-30 F1): payloads tighten,
+        # never relax or promote.
         assert resolve_isolation("none", "workspace") == "workspace"
+        assert resolve_isolation("host", "workspace") == "workspace"
+        assert resolve_isolation("workspace", "none") == "workspace"
+
+    def test_payload_cannot_promote_to_host(self):
+        assert resolve_isolation("none", "host") == "none"
+        assert resolve_isolation("workspace", "host") == "workspace"
 
     def test_retired_container_tier_maps_to_workspace(self):
         # The docker lane was removed 2026-07-27; old frontmatter/payloads
@@ -45,9 +52,11 @@ class TestResolveIsolation:
 
     def test_host_never_downgrades(self):
         assert resolve_isolation("host", None) == "host"
+        assert resolve_isolation("host", "none") == "host"
 
-    def test_unknown_tier_treated_as_none(self):
-        assert resolve_isolation("vmware", None) == "none"
+    def test_unknown_tier_fails_closed_to_workspace(self):
+        assert resolve_isolation("vmware", None) == "workspace"
+        assert resolve_isolation("none", "vmware") == "workspace"
 
 
 def test_workspace_dir_name():

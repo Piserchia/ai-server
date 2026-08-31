@@ -25,14 +25,38 @@ logger = logging.getLogger(__name__)
 # ── Pure helpers (tested directly) ─────────────────────────────────────────
 
 
+# Kinds no session may dispatch (2026-08-31, EVALUATION_2026-08-30 F1.3):
+# `god` is the owner-invoked break-glass — reachable ONLY via Telegram /god.
+# Before this check, any skill holding the dispatch MCP could enqueue a
+# kind='god' job and inherit host isolation + bypassPermissions.
+_FORBIDDEN_KINDS = frozenset({"god"})
+
+# Payload keys a dispatching session may not set: isolation and permission
+# escalation belong to the target skill's frontmatter, not the caller.
+# (session.resolve_isolation independently ignores loosening overrides —
+# this strip just makes the refusal visible at enqueue time.)
+_STRIPPED_PAYLOAD_KEYS = frozenset({"isolation", "permission_mode", "permission"})
+
+
 def _validate_enqueue_args(kind: str, description: str) -> list[str]:
     """Validate enqueue arguments. Returns a list of error strings (empty = valid)."""
     errors: list[str] = []
     if not isinstance(kind, str) or not kind.strip():
         errors.append("kind must be a non-empty string")
+    elif kind.strip().lower() in _FORBIDDEN_KINDS:
+        errors.append(f"kind '{kind.strip()}' is owner-invoked only (use Telegram /god)")
     if not isinstance(description, str) or not description.strip():
         errors.append("description must be a non-empty string")
     return errors
+
+
+def _sanitize_payload(payload: dict) -> tuple[dict, list[str]]:
+    """Drop privilege-bearing keys from a dispatched payload.
+
+    Returns (clean_payload, stripped_key_names). Pure.
+    """
+    stripped = sorted(k for k in payload if k in _STRIPPED_PAYLOAD_KEYS)
+    return {k: v for k, v in payload.items() if k not in _STRIPPED_PAYLOAD_KEYS}, stripped
 
 
 # ── Server factory ─────────────────────────────────────────────────────────
@@ -68,6 +92,12 @@ def create_server(spawning_job=None):
         description = args.get("description", "")
         payload = dict(args.get("payload") or {})
         depends_on = [str(d) for d in (args.get("depends_on") or []) if str(d).strip()]
+
+        payload, stripped_keys = _sanitize_payload(payload)
+        if stripped_keys:
+            logger.warning("dispatch-mcp stripped privileged payload keys %s "
+                           "(kind=%s, spawner=%s)", stripped_keys, kind,
+                           str(spawner_job_id)[:8] if spawner_job_id else "?")
 
         validation_errors = _validate_enqueue_args(kind, description)
         if validation_errors:

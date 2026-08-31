@@ -1,6 +1,7 @@
 ---
 name: atlas-k401-review
-description: Weekly 401k review for Atlas — per-holding analyst fan-out over the combined Fidelity core+BrokerageLink book, strategist aggregate under the retirement_strategist charter, mandatory adversarial pass, persisted as a k401_review report. Scheduled Sat 13:00 UTC; also triggerable via "atlas-k401-review: run".
+description: >-
+  Weekly 401k review for Atlas — per-holding analyst fan-out over the combined Fidelity core+BrokerageLink book, strategist aggregate under the retirement_strategist charter, mandatory adversarial pass, persisted as a k401_review report. Scheduled Sat 13:00 UTC; also triggerable via "atlas-k401-review: run".
 model: claude-opus-4-8
 effort: high
 permission_mode: bypassPermissions
