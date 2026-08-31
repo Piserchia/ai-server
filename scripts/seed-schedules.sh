@@ -66,6 +66,14 @@ upsert 'system-manager-monthly' '0 7 1 * *' 'system-manager' 'Monthly CEO org re
 # reconciler + knowledge-manager both flagged it). Weekly Monday 13:00 UTC.
 upsert 'research-report-weekly' '0 13 * * 1' 'research-report' 'Weekly research report'
 
+# ── Atlas report cadence (owner-visible daily/weekly reports) ───────────────
+# These two rows predate this script's atlas section and lived ONLY in the DB
+# (created out-of-band); a wipe+seed would have silently dropped the two most
+# owner-visible atlas jobs (2026-08-31, EVALUATION_2026-08-30 F5.5). Crons
+# match the live rows exactly.
+upsert 'atlas-daily-brief'   '0 12 * * *' 'atlas-daily-brief'  'atlas-daily-brief: pre-open synthesis'
+upsert 'atlas-weekly-reports' '0 18 * * 0' 'atlas-report-sweep' 'atlas-report-sweep: weekly full report pass'
+
 # ── Atlas living loops (staged from atlas integrations/ai-server, 2026-08-03) ─
 # The closed loop (atlas evaluation/LOOP.md, owner decision 2026-08-04):
 # Mon evaluate (governor: triage, grade builds, built→live) → Tue build #1 →

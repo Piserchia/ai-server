@@ -5,6 +5,21 @@
 # Usage:
 #   bash scripts/install-launchd.sh           # install
 #   bash scripts/install-launchd.sh uninstall
+#
+# NOT installed by this script (documented 2026-08-31, EVALUATION_2026-08-30 F7):
+#   - cloudflared: runs as a SYSTEM LaunchDaemon at
+#     /Library/LaunchDaemons/com.cloudflare.cloudflared.plist (installed via
+#     `sudo cloudflared service install` after `cloudflared tunnel login` +
+#     tunnel config). A user-level script must not install system daemons;
+#     a rebuild MUST re-install it by hand or the public domain stays dark.
+#   - postgresql@15 + redis: Homebrew services (`brew services start ...`).
+#   - Caddy + per-project units: scripts/register-project.sh / hosting docs.
+#
+# KeepAlive semantics (deliberate): SuccessfulExit=false + Crashed=true means
+# a crash restarts the service but a CLEAN exit (sys.exit(0), launchctl stop)
+# STAYS DOWN until next login/kickstart. That is the intended operator
+# behavior — use `launchctl kickstart -k gui/$UID/com.assistant.<name>` to
+# restart a healthy service.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

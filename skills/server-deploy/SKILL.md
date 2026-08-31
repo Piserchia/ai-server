@@ -90,14 +90,16 @@ git log --oneline "$BEFORE..$AFTER"
 
 ```bash
 cd "$SRV"
-if git diff --name-only "$BEFORE..$AFTER" | grep -qE '^(Pipfile|pyproject\.toml)'; then
-  pipenv lock        # Pipfile.lock is untracked and per-checkout; server deps
-  pipenv sync --dev  # live in pyproject (behind the editable install), which
-                     # Pipfile's hash never sees — so re-resolve, then install
-                     # exactly the fresh lock. --dev is REQUIRED: the test gate
-                     # needs pytest-asyncio/fakeredis (dev deps); plain
-                     # `pipenv sync` omits them and the gate red-fails every
-                     # async test on a code-clean tree (real incident 2026-07-30).
+if git diff --name-only "$BEFORE..$AFTER" | grep -qE '^(Pipfile|pyproject\.toml|Pipfile\.lock)'; then
+  pipenv sync --dev  # Pipfile.lock is COMMITTED as of 2026-08-31 (EVALUATION_
+                     # 2026-08-30 F6) — install exactly the tracked lock; do
+                     # NOT `pipenv lock` here (re-resolving on deploy is the
+                     # unpinned-graph hole that caused the mcp 2.0.0 outage
+                     # 2026-07-30). If Pipfile/pyproject changed without a
+                     # matching lock update, that's a dev-side mistake: stop
+                     # and report — the lock is regenerated in the dev tree
+                     # and committed, never on prod. --dev is REQUIRED: the
+                     # test gate needs pytest-asyncio/fakeredis (dev deps).
 fi
 bash scripts/install-prod-hooks.sh          # re-arm the main-commit guard (hooks are untracked)
 ```

@@ -36,7 +36,15 @@ ALLOWLIST=(
     ".context/*.md"
     ".context/modules/*/*.md"
     ".context/modules/*/skills/*.md"
-    "skills/*/*.md"
+    # Learning files only — NOT skills/*/SKILL.md (2026-08-31,
+    # EVALUATION_2026-08-30 F3.2): SKILL.md is the runner-read machine
+    # contract (model/tools/isolation/permission_mode). Contract changes are
+    # code changes and go through server-patch in the dev tree under the
+    # INV-4 lane; auto-publishing them from prod bypassed review entirely.
+    "skills/*/GOTCHAS.md"
+    "skills/*/CHANGELOG.md"
+    "skills/*/DEBUG.md"
+    "skills/*/PATTERNS.md"
     "docs/Troubleshooting.md"
     "docs/TROUBLESHOOTING.md"
 )

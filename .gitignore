@@ -14,7 +14,8 @@ __pycache__/
 venv/
 ENV/
 env/
-Pipfile.lock
+# Pipfile.lock is COMMITTED (2026-08-31, EVALUATION_2026-08-30 F6) — one
+# pinned graph for dev+prod; regenerate only in dev via `pipenv lock`.
 *.egg-info/
 .pytest_cache/
 .ruff_cache/

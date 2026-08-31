@@ -1,5 +1,31 @@
 # Changelog: hosting
 
+## 2026-08-31 — F3/F5/F6/F7 topology fixes (EVALUATION_2026-08-30)
+
+- `scripts/sync-learnings.sh`: allowlist narrowed — `skills/*/*.md` →
+  `skills/*/{GOTCHAS,CHANGELOG,DEBUG,PATTERNS}.md`. SKILL.md is the
+  runner-read machine contract; contract edits now only travel dev→prod via
+  server-patch/deploy, never prod→dev via auto-publish.
+- `Pipfile.lock` is now COMMITTED (was gitignored + diverged between
+  checkouts — same class as the mcp 2.0.0 outage). server-deploy runs
+  `pipenv sync --dev` against the tracked lock and no longer re-locks on
+  prod.
+- `scripts/seed-schedules.sh`: absorbed the two DB-only rows
+  `atlas-daily-brief` (0 12 * * *) and `atlas-weekly-reports`
+  (0 18 * * 0, kind atlas-report-sweep) so a wipe+seed keeps the
+  owner-visible report cadence.
+- `scripts/install-launchd.sh`: header now documents what it does NOT
+  install (cloudflared system LaunchDaemon, brew postgres/redis) and the
+  deliberate KeepAlive semantics (clean exit stays down).
+- `.env.example`: `SERVER_ROOT` no longer hardcodes `/Users/chris` (config
+  default already resolves `$HOME`); concurrency comment notes live=2 vs
+  code default 4.
+- Dev-tree quarantines (renames, per the no-deletion rule):
+  `projects/atlas` → `projects/atlas.stale-clone-20260731.quarantined`
+  (month-stale third clone), `projects/market-tracker` →
+  `projects/market-tracker.retired.quarantined`. Each carries a
+  QUARANTINED.md; owner may delete.
+
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
 ## 2026-08-18 — healthcheck-all cadence-slip false positive (baseball-bingo, 84th recurrence)
