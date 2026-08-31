@@ -104,3 +104,54 @@ count is growing and hand-moving each one is not viable inside the turn budget. 
    ```
 5. Dry-run the plan and assert the transition count equals the row count and that the ids are
    unique, before passing `--apply`.
+6. Add a fallback branch for "cluster whose representative I just triaged" — its siblings need a
+   `duplicate of <rep>` reason, and without the branch the dry-run asserts `unrouted` and you lose
+   a turn re-deriving why. Assert `not unrouted` explicitly; a silent unrouted row would otherwise
+   be applied with a nonsense reason string.
+
+## A job row with `status=completed` can be a total failure (2026-08-31)
+
+atlas-build job `fad40175` ran **1.4 seconds**, consumed **0 tokens**, stored the summary
+`"Not logged in · Please run /login"` — and resolved as `status=completed`. Because it is not a
+failure row, no failure trigger fired, no escalation was sent, and self-diagnose never ran. The
+loop silently lost a week of build capacity and the only reason it was ever visible is that this
+run happened to read durations and token counts.
+
+**When grading builds, never filter on `status`.** Read the shape of the row:
+
+```sql
+SELECT id, status, review_outcome,
+       EXTRACT(epoch FROM (finished_at - started_at)) AS secs,
+       total_tokens, result->>'summary'
+FROM jobs WHERE resolved_skill='atlas-build' AND created_at > now()-interval '8 days';
+```
+
+A build session under ~60s or with 0 tokens did not build anything, whatever the status column
+says. Treat it as a missed slot and file the `[ops]` item.
+
+## `feed_status.last_success` only advances on ALL-symbol success (2026-08-31)
+
+`ccxt:kraken` read STALE for 8 days with `error_count` 1,399 — which looks like a dead feed and was
+written up as one last run ("CBETH has no market price"). It was not dead: `last_rows` was 80 and
+12 of 13 symbols were polling fine. One failing symbol pins the whole source's `last_success`, so
+the staleness signal is source-wide while the defect is symbol-wide.
+
+**Read `last_rows` and `detail` before calling a source dead.** A source that is STALE but still
+returning rows is a partial-failure bug (and the correct backlog item is two-part: fix the symbol
+*and* make partial success advance `last_success`), not an outage.
+
+## Commit BEFORE the closing rebase, not after (2026-08-31)
+
+The skill says the last commands are `git pull --rebase origin master && git push origin master`.
+Taken literally that fails: `error: cannot pull with rebase: You have unstaged changes`. Order is
+stage → commit → `pull --rebase` → push. (The opening `git pull --rebase` at the top of the run is
+on a clean tree and is fine.)
+
+## Check deploy state by probing routes, not just comparing hashes (2026-08-31)
+
+The existing gotcha says to compare the runtime clone's HEAD against `origin/master`. Do that, but
+also probe the web surface on the port from `projects/_ports.yml` (atlas = **8791**, not 3001) and
+check the live schema. This run found the combination that a hash diff alone understates: live
+schema at migration 0046 while live *code* is three commits behind, i.e. schema leading code with
+new schedules about to fire against it. `/portfolio` 200 + `/trading` 404 is the evidence line that
+makes "pushed but undeployed" undeniable in a report.
