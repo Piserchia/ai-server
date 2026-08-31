@@ -13,14 +13,14 @@
 | Add a new project | `.context/PROJECTS_REGISTRY.md`, `skills/new-project/SKILL.md` |
 | Add a new skill | `.context/SKILLS_REGISTRY.md`, `skills/new-skill/SKILL.md` |
 | Patch a project | `skills/app-patch/SKILL.md` (reads project's own CLAUDE.md) |
-| Patch server code | `skills/server-patch/SKILL.md` (always PR-gated) |
+| Patch server code | `skills/server-patch/SKILL.md` (INV-4 lane: autonomous merge on gate-green + code-review LGTM + owner notification; protected paths owner-approved) |
 | Debug a failure | `docs/TROUBLESHOOTING.md`, `volumes/audit_log/<job_id>.jsonl` |
 | Understand a skill | `skills/<name>/SKILL.md` (frontmatter = config, body = system prompt) |
 | Check what's hosted | `.context/PROJECTS_REGISTRY.md` |
 | Check what skills exist | `.context/SKILLS_REGISTRY.md` |
 | Review system performance | `src/runner/retrospective.py`, `skills/review-and-improve/SKILL.md` |
 | Regression-test a skill's behaviour | `evals/README.md`, `evals/run.py`, `evals/cases/<skill>.yml` |
-| See evaluation status | `docs/EVALUATION_2026-07-28.md` (latest full audit — living tracker), `docs/EVALUATION_2026-07-10.md` (runtime audit), `docs/EVALUATION_2026-04-18.md` (architecture) |
+| See evaluation status | `docs/EVALUATION_2026-08-30.md` (**latest** — grokbot audit + 2026-08-31 remediation disposition), `docs/EVALUATION_2026-07-28.md` (historical tracker), `docs/EVALUATION_2026-07-10.md` (runtime audit), `docs/EVALUATION_2026-04-18.md` (architecture) |
 | Fix a defect found in the July audit | `docs/superpowers/plans/2026-07-10-eval-remediation.md` (task-by-task plan T1–T17) |
 | Segregate project delivery (dev-repo split + deploy contract) | `docs/superpowers/plans/2026-07-27-project-delivery-segregation.md` (Phases A–E) |
 | Understand the atlas project | `docs/EVALUATION_2026-07-10-atlas.md`, `projects/atlas/CLAUDE.md` |
@@ -51,6 +51,7 @@ docs/
   EVALUATION_2026-04-18.md          ← Full system evaluation + rec status table
   EVALUATION_2026-07-10.md          ← Runtime audit: loop defects, cleanup, subagent suite + task table
   EVALUATION_2026-07-10-atlas.md    ← Atlas deep-dive (doc verdicts, contract check, ops)
+  EVALUATION_2026-08-30.md          ← LATEST: third-party grokbot audit + 2026-08-31 remediation disposition
   superpowers/plans/                ← Executable implementation plans (incl. 2026-07-10 remediation)
   superpowers/specs/                ← Specs behind shipped plans
   TROUBLESHOOTING.md                ← Failure modes + fixes
@@ -96,7 +97,7 @@ projects/<slug>/
 | Read the audit that motivated all of this | `docs/AUDIT_2026-07-12.md` |
 | Understand the management hierarchy (agents-as-org) | `.context/org/ORG.md` (chart + operating model), `.context/org/divisions/<div>/CHARTER.md` (per-division), `docs/superpowers/plans/2026-07-28-management-hierarchy.md` (design + rollout) |
 | Understand the autonomous execution lane (no-approval merge/deploy, read-only+dispatch tier, breaker, autopilot) | `docs/superpowers/plans/2026-07-31-autonomous-execution.md` (design + safety inventory), MISSION.md § M, SYSTEM.md INV-4/INV-20 |
-| Understand the multi-provider model-router plan (Codex/Gemini/OpenRouter/local lanes, INV-21) | `docs/superpowers/plans/2026-08-10-model-router.md` (PROPOSED — owner sign-off pending) |
+| Understand the multi-provider model-router plan (Codex/Gemini/OpenRouter/local lanes, INV-21) | `docs/superpowers/plans/2026-08-10-model-router.md` (APPROVED 2026-08-17 — MISSION non-goals amended, free-tiers-only; implementation R0 not started) |
 
 ## Additions 2026-07-27 (SDK-native overhaul)
 

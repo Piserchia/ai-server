@@ -1,11 +1,11 @@
 # System context
 
 > Source of truth for the server's architecture. Update when modules change.
-> Last updated: 2026-07-31 (autonomous execution lane: INV-4 rewritten —
-> gate-green + agent code-review LGTM + owner notification replaces human
-> pre-merge, protected paths excepted; INV-20 added: read-only privilege is
-> hook-enforced. Previous: 2026-07-27 SDK-native overhaul —
-> docs/SDK_MIGRATION_2026-07-27.md)
+> Last updated: 2026-08-31 (EVALUATION_2026-08-30 remediation: fail-closed
+> skill registry, tighten-only isolation, dispatch guards, queue honesty,
+> INV-13 row corrected to actual behavior, INV-21 defined, INV-22 live-money
+> ceiling added. Previous: 2026-07-31 autonomous execution lane — INV-4
+> rewritten, INV-20 added; 2026-07-27 SDK-native overhaul.)
 
 ## Tech stack
 
@@ -97,7 +97,9 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 - **Audit log is append-only.** Use `audit_log.append(...)`. Never rewrite prior entries.
 - **Redis channels** live in `db.py` as named constants. Don't inline string names.
 - **Error handling**: catch `QuotaExhausted` specifically in the runner; everything else is a failure.
-- **Migrations**: Alembic. One migration file (`001_initial.py`) for Phase 1; add more as schema evolves.
+- **Migrations**: Alembic, six files (`001_initial` … `006_job_status_constraint`).
+  Tables: `jobs`, `schedules`, `projects`, `proposals`, `tasks`, `task_turns`
+  (+ `alembic_version`). `tests/test_migrations.py` keeps the chain consistent.
 
 ## Invariants (hard rules)
 
@@ -115,14 +117,16 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | INV-10 | Skills in `plan` mode cannot write files | SDK-level permission_mode |
 | INV-11 | Audit logs are append-only | filesystem O_APPEND in `audit_log.append` |
 | INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front | `runner/main.py:_process_job` |
-| INV-13 | `server-patch` always requires a passing `code-review` sub-agent; the gate fails CLOSED — a review that can't run returns `error` → `awaiting_user`, never silently completes | `server-patch` SKILL.md + `main._maybe_review` + `review.run_code_review` |
+| INV-13 | Code-touching skills require a `code-review` sub-agent LGTM **in-session, before push** (that is the merge gate). `main._maybe_review` is a SECOND belt that runs post-session, after the push, and only FLAGS: it stamps `review_outcome` (job stays `completed`) and on blocker/error emits `post_review_flagged` + a task DM — it does NOT park or fail the job. (Behavior weakened 2026-08-05; row corrected to match 2026-08-31 — restoring a fail-closed pre-push gate in code is an open owner decision, see EVALUATION_2026-08-30 F4.3.) | in-session `code-review` subagent per skill SKILL.md; `main._maybe_review` + `review.run_code_review` (flag-only) |
 | INV-14 | Project slugs unique; port allocations never reused | `registry/manifest.py` + `projects/_ports.yml` |
-| INV-15 | On startup the runner reconciles orphaned `running` jobs (fail-only) before consuming the queue | `runner/reconcile.py` + `runner/main.py:main` |
+| INV-15 | On startup the runner reconciles orphaned `running` jobs (fail-only) AND re-queues `queued` rows with no Redis entry, before consuming the queue; the job loop holds a concurrency slot before BLPOP so ids are never parked in-process | `runner/reconcile.py` + `runner/main.py:main`/`_job_loop` |
 | INV-16 | Code-writing skills (`isolation: workspace`) never run in a shared checkout — one throwaway clone per job; work leaves only via git push | `runner/workspaces.py` + `runner/session.py:run_session` |
 | INV-17 | Workspace-tier sessions are guard-hooked: file writes outside the per-job clone and dangerous host commands (sudo, launchctl, keychain, force-push, kills, API-key injection, destructive ops on protected roots) are DENIED at PreToolUse — hooks fire before permission evaluation, so this binds even under bypassPermissions. Denials are audited (`guard_denied`). (Redefined 2026-07-27; formerly the container-env rule.) | `runner/guards.py` + `runner/session.py:_build_options` |
-| INV-18 | `god` is the ONLY host-tier skill — the deliberate break-glass lane for phone-initiated server fixes | `skills/god/SKILL.md` frontmatter + `scripts/lint_docs.py:check_isolation_values` |
+| INV-18 | `god` is the ONLY `isolation: host` skill — the deliberate break-glass lane for phone-initiated server fixes; `kind=god` is rejected by the dispatch MCP and by `/task --kind=god` (Telegram `/god` is the single door). HONESTY NOTE: `isolation: none` is host-EQUIVALENT at runtime (no clone, no guard hooks) and is the default for ~44 skills including the ops skills (`server-deploy`, `*-redeploy`) that legitimately operate on the live checkout — lint freezes that set as an explicit debt register so new write-capable skills must isolate or be consciously allowlisted | `skills/god/SKILL.md` + `scripts/lint_docs.py` (isolation checks) + `runner/mcp_dispatch.py` + `gateway/telegram_bot.py` |
 | INV-19 | A task auto-closes only on an `_evaluate` EVAL_PASS backed by evidence; the user can always overrule via Reopen | `runner/main.py:_handle_evaluator_result` + bot `reopen` action |
 | INV-20 | `privilege_class: read-only` is hook-enforced at runtime: file-mutation tools, mutating Bash, and `restart_project` are PreToolUse-denied for such sessions regardless of permission_mode (dispatch via enqueue_job stays allowed) | `runner/guards.py:make_readonly_guard_hooks` + `runner/session.py:_build_options` |
+| INV-21 | A non-Anthropic executor runs ONLY (a) at `isolation: workspace` with guard hooks, (b) on lanes the router is allowed to route (never review/evaluate/server-code — Anthropic stays the trust anchor), (c) under the free-tier-only spend rule (owner decision 2026-08-17: OpenRouter free tiers, unpaid Gemini key, Codex Free). Defined in `docs/superpowers/plans/2026-08-10-model-router.md` §8 (APPROVED 2026-08-17; implementation R0 not started — this row exists so the MISSION reference resolves) | plan §8; enforcement lands with the router implementation |
+| INV-22 | No ai-server skill/session/task ever places, modifies, or cancels a brokerage order. The single order path in the system is the atlas swing vertical's deterministic executor behind its risk kernel (owner-accepted 2026-08-30), sandbox-pinned until the owner's `swing/LADDER.md` funding gate; the value vertical is advisory-only; brokerage creds live only in the atlas project env; any new/widened order path is a protected-path change (owner-approval-only) | `MISSION.md` §M (INV-22) + atlas `swing/CLAUDE.md` rules 1–3 + kernel grep-tripwires + atlas-side test gates; server-side code deny is an open follow-up |
 
 ## Environment & setup
 
@@ -152,7 +156,7 @@ bash scripts/run.sh stop
 - **Quota detection is typed-first** (2026-07-27): `RateLimitEvent` from the SDK
   drives pause/requeue (`quota.detect_from_rate_limit`); the string heuristic
   remains as fallback for error text that arrives outside the typed channel.
-- **SDK pinned to 0.1.x** (`>=0.1.63,<0.2`). The 0.2.x line exists on PyPI —
+- **SDK pinned to 0.1.x** (`>=0.1.81,<0.2` — pyproject.toml is authoritative). The 0.2.x line exists on PyPI —
   upgrading is a deliberate follow-up with its own verification pass, never a
   side effect of other work.
 - **SDK sandbox (macOS Seatbelt) not yet enabled** — `ClaudeAgentOptions.sandbox`
@@ -160,9 +164,12 @@ bash scripts/run.sh stop
   needs per-skill tuning (git/network flows) before turning on.
 - **Dashboard has SSE streaming** — `/api/jobs/{id}/stream` provides live job
   tailing via EventSourceResponse (shipped Phase 6).
-- **Pure-function unit tests only** (289+). Integration tests with SDK mocks
-  deferred indefinitely — the pure-function surface covers core business logic
-  well, and the SDK mock surface is complex with limited payoff.
+- **Pure-function unit tests + local-git integration tests** (~640 test
+  functions, ~1250 collected with parametrization; sub-second collect, no
+  network). Don't hardcode the count elsewhere — run
+  `pipenv run pytest --collect-only -q` when a number is needed. DB-backed
+  tests are opt-in via `AI_SERVER_RUN_DB_TESTS=1`. SDK-mock integration tests
+  remain deferred.
 
 ## Hosting
 
@@ -177,12 +184,21 @@ See `.context/modules/hosting/CONTEXT.md` for the full manifest schema and docum
 
 ## Active workstreams
 
-All 6 phases shipped. Current work tracked in `docs/EVALUATION_2026-07-10.md` (tasks T1–T17).
+All 8 phases shipped (see MISSION.md phase map). Historical trackers:
+`docs/EVALUATION_2026-07-10.md` (T1–T17, done), `docs/EVALUATION_2026-07-28.md`
+(remediation tracker, done). **Current audit: `docs/EVALUATION_2026-08-30.md`**
+(third-party "grokbot" evaluation + 2026-08-31 remediation disposition).
 
-- Phase 1 ✓ (commit 05ad5e7)
-- Phase 2 ✓ (commit 6e58fe3)
-- Phase 3 ✓
-- Phase 4 ✓
-- Phase 5 ✓
-- Phase 6 ✓
-- Atlas integration ✓ (2026-07-09)
+Live workstreams as of 2026-08-31:
+
+- **Atlas living loops** — evaluate/build/gap-scout/momo/trader/advisors/
+  k401/swing/value verticals on schedules (see `scripts/seed-schedules.sh`,
+  the single schedule writer).
+- **Trading-bots verticals** — BUILT 2026-08-30 (spec
+  `docs/superpowers/specs/2026-08-27-two-trading-bots-design.md`); armed
+  pending owner P0 (Tradier sandbox tokens, funding). Bounded by INV-22.
+- **Isolation/queue debt** — F1/F2 remediation landed 2026-08-31; remaining:
+  privilege_class backfill vs charters, server-side INV-22 code deny,
+  INV-13 fail-closed restore (owner decision).
+- **Model router** — plan APPROVED 2026-08-17 (INV-21); implementation R0
+  not started.

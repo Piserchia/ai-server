@@ -16,7 +16,17 @@ to grow in efficiency and effectiveness over time.
 
 The system is single-tenant (Chris only). It prefers **documenting itself
 well** over trying to be clever. It prefers **Claude subscription** over API
-billing. 
+billing.
+
+**Atlas is a first-class hosted product, not a side project** (recognised
+2026-08-31; it had been true for weeks): a finance/markets product org running
+ON this server — reports, 401k review, momentum lab, paper trader, advisor
+shadow books, and the owner-accepted swing/value trading verticals (spec
+`docs/superpowers/specs/2026-08-27-two-trading-bots-design.md`). Roughly half
+the skill catalog and most schedule rows are Atlas. The assistant kernel and
+the Atlas org share quota, concurrency, and manager attention — when they
+conflict, kernel ops (deploy, health, safety) win. Money-touching Atlas work
+is bounded by §M below.
 
 ## Objectives and how we accomplish them
 
@@ -38,7 +48,7 @@ isn't served by anything in the table, we've drifted.
 |---|---|
 | `schedules` table + `_scheduler_loop` in runner | Cron-based job enqueuing |
 | `research-report` skill (Phase 2) | Weekly/daily research dropped into `projects/research/` |
-| `project-update-poll` skill (Phase 6) | Per-project data refresh on their own cron |
+| `project-update-poll` skill (Phase 6) | Per-project data refresh — **on-demand only; deliberately unscheduled** (2026-08-31: no project currently wants a poll cadence) |
 | `server-upkeep` skill (Phase 5) | Daily 3am log rotation, disk check, cert check, anomaly report |
 
 ### C. App creation + deployment
@@ -65,7 +75,7 @@ isn't served by anything in the table, we've drifted.
 
 | Element | How it serves the objective |
 |---|---|
-| `idea-generation` skill (Phase 6) | Structured ideas + dedup against a history log |
+| `idea-generation` skill (Phase 6) | Structured ideas + dedup against a history log — **on-demand only; deliberately unscheduled** (2026-08-31: quota goes to the Atlas loops instead; schedule it when wanted, it's one row) |
 | `schedules` table | "Generate 3 ideas every Monday morning" is a single row |
 
 ### F. Self-management
@@ -177,6 +187,21 @@ Things the system is **explicitly prohibited from doing** autonomously:
 - Cannot deploy to cloud environments (no AWS, no Heroku, etc.)
 - Cannot send emails from your account
 - Cannot publish to your public social accounts
+- **Live money (INV-22, added 2026-08-31 — EVALUATION_2026-08-30 F5):**
+  - No ai-server skill, session, or generic task may EVER place, modify, or
+    cancel a brokerage order directly. The ONLY order path in the whole
+    system is the atlas swing vertical's deterministic executor behind its
+    risk kernel (atlas `swing/` — "LLM proposes, kernel disposes"), which the
+    owner accepted 2026-08-30 and which is SANDBOX-PINNED until the owner
+    completes the `swing/LADDER.md` funding gate. The value vertical is
+    advisory-only by owner decision (v3) — it has no order path, ever.
+  - Brokerage credentials (Tradier, Alpaca) live only in the atlas project
+    env, never in the ai-server `.env` or any server process environment.
+  - Adding ANY new order path — a new skill that trades, a second executor,
+    widening kernel limits, un-pinning the sandbox — is a protected-path
+    change: explicit owner approval, never autonomous, regardless of gates
+    and LGTMs. The paper trader (`atlas-trader-*`) stays paper
+    (atlas `trader/CLAUDE.md` rule 1 + `trader/GO_LIVE.md` owner gate).
 
 `god` skill: the deliberate, owner-invoked exception to every ceiling above
 (bypassPermissions, direct commit+push, 200 turns). Exists so "human at the

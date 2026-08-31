@@ -1,5 +1,10 @@
 # Teardown: mac-mini-ai-server
 
+> **HISTORICAL — tears down the ARCHIVED docker/ollama `mac-mini-ai-server`
+> stack (early 2026), NOT the current launchd-managed ai-server.** Running
+> these steps today would touch nothing that matters (the old stack is gone)
+> — but do not mistake this for an ai-server shutdown procedure.
+
 Exact steps to shut down the old system on your Mac Mini. Run these *before*
 standing up the new `ai-server` server (so the Telegram bot token frees up and
 <!-- HISTORICAL: one-time teardown of the OLD mac-mini-ai-server (docker/ollama),

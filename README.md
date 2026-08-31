@@ -24,30 +24,42 @@ Built to manage, diagnose, and extend itself with minimal intervention.
 
 ## First-time setup
 
+This system runs from **two checkouts** (CLAUDE.md § single-writer topology):
+production lives in `~/Library/Application Support/ai-server` (launchd's
+working directory; pull-only), and all code is born in a second dev clone at
+`~/Documents/repos/ai-server`. A rebuild needs BOTH.
+
 On the Mac Mini:
 
 ```bash
-# 1. Clone to the right place (not ~/Documents — macOS FDA blocks launchd there)
+# 1a. Clone PROD to the right place (not ~/Documents — macOS FDA blocks launchd there)
 mkdir -p "$HOME/Library/Application Support"
 cd "$HOME/Library/Application Support"
 git clone git@github.com:Piserchia/ai-server.git
 cd ai-server
 
+# 1b. Clone the DEV writer (where commits are born)
+mkdir -p ~/Documents/repos
+git -C ~/Documents/repos clone git@github.com:Piserchia/ai-server.git
+
 # 2. Authenticate Claude Code (once)
 claude login
 
-# 3. Run the bootstrap — installs deps, creates DB, runs migrations, writes .env
+# 3. Run the bootstrap — installs deps (from the committed Pipfile.lock),
+#    creates DB, runs migrations, writes .env
 bash scripts/bootstrap.sh
 
 # 4. Edit .env with your Telegram bot token, allowed chat IDs, and a web auth token
 vi .env
 
-# 5. Start the three processes
-bash scripts/run.sh start
-bash scripts/run.sh status
-
-# 6. (Optional) auto-start on boot + auto-restart on crash
+# 5. Install launchd supervision — launchd OWNS the processes in production
 bash scripts/install-launchd.sh
+bash scripts/run.sh status        # reports launchd state when units exist
+
+# 6. Public domain: cloudflared runs as a SYSTEM LaunchDaemon that
+#    install-launchd.sh does NOT install — re-install it by hand
+#    (`cloudflared tunnel login` + `sudo cloudflared service install`;
+#    see .context/modules/hosting/CONTEXT.md). Postgres/redis via brew services.
 
 # 7. On your phone: message the bot
 /help
@@ -56,9 +68,11 @@ bash scripts/install-launchd.sh
 ## Daily operation
 
 ```bash
-bash scripts/run.sh status                 # is it running?
-tail -f volumes/logs/runner.log            # what is it doing?
+bash scripts/run.sh status                 # launchd-aware status (refuses `start` when launchd owns the services)
+curl -s localhost:8080/health | jq         # runner heartbeat + real PG queue backlog
+tail -f volumes/logs/runner.out.log        # what is it doing?
 tail -f volumes/audit_log/<job_id>.jsonl   # what did it do on one job?
+launchctl kickstart -k gui/$UID/com.assistant.runner   # restart a service
 ```
 
 Telegram (bare natural language works too — it's NL-first; commands are the explicit path):
@@ -84,7 +98,7 @@ containers — see `docs/SDK_MIGRATION_2026-07-27.md`).
 ## Testing
 
 ```bash
-pipenv run pytest                  # ~750 tests (pure-function + local-git integration)
+pipenv run pytest                  # full suite (pure-function + local-git integration; count grows — don't pin it here)
 pipenv run python scripts/lint_docs.py   # doc/registry/contract sync checks
 ```
 

@@ -82,6 +82,10 @@ def check_projects_registry() -> list[str]:
     for child in sorted(projects_dir.iterdir()):
         if child.name in skip or not child.is_dir():
             continue
+        # Quarantined leftovers (renamed, never deleted — CLAUDE.md hard rule)
+        # are not live projects; each carries a QUARANTINED.md explaining itself.
+        if child.name.endswith(".quarantined"):
+            continue
         slug = child.name
         if f"`{slug}`" not in registry:
             warnings.append(f"Project `{slug}` exists but not in PROJECTS_REGISTRY.md")
@@ -595,6 +599,122 @@ def check_skill_sections() -> list[str]:
     return warnings
 
 
+# ── 2026-08-31 checks (EVALUATION_2026-08-30 F1/F4) ─────────────────────────
+
+# Debt register, frozen 2026-08-31: skills that hold write-capable tools
+# (Bash/Write/Edit) while running UNISOLATED (`isolation` none/absent — no
+# clone, no guard hooks; host-equivalent). These predate the isolation
+# hardening and were audited as intentional (ops skills operate on the live
+# checkout by design; report skills write into the runtime clone/projects).
+# A NEW skill must either declare `isolation: workspace` (or `host`, god
+# only) or be consciously added here with a rationale in its SKILL.md.
+# Shrinking this list is the goal; growing it is a review decision.
+UNISOLATED_WRITER_ALLOWLIST = {
+    "_evaluate", "_learning_apply", "_writeback",
+    "atlas-chat", "atlas-daily-brief", "atlas-evaluate", "atlas-gap-scout",
+    "atlas-k401-adversary", "atlas-k401-holding", "atlas-k401-review",
+    "atlas-manager", "atlas-portfolio", "atlas-redeploy",
+    "atlas-refresh-knowledge", "atlas-report", "atlas-report-business",
+    "atlas-report-sweep", "atlas-report-technical", "atlas-scout",
+    "atlas-swing-evaluate", "atlas-trader-evaluate", "atlas-value-evaluate",
+    "delivery-manager", "delivery-ops-reconciler", "deploy-director",
+    "gap-auditor", "idea-generation", "insight-router", "knowledge-manager",
+    "new-project", "ops-manager", "plan", "project-redeploy",
+    "project-update-poll", "research-deep", "research-report", "restore",
+    "review-and-improve", "self-diagnose", "server-deploy", "server-upkeep",
+    "system-manager",
+}
+
+
+def _iter_skill_frontmatters():
+    """Yield (name, frontmatter_dict_or_None, parse_error_or_None)."""
+    import yaml
+    skills_dir = REPO_ROOT / "skills"
+    if not skills_dir.exists():
+        return
+    for child in sorted(skills_dir.iterdir()):
+        skill_md = child / "SKILL.md"
+        if not child.is_dir() or not skill_md.exists():
+            continue
+        text = skill_md.read_text()
+        if not text.startswith("---"):
+            yield child.name, None, "no frontmatter block"
+            continue
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            yield child.name, None, "unterminated frontmatter block"
+            continue
+        try:
+            fm = yaml.safe_load(parts[1]) or {}
+        except Exception as exc:
+            yield child.name, None, f"YAML error: {exc}"
+            continue
+        if not isinstance(fm, dict):
+            yield child.name, None, f"frontmatter is {type(fm).__name__}, not a mapping"
+            continue
+        yield child.name, fm, None
+
+
+def check_frontmatter_parses() -> list[str]:
+    """Every SKILL.md frontmatter must parse to a YAML mapping.
+
+    The runtime now FAILS jobs on corrupt frontmatter (SkillFrontmatterError,
+    2026-08-31) instead of silently running defaults — catch it at lint time
+    so the failure never reaches a scheduled job."""
+    warnings = []
+    for name, fm, err in _iter_skill_frontmatters():
+        if err is not None:
+            warnings.append(f"Skill `{name}` frontmatter does not parse: {err}")
+    return warnings
+
+
+def check_unisolated_writers() -> list[str]:
+    """A skill holding Bash/Write/Edit must be workspace/host-isolated OR on
+    the frozen UNISOLATED_WRITER_ALLOWLIST (EVALUATION_2026-08-30 F1)."""
+    warnings = []
+    write_tools = {"Bash", "Write", "Edit"}
+    seen = set()
+    for name, fm, err in _iter_skill_frontmatters():
+        if fm is None:
+            continue  # frontmatter_parses check reports it
+        seen.add(name)
+        iso = str(fm.get("isolation", "none"))
+        tools = set(fm.get("required_tools") or [])
+        if iso in ("workspace", "host"):
+            continue
+        if tools & write_tools and name not in UNISOLATED_WRITER_ALLOWLIST:
+            warnings.append(
+                f"Skill `{name}` holds write tools ({', '.join(sorted(tools & write_tools))}) "
+                f"but runs unisolated (isolation={iso!r}). Declare `isolation: workspace` "
+                f"or get it consciously allowlisted in lint_docs.py (protected path)."
+            )
+    for name in sorted(UNISOLATED_WRITER_ALLOWLIST - seen):
+        warnings.append(
+            f"UNISOLATED_WRITER_ALLOWLIST names `{name}` but no such skill exists — prune it"
+        )
+    return warnings
+
+
+def check_invariant_refs() -> list[str]:
+    """Every INV-N referenced in MISSION.md / .context/INDEX.md must exist as
+    a row in SYSTEM.md's invariant table (EVALUATION_2026-08-30 F4: INV-21
+    was named in MISSION but undefined for two weeks)."""
+    import re
+    warnings = []
+    system = (REPO_ROOT / ".context" / "SYSTEM.md").read_text()
+    defined = set(re.findall(r"^\| (INV-\d+) \|", system, flags=re.M))
+    for rel in ("MISSION.md", ".context/INDEX.md"):
+        path = REPO_ROOT / rel
+        if not path.exists():
+            continue
+        for inv in sorted(set(re.findall(r"INV-\d+", path.read_text()))):
+            if inv not in defined:
+                warnings.append(
+                    f"{rel} references {inv} but SYSTEM.md's invariant table has no such row"
+                )
+    return warnings
+
+
 def run_all() -> dict[str, list[str]]:
     """Run all checks, return {check_name: [warnings]}."""
     return {
@@ -607,6 +727,9 @@ def run_all() -> dict[str, list[str]]:
         "context_files_exist": check_context_files_exist(),
         "skill_sections": check_skill_sections(),
         "isolation_values": check_isolation_values(),
+        "frontmatter_parses": check_frontmatter_parses(),
+        "unisolated_writers": check_unisolated_writers(),
+        "invariant_refs": check_invariant_refs(),
         "delivery_contracts": check_delivery_contracts(),
         "org_charters": check_org_charters(),
         "role_privileges": check_role_privileges(),

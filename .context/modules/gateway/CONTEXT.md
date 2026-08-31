@@ -27,7 +27,11 @@ the single enqueue/cancel/lookup helper.
   runner heartbeat (`heartbeat:runner` in Redis, written every loop) is fresher than
   `runner_heartbeat_stale_seconds` (default 90s) AND Postgres + Redis are reachable;
   otherwise **503** with `{status, runner_ok, runner_heartbeat_age_s, queue_depth,
-  db_ok, redis_ok}`. Polled by the external heartbeat Worker (`ops/heartbeat-worker/`).
+  redis_llen, pg_queued, pg_running, pg_deferred, db_ok, redis_ok}`. Since
+  2026-08-31 (EVALUATION_2026-08-30 F2.4) `queue_depth` is the Postgres
+  `queued` count — the REAL backlog — not the Redis LLEN (which reads 0 while
+  ids sit inside the runner); `redis_llen` carries the old value. Polled by
+  the external heartbeat Worker (`ops/heartbeat-worker/`).
 - `web.health_verdict(heartbeat_age, db_ok, redis_ok, stale_after) -> (runner_ok, healthy)`
   — pure helper behind `/health` (tested in `tests/test_health.py`).
 - Telegram primary commands: `/task`, `/status`, `/jobs`, `/help`

@@ -18,7 +18,11 @@ Parsers for the two pieces of external declarative configuration:
 
 ### skills
 
-- `load(name) -> SkillConfig | None` — load one skill by directory name
+- `load(name) -> SkillConfig | None` — load one skill by directory name.
+  Since 2026-08-31 raises `SkillFrontmatterError` when the skill exists but
+  its frontmatter is corrupt (fail closed — never run a skill on defaults);
+  `None` only means "no such skill". `list_all()` skips corrupt skills with
+  an ERROR log.
 - `list_all() -> list[SkillConfig]` — all skills, for SKILLS_REGISTRY.md generation
 - `SkillConfig` dataclass — fields mirror frontmatter schema, with sensible
   defaults. Notable: `description` (router catalog + subagent card),

@@ -177,6 +177,10 @@ bash scripts/install-launchd.sh uninstall
 
 ## 9. You're on Phase 1
 
+> **STOP — historical snapshot.** All 8 phases shipped long ago (see
+> MISSION.md phase map). Nothing below describes the current system; do NOT
+> "tell me when Phase 1 is up". Current setup: `README.md`.
+
 What works now:
 - `/chat <anything>` — one-shot conversation
 - `/task <anything>` — runs a generic Claude session in the server directory with
