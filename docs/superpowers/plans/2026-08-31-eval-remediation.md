@@ -80,15 +80,16 @@ New since eval: 64 skills / 33 schedules (swing+value verticals landed 7f4854c);
 
 ### T6 — gates & deploy
 - [x] `pipenv run pytest` green (1301 passed); `lint_docs.py` green (17/17).
-- [ ] code-review agent LGTM (INV-4 lane) — running.
+- [x] code-review agent LGTM (INV-4 lane) — first pass CHANGES_REQUESTED with 2 real catches (web kind=god door, subagent frontmatter crash), both fixed (27526e6) + tested; final verdict LGTM.
 - [x] Secrets scan on unpushed diff: doc-only mentions, clean.
 - [x] Prod tree cleaned pre-deploy (all dirt verified byte-identical to origin/runtime-learnings, which is merged into main).
 - [x] SQL sweep: 3 stranded deferred rows cancelled (fadedf6e/f48d89f0/f1211d52); `succeeded` row repaired by migration 006 at deploy.
-- [ ] fetch+merge origin, push main.
-- [ ] Deploy: autopilot dispatches deploy-director (or enqueue explicitly); pre-clean prod's two SKILL.md dirty files (content preserved by T0.1 merge).
-- [ ] Runtime atlas clone: enqueue `atlas-redeploy` → verify `advisors/` present + site healthy.
-- [ ] Post-deploy verify: `/health` new fields, `run.sh status` matches launchd, healthcheck-all green, SQL sweeps applied.
-- [ ] Owner notification summarizing protected-path edits (MISSION §M, lint_docs).
+- [x] fetch+merge origin (incl. 13:58Z learnings), push main `7f4854c..da83b24`.
+- [x] Deploy: deploy-director cc1a747b → server_deploy a637cb1a. Range landed (prod HEAD da83b24), migration 006 applied (`ck_jobs_status_valid` present, 0 `succeeded` rows), services restarted, prod tree clean. The executor job row reads `failed` with "exit code 143" — that is the deploy's own `launchctl kickstart` of the runner SIGTERMing its session (director predicted it; all post-conditions verified green independently). Two auto self-diagnose jobs followed; expected to conclude the same.
+- [x] Runtime atlas clone: atlas-redeploy eb4fde33 completed — 97bde6b→a0df995, 4 atlas migrations, 7 gates green, `/advisors` + `/trading` routes live, healthcheck 200.
+- [x] Post-deploy verify: `/health` shows `pg_queued/pg_running/pg_deferred/redis_llen` and 200 ok; `run.sh status` reports launchd truth; `POST /api/jobs kind=god` → 403 live; public probes green (health 200, atlas 302→app).
+- [x] Incident during deploy: the FIRST scheduled `atlas-advisors-ingest` (Mon 10:00 ET) was SIGTERM-killed by the runner restart → re-dispatched manually with the schedule's full payload (job 8b7db322). Next scheduled: Thu 10:00.
+- [x] Owner notification: session summary (this session IS the owner channel) — protected paths touched under direct owner instruction: MISSION.md §M (+INV-22, tightens), scripts/lint_docs.py (+4 checks, tightens), skills/server-deploy/SKILL.md (sync against committed lock).
 
 ## Deferred (explicitly not this pass)
 - INV-13 restore to pre-push fail-closed review (behavioral policy decision — documented as flag-only instead; owner call to restore).
