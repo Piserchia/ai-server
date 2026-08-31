@@ -2,6 +2,31 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-08-31 — F2 queue honesty: slot-before-BLPOP, stranded-queued healing, honest /health, launchd-aware run.sh, status constraint (EVALUATION_2026-08-30)
+
+**Files changed**: `src/runner/main.py`, `src/runner/reconcile.py`,
+`src/gateway/web.py`, `scripts/run.sh`,
+`alembic/versions/006_job_status_constraint.py`, tests.
+
+- **Job loop acquires a semaphore slot BEFORE `BLPOP`** (new
+  `_run_with_held_slot`). Previously ids were popped eagerly and parked on
+  in-process semaphore waiters — a runner death lost every waiting id from
+  Redis while rows stayed `queued` in Postgres forever (observed live:
+  Redis LLEN 0 vs 15 PG-queued).
+- **`reconcile.requeue_stranded_queued()`** (startup, after orphan
+  reconciliation): re-RPUSHes every `queued` row absent from Redis; audit
+  event `queued_requeued`. Pure helper `stranded_queued_ids`.
+- **`/health`**: `queue_depth` is now the Postgres queued count (was Redis
+  LLEN alone — reported 0 with 15 queued). New fields `redis_llen`,
+  `pg_queued`, `pg_running`, `pg_deferred`. Health verdict logic unchanged.
+- **`run.sh`**: when `com.assistant.*` launchd units are loaded, `status`
+  reports launchd truth (was: PID files → "not running" while everything
+  ran) and `start` refuses (was: would bind :8080 against live uvicorn).
+- **Migration 006**: maps the illegal `status='succeeded'` row (wrote by a
+  session via SQL; its 3 deferred children stranded 8 days because
+  promotion only recognises `completed`) to `completed`, fails any other
+  unknown status, and adds CHECK `ck_jobs_status_valid`.
+
 ## 2026-08-31 — F1 hardening: fail-closed skill contracts, tighten-only isolation, dispatch guards (EVALUATION_2026-08-30)
 
 **Agent task**: interactive remediation of `docs/EVALUATION_2026-08-30.md` F1.

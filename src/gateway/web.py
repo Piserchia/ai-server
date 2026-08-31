@@ -325,18 +325,28 @@ async def health():
     db_ok = True
     redis_ok = True
     heartbeat_age: float | None = None
-    queue_depth: int | None = None
+    redis_llen: int | None = None
+    pg_queued: int | None = None
+    pg_running: int | None = None
+    pg_deferred: int | None = None
 
     try:
         hb = await redis.get(KEY_RUNNER_HEARTBEAT)
-        queue_depth = await redis.llen(QUEUE_JOBS)
+        redis_llen = await redis.llen(QUEUE_JOBS)
         heartbeat_age = parse_heartbeat_age(hb, now)
     except Exception:
         redis_ok = False
 
     try:
         async with async_session() as s:
-            await s.execute(text("SELECT 1"))
+            rows = (await s.execute(text(
+                "SELECT status, COUNT(*) FROM jobs "
+                "WHERE status IN ('queued','running','deferred') GROUP BY status"
+            ))).all()
+            counts = {status: n for status, n in rows}
+            pg_queued = counts.get("queued", 0)
+            pg_running = counts.get("running", 0)
+            pg_deferred = counts.get("deferred", 0)
     except Exception:
         db_ok = False
 
@@ -348,7 +358,16 @@ async def health():
         "status": "ok" if healthy else "degraded",
         "runner_ok": runner_ok,
         "runner_heartbeat_age_s": round(heartbeat_age, 1) if heartbeat_age is not None else None,
-        "queue_depth": queue_depth,
+        # queue_depth is the REAL backlog (Postgres queued rows). It used to be
+        # the Redis LLEN alone, which reads 0 while ids wait inside the runner
+        # process — 15 queued jobs looked like an idle server
+        # (2026-08-31, EVALUATION_2026-08-30 F2.4). redis_llen kept for the
+        # not-yet-popped view; both should converge near 0 on a quiet server.
+        "queue_depth": pg_queued,
+        "redis_llen": redis_llen,
+        "pg_queued": pg_queued,
+        "pg_running": pg_running,
+        "pg_deferred": pg_deferred,
         "db_ok": db_ok,
         "redis_ok": redis_ok,
     }

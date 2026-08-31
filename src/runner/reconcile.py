@@ -38,6 +38,8 @@ from src.runner.audit_index import append_to_index
 
 logger = structlog.get_logger()
 
+REQUEUE_EVENT = "queued_requeued"
+
 ORPHAN_CATEGORY = "orphaned"
 ORPHAN_ERROR = (
     "Runner restarted while this job was still 'running'; marked failed by "
@@ -59,6 +61,50 @@ def orphaned_job_ids(rows: Iterable[tuple]) -> list:
     leftover from a previous process that died mid-job.
     """
     return [jid for jid, status in rows if status == JobStatus.running.value]
+
+
+def stranded_queued_ids(queued_rows: Iterable[tuple], redis_ids: Iterable[str]) -> list:
+    """Pure. Given ``(job_id, status)`` rows and the ids currently visible in
+    the Redis list, return the job_ids stuck in ``queued`` with no Redis entry.
+
+    2026-08-31 (EVALUATION_2026-08-30 F2.3): the job loop BLPOPs ids into
+    in-process waiters before a semaphore slot frees, so a runner crash loses
+    every waiting id from Redis while the rows stay ``queued`` in Postgres —
+    invisible to /health (which counted Redis only) and never run again. At
+    startup nothing is in flight, so every queued row missing from Redis is
+    stranded and safe to re-push (idempotent: _process_job re-checks status).
+    """
+    in_redis = {str(r) for r in redis_ids}
+    return [jid for jid, status in queued_rows
+            if status == JobStatus.queued.value and str(jid) not in in_redis]
+
+
+async def requeue_stranded_queued() -> int:
+    """Re-RPUSH every ``queued`` job that has no Redis queue entry.
+
+    Call once at startup, after ``reconcile_orphaned_jobs`` and before the job
+    loop begins consuming. Returns the count re-queued.
+    """
+    from src.db import QUEUE_JOBS, redis
+
+    async with session_scope() as s:
+        result = await s.execute(
+            select(Job.id, Job.status).where(Job.status == JobStatus.queued.value)
+        )
+        rows = [(row[0], row[1]) for row in result.all()]
+    if not rows:
+        return 0
+
+    redis_ids = await redis.lrange(QUEUE_JOBS, 0, -1)
+    stranded = stranded_queued_ids(rows, redis_ids)
+    for job_id in stranded:
+        await redis.rpush(QUEUE_JOBS, str(job_id))
+        audit_log.append(str(job_id), REQUEUE_EVENT,
+                         reason="queued row had no Redis entry at runner startup")
+    if stranded:
+        logger.warning("re-queued stranded queued jobs",
+                       count=len(stranded), job_ids=[str(j) for j in stranded])
+    return len(stranded)
 
 
 def _existing_terminal_status(job_id) -> JobStatus | None:

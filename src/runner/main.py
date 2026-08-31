@@ -50,7 +50,7 @@ from src.models import Job, JobStatus, Project, Schedule
 from src.registry.skills import load as load_skill
 from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
-from src.runner.reconcile import reconcile_orphaned_jobs
+from src.runner.reconcile import reconcile_orphaned_jobs, requeue_stranded_queued
 from src.runner.review import (
     ReviewOutcome,
     get_git_diff,
@@ -140,9 +140,23 @@ async def _job_loop() -> None:
             except asyncio.TimeoutError:
                 continue
 
+        # Acquire a concurrency slot BEFORE consuming from Redis
+        # (2026-08-31, EVALUATION_2026-08-30 F2.2): a popped id exists only in
+        # this process's memory. The old order BLPOP'd eagerly and parked ids
+        # on semaphore waiters, so a crash lost every waiting id — rows stayed
+        # 'queued' in Postgres with no Redis entry, invisible forever.
+        # (requeue_stranded_queued() heals any pre-existing strandings at
+        # startup; this ordering stops creating new ones.)
+        try:
+            await asyncio.wait_for(sem.acquire(), timeout=2)
+        except asyncio.TimeoutError:
+            in_flight = {t for t in in_flight if not t.done()}
+            continue
+
         try:
             popped = await redis.blpop([QUEUE_JOBS], timeout=2)
         except Exception:
+            sem.release()
             logger.warning("queue poll failed — retrying shortly")
             try:
                 await asyncio.wait_for(_shutdown.wait(), timeout=2)
@@ -150,6 +164,7 @@ async def _job_loop() -> None:
             except asyncio.TimeoutError:
                 continue
         if popped is None:
+            sem.release()
             in_flight = {t for t in in_flight if not t.done()}
             continue
 
@@ -157,10 +172,11 @@ async def _job_loop() -> None:
         try:
             job_id = uuid.UUID(job_id_str)
         except ValueError:
+            sem.release()
             logger.warning("malformed job_id in queue", raw=job_id_str)
             continue
 
-        task = asyncio.create_task(_run_with_semaphore(sem, job_id))
+        task = asyncio.create_task(_run_with_held_slot(sem, job_id))
         in_flight.add(task)
         task.add_done_callback(in_flight.discard)
 
@@ -169,9 +185,12 @@ async def _job_loop() -> None:
         await asyncio.gather(*in_flight, return_exceptions=True)
 
 
-async def _run_with_semaphore(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None:
-    async with sem:
+async def _run_with_held_slot(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None:
+    """Run one job on a semaphore slot the job loop already acquired."""
+    try:
         await _process_job(job_id)
+    finally:
+        sem.release()
 
 
 # ── Enqueue visibility race (BLPOP can win against the INSERT's commit) ─────
@@ -1418,6 +1437,16 @@ async def main() -> int:
             logger.warning("startup: failed orphaned running jobs", count=n)
     except Exception:
         logger.exception("orphaned-job reconciliation failed (non-fatal)")
+
+    # Re-push 'queued' rows whose Redis entry died with the previous process
+    # (BLPOP'd into an in-process waiter, never run). Idempotent; must run
+    # before the job loop starts consuming (EVALUATION_2026-08-30 F2.3).
+    try:
+        n = await requeue_stranded_queued()
+        if n:
+            logger.warning("startup: re-queued stranded queued jobs", count=n)
+    except Exception:
+        logger.exception("stranded-queued reconciliation failed (non-fatal)")
 
     tasks = [
         asyncio.create_task(_job_loop(), name="job_loop"),

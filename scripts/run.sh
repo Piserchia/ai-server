@@ -18,6 +18,42 @@ unset ANTHROPIC_API_KEY || true
 
 SERVICES=(runner web bot)
 
+# ── launchd awareness (2026-08-31, EVALUATION_2026-08-30 F2.1) ──────────────
+# In production the three services are OWNED BY LAUNCHD (com.assistant.*),
+# which never writes PID files — so the PID-file status below reported
+# "not running" while everything was up, and a well-meaning `run.sh start`
+# from the dev tree would bind :8080 against the live uvicorn. When launchd
+# units exist, status reports launchd truth and start refuses. Manage the
+# production services with:
+#   launchctl kickstart -k gui/$UID/com.assistant.runner   (restart one)
+#   launchctl print gui/$UID/com.assistant.runner          (inspect)
+
+_launchd_unit_loaded() {
+    launchctl print "gui/$(id -u)/com.assistant.$1" > /dev/null 2>&1
+}
+
+_launchd_status_one() {
+    local name="$1" out pid
+    if out=$(launchctl print "gui/$(id -u)/com.assistant.$name" 2>/dev/null); then
+        pid=$(printf '%s' "$out" | awk '/^\tpid = /{print $3; exit}')
+        if [ -n "${pid:-}" ]; then
+            echo "  $name: running under launchd (PID $pid)"
+        else
+            echo "  $name: loaded in launchd but NOT running"
+        fi
+    else
+        echo "  $name: no launchd unit"
+    fi
+}
+
+_any_launchd_unit() {
+    local s
+    for s in "${SERVICES[@]}"; do
+        _launchd_unit_loaded "$s" && return 0
+    done
+    return 1
+}
+
 _start_one() {
     local name="$1"
     shift
@@ -68,6 +104,13 @@ _status_one() {
 }
 
 do_start() {
+    if _any_launchd_unit; then
+        echo "REFUSING to start: com.assistant.* launchd units are loaded — the"
+        echo "services are launchd-managed (probably already running). Starting a"
+        echo "second copy here would collide on :8080 and the job queue."
+        echo "Use: launchctl kickstart -k gui/\$UID/com.assistant.<runner|web|bot>"
+        exit 1
+    fi
     cd "$PROJECT_DIR"
     echo "Starting services..."
     _start_one runner pipenv run python3 -m src.runner.main
@@ -82,8 +125,13 @@ do_stop() {
 }
 
 do_status() {
-    echo "Service status:"
-    for s in "${SERVICES[@]}"; do _status_one "$s"; done
+    if _any_launchd_unit; then
+        echo "Service status (launchd-managed):"
+        for s in "${SERVICES[@]}"; do _launchd_status_one "$s"; done
+    else
+        echo "Service status (PID files — dev mode):"
+        for s in "${SERVICES[@]}"; do _status_one "$s"; done
+    fi
 }
 
 case "${1:-start}" in

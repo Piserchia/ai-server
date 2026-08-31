@@ -16,7 +16,30 @@ from src.runner.reconcile import (
     ORPHAN_ERROR,
     _existing_terminal_status,
     orphaned_job_ids,
+    stranded_queued_ids,
 )
+
+
+class TestStrandedQueuedIds:
+    """2026-08-31 (EVALUATION_2026-08-30 F2.3): queued rows with no Redis
+    entry are stranded forever unless healed at startup."""
+
+    def test_queued_not_in_redis_is_stranded(self):
+        a, b = uuid.uuid4(), uuid.uuid4()
+        rows = [(a, JobStatus.queued.value), (b, JobStatus.queued.value)]
+        assert stranded_queued_ids(rows, [str(b)]) == [a]
+
+    def test_queued_in_redis_is_not_stranded(self):
+        a = uuid.uuid4()
+        assert stranded_queued_ids([(a, JobStatus.queued.value)], [str(a)]) == []
+
+    def test_non_queued_rows_ignored(self):
+        a, b = uuid.uuid4(), uuid.uuid4()
+        rows = [(a, JobStatus.running.value), (b, JobStatus.deferred.value)]
+        assert stranded_queued_ids(rows, []) == []
+
+    def test_empty(self):
+        assert stranded_queued_ids([], []) == []
 
 
 class TestOrphanedJobIds:
