@@ -29,3 +29,25 @@ Then re-trigger the redeploy.
 run. When the CLAUDE.md write-back instruction fires at conversation end, write
 to `skills/atlas-redeploy/CHANGELOG.md` or the ai-server's top-level
 `CHANGELOG.md`, NOT the atlas project's CHANGELOG.
+
+## swing/value venvs need tradingcore installed separately (2026-08-31)
+
+`swing` and `value` depend on `tradingcore` as a peer package (not listed in
+their `pyproject.toml` dependencies — stdlib+pyyaml-only ceiling). When their
+venvs are freshly created (`self-heal` path), running `pytest` immediately fails
+with `ModuleNotFoundError: No module named 'tradingcore'`.
+
+**Fix**: after creating the swing or value venv (or after tradingcore changes),
+install tradingcore into it explicitly:
+
+```bash
+cd "$ATLAS/swing"
+.venv/bin/pip install -q -e "../tradingcore"
+
+cd "$ATLAS/value"
+.venv/bin/pip install -q -e "../tradingcore"
+```
+
+The manifest gates for swing and value use `when_paths: ["swing/", "tradingcore/"]`
+and `["value/", "tradingcore/"]` — so this fix is needed whenever tradingcore
+itself changes too.
