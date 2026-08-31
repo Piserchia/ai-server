@@ -79,9 +79,12 @@ New since eval: 64 skills / 33 schedules (swing+value verticals landed 7f4854c);
 - [x] Module CHANGELOGs (runner, gateway) + CONTEXT.md updates for changed interfaces.
 
 ### T6 — gates & deploy
-- [x] `pipenv run pytest` green; `lint_docs.py` green.
-- [x] code-review agent LGTM (INV-4 lane).
-- [x] fetch+merge origin, push main.
+- [x] `pipenv run pytest` green (1301 passed); `lint_docs.py` green (17/17).
+- [ ] code-review agent LGTM (INV-4 lane) — running.
+- [x] Secrets scan on unpushed diff: doc-only mentions, clean.
+- [x] Prod tree cleaned pre-deploy (all dirt verified byte-identical to origin/runtime-learnings, which is merged into main).
+- [x] SQL sweep: 3 stranded deferred rows cancelled (fadedf6e/f48d89f0/f1211d52); `succeeded` row repaired by migration 006 at deploy.
+- [ ] fetch+merge origin, push main.
 - [ ] Deploy: autopilot dispatches deploy-director (or enqueue explicitly); pre-clean prod's two SKILL.md dirty files (content preserved by T0.1 merge).
 - [ ] Runtime atlas clone: enqueue `atlas-redeploy` → verify `advisors/` present + site healthy.
 - [ ] Post-deploy verify: `/health` new fields, `run.sh status` matches launchd, healthcheck-all green, SQL sweeps applied.
