@@ -932,6 +932,50 @@ recorded occurrence (2026-07-13 `_evaluate` variant, 2026-08-15 variant,
 2026-08-17). Prevention work should be prioritized: every occurrence
 burns ~30–60k tokens on a spurious self-diagnose session.
 
+**New third-party-collateral variant 2026-08-31** (self-diagnose
+`32ab9bad` for skill `atlas-advisors-ingest`, failed job `7ce94790`):
+first observed case where the SIGTERM wave killed an **unrelated
+project skill** running concurrently — not `_evaluate`, not
+`server-deploy` itself, not an escalation child. Timeline: advisors-
+ingest started 10:00:03 (session_timeout=3600, mid-work — 23
+transcripts archived across 5 personas, reading through to extract
+claims); server_deploy `a637cb1a` started 10:02:22 (dispatched via
+`dispatch-mcp`, range `7f4854c..da83b24`); at 10:05:22 the detached
+runner-restart fired and SIGTERM'd BOTH jobs simultaneously (advisors-
+ingest exit 143 mid transcript-read, deploy exit 143 mid summary).
+Post-state: HEAD=`da83b24`=`origin/main`, health=200, runner/web/bot
+PIDs alive — deploy succeeded. But advisors-ingest's 23 archived
+transcripts sat unpushed in the workspace clone
+(`volumes/workspaces/7ce94790-atlas/advisors/personas/*`) — the ingest
+never reached the extraction/dossier/commit steps. Self-diagnose
+re-enqueued a fresh `atlas-advisors-ingest` (idempotent: cap 5
+oldest-first per channel, same feed window will re-archive the same
+videos). **Widened prevention scope**: prevention item (3)
+(`deploy_restart_sigterm` error_category) should suppress escalation
+for ALL concurrent jobs killed in the same restart wave, not just the
+deploy's own children. Detection: any job with `error_message LIKE
+'Command failed with exit code 143%'` and `completed_at` within ±2s of
+a `server_deploy` job's `completed_at`. This is the **fourth** recorded
+occurrence.
+
+**Same event, second self-diagnose (2026-08-31, `5226b4dd`)**: the same
+10:05:22 SIGTERM wave also tripped the *skill-level* self-diagnose
+threshold for `server-deploy` itself — the parent deploy `a637cb1a`
+and its escalation child `0eefd937` both landed in `failed` state
+within seconds of each other, satisfying "skill server-deploy failed
+2+ times in the last 10 minutes". So one deploy-restart-race produced
+TWO concurrent self-diagnose sessions (`32ab9bad` for advisors-ingest,
+`5226b4dd` for server-deploy) plus the escalation retry — all
+diagnosing the same non-defect. Independent verification from
+`5226b4dd`: HEAD stayed at `da83b24` = `origin/main`, alembic at
+`006 (head)`, `SELECT DISTINCT status FROM jobs` returns only valid
+values, `curl /health` = 200, `launchctl list` shows runner/web/bot/
+caddy pids alive. The proposed prevention (`deploy_restart_sigterm`
+error_category + escalation-skip) would collapse all three spurious
+jobs — kill the escalation, skip both self-diagnoses. Estimated
+waste per event: 30–60k tokens × 2–3 sessions = ~150k tokens per
+occurrence. **Fifth** recorded occurrence of the underlying race.
+
 ---
 
 ## Symptom: self-diagnose fires for Telegram handler with error "boom"
@@ -2802,6 +2846,7 @@ Job status is not proof of output. Watchdogs must check artifacts:
 schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
 open follow-up.
 
+## Adding entries to this file
 ## Symptom: `atlas-momo-research` hits `session_timeout` at 60 min while the engineer probe is still running
 
 ### Diagnostic
