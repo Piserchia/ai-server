@@ -137,6 +137,57 @@ check_runner_liveness() {
 
 check_runner_liveness || true
 
+# ── Swing trading watchdog (R18, spec 2026-08-27 v3 §6.2) ───────────────────
+# OUT-OF-BAND by design: the scheduler cannot watchdog itself (08-17
+# governor-dark incident). On market weekdays, if the swing vertical has no
+# completed run inside its expected window, DM the owner — resting broker
+# stops protect positions through loop death, but options lifecycle needs
+# eyes. Fails SILENT-SAFE pre-deploy (no atlas .env / schema yet → WARN log).
+SWING_ALERT_STATE="$PROJECT_DIR/volumes/healthcheck-swing-alert.epoch"
+SWING_ALERT_INTERVAL=43200   # one DM per 12h
+
+check_swing_freshness() {
+    local now dow hour max_age atlas_env db_url last_ts last_epoch age token chat_ids chat_id msg last_alert
+    now=$(date +%s); dow=$(date -u +%u); hour=$(date -u +%H)
+    # weekends: nothing expected
+    (( dow >= 6 )) && return 0
+    # give the morning supervise run (13:40/14:40 UTC) time before judging
+    (( 10#$hour < 16 )) && return 0
+    # Mon looks back across the weekend (74h); Tue-Fri expect <26h
+    if (( dow == 1 )); then max_age=266400; else max_age=93600; fi
+    atlas_env="$PROJECT_DIR/projects/atlas/.env"
+    db_url=$(grep -E '^DATABASE_URL=' "$atlas_env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+    if [[ -z "$db_url" ]]; then
+        echo "$(date -u +%FT%TZ) WARN swing watchdog: atlas .env/DATABASE_URL absent (pre-deploy?)" >> "$LOG"
+        return 0
+    fi
+    last_ts=$(psql "$db_url" -X -q -t -A -c "SELECT extract(epoch from max(ts))::bigint FROM swing.runs;" 2>/dev/null || true)
+    if [[ ! "$last_ts" =~ ^[0-9]+$ ]]; then
+        echo "$(date -u +%FT%TZ) WARN swing watchdog: swing.runs unreadable/empty (pre-first-run?)" >> "$LOG"
+        return 0
+    fi
+    age=$(( now - last_ts ))
+    (( age <= max_age )) && return 0
+    echo "$(date -u +%FT%TZ) FAIL swing watchdog: last swing.runs ${age}s old (limit ${max_age}s)" >> "$LOG"
+    last_alert=$(cat "$SWING_ALERT_STATE" 2>/dev/null || echo 0)
+    [[ "$last_alert" =~ ^[0-9]+$ ]] || last_alert=0
+    (( now - last_alert < SWING_ALERT_INTERVAL )) && return 0
+    token=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+    chat_ids=$(grep -E '^TELEGRAM_ALLOWED_CHAT_IDS=' "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+    chat_id=$(printf '%s' "$chat_ids" | cut -d, -f1 | tr -d '[:space:]')
+    [[ -z "$token" || -z "$chat_id" ]] && return 0
+    msg="🚨 Swing watchdog (R18): no completed swing run in $(( age / 3600 ))h on a market day. Resting broker stops protect stock lots; OPTION lifecycle needs eyes — check /trading/swing and the atlas-swing-* schedules."
+    if curl -sf --max-time 10 "https://api.telegram.org/bot${token}/sendMessage" \
+            --data-urlencode "chat_id=${chat_id}" \
+            --data-urlencode "text=${msg}" > /dev/null 2>&1; then
+        echo "$now" > "$SWING_ALERT_STATE" 2>/dev/null || true
+        echo "$(date -u +%FT%TZ) ALERT swing-watchdog DM sent" >> "$LOG"
+    fi
+    return 0
+}
+
+check_swing_freshness || true
+
 # ── Deploy autopilot (continuous delivery, 2026-07-31) ──────────────────────
 # Pushed-but-undeployed commits used to wait for a human to say "deploy".
 # This zero-token check notices a pending origin/main range and dispatches a

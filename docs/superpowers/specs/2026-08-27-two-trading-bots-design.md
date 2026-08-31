@@ -1,6 +1,6 @@
 # Two Trading Bots — Design & Implementation Plan
 
-**Date:** 2026-08-27 · **v3: 2026-08-30** · **Status:** ACCEPTED-DIRECTION — build starts at P0/P1. Nothing implemented yet.
+**Date:** 2026-08-27 · **v3: 2026-08-30** · **Status:** BUILT 2026-08-30 (plan T1–T17 executed; atlas `tradingcore/`+`swing/`+`value/`+migrations 0044–0046+`/trading` pages; 8 ai-server skills + schedules; baselines B-0001/2 on real data; code-review round applied). **Armed pending owner P0** (Tradier sandbox tokens + FINNHUB_TOKEN in atlas `.env`, funding decisions) and prod deploy (`/task deploy server` + `/task redeploy atlas`). Live money remains gated by `swing/LADDER.md`.
 **Owner request (as evolved):** (1) a short-term aggressive stock/options trading account driven by technicals and recurring patterns, high risk tolerance, no trade >50% of account value, mandatory stops/safeguards, every trade tracked and audited — **auto-trading**; (2) a medium/long-term value engine using earnings and financial fundamentals — **v3 change: no automated trading; it generates theses/suggestions for the owner's own portfolio** (long entries, margin-secured put ideas, exits), with every suggestion tracked and graded.
 
 **Owner decision log:**

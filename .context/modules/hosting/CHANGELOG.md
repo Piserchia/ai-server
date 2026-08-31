@@ -330,3 +330,12 @@ soft dependency on `rclone` (brew) for the off-site leg only.
 - Multi-service projects (market-tracker has 3 Flask servers) get separate launchd plists per sub-service and Caddy handle blocks for path-based routing. This keeps each service independently supervised and restartable.
 - Manifest schema includes `mission`, `web_strategy`, and `platforms` fields so the AI server can distinguish "this IS a web app" from "this has a web shim for a native app."
 - Healthchecks read from manifest files (source of truth) rather than the DB.
+
+## 2026-08-30 — swing trading watchdog in healthcheck-all (R18)
+
+`scripts/healthcheck-all.sh` gains `check_swing_freshness`: on market
+weekdays after 16:00 UTC, if `swing.runs` (atlas DB, read via the runtime
+clone's .env) shows no run inside 26h (74h Mondays), DM the owner — rate-
+limited 1/12h, silent-safe pre-deploy. Out-of-band by design (the scheduler
+cannot watchdog itself; spec 2026-08-27 v3 §6.2 R18). Session: trading-bots
+implementation.

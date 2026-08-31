@@ -115,7 +115,7 @@ projects/<slug>/
 | Work on the trader loop skills | `skills/atlas-trader-{paper,research,evaluate}/SKILL.md` (staged in atlas `integrations/ai-server/`) |
 | Understand how live money would ever be enabled (owner-only) | atlas `trader/GO_LIVE.md` + `trader/CLAUDE.md` rule 1 |
 
-## Additions 2026-08-27 (trading bot verticals — ACCEPTED-DIRECTION, v3 2026-08-30)
+## Additions 2026-08-27 (trading bot verticals — BUILT 2026-08-30, v3)
 
 | I need to... | Read these |
 |---|---|

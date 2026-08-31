@@ -31,7 +31,8 @@ The vertical is SANDBOX-PINNED until the owner's LADDER.md funding gate.
 2. Fast-fail suite: `cd swing && .venv/bin/python -m pytest -q -x`.
    Red → do NOT run the executor; the failure IS the finding.
 3. Run `cd swing && .venv/bin/python -m swing.executor --manage`.
-4. Verify the JSON report: `run_id` present; status ∈ ok | market_closed |
+4. Verify the JSON report: `run_id` present; status ∈ provisioning_gap |
+   ok | market_closed |
    off_window | halted | halted_standing | breaker_tripped | lifecycle_only |
    stale_data | broker_unreachable. Read `actions` — stop re-arms (R21),
    expiry disposals (R12), assignment cures (R20) are the morning's work.
