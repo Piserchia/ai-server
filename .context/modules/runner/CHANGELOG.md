@@ -2,6 +2,24 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-01 — schedule-adherence monitor: the missing-run axis (firm WS1)
+
+**Files changed**: `src/runner/schedule_adherence.py` (new),
+`tests/test_schedule_adherence.py` (new), `scripts/schedule-monitor.sh`
+(new), `scripts/install-launchd.sh`.
+
+`schedule_rollup` grades runs that exist; nothing noticed a schedule that
+silently stopped producing runs (08-17 governor-dark: scheduler-task death
+looks healthy; scout-never-ran: a row that never fired sorts as fine). New
+pure fold `adherence_report(schedules, jobs, now)` → findings
+DARK / NEVER_RAN / STUCK / FAILURE_STREAK + per-schedule status rows;
+schedule_id join, never kind (2026-08-17 review doctrine). CLI main writes
+`volumes/telemetry/schedule_adherence.json` (consumed by atlas firm
+`liveness.py`, spec 2026-09-01-atlas-firm-org-design). Out-of-band delivery:
+`scripts/schedule-monitor.sh` on launchd timer `com.assistant.schedule-monitor`
+(daily 07:15 local) — the scheduler must not watchdog itself — with the
+healthcheck-all curl-DM idiom, 12h alert rate limit, Sunday always-summary.
+
 ## 2026-08-31 — review catches on the F1 hardening (same session)
 
 The INV-4 code-review pass on the remediation diff found two real holes:
