@@ -42,6 +42,8 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-trader-evaluate` | worker | guarded-writer | Weekly trader-vertical governor: grade the week vs SPY/BIL from DB evidence, lessons, gated stage flips (never toward live), liveness sweep (Sun 15:00) |
 | `atlas-advisors-ingest` | worker | guarded-writer | Twice-weekly advisors ingest: RSS roster poll, yt-dlp transcripts, schema-validated claim extraction, dossier compaction; measurement-only, no order path (Mon+Thu 14:00) |
 | `atlas-advisors-panel` | worker | guarded-writer | Weekly advisors panel: committed persona-mind emissions, deterministic book rebuild + SPY/BIL marks, digest w/ debate + liveness; measurement-only, graduation notes never wires (Sat 15:00) |
+| `atlas-firm-rollup` | worker | guarded-writer | Daily firm-vertical deterministic run: firm.cli rollup+check+liveness in workspace clone, verify firm.* rows, breach-first risk-officer report; advisory only, writes only schema firm (weekdays 19:15) |
+| `atlas-cio` | worker | guarded-writer | Weekly investment committee: firm spine + all governor grades → ONE attention-allocation memo (F-#### ledger entry + firm.decisions), owner DM digest; frozen evaluator, advisory ceiling per firm/FIRM_AUTHORITY.md (Mon 16:00) |
 
 ## Standards
 

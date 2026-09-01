@@ -108,6 +108,13 @@ upsert 'atlas-trader-paper'      '30 17 * * 1-5' 'atlas-trader-paper'    'atlas-
 upsert 'atlas-trader-research'   '0 13 * * 3'  'atlas-trader-research'   'atlas-trader-research: weekly governed trader research cycle -> pre-registered card, deterministic backtest evidence, adversarial validation, ledger + trial-registry close-out under trader/evaluation/PROTOCOL.md (skills/atlas-trader-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 upsert 'atlas-trader-evaluate'   '0 15 * * 0'  'atlas-trader-evaluate'   'atlas-trader-evaluate: weekly trader governor -> grade the week vs SPY/BIL from DB evidence, lessons, gated stage flips (never live), schedule-liveness sweep (skills/atlas-trader-evaluate)'
 
+# Firm vertical (2026-09-01): rollup daily after trader-paper 17:30 and
+# value-monitor 18:10; CIO Monday after atlas-evaluate 11:00 so the memo
+# reads the fresh scorecard. Both workspace-isolated (project_slug atlas);
+# the CIO pushes its ledger commit from the workspace like atlas-build.
+upsert 'atlas-firm-rollup' '15 19 * * 1-5' 'atlas-firm-rollup' 'atlas-firm-rollup: daily firm-vertical deterministic run -> firm.cli rollup+check+liveness in workspace clone, verify firm.* rows, breach-first risk-officer report; advisory only, writes only schema firm (skills/atlas-firm-rollup)' '{"project_slug":"atlas"}'
+upsert 'atlas-cio'         '0 16 * * 1'    'atlas-cio'         'atlas-cio: weekly investment committee -> read firm spine + all governor grades, ONE attention-allocation memo as F-#### ledger entry + firm.decisions row, owner DM digest; frozen evaluator, advisory ceiling (skills/atlas-cio)' '{"project_slug":"atlas"}'
+
 # Advisors vertical (YouTuber persona shadow scoreboard, spec 2026-08-30):
 # ingest Mon+Thu 14:00 UTC (clear of 11:00 loop slots, 12:00 brief, 13:00
 # research slots); panel Sat 15:00 UTC (clear of k401 Sat 13:00 and
