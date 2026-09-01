@@ -1,5 +1,39 @@
 # Changelog: hosting
 
+## 2026-09-01 — atlas-weekly-reports session_timeout_seconds → 3600
+
+**Agent task**: review-and-improve — raise session_timeout_seconds to 3600
+for the atlas-report-sweep schedule row so the weekly Sunday sweep stops
+hitting the 1800s default.
+
+**Files changed**:
+- `scripts/seed-schedules.sh` — added payload
+  `'{"session_timeout_seconds":3600}'` to the `atlas-weekly-reports` upsert
+  (job_kind `atlas-report-sweep`), expanded the section comment to note the
+  override and why (report-family, no `project_slug`, well below the 5400
+  cap).
+
+**Why**: the Sunday sweep does a full `atlas-dash refresh` + enumerate +
+fan-out (or, when the dispatch MCP tool is unavailable, sequential
+per-target reports). Under the 1800s default it was hitting the ceiling
+mid-sweep; 3600s matches the cadence other governed atlas weekly rows
+already carry (momo/trader/advisors/swing/value-research + value-theses).
+
+**Side effects**: the seed script is idempotent — on the next
+`server-deploy` step 3b, the `ON CONFLICT DO UPDATE` branch will overwrite
+`job_payload` for the existing `atlas-weekly-reports` row with the new
+payload (declared payloads win per the COALESCE rule in `upsert`). No cron
+change; no other schedules touched. Cap remains at 5400 per
+`SESSION_TIMEOUT_CAP_SECONDS` in `runner/main.py` — the TROUBLESHOOTING.md
+guidance against reflexively bumping the timeout is for fleet-workflow
+skills that should be split (e.g. momo H010); atlas-report-sweep is
+already a fan-out orchestrator, so this bump gives it room to enumerate,
+not to do more work inline.
+
+**Gotchas discovered**: none — this uses the exact same
+`session_timeout_seconds` payload key already carried by six other atlas
+schedule rows; `resolve_session_timeout` in `runner/main.py` reads it.
+
 ## 2026-08-31 — F3/F5/F6/F7 topology fixes (EVALUATION_2026-08-30)
 
 - `scripts/sync-learnings.sh`: allowlist narrowed — `skills/*/*.md` →

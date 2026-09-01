@@ -70,9 +70,12 @@ upsert 'research-report-weekly' '0 13 * * 1' 'research-report' 'Weekly research 
 # These two rows predate this script's atlas section and lived ONLY in the DB
 # (created out-of-band); a wipe+seed would have silently dropped the two most
 # owner-visible atlas jobs (2026-08-31, EVALUATION_2026-08-30 F5.5). Crons
-# match the live rows exactly.
+# match the live rows exactly. The sweep is a REPORT job against the runtime
+# clone (atlas-report family), so no project_slug payload; the 3600s override
+# lifts it off the 1800s default because refresh + enumerate + fan-out was
+# clipping the Sunday sweep at the ceiling (still well below the 5400 cap).
 upsert 'atlas-daily-brief'   '0 12 * * *' 'atlas-daily-brief'  'atlas-daily-brief: pre-open synthesis'
-upsert 'atlas-weekly-reports' '0 18 * * 0' 'atlas-report-sweep' 'atlas-report-sweep: weekly full report pass'
+upsert 'atlas-weekly-reports' '0 18 * * 0' 'atlas-report-sweep' 'atlas-report-sweep: weekly full report pass' '{"session_timeout_seconds":3600}'
 
 # ── Atlas living loops (staged from atlas integrations/ai-server, 2026-08-03) ─
 # The closed loop (atlas evaluation/LOOP.md, owner decision 2026-08-04):
