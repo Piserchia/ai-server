@@ -194,6 +194,8 @@ install_timer "backup" "scripts/backup.sh" \
   "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>"
 install_timer "healthcheck-all" "scripts/healthcheck-all.sh" \
   "<key>StartInterval</key><integer>300</integer>"
+install_timer "schedule-monitor" "scripts/schedule-monitor.sh" \
+  "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer></dict>"
 
 echo ""
 echo "Done. Services will auto-start on login and auto-restart on crash."
