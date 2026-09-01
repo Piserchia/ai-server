@@ -131,6 +131,12 @@ projects/<slug>/
 | Understand the advisors vertical (persona minds, shadow books, consensus, digest) | `docs/superpowers/specs/2026-08-30-atlas-advisors-design.md`; atlas `advisors/CLAUDE.md` |
 | Work on the advisors loop skills | `skills/atlas-advisors-{ingest,panel}/SKILL.md` (staged in atlas `integrations/ai-server/`) |
 
+## Additions 2026-09-01 (atlas firm layer — ACCEPTED, building)
+
+| I need to... | Read these |
+|---|---|
+| Understand the firm program (cross-vertical risk book/P&L, advisory CIO + graduation gates, schedule-adherence monitor, role handbooks, dashboard Firm section) | `docs/superpowers/specs/2026-09-01-atlas-firm-org-design.md` |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
