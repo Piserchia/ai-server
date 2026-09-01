@@ -131,11 +131,14 @@ projects/<slug>/
 | Understand the advisors vertical (persona minds, shadow books, consensus, digest) | `docs/superpowers/specs/2026-08-30-atlas-advisors-design.md`; atlas `advisors/CLAUDE.md` |
 | Work on the advisors loop skills | `skills/atlas-advisors-{ingest,panel}/SKILL.md` (staged in atlas `integrations/ai-server/`) |
 
-## Additions 2026-09-01 (atlas firm layer — ACCEPTED, building)
+## Additions 2026-09-01 (atlas firm layer — BUILT same day)
 
 | I need to... | Read these |
 |---|---|
-| Understand the firm program (cross-vertical risk book/P&L, advisory CIO + graduation gates, schedule-adherence monitor, role handbooks, dashboard Firm section) | `docs/superpowers/specs/2026-09-01-atlas-firm-org-design.md` |
+| Understand the firm program (cross-vertical risk book/P&L, advisory CIO + graduation gates, schedule-adherence monitor, role handbooks, dashboard Firm section) | `docs/superpowers/specs/2026-09-01-atlas-firm-org-design.md`; plans `docs/superpowers/plans/2026-09-01-firm-ws1-schedule-monitor.md` + `2026-09-01-firm-ws2a-spine.md` |
+| Understand the schedule-adherence monitor (missing-run axis, DARK/NEVER_RAN/STUCK/FAILURE_STREAK) | `src/runner/schedule_adherence.py` docstrings; `.context/modules/runner/CONTEXT.md`; `scripts/schedule-monitor.sh` header |
+| Work on the firm loop skills | `skills/atlas-{cio,firm-rollup}/SKILL.md` (staged byte-identical from atlas `integrations/ai-server/`); atlas `firm/CLAUDE.md` + `firm/charters/` |
+| Understand how firm authority is gated | atlas `firm/FIRM_AUTHORITY.md` + `firm/CLAUDE.md` Rule 1 + atlas `evaluation/LOOP.md` §6 |
 
 ## Update this file
 
