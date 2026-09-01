@@ -119,6 +119,18 @@ class TestStuck:
         rep = adherence_report([s], jobs, NOW)
         assert any(f["kind"] == "STUCK" for f in rep["findings"])
 
+    def test_stuck_beats_failure_streak_status(self):
+        # Both conditions apply: a hung >24h job AND a 3-failure streak.
+        # Both findings must appear, and the per-schedule status must be
+        # the more severe "stuck" (review 2026-09-01 precedence fix).
+        s = _sched(cron="0 16 * * *")
+        jobs = [_job(s["id"], "running", 25), _job(s["id"], "failed", 50),
+                _job(s["id"], "failed", 74), _job(s["id"], "failed", 98)]
+        rep = adherence_report([s], jobs, NOW)
+        kinds = {f["kind"] for f in rep["findings"]}
+        assert {"STUCK", "FAILURE_STREAK"} <= kinds
+        assert rep["schedules"][0]["status"] == "stuck"
+
     def test_recent_running_job_ok(self):
         s = _sched(cron="0 16 * * *")
         jobs = [_job(s["id"], "running", 1), _job(s["id"], "completed", 26)]

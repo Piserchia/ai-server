@@ -61,21 +61,12 @@ def adherence_report(
             continue
 
         last_slot = croniter(sch["cron_expression"], now).get_prev(datetime)
+        # Status is built by sequential overwrites in ASCENDING severity —
+        # failing < stuck < dark/never_ran — so when several conditions
+        # apply, the last (most severe) write wins, matching the severity
+        # table used for sorting below (review 2026-09-01: the original
+        # stuck-then-failing order let a streak clobber a hung job).
         status = "ok"
-
-        stuck = [
-            j for j in sjobs
-            if j["status"] not in _TERMINAL
-            and (now - j["created_at"]) > timedelta(hours=stuck_hours)
-        ]
-        if stuck:
-            status = "stuck"
-            findings.append({
-                "kind": "STUCK", "schedule": name,
-                "detail": f"{len(stuck)} non-terminal job(s) older than "
-                          f"{stuck_hours}h (oldest status "
-                          f"{stuck[-1]['status']!r})",
-            })
 
         terminal = [j for j in sjobs if j["status"] in _TERMINAL]
         streak = 0
@@ -89,6 +80,20 @@ def adherence_report(
             findings.append({
                 "kind": "FAILURE_STREAK", "schedule": name,
                 "detail": f"{streak} consecutive failures",
+            })
+
+        stuck = [
+            j for j in sjobs
+            if j["status"] not in _TERMINAL
+            and (now - j["created_at"]) > timedelta(hours=stuck_hours)
+        ]
+        if stuck:
+            status = "stuck"
+            findings.append({
+                "kind": "STUCK", "schedule": name,
+                "detail": f"{len(stuck)} non-terminal job(s) older than "
+                          f"{stuck_hours}h (oldest status "
+                          f"{stuck[-1]['status']!r})",
             })
 
         slot_covered = any(

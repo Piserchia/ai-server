@@ -22,6 +22,9 @@ healthcheck-all curl-DM idiom, 12h alert rate limit, Sunday always-summary.
 Artifact shape: `{generated_at, findings[], schedules[{name, cron, paused,
 status: ok|paused|dark|never_ran|failing|stuck, last_expected,
 observed_job_at}]}`. First live run 2026-09-01: 33 schedules, 0 findings.
+Review catch (same day, INV-13 pass): status overwrites now run in
+ascending severity (failing → stuck → dark/never_ran) so a hung job is
+never downgraded to "failing" by a coincident streak; overlap test added.
 
 ## 2026-08-31 — review catches on the F1 hardening (same session)
 
