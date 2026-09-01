@@ -44,13 +44,23 @@ trigger it — 3rd instance was `atlas-momo-research` (isolation=workspace).
    `skills/atlas-momo-research/SKILL.md`), then burned turns exploring
    `projects/atlas` and reading the parent's summary before hitting the ceiling.
 
-### Status (2026-08-13)
+### Status (2026-09-01)
 
-**Not yet fixed** — three failures across three days (`56c478cc`, `fc483ddb`,
-`dc5fad7d`). The immediate remediation (delete `projects/atlas/.superpowers`
-in the dev repo + `.gitignore` it) doesn't cover the 3rd-instance path
-(workspace-isolated parents). The server-code fixes below are the durable
-answer and should be prioritized in the dev repo.
+**Still not fixed** — 4th occurrence today: job `f6c9e375`, parent `027d959b`
+(`atlas-momo-drift`, no `project_id`, `payload.cwd=~/Documents/repos/atlas`).
+Confirmed defect #3 exclusively: the writeback session started at server root,
+ran `git status` there, listed `projects/`, drilled into `projects/atlas/` (the
+wrong tree — that's the runtime clone, not the dev repo where the modified
+files live), read the parent audit summary, and hit `max_turns: 6` before
+issuing a single Edit. No `.superpowers/` involvement this time. The parent
+job's `atlas-momo-drift` work remains uncommitted in the dev repo (7 modified
+files, 2 untracked, including `db/migrations/0048_glossary_drawing_terms.sql`
+and the ChartDrawings feature) — a human or a properly-cwd'd session needs to
+land the CHANGELOG + commit. Server-code fixes below remain the durable answer;
+prioritize `session.py` `_resolve_cwd` honoring `payload.cwd` and raising
+`_writeback` `max_turns` to 12 in the dev repo.
+
+Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`.
 
 ### Diagnostic
 
