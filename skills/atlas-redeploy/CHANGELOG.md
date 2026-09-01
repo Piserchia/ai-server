@@ -1,5 +1,14 @@
 # atlas-redeploy CHANGELOG
 
+## 2026-09-01 — deploy 3fdb696..ce82c14 (firm vertical)
+
+- Range: 11 commits — feat(firm): full vertical scaffold (migration 0049, books/risk/rollup/liveness/cli, advisory-ceiling guard, CIO+risk-officer charters, atlas-cio+atlas-firm-rollup loop skills); feat(web): /firm consolidated risk-book page + Nav link; tradingcore.marks graduated from advisors; knowledge role-archetype handbooks
+- Migration 0049_firm.sql: applied ✅
+- Gates: dashboard pytest 448 passed ✅; pmedge pytest 45 passed ✅; tradingcore pytest 37 passed ✅; swing pytest 72 passed ✅ (tradingcore reinstalled per GOTCHAS); value pytest 46 passed ✅ (tradingcore reinstalled); firm pytest 28 passed ✅ (new gate, venv self-healed with python3.12); web build ✅ (grep '^web/' hit 3 files — Nav.tsx, firm/page.tsx, firm-queries.ts)
+- Services restarted: all three (atlas pid 90820, atlas-dash-scheduler pid 90822, atlas-pm-edge pid 90826) → all RUNNING ✅
+- Healthcheck: / → 200 ✅
+- Marker advanced: ce82c146...
+
 ## 2026-09-01 — deploy 2482986..3fdb696
 
 - Range: 5 commits — feat(web): earnings tables → hover tooltips + ChartDrawings.tsx (drawing tools on price charts); research(value): C-0001 TTM EBIT measured, NOT ADOPTED; data(momentum): retention drift point 2026-09-01 (data-only JSON); docs: CHANGELOG + knowledge monthly refresh (inert)
