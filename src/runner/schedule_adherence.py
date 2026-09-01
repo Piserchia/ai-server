@@ -137,3 +137,67 @@ def _row(sch: dict, status: str, last_slot: datetime | None,
         "last_expected": last_slot.isoformat() if last_slot else None,
         "observed_job_at": observed.isoformat() if observed else None,
     }
+
+
+# ── I/O below: thin, untested by design (pure-function-first suite) ─────────
+
+async def _collect(window_days: int = 45) -> tuple[list[dict], list[dict]]:
+    """Read schedules (+ per-schedule total job count) and windowed jobs."""
+    from sqlalchemy import func, select
+
+    from src.db import async_session
+    from src.models import Job, Schedule
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    async with async_session() as s:
+        counts = dict(
+            (await s.execute(
+                select(Job.schedule_id, func.count())
+                .where(Job.schedule_id.is_not(None))
+                .group_by(Job.schedule_id)
+            )).all()
+        )
+        scheds = [{
+            "id": str(r.id), "name": r.name,
+            "cron_expression": r.cron_expression,
+            "paused": r.paused, "created_at": r.created_at,
+            "total_jobs": int(counts.get(r.id, 0)),
+        } for r in (await s.execute(select(Schedule))).scalars()]
+        jobs = [{
+            "schedule_id": str(r.schedule_id), "status": r.status,
+            "created_at": r.created_at, "started_at": r.started_at,
+            "completed_at": r.completed_at,
+        } for r in (await s.execute(
+            select(Job)
+            .where(Job.schedule_id.is_not(None), Job.created_at >= cutoff)
+            .order_by(Job.created_at.desc())
+        )).scalars()]
+    return scheds, jobs
+
+
+def main() -> None:
+    import asyncio
+    import json
+    from pathlib import Path
+
+    now = datetime.now(timezone.utc)
+    scheds, jobs = asyncio.run(_collect())
+    rep = adherence_report(scheds, jobs, now)
+
+    out = Path("volumes/telemetry")
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "schedule_adherence.json").write_text(json.dumps({
+        "generated_at": now.isoformat(),
+        "findings": rep["findings"],
+        "schedules": rep["schedules"],
+    }, indent=2))
+
+    for f in rep["findings"]:
+        print(f"FINDING {f['kind']} {f['schedule']}: {f['detail']}")
+    n_paused = sum(1 for r in rep["schedules"] if r["status"] == "paused")
+    print(f"OK {len(scheds)} schedules ({n_paused} paused), "
+          f"{len(rep['findings'])} finding(s)")
+
+
+if __name__ == "__main__":
+    main()

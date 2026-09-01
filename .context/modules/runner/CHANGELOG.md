@@ -19,6 +19,9 @@ schedule_id join, never kind (2026-08-17 review doctrine). CLI main writes
 `scripts/schedule-monitor.sh` on launchd timer `com.assistant.schedule-monitor`
 (daily 07:15 local) — the scheduler must not watchdog itself — with the
 healthcheck-all curl-DM idiom, 12h alert rate limit, Sunday always-summary.
+Artifact shape: `{generated_at, findings[], schedules[{name, cron, paused,
+status: ok|paused|dark|never_ran|failing|stuck, last_expected,
+observed_job_at}]}`. First live run 2026-09-01: 33 schedules, 0 findings.
 
 ## 2026-08-31 — review catches on the F1 hardening (same session)
 
