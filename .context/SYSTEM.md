@@ -58,6 +58,7 @@
 | `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards | config, db, models, gateway.jobs, audit_log, runner.router, runner.plans | (entry point) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
 | `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
+| `scripts/schedule-monitor.sh` | Schedule-adherence watchdog: DARK/NEVER_RAN/STUCK/FAILURE_STREAK findings → owner DM; writes `volumes/telemetry/schedule_adherence.json` | runner.schedule_adherence, curl | — (daily 07:15 launchd timer, out-of-band) |
 | `scripts/backup.sh` | Nightly pg_dump + audit log + log snapshot | psql, tar | — (launchd timer) |
 | `scripts/seed-schedules.sh` | Insert canonical schedules into DB | psql | server-deploy skill (step 3b, every deploy) |
 | `scripts/seed-module-skills.sh` | Ensure every `.context/modules/<x>/` has `skills/{GOTCHAS,PATTERNS,DEBUG}.md` stubs | — | bootstrap.sh + test_doc_lint.py |

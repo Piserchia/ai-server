@@ -1,6 +1,6 @@
 # Runner module
 
-**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`, `src/runner/workspaces.py`, `src/runner/guards.py`, `src/runner/agents.py`, `src/runner/delivery.py`, `src/runner/plans.py`, `src/runner/llm_router.py`
+**Paths:** `src/runner/main.py`, `src/runner/session.py`, `src/runner/router.py`, `src/runner/quota.py`, `src/runner/writeback.py`, `src/runner/review.py`, `src/runner/events.py`, `src/runner/mcp_projects.py`, `src/runner/mcp_dispatch.py`, `src/runner/retention.py`, `src/runner/retrospective.py`, `src/runner/learning.py`, `src/runner/proposals.py`, `src/runner/audit_index.py`, `src/runner/reconcile.py`, `src/runner/workspaces.py`, `src/runner/guards.py`, `src/runner/agents.py`, `src/runner/delivery.py`, `src/runner/plans.py`, `src/runner/llm_router.py`, `src/runner/schedule_adherence.py`
   - `guards.make_readonly_guard_hooks(job_id)` — PreToolUse hooks for `privilege_class: read-only` sessions: Write/Edit/MultiEdit/NotebookEdit and `mcp__projects__restart_project` denied outright; Bash checked against a mutation denylist (`readonly_bash_violation`; `git fetch` + SELECT-only psql allowed); `enqueue_job` deliberately unmatched. Every tier/mode; readonly wins over the workspace profile. Denials audited (`guard_denied`, `profile="read-only"`).
 
 ## Purpose
@@ -105,6 +105,7 @@ not a requirement. Rate limits are detected typed-first (`RateLimitEvent` →
 
 ## Testing
 
+- `schedule_adherence.adherence_report(schedules, jobs, now, window_days=45, grace_seconds=10800, streak_threshold=3, stuck_hours=24)` — pure: the missing-run axis of fleet telemetry (`schedule_rollup` grades runs that exist; this notices runs that never happened). Findings DARK / NEVER_RAN / STUCK / FAILURE_STREAK + per-schedule status rows; schedule_id join, never kind. CLI `python -m src.runner.schedule_adherence` writes `volumes/telemetry/schedule_adherence.json` (consumed by atlas firm `liveness.py`) and prints `FINDING ...` lines for `scripts/schedule-monitor.sh`, which runs OUT-OF-BAND on launchd timer `com.assistant.schedule-monitor` (daily 07:15 local — the scheduler must not watchdog itself; 08-17 incident doctrine). Tested in `tests/test_schedule_adherence.py`.
 - `tests/test_guards.py` — guard predicates + hook denial contract (INV-17 enforcement surface).
 - `tests/test_agents.py` — SKILL.md → AgentDefinition compilation, effort normalization, delegability rules.
 - `tests/test_pure_functions.py` — router, flag parser, writeback classifier (Phase 2).

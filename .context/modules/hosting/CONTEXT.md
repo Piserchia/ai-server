@@ -14,6 +14,9 @@ Multi-project hosting on a single public domain via:
 
 - `register-project.sh <slug> [--dry-run]` — add/update a project's hosting config. Reads `projects/<slug>/manifest.yml`, generates Caddy snippet + launchd plist(s) + DB row.
 - `healthcheck-all.sh` — probe all projects (runs on 5-min timer via launchd)
+- `schedule-monitor.sh` — schedule-adherence watchdog (daily 07:15 timer
+  `com.assistant.schedule-monitor`; out-of-band — the scheduler must not
+  watchdog itself; new timers require one `install-launchd.sh` run on prod)
 - `setup-tunnel.sh` — one-time: create/update Cloudflare named tunnel (interactive, needs browser)
 - `setup-caddy.sh` — one-time: install Caddy + base Caddyfile + launchd service
 - `backup.sh` — nightly (04:00 via `com.assistant.backup`): pg_dump + audit-log/log snapshot → `volumes/backups/backup-<date>.tar.gz`, then off-site replication to Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`. Off-site push is guarded — absent `rclone`/`r2:` remote or a failed upload never fails the local backup. `server-upkeep` alerts if the newest remote object is > 48h old.
