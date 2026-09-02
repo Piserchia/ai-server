@@ -5,7 +5,7 @@ model: claude-sonnet-4-6
 effort: low
 permission_mode: bypassPermissions
 required_tools: [Read, Edit, Bash]
-max_turns: 6
+max_turns: 10
 tags: [internal, learning]
 ---
 
