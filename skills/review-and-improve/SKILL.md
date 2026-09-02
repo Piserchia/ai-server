@@ -39,7 +39,7 @@ the time window based on the job description (default: last 30 days).
 psql assistant -c "
   SELECT kind,
          COUNT(*) AS total,
-         COUNT(*) FILTER (WHERE status = 'done') AS succeeded,
+         COUNT(*) FILTER (WHERE status = 'completed') AS succeeded,
          COUNT(*) FILTER (WHERE status = 'failed') AS failed,
          ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'failed') / COUNT(*), 1) AS fail_pct
   FROM jobs
@@ -54,11 +54,11 @@ psql assistant -c "
 ```bash
 psql assistant -c "
   SELECT kind,
-         COUNT(rating) AS rated,
-         ROUND(AVG(rating), 2) AS avg_rating
+         COUNT(user_rating) AS rated,
+         ROUND(AVG(user_rating), 2) AS avg_rating
   FROM jobs
   WHERE created_at > NOW() - INTERVAL '30 days'
-    AND rating IS NOT NULL
+    AND user_rating IS NOT NULL
   GROUP BY kind
   ORDER BY avg_rating ASC;
 "
@@ -389,6 +389,8 @@ the system prompt), nor to skills without case files.
 - **The `enqueue_job` MCP tool** is provided by the dispatch MCP server. If
   it is not available, output your proposals as text and note that dispatch
   was not possible — the user can manually create the server-patch job.
-- **Rating column may not exist yet**: The `rating` column is planned but may
-  not be in the schema. If the ratings query fails, skip that criterion and
-  note it in your summary.
+- **Rating column is `user_rating`** (not `rating`), and **status uses `'completed'`**
+  (not `'done'`) per the `ck_jobs_status_valid` check constraint. Historical
+  copies of this skill referenced the wrong names — every SQL query above
+  now uses the actual column/values. If a snippet elsewhere still says
+  `rating` or `status = 'done'`, treat it as stale.
