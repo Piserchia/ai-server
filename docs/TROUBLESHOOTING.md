@@ -9,6 +9,110 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: hosted project crash-loops with `ImportError: TaskHandle` from anyio
+
+### Root cause (diagnosed 2026-09-03, job `34c9d162`, project `baseball-bingo`)
+
+Any hosted project whose `manifest.yml` `start_command` runs from the shared
+`ai-server-bpzo5SVu` venv (grep `ai-server-bpzo5SVu` in `projects/*/manifest.yml`)
+is vulnerable: when server-side pip work upgrades a shared dep mid-flight, the
+running project process can crash on the FIRST request that lazy-loads
+`anyio._backends._asyncio` — typically `starlette.responses.FileResponse
+.set_stat_headers` on `/`, `/favicon.ico`, or `/static/*`. Stack trace:
+
+```
+File ".../anyio/_backends/_asyncio.py", line 95, in <module>
+  from .._core._tasks import TaskHandle
+ImportError: cannot import name 'TaskHandle' from 'anyio._core._tasks'
+```
+
+`/healthz` typically stays 200 (no file backend), so self-diagnose's 20-min
+unhealthy trigger fires from the file-serving 500s while the process appears
+"up." launchd KeepAlive restart-loop follows.
+
+### Diagnostics
+
+```bash
+# 1. Is the venv currently consistent?
+/Users/alfredbot.ai.butler/.local/share/virtualenvs/ai-server-bpzo5SVu/bin/python \
+  -c "from anyio._core._tasks import TaskHandle; print('ok')"
+
+# 2. If OK, restart the project — the current process is stuck on stale imports.
+launchctl kickstart -k gui/$(id -u)/com.assistant.project.<slug>
+
+# 3. If import still fails, force-reinstall anyio in the venv:
+/Users/alfredbot.ai.butler/.local/share/virtualenvs/ai-server-bpzo5SVu/bin/pip \
+  install --force-reinstall --no-deps anyio
+```
+
+### Fix (long-term)
+
+Give each hosted service its own venv so server-side pip operations cannot
+crash-loop a hosted project. Same class of failure will bite any project on the
+shared venv (`baseball-bingo`, and any others sharing it).
+
+---
+
+## Symptom: repeated event-triggered `self-diagnose` jobs for a project that is actually healthy
+
+### Root cause (diagnosed 2026-09-03, job `53926108`, project `atlas`, 4 spurious diagnoses in ~2h)
+
+`events._check_project_health` fires when `Project.last_healthy_at` is older
+than 20 min. That timestamp is written **only** by `scripts/healthcheck-all.sh`
+(launchd `com.assistant.healthcheck-all`, `StartInterval` every 5 min).
+
+**launchd `StartInterval` does not fire while the Mac is asleep.** After a
+long sleep, `last_healthy_at` looks decades stale for a few seconds until the
+first post-wake healthcheck lands — but `events.py` polls every 60s and
+enqueues a self-diagnose immediately when it sees the stale value. With 71+
+sleep/wake cycles on this Mac, the trigger fires repeatedly for projects that
+are actually healthy 100% of the time they are reachable.
+
+Symptoms:
+
+- `healthcheck.out.log` shows big gaps between rows (e.g. 78 min from
+  `2026-09-03T14:50Z` to `2026-09-03T16:08Z`) with `checked=3 healthy=3 failed=0`
+  on both sides — never a `failed>0` line.
+- `SELECT description, created_at FROM jobs WHERE kind='self-diagnose' AND
+  description ILIKE '%<slug>%' ORDER BY created_at DESC LIMIT 10;` shows one
+  new entry roughly every 20–35 min for the same slug.
+- `curl -sf http://localhost:<port>/ ` returns 200 the whole time; `launchctl
+  list | grep <slug>` shows live PIDs.
+- `pmset -g log | grep -iE 'sleep|wake' | tail` — mac was asleep during the gaps.
+
+### Diagnostics
+
+```bash
+# 1. Is the project actually unhealthy right now, or only stale-in-DB?
+curl -sf -o /dev/null -w "%{http_code}\n" http://localhost:<port>/
+launchctl list | grep com.assistant.project.<slug>
+
+# 2. Is healthcheck-all firing on cadence?
+tail -50 volumes/logs/healthcheck.out.log   # gaps > 5 min = launchd missed a tick
+
+# 3. Cross-check: sleep/wake correlation.
+pmset -g log 2>/dev/null | grep -iE 'sleep|wake' | tail -40
+```
+
+### Fix (long-term, server-code, medium risk — needs `server-patch` skill or manual)
+
+In `src/runner/events.py:_check_project_health`, before enqueuing a
+self-diagnose, gate on healthcheck freshness. E.g. read the mtime of
+`volumes/logs/healthcheck.out.log` (or the last line's timestamp) and skip
+the trigger if the healthcheck script has not run since `NOW() -
+unhealthy_minutes`. This closes the "healthcheck-was-asleep" false positive
+without hiding real project outages (a project that stays down through 4+
+successful healthchecks still trips the trigger).
+
+Immediate mitigation: none needed on the project side — atlas is fine. The
+spurious self-diagnose jobs are noise: each one runs, confirms atlas is
+healthy, and exits. Optional cleanup: `psql assistant -c "UPDATE jobs SET
+status='cancelled' WHERE kind='self-diagnose' AND status='queued' AND
+description ILIKE '%atlas%';"` to keep the queue tidy (safe because these
+are duplicates of a diagnose that already ran).
+
+---
+
 ## Symptom: `_writeback` fails with `error_max_turns (6)` after atlas jobs
 
 ### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`; 3rd occurrence 2026-08-13, job `dc5fad7d` — parent was `atlas-momo-research`, not `atlas-redeploy`)
@@ -2168,7 +2272,23 @@ events.py fix can land through the normal patch lane. No inline action
 taken on atlas — it's healthy; the pre-existing
 `invalid input syntax for type uuid: "AAPL"` bug in
 `.next/server/app/api/atlas/{assets,candles}/route.js` is unrelated
-to healthcheck and root `/` still serves 200.)
+to healthcheck and root `/` still serves 200.); 2026-09-03 ~16:34Z
+(job `6ff47265`, atlas answered `/` 200 in 92ms on port 8791,
+`last_healthy_at` age 1m25s at diagnosis but stamp was 20m+ stale
+when the event trigger fired at 12:27:14 EDT / 16:27Z.
+`healthcheck.out.log` cadence shows large gaps throughout 09/03 UTC
+— `14:50:07Z → 16:08:31Z` = 78 min, plus earlier overnight gaps of
+60–90+ min — same macOS-sleep-cadence-slip signature. All three
+atlas launchd processes healthy with PIDs 90820 / 90822 / 90826.
+Also enqueued in the same tick: `d350390f` baseball-bingo,
+`b0fde255` content-forge (that one auto-cancelled). Fifty-ninth
+recurrence. Live-probe gate fix in `src/runner/events.py` still
+not on `origin/main` — workspace-push meta-bug still trapping
+attempted patches per the 58th-entry note. Inline
+`launchctl kickstart -k gui/$UID/com.assistant.healthcheck-all`
+executed; healthcheck-all resumed at 16:36:06Z, all three
+projects' `last_healthy_at` refreshed to ~3s old. No inline
+action on atlas itself — healthy.)
 
 **Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
 insert a live-probe gate before `enqueue_job`. Between lines 323-330,
@@ -2682,7 +2802,106 @@ blocker per the 51st entry still stands. The trigger-storm
 sibling chain has now self-documented its own predicted
 tail across three consecutive fires — sufficient evidence
 that the self-suppress guard IS the right next fix
-whenever the workspace-push meta-bug unblocks it.)
+whenever the workspace-push meta-bug unblocks it.);
+2026-09-03 ~16:27Z (job `4cbadd62`, atlas answered `/`
+HTTP 200 in 65ms on port 8791, external `atlas.chrispiserchia.com`
+HTTP 302 = expected Cloudflare Access redirect. All three
+launchd services loaded: `com.assistant.project.atlas`
+PID 90820, `-dash-scheduler` 90822, `-pm-edge` 90826.
+`com.assistant.healthcheck-all` `state = not running`,
+last exit code 0, last tick 16:08:31Z (`checked=3
+healthy=3 failed=0` for all 3 projects — shared-cadence
+fingerprint intact). DB `last_healthy_at` was 16:08:20Z
+for all three projects (~19m stale, ~4 missed 5-min
+ticks). Kickstarted inline via
+`gui/$(id -u)/com.assistant.healthcheck-all`; cadence
+resumed at 16:28:15Z (`checked=3 healthy=3 failed=0`),
+DB refreshed to 16:28:14Z (<1s) for all three projects
+so the trigger wouldn't refire within its dedup window.
+Historical intervals in healthcheck.out.log show growing
+drift throughout the day (12:21→13:23→14:50→16:08 —
+~60-90m gaps instead of 5m) consistent with macOS App
+Nap / power-throttle rather than a single sleep event.
+App-level noise in project.atlas.err.log (UUID cast
+error from `/api/atlas/candles` and FK violations on
+`stop_config_asset_fk` when deleting assets referenced
+by stop_config) is unrelated to trigger — `/` returns
+200 and healthcheck path is `/`; tracked as separate
+app-code issues, not dispatched from this diagnose.
+Eighty-fourth recurrence — canonical throttled-cadence-
+slip. Live-probe gate and self-suppress guard STILL
+un-landed; not re-dispatching a server-patch —
+workspace-push meta-bug blocker per the 51st entry
+still stands.); 2026-09-03 ~16:28Z (job `b24e1845`,
+baseball-bingo — direct twin of the atlas fire in the
+84th entry immediately above. baseball-bingo answered
+`/healthz` HTTP 200 and `/` HTTP 200 on port 8790 BEFORE
+any action, project PID 1469 healthy with 8-day uptime.
+Shared healthcheck-all cadence slip 16:08:31Z→16:28:15Z
+(~20m past the 5m tick, four missed ticks) drove the
+DB `last_healthy_at`=16:08:20Z (~19m stale at trigger
+time) that fired the event — same shared fingerprint as
+`4cbadd62`. By the time this session ran its verification
+curls, the concurrent atlas diagnose had already
+kickstarted `com.assistant.healthcheck-all` and cadence
+had resumed at 16:28:15Z, refreshing all three projects'
+DB timestamps to 16:28:14Z (<1s). No further healthcheck
+kickstart needed.
+
+**Diagnose author error worth logging**: this session's
+first move was to read `read_project_logs` output, saw
+the `ImportError: cannot import name 'TaskHandle' from
+anyio._core._tasks` traceback, and treated it as the
+active fault — restarting baseball-bingo via
+`restart_project` (~3s downtime) BEFORE reading the
+false-positive section above. The ImportError trace is
+HISTORICAL (from the pre-8-day-old uvicorn PID that was
+still holding stale in-memory `anyio._core._tasks`
+predating the July 30 anyio 4.14.2 upgrade); the running
+process itself was serving 200s cleanly on `/healthz`
+and `/`. This exactly matches the "anyio ImportError is
+NOT the source" pattern documented across recurrences
+40–83. Post-restart the new PID 50521 continues to serve
+200s — the restart neither helped nor durably harmed,
+but it caused the only actual downtime of the incident,
+which is precisely what the Fix section of this symptom
+warns against. Future self-diagnose runs on
+baseball-bingo: **read this section BEFORE reacting to
+the log tail's anyio traceback.**
+
+Eighty-fifth recurrence — canonical
+throttled-cadence-slip twin-fire; the shared-cadence
+signature makes atlas + baseball-bingo diagnose pings
+mechanically simultaneous. Live-probe gate and
+self-suppress guard STILL un-landed; not re-dispatching
+a server-patch — workspace-push meta-bug blocker per
+the 51st entry still stands. The self-suppress guard
+(skip enqueue if a running/queued self-diagnose for the
+same slug OR its shared-cadence sibling exists) would
+have collapsed 84+85 into a single fire and prevented
+the restart-mistake in this entry.);
+2026-09-03 ~16:39Z (job `4b9b4c67`, baseball-bingo
+answered `/healthz` 200 across 5 back-to-back probes on
+port 8790 and `/` 200; project PID 50521 up 12m22s (the
+same post-restart PID from the 84th recurrence);
+`healthcheck.out.log` shows severe overnight cadence
+throttling — sample gaps 09-02T23:36→23:57 (21m),
+09-03T01:23→03:00 (97m), 09-03T14:50→16:08 (78m),
+finally 16:08:31Z→16:28:15Z (20m) matching the trigger
+fire; cadence resumed cleanly at 16:33:26Z and 16:36:06Z
+which refreshed baseball-bingo `last_healthy_at` to only
+3m old by diagnosis time. The recent
+`project.baseball-bingo.err.log` tail shows anyio
+`TaskHandle` ImportError bursts but those are all from
+restart PIDs 3619 / 71686 / 73320 / 1523 during the
+anyio partial-import episode; PID 50521 (current) is
+not in the traceback. `python -c "from
+anyio._backends._asyncio import TaskHandle"` succeeds
+now. No action taken — did NOT restart, did NOT run pip
+(per recurrence 84's warning that restart is the only
+real downtime cause). Eighty-sixth recurrence — same
+throttled-cadence signature; live-probe gate and
+self-suppress guard STILL un-landed.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 

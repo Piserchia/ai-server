@@ -1,5 +1,85 @@
 # Changelog: hosting
 
+## 2026-09-03 — healthcheck-all cadence-slip false alarm (atlas 84th recurrence)
+
+**Agent task**: self-diagnose job `4cbadd62` — atlas flagged unhealthy 20+ min.
+
+**Runtime action**: none to atlas (project was HTTP 200 on port 8791 throughout,
+external 302 = CF Access as expected, all 3 launchd services healthy).
+Kickstarted `com.assistant.healthcheck-all` inline via
+`launchctl kickstart -k gui/$UID/com.assistant.healthcheck-all`; cadence
+resumed and all 3 projects' `last_healthy_at` refreshed to <1s.
+
+**Files changed**:
+- `docs/TROUBLESHOOTING.md` — appended 84th recurrence entry to the
+  shared-cadence-slip running log (throttled to ~60-90m gaps throughout
+  the day rather than a single sleep event; noted app-level UUID cast +
+  FK violation noise in project.atlas.err.log is unrelated).
+
+**Why**: canonical macOS launchd `StartInterval` throttling; the live-probe
+gate and self-suppress guard fixes remain blocked by the workspace-push
+meta-bug per the 51st entry, so still not re-dispatching a server-patch.
+
+## 2026-09-01 — atlas-weekly-reports session_timeout_seconds → 3600
+
+**Agent task**: review-and-improve — raise session_timeout_seconds to 3600
+for the atlas-report-sweep schedule row so the weekly Sunday sweep stops
+hitting the 1800s default.
+
+**Files changed**:
+- `scripts/seed-schedules.sh` — added payload
+  `'{"session_timeout_seconds":3600}'` to the `atlas-weekly-reports` upsert
+  (job_kind `atlas-report-sweep`), expanded the section comment to note the
+  override and why (report-family, no `project_slug`, well below the 5400
+  cap).
+
+**Why**: the Sunday sweep does a full `atlas-dash refresh` + enumerate +
+fan-out (or, when the dispatch MCP tool is unavailable, sequential
+per-target reports). Under the 1800s default it was hitting the ceiling
+mid-sweep; 3600s matches the cadence other governed atlas weekly rows
+already carry (momo/trader/advisors/swing/value-research + value-theses).
+
+**Side effects**: the seed script is idempotent — on the next
+`server-deploy` step 3b, the `ON CONFLICT DO UPDATE` branch will overwrite
+`job_payload` for the existing `atlas-weekly-reports` row with the new
+payload (declared payloads win per the COALESCE rule in `upsert`). No cron
+change; no other schedules touched. Cap remains at 5400 per
+`SESSION_TIMEOUT_CAP_SECONDS` in `runner/main.py` — the TROUBLESHOOTING.md
+guidance against reflexively bumping the timeout is for fleet-workflow
+skills that should be split (e.g. momo H010); atlas-report-sweep is
+already a fan-out orchestrator, so this bump gives it room to enumerate,
+not to do more work inline.
+
+**Gotchas discovered**: none — this uses the exact same
+`session_timeout_seconds` payload key already carried by six other atlas
+schedule rows; `resolve_session_timeout` in `runner/main.py` reads it.
+
+## 2026-08-31 — F3/F5/F6/F7 topology fixes (EVALUATION_2026-08-30)
+
+- `scripts/sync-learnings.sh`: allowlist narrowed — `skills/*/*.md` →
+  `skills/*/{GOTCHAS,CHANGELOG,DEBUG,PATTERNS}.md`. SKILL.md is the
+  runner-read machine contract; contract edits now only travel dev→prod via
+  server-patch/deploy, never prod→dev via auto-publish.
+- `Pipfile.lock` is now COMMITTED (was gitignored + diverged between
+  checkouts — same class as the mcp 2.0.0 outage). server-deploy runs
+  `pipenv sync --dev` against the tracked lock and no longer re-locks on
+  prod.
+- `scripts/seed-schedules.sh`: absorbed the two DB-only rows
+  `atlas-daily-brief` (0 12 * * *) and `atlas-weekly-reports`
+  (0 18 * * 0, kind atlas-report-sweep) so a wipe+seed keeps the
+  owner-visible report cadence.
+- `scripts/install-launchd.sh`: header now documents what it does NOT
+  install (cloudflared system LaunchDaemon, brew postgres/redis) and the
+  deliberate KeepAlive semantics (clean exit stays down).
+- `.env.example`: `SERVER_ROOT` no longer hardcodes `/Users/chris` (config
+  default already resolves `$HOME`); concurrency comment notes live=2 vs
+  code default 4.
+- Dev-tree quarantines (renames, per the no-deletion rule):
+  `projects/atlas` → `projects/atlas.stale-clone-20260731.quarantined`
+  (month-stale third clone), `projects/market-tracker` →
+  `projects/market-tracker.retired.quarantined`. Each carries a
+  QUARANTINED.md; owner may delete.
+
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
 ## 2026-08-18 — healthcheck-all cadence-slip false positive (baseball-bingo, 84th recurrence)
@@ -357,3 +437,12 @@ soft dependency on `rclone` (brew) for the off-site leg only.
 - Multi-service projects (market-tracker has 3 Flask servers) get separate launchd plists per sub-service and Caddy handle blocks for path-based routing. This keeps each service independently supervised and restartable.
 - Manifest schema includes `mission`, `web_strategy`, and `platforms` fields so the AI server can distinguish "this IS a web app" from "this has a web shim for a native app."
 - Healthchecks read from manifest files (source of truth) rather than the DB.
+
+## 2026-08-30 — swing trading watchdog in healthcheck-all (R18)
+
+`scripts/healthcheck-all.sh` gains `check_swing_freshness`: on market
+weekdays after 16:00 UTC, if `swing.runs` (atlas DB, read via the runtime
+clone's .env) shows no run inside 26h (74h Mondays), DM the owner — rate-
+limited 1/12h, silent-safe pre-deploy. Out-of-band by design (the scheduler
+cannot watchdog itself; spec 2026-08-27 v3 §6.2 R18). Session: trading-bots
+implementation.
