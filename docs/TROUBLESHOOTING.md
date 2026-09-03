@@ -3185,6 +3185,35 @@ the skill's own gotcha names. Two independent knobs:
 
 Both are medium-risk skill/orchestration changes; neither is a `server-patch`.
 
+### Update (2026-09-03, job `f954aba2`)
+
+Third instance of this exact ceiling-hit, this time on cycle 0008 (H010,
+same probe as `44d1bc6b`). **Skill-level mitigation is now landed and
+demonstrated working.** Timeline diff vs. `44d1bc6b`:
+
+- Prior run recorded *nothing* at row 264/315 when the ceiling fired.
+- `f954aba2` re-forked the classifier with a token-bucket rate limiter
+  (~2.3 s/row vs. ~13 s/row), 8-row prefetch preserving in-order writes,
+  `--deadline-seconds`, and six resume rules that hard-refuse on cursor
+  regression. Frame stopped cleanly at row 278/315 with committed
+  `state.json`, cycle report (`cycle-0008.json`, status `partial`), full
+  test suite green (515 passed), CHANGELOG entry, and
+  `docs/SESSION_HANDOFF.md` describing the resume. Both close-out commits
+  reached `origin/master` (`aed600c`, `db89988`) BEFORE
+  `session_timeout` fired at 17:48:31.
+- The E-0032 pre-registration corrective also landed: card sealed in its
+  own commit `f8317d7` strictly before instrument commit `b13c2d8`.
+
+Diagnostic classification therefore: the `Session timed out` lifecycle
+marker is not, in this instance, a work-loss failure. It is the runner's
+60-min ceiling firing on a session that had already committed and pushed
+its close-out. Recovery: none required beyond dispatching a resume run of
+`atlas-momo-research` (or letting the weekly schedule pick it up) — the
+resume path in `docs/SESSION_HANDOFF.md` is authoritative. Do NOT restart
+from cursor 0; resume rule 3 will refuse and write nothing. The durable
+split-into-child-jobs Prevention above still stands as the right long-term
+fix; the parallel-fetch speed knob is now half-shipped inside H010.
+
 
 
 When you hit a new failure, append a section here in this shape:
