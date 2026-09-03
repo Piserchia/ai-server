@@ -5,7 +5,7 @@ model: claude-sonnet-4-6
 effort: low
 permission_mode: bypassPermissions
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]
-max_turns: 10
+max_turns: 20
 tags: [internal, write-back]
 ---
 

@@ -2,6 +2,24 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-03 — session._build_options: log effective ClaudeAgentOptions (INV-1 observability)
+
+**Files changed**: `src/runner/session.py`.
+
+Added a single `logger.info` at the tail of `_build_options` recording the
+resolved job id, skill, model, effort, `max_turns`, and `permission_mode`.
+The existing `job_started` audit event carries model / effort / isolation
+but omits `max_turns` and `permission_mode`, so an SDK-side termination
+like `error_max_turns: Reached maximum number of turns (N)` used to leave
+no trace of what the SDK was actually configured with. Root case: on
+2026-09-01, `_writeback` job `f6c9e375-376f-423f-9566-40a686131f60`
+failed with N=6 while the *current* `SKILL.md` says 10 — the 6 → 10 bump
+(commit `12a7851`) landed on 2026-09-02, so at run time SKILL.md really
+was 6. Diagnosing that required git-archaeology on the SKILL.md history
+because nothing in the audit log said "SDK max_turns=6". Pure additive
+observability — the returned `ClaudeAgentOptions` and every existing test
+expectation are unchanged.
+
 ## 2026-09-01 — schedule-adherence monitor: the missing-run axis (firm WS1)
 
 **Files changed**: `src/runner/schedule_adherence.py` (new),

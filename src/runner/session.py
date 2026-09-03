@@ -795,6 +795,24 @@ def _build_options(
             tools = [*tools, *missing]
             kwargs["allowed_tools"] = tools
 
+    # Effective-options one-liner (2026-09-03): the `job_started` audit event
+    # records model/effort/isolation but NOT max_turns or permission_mode, so a
+    # failure like `error_max_turns: Reached maximum number of turns (N)` gives
+    # no trace of what the SDK was actually configured with. This surfaces the
+    # four knobs that most often explain SDK-side terminations for a session
+    # (e.g. _writeback job f6c9e375 on 2026-09-01 hit max_turns=6 while
+    # SKILL.md declared 10 — the load-time state was invisible in the log).
+    logger.info(
+        "session options resolved: job=%s skill=%s model=%s effort=%s "
+        "max_turns=%s permission_mode=%s",
+        str(job.id)[:8],
+        (skill_cfg.name if skill_cfg else "<generic>"),
+        kwargs.get("model"),
+        kwargs.get("effort", "medium"),
+        kwargs.get("max_turns"),
+        kwargs.get("permission_mode"),
+    )
+
     return ClaudeAgentOptions(**kwargs)
 
 
