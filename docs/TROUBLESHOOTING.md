@@ -13,6 +13,16 @@ failures in the wild — it's a living document.
 
 ### Root cause (diagnosed 2026-09-03, job `34c9d162`, project `baseball-bingo`)
 
+> **Recurrence 2026-09-03, job `1ac2ee75`, project `baseball-bingo`**: same
+> symptom fired again ~4h later. Diagnostic step 1 passed (TaskHandle import OK
+> in the shared venv, anyio 4.14.2), process PID 50525 had been stable ~13 min
+> after the launchd KeepAlive restart cycle, both `curl
+> http://127.0.0.1:8790/healthz` and `https://bingo.chrispiserchia.com/healthz`
+> returned 200. No action taken — service had already self-recovered by the
+> time the 20-min trigger fired. Reinforces the long-term fix: separate venv per
+> hosted service.
+
+
 Any hosted project whose `manifest.yml` `start_command` runs from the shared
 `ai-server-bpzo5SVu` venv (grep `ai-server-bpzo5SVu` in `projects/*/manifest.yml`)
 is vulnerable: when server-side pip work upgrades a shared dep mid-flight, the
@@ -56,6 +66,14 @@ shared venv (`baseball-bingo`, and any others sharing it).
 ## Symptom: repeated event-triggered `self-diagnose` jobs for a project that is actually healthy
 
 ### Root cause (diagnosed 2026-09-03, job `53926108`, project `atlas`, 4 spurious diagnoses in ~2h)
+
+> **Recurrence 2026-09-03, job `fb99cdcc`, project `baseball-bingo`, 12 spurious diagnoses over ~8h**: same
+> pattern. `last_healthy_at` was 2 min old at diagnosis time; local `/healthz`, local `/`, and public
+> `https://bingo.chrispiserchia.com/healthz` all returned 200; PID 50521 stable under
+> `com.assistant.project.baseball-bingo`. `healthcheck.out.log` gaps of 21–86 min (23:36→23:57, 23:57→01:23,
+> 01:23→03:00, 03:00→04:09, 04:09→05:47, 05:47→07:00, 07:00→08:24, 08:24→09:46, 09:46→11:14, 11:14→12:21,
+> 12:21→13:23, 13:23→14:50, 14:50→16:08) correlate with 71 sleep/wake cycles. All 12 prior queued
+> self-diagnose jobs were auto-cancelled by dedup. No action taken — service healthy throughout.
 
 `events._check_project_health` fires when `Project.last_healthy_at` is older
 than 20 min. That timestamp is written **only** by `scripts/healthcheck-all.sh`
@@ -2902,6 +2920,36 @@ now. No action taken — did NOT restart, did NOT run pip
 real downtime cause). Eighty-sixth recurrence — same
 throttled-cadence signature; live-probe gate and
 self-suppress guard STILL un-landed.)
+
+2026-09-03 ~16:42Z (job `5c1c8891`, baseball-bingo
+answered `/healthz` 200 in 6.4ms on port 8790, project
+PID 50521 healthy (same post-restart PID as 84th/86th
+recurrences). DB `last_healthy_at` was already fresh at
+diagnosis (1m46s old, stamp 16:41:07Z from the 16:41:08Z
+tick that landed AFTER this event trigger fired) — the
+slip window had already closed by pickup time.
+`healthcheck.out.log` shows the same overnight/afternoon
+throttling as recurrence 86 with fresh gaps
+16:08:31Z→16:28:15Z (20m), then a burst of catch-up
+ticks 16:28→16:33→16:36→16:41 — the trigger fired on the
+16:08→16:28 gap. **Also found 15 accumulated queued
+`self-diagnose` jobs for baseball-bingo backed up from
+02:42Z through 11:51Z, all cancelled inline** via the
+same `UPDATE jobs SET status='cancelled' WHERE
+kind='self-diagnose' AND status='queued' AND description
+ILIKE '%baseball-bingo%'` recipe from the 2026-09-03
+atlas root-cause entry above — those 15 duplicates would
+have run one after the other through the day if the
+runner picked them up, each doing the same false-positive
+work. `pmset -g log` confirms 71+ sleep/wake cycles on
+this Mac (matches the SlashCommand root cause). No action
+taken on the project itself. Eighty-seventh recurrence
+— same throttled-cadence signature; live-probe gate and
+self-suppress guard STILL un-landed after 87 recurrences.
+The queue backlog is a new observation this cycle:
+without a self-suppress guard the diagnose kind
+accumulates faster than the runner drains it during a
+long sleep window.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
