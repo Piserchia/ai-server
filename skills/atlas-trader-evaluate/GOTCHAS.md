@@ -32,3 +32,40 @@ rewrite old entries.
   `schedules.created_at`, not the raw calendar week. Sessions predating the
   schedule are not misses; state both numbers so the grade is honest either
   way.
+- 2026-09-07: derive coverage from an INDEPENDENT NYSE session calendar, not
+  from the rows that exist. A missed run leaves no row anywhere, so absence
+  is invisible to every query that starts from `trader.runs`. T-0010 found a
+  lost session (2026-09-04) only by listing the week's sessions first and
+  diffing. Cheap confirmation that a date was a real session (read-only, no
+  order path): `GET data.alpaca.markets/v2/stocks/bars?symbols=SPY&
+  timeframe=1Day&adjustment=split` with the repo's `.env` creds — if a
+  completed daily bar exists, the market was open.
+- 2026-09-07: an IDENTICAL `schedules.last_run_at` microsecond across
+  unrelated schedules is an OUTAGE signature, not a cadence — it means the
+  runner restarted and drained every overdue schedule at once. Confirm the
+  host with `last reboot` (a boot with NO preceding `shutdown time` = unclean
+  down) and by `ls -la volumes/logs/` mtimes, which cluster at the last write
+  of the old boot and the first of the new. `scripts/schedule-monitor.sh` is
+  a launchd timer on the same host and detects NONE of this.
+- 2026-09-07: a catch-up run is NOT a recovered run. `trader/executor.py` is
+  today-only — it has no gap detection and no backfill — so the paper job
+  firing late runs for *today* and leaves the missed session permanently
+  absent. Never read "the schedule fired" as "the session was covered".
+- 2026-09-07: the frozen benchmark pair is recorded on the WRONG convention.
+  `trader/alpaca.py:148` requests `"adjustment": "split"`, so
+  `equity_curve.spy_close/bil_close` are PRICE series, while CLAUDE.md rule 7
+  demands SPY TOTAL RETURN (and the T-0003 harness used dividend-adjusted
+  bars — different series). BIL and SGOV go ex MONTHLY on the first business
+  day; SPY quarterly (Mar/Jun/Sep/Dec). Check every window for an ex-date
+  before quoting the pair: a ~29bp one-day drop in BIL *and* SGOV together is
+  a distribution, not a rate move. The error is one-directional and always
+  flatters the book. Correct by substituting the mean of the neighbouring
+  non-ex-date daily returns and SAY you did.
+- 2026-09-07: `equity_curve.*_close` are 13:31 EDT PARTIAL-bar marks, not
+  closes (executor runs 17:30 UTC, 2.5h before the 16:00 close; T-0008 A3).
+  Book and benchmarks share the instant so relative returns are valid — but
+  never call them closes and never expect them to tie to published figures.
+- 2026-09-07: use the LIVE convention's backtest maxDD for PROTOCOL §4
+  demotion thresholds: `v1_dailygate` **0.188521** (T-0008), NOT the
+  `v1_monthend` control 0.307268 that T-0005 used. The executor runs the
+  daily gate, so the correct thresholds are ~39% tighter.

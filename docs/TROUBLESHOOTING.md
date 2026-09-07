@@ -74,6 +74,20 @@ shared venv (`baseball-bingo`, and any others sharing it).
 > 01:23→03:00, 03:00→04:09, 04:09→05:47, 05:47→07:00, 07:00→08:24, 08:24→09:46, 09:46→11:14, 11:14→12:21,
 > 12:21→13:23, 13:23→14:50, 14:50→16:08) correlate with 71 sleep/wake cycles. All 12 prior queued
 > self-diagnose jobs were auto-cancelled by dedup. No action taken — service healthy throughout.
+>
+> **Recurrence 2026-09-07, job `8c2be7b9`, project `baseball-bingo`**: mac slept
+> from `2026-09-04T03:36:45Z` to `2026-09-07T18:31:54Z` (~3.5 days — single
+> gap in `healthcheck.out.log`, no rows in between). On wake, `events.py`
+> saw a ~3.5-day-old `last_healthy_at` and enqueued self-diagnose within
+> ~5 min; the first three post-wake healthchecks (18:31, 18:36, 18:41) all
+> returned `checked=3 healthy=3 failed=0`. At diagnosis: PID 4086 uptime
+> 18 min, `curl http://127.0.0.1:8790/healthz` and `curl
+> https://bingo.chrispiserchia.com/healthz` both 200, `anyio._core._tasks
+> .TaskHandle` imports cleanly. The project's stderr log did show the
+> historical anyio crash-loop from the 2026-09-03 incident, which is a
+> red herring — `project.<slug>.err.log` is not truncated on restart, so
+> stale tracebacks look current until you check PIDs. Reinforces: the
+> long-term fix is server-side (events.py freshness gate), not project-side.
 
 `events._check_project_health` fires when `Project.last_healthy_at` is older
 than 20 min. That timestamp is written **only** by `scripts/healthcheck-all.sh`
