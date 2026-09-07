@@ -155,3 +155,67 @@ check the live schema. This run found the combination that a hash diff alone und
 schema at migration 0046 while live *code* is three commits behind, i.e. schema leading code with
 new schedules about to fire against it. `/portfolio` 200 + `/trading` 404 is the evidence line that
 makes "pushed but undeployed" undeniable in a report.
+
+## Shell cwd resets between Bash calls — source `.env` by ABSOLUTE path (2026-09-07)
+
+`cd ~/Documents/repos/atlas && ... ; . .env` fails with `(eval):.:1: no such file or directory:
+.env` because the working directory does not persist across tool calls the way you expect. The
+failure is **silent in the thing that matters**: with no `DATABASE_URL`, the glossary scanner falls
+back to a file-based `defined` set and reported **19 false undefined terms** this run before the
+mistake was caught.
+
+Always: `set -a; . "$HOME/Documents/repos/atlas/.env"; set +a` (absolute path), and chain with `&&`
+inside one invocation. Sanity-check the scanner's own header line — it prints
+`defined terms: N (source: db)`. If it does not say `source: db`, the result is garbage.
+
+## `DASH_TEST_DATABASE_URL=$DATABASE_URL` is not how you run the suite (2026-09-07)
+
+Pointing the test env var at the live DB yields `224 passed, 224 errors` with `RuntimeError: ref...`.
+That is **conftest's live-DB guard working correctly** — `_ensure_test_db()` refuses any database
+whose name does not end in `_test`. Do not "fix" it and do not report it as a red suite.
+
+`unset DASH_TEST_DATABASE_URL CREW_TEST_DATABASE_URL` and let `resolve_test_db_url()` auto-derive
+the sibling `<db>_test` from `DATABASE_URL`. Correct invocation this run: `1 failed, 447 passed`.
+
+## Count coverage-matrix rows with a parser, never a grep (2026-09-07)
+
+Published per-sector denominators had been wrong for at least one run: a naive `grep -c LIVE` counts
+`DEFERRED — paid-only` **prose bullets**, section headers and note text as table rows, which is why
+08-31 reported crypto 12/21 and stocks 26/32 against true values of 8/16 and 25/28.
+
+Split each line on `|`, take the *status* cell, and match it exactly-equal-to or prefixed-by a status
+token. Cross-check with a second stricter parser and hand-verify one sector before publishing. If the
+numbers move a lot versus last run, suspect your predecessor's arithmetic before suspecting the repo.
+
+## A gap at `specced` is not necessarily scout-approved (2026-09-07)
+
+The builder trusts `specced` as "researched, probed, ready". But `atlas-refresh-knowledge`'s
+matrix-sync can **insert gaps directly at `specced`**, skipping `filed`/`triaged` entirely — the
+09-01 run created five that way, one of which (`16785548`, crypto exchange flows) resurrected an
+owner-settled paid-only rejection whose matrix row has read `DEFERRED` since 08-24.
+
+When sweeping `specced`, check provenance: a spec block must exist in the sector's `pipelines.md`.
+No spec block = it is not really specced, and if the matrix row says `DEFERRED` you are looking at a
+policy inversion, not a work item. Route it as a `[pipeline]` fix, not as buildable work.
+
+## Ordered triage rulesets need specific-before-generic — and a per-cluster count check (2026-09-07)
+
+In the 127-gap sweep, `3ab53b90` ("Insider activity not piped — ... would sharpen the OBV
+distribution read") was captured by the `obv-subtrend` rule because a gap's *title* often mentions
+the indicator it would improve, not the data it needs. Rules must be ordered by specificity of the
+**subject**, not by how the text reads: `insider` above `obv-subtrend`, etc.
+
+Never ship on `assert not unrouted` alone — that only proves everything matched *something*. Print
+the per-cluster counts in the dry run and eyeball them; a cluster that swelled unexpectedly is a
+mis-route. Leave an inline comment on any rule whose position is load-bearing, or the next run will
+"tidy" it back.
+
+## Grade the CONTENTS of a pending deploy range, not its size (2026-09-07)
+
+Runtime `ce82c14` vs `origin/master` `6a3425d` looked alarming — 38 files, 65,666 insertions — and
+last run's headline finding was exactly this shape. But `git diff --stat` on the range showed it was
+**entirely research artifacts**: twelve multi-MB CSVs and dossier prose, no `src/` change and no
+migration. That is deploy *lag*, which costs nothing, not deploy *drift*, which is a finding.
+
+Read the range before scoring it. The line that separates the two is: does it contain a migration or
+app code? If not, say so explicitly in the scorecard so the next run does not re-raise it.

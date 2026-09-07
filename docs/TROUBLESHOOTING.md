@@ -2965,6 +2965,29 @@ without a self-suppress guard the diagnose kind
 accumulates faster than the runner drains it during a
 long sleep window.)
 
+Eighty-eighth recurrence: 2026-09-07 ~18:41Z (job
+`430f671b`, project `content-forge`; parent
+`2a46c9c7` failed with `error_max_turns: 30` while
+gathering evidence and escalated → child `430f671b`
+took the finding cleanly in one pass). content-forge
+answered `/health` 200 in 1.4ms on port 8792, PID
+4081 up since 14:27:10 EDT, DB `last_healthy_at` was
+1.5 min stale (fresh — 16:02:16 EDT, from the 16:02
+tick that landed AFTER the trigger fired). All three
+service projects (atlas, baseball-bingo,
+content-forge) shared identical `last_healthy_at`
+timestamps within milliseconds — the definitive
+shared-cadence fingerprint. No action taken on the
+project itself. New observation this cycle: the
+prior self-diagnose blew its 30-turn budget doing
+first-principles archaeology instead of pattern-
+matching to this section — argues for a compact
+"known false-alarm fast-exit" checklist at the top
+of the self-diagnose SKILL so the LLM can short-
+circuit on the shared-timestamp fingerprint before
+tool-calling deep. Live-probe gate + self-suppress
+guard STILL un-landed after 88 recurrences.)
+
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
 ### Diagnostic
