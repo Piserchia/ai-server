@@ -9,6 +9,50 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: `atlas-value-monitor` fails with `error_max_turns: Reached maximum number of turns (20)`
+
+### Root cause (diagnosed 2026-09-08, job `c2a04f63`, self-diagnose child `7edb7e19`)
+
+`skills/atlas-value-monitor/SKILL.md` step 1 says "bootstrap value venv (as
+in atlas-value-theses, incl. sitecustomize script)" — a cross-skill reference
+the session cannot follow. `skills/` lives outside the workspace clone (INV-16),
+and while Read against the ai-server skills path is allowed, workspace-tier
+sessions cannot `ls` under it (INV-17 guard denial fires for the protected
+`ai-server` root even on read-only `ls`). Sessions are pushed into an
+exploratory hunt (workspace ls → value/ ls → tradingcore internals → tradier.py
+→ weekly.py → config → grep for "sitecustomize") before they can bootstrap.
+The five prior successful runs (`056000f8`, `15e59ec4`, `4af41f91`,
+`9ce32026`, `d2328352`) each finished with ~25 tool uses — essentially zero
+slack under `max_turns: 20`. `c2a04f63` took slightly worse detours (looked
+for `GOTCHAS.md` at the WORKSPACE path instead of the ai-server skills path,
+then reproduced the sitecustomize hunt) and burned all 20 turns without ever
+running pytest or `value.monitor`.
+
+Same pattern family as `_writeback` (§ error_max_turns 6) and
+`_learning_apply` (§ error_max_turns 6 above): tight `max_turns` + prompt
+that forces exploratory work = intermittent max_turns failure. The escalation
+hook spawns a `self-diagnose` child (level 2) automatically.
+
+### Fix (dispatched to server-patch `3f38044a`, 2026-09-08)
+
+Two-part edit of `skills/atlas-value-monitor/SKILL.md`:
+
+1. Replace step 1's cross-skill reference with the same inline bootstrap
+   commands atlas-value-theses uses at lines 26-28
+   (`python3.12 -m venv .venv && ... -e ../tradingcore` then
+   `bash ../scripts/install-venv-sitecustomize.sh`). Durable answer — no
+   session should need to look outside its own SKILL.md for its bootstrap.
+2. Frontmatter `max_turns: 20` → `max_turns: 30` — headroom while sessions
+   still explore GOTCHAS legitimately.
+
+### Recurrence guard
+
+If max_turns fails again after the fix lands, raise to 40 and open an
+owner-decision proposal to split bootstrap+run into two skills. Recurrence
+count so far: 1 (`c2a04f63`).
+
+---
+
 ## Symptom: hosted project crash-loops with `ImportError: TaskHandle` from anyio
 
 ### Root cause (diagnosed 2026-09-03, job `34c9d162`, project `baseball-bingo`)
