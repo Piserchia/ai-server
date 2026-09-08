@@ -5,7 +5,7 @@ model: claude-sonnet-4-6
 effort: medium
 permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
-max_turns: 20
+max_turns: 30
 isolation: workspace
 role: worker
 division: atlas
@@ -21,8 +21,9 @@ this vertical (value/CLAUDE.md rule 1); no repo writes, no fixes.
 
 ## Procedure
 
-1. Workspace clone, rebase, bootstrap value venv (as in atlas-value-theses,
-   incl. sitecustomize script).
+1. Workspace clone, rebase, bootstrap:
+   `cd value && python3.12 -m venv .venv && .venv/bin/pip install -q -e '.[dev]' -e ../tradingcore`
+   then `bash ../scripts/install-venv-sitecustomize.sh`.
 2. `cd value && .venv/bin/python -m pytest -q -x` — red → stop, report.
 3. `.venv/bin/python -m value.monitor` and read the JSON.
 
