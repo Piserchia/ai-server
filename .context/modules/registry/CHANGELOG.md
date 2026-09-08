@@ -2,6 +2,36 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-08 — atlas-value-monitor: inline bootstrap + max_turns 20→30
+
+**Files created**: none
+**Files changed**:
+- `skills/atlas-value-monitor/SKILL.md` — replaced step 1 body ("as in
+  atlas-value-theses, incl. sitecustomize script") with the actual bootstrap
+  commands inline (matches atlas-value-theses lines 26–28); raised
+  `max_turns` from 20 → 30.
+
+**Why**: audit `c2a04f63` (2026-09-08) burned all 20 turns hunting for the
+bootstrap details across the workspace (tradingcore, tradier.py, weekly.py,
+config, grep for "sitecustomize") and hit `error_max_turns` mid-hunt without
+ever running pytest or `value.monitor`. Cross-skill reference is unfollowable
+— `skills/` live outside the workspace clone, so the session literally can't
+Read the file being cited. Inlining the commands removes the exploratory
+work; the max_turns bump adds ~10 turns of headroom on top so the historically
+tight-but-passing trajectory (bootstrap ~5 tool calls + pytest + monitor + env
+poking = ~25 turns) has slack against the same recurrence.
+
+**Side effects**: none. Skill body is self-contained now; the frontmatter
+change is a ceiling raise (no new authority, no new tools). No runtime code
+touched — the registry just re-parses the file on skill reload.
+
+**Gotchas discovered**: same pattern as `_writeback` / `_learning_apply`
+(TROUBLESHOOTING.md) — tight `max_turns` + a prompt that forces exploratory
+work = intermittent `error_max_turns`. The fix is the prompt; the budget
+bump is defense-in-depth. Cross-skill references ("do X like skill Y") are
+particularly toxic: skills live outside the workspace clone so the session
+can't actually resolve the reference.
+
 ## 2026-08-31 — atlas-report + ops-manager: pre-load `.context/SYSTEM.md` (review-and-improve proposals)
 
 **Agent task**: implement two `review-and-improve` proposals adding
