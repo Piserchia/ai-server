@@ -9,6 +9,71 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: `atlas-value-monitor` fails with `error_max_turns (30)` on `provisioning_gap` monitor output
+
+### Root cause (diagnosed 2026-09-09, job `b1f8cf18`, self-diagnose child `31d5784f`)
+
+Bootstrap + pytest + `python -m value.monitor` all succeeded (turns 1–10);
+the monitor returned `{"status": "provisioning_gap", "note":
+"TRADIER_SANDBOX_TOKEN absent from environment and repo-root .env.
+Provisioning is an OWNER ACTION..."}`. `skills/atlas-value-monitor/SKILL.md`
+Report section defines exactly three branches: `alerts` empty → one-line
+quiet report; alerts present → per-alert lines; crash → fail with traceback.
+It has NO branch for the monitor's third documented status
+(`provisioning_gap`). Session interpreted the gap as an anomaly, spent
+turns 11–30 investigating (read `monitor.py`, `env.py`, `tradier.py`, tried
+to `cat` production `.env` — blocked by INV-16/17 sandbox — then began
+authoring a CHANGELOG entry) and hit `max_turns: 30`.
+
+Cross-check: production `projects/atlas/.env` also lacks `TRADIER_*` keys.
+Atlas CHANGELOG's 2026-09-08 `DR-0002` item 3 is the durable owner
+decision — do **not** provision `TRADIER_SANDBOX_TOKEN` alone while the
+earnings feed is dark, or the first booked card carries a fabricated
+`earnings_veto` provenance string. So `provisioning_gap` is the CORRECT and
+EXPECTED daily result until the owner flips both feeds together.
+
+Distinct from the 2026-09-08 max_turns recurrence (that one was
+bootstrap-hunt caused; fix landed and worked — bootstrap now completes in
+~10 turns). This is a *reporting-branch* gap, not a budget gap.
+
+### Fix (proposed — server code, needs dev-repo edit)
+
+Add a fourth branch to `skills/atlas-value-monitor/SKILL.md` Report
+section, above the crash line:
+
+```
+- `status: provisioning_gap` → ONE line: "value monitor: provisioning
+  gap — <note>. No sweep today." Do NOT investigate; the note is
+  authoritative; owner action (per Atlas CHANGELOG `DR-0002`) is required.
+```
+
+Also append to `skills/atlas-value-monitor/GOTCHAS.md`:
+
+```
+- `provisioning_gap` is a NORMAL daily outcome while credentials are
+  intentionally un-provisioned (Atlas CHANGELOG `DR-0002` item 3, 2026-09-08).
+  Report the one-line status and exit; do not read production `.env`, do
+  not "diagnose" the missing token, do not open a CHANGELOG entry —
+  provisioning is owner action.
+```
+
+Recurrence guard: if `provisioning_gap` becomes owner-resolved (token +
+earnings feed both live), remove the branch. If a *different* new monitor
+status appears, add a generic `status != alerts` handler that echoes
+`note` and exits.
+
+### Immediate operator action
+
+None. The 2026-09-09 monitor result is expected. The failure surfaced
+because the skill didn't gracefully emit the note; the underlying signal
+("token still un-provisioned, per owner decision") is unchanged from
+yesterday. Job b1f8cf18's workspace CHANGELOG edit (turn 81) died with the
+workspace clone — no persistence, no cleanup needed.
+
+Occurrences so far: 1 (`b1f8cf18`).
+
+---
+
 ## Symptom: `atlas-value-monitor` fails with `error_max_turns: Reached maximum number of turns (20)`
 
 ### Root cause (diagnosed 2026-09-08, job `c2a04f63`, self-diagnose child `7edb7e19`)
