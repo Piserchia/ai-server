@@ -140,6 +140,12 @@ projects/<slug>/
 | Work on the firm loop skills | `skills/atlas-{cio,firm-rollup}/SKILL.md` (staged byte-identical from atlas `integrations/ai-server/`); atlas `firm/CLAUDE.md` + `firm/charters/` |
 | Understand how firm authority is gated | atlas `firm/FIRM_AUTHORITY.md` + `firm/CLAUDE.md` Rule 1 + atlas `evaluation/LOOP.md` §6 |
 
+## Additions 2026-09-09 (pickem league dashboard — spec approved, build in progress)
+
+| I need to... | Read these |
+|---|---|
+| Understand the pick'em league dashboard (CBS GraphQL ingest, prize/leaderboard engine, public site at pickem.chrispiserchia.com, AI analysis lane) | `docs/superpowers/specs/2026-09-09-pickem-league-design.md`; project `~/Documents/repos/pickem` |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
