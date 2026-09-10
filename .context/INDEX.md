@@ -140,11 +140,11 @@ projects/<slug>/
 | Work on the firm loop skills | `skills/atlas-{cio,firm-rollup}/SKILL.md` (staged byte-identical from atlas `integrations/ai-server/`); atlas `firm/CLAUDE.md` + `firm/charters/` |
 | Understand how firm authority is gated | atlas `firm/FIRM_AUTHORITY.md` + `firm/CLAUDE.md` Rule 1 + atlas `evaluation/LOOP.md` §6 |
 
-## Additions 2026-09-09 (pickem league dashboard — spec approved, build in progress)
+## Additions 2026-09-09 (pickem league dashboard — LIVE 2026-09-10)
 
 | I need to... | Read these |
 |---|---|
-| Understand the pick'em league dashboard (CBS GraphQL ingest, prize/leaderboard engine, public site at pickem.chrispiserchia.com, AI analysis lane) | `docs/superpowers/specs/2026-09-09-pickem-league-design.md`; project `~/Documents/repos/pickem` |
+| Understand the pick'em league dashboard (CBS GraphQL ingest, prize/leaderboard engine, AI analysis lane) — **live** at pickem.chrispiserchia.com since 2026-09-10: site, `pickem-sync`/`pickem-analysis` skills and the 4×/week sync schedule (Sun/Mon/Tue/Fri 09:00 UTC) all shipped | `docs/superpowers/specs/2026-09-09-pickem-league-design.md`; project `~/Documents/repos/pickem` (its `.context/CONTEXT.md` + `CHANGELOG.md`); `.context/SKILLS_REGISTRY.md` |
 
 ## Update this file
 

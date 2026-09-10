@@ -112,6 +112,30 @@ but the root cert can't be installed into macOS trust store without sudo. This
 causes TLS handshake failures when cloudflared connects. Since the tunnel itself
 is already encrypted, the localhost hop doesn't need TLS.
 
+**Visitor IPs: both hops must be trusted, in both directions.** Every hop in
+that chain after Cloudflare is loopback, and each end defaults to distrusting
+it:
+
+- **Caddy** (`Caddyfile` global options → `servers { trusted_proxies static
+  127.0.0.1/32 ::1/128 }`). cloudflared dials Caddy from 127.0.0.1, so from
+  Caddy's point of view every request in the world arrives from the same
+  untrusted peer. Caddy treats an untrusted peer's `X-Forwarded-For` as
+  spoofable and **replaces** it with the peer address rather than appending
+  to it — so Cloudflare's `CF-Connecting-IP`-derived XFF is discarded at the
+  door and every app downstream sees 127.0.0.1. Added 2026-09-10; see
+  Gotchas.
+- **The app** (`--forwarded-allow-ips 127.0.0.1` in the project's
+  `start_command`, for uvicorn apps). Same logic one hop later: uvicorn only
+  honours `X-Forwarded-For` from a peer it trusts, and its peer is Caddy on
+  loopback.
+
+Fix only one and visitor IPs still die — the Caddy side is upstream, so
+without it uvicorn faithfully forwards the 127.0.0.1 Caddy already
+substituted. Anything keyed on client IP (per-IP rate limits, abuse
+throttles, geo logic) silently degrades into ONE shared bucket for every
+visitor, and it degrades *quietly*: the app keeps working, the caps just
+apply to the whole internet at once.
+
 ## External monitoring
 
 - `Caddyfile.d/health.conf` exposes **only** `/health` at `health.chrispiserchia.com`
@@ -130,3 +154,19 @@ is already encrypted, the localhost hop doesn't need TLS.
 - If you edit `Caddyfile.d/*.conf` by hand, `caddy reload --config ./Caddyfile` picks it up without downtime.
 - Multi-service projects generate separate launchd plists per sub-service (e.g., `com.assistant.project.market-tracker-stocks.plist`).
 - `handle_path` strips the prefix before forwarding. API routes that need the full path use `handle` instead.
+- **A per-IP rate limit that never seems to trigger per-IP is this.** Caddy
+  needs `trusted_proxies` for the loopback cloudflared hop or it discards
+  Cloudflare's `X-Forwarded-For` (see Traffic flow above). Confirmed live on
+  2026-09-10: every line in `volumes/logs/project.pickem.out.log` read
+  `INFO: 127.0.0.1:<port> - "GET /healthz"` for real internet visitors, so
+  pickem's per-IP analysis cap was one bucket shared by the whole league.
+  The app-side `--forwarded-allow-ips` was already correct — it is the Caddy
+  hop that was missing, and fixing only the app end cannot help.
+- **`setup-caddy.sh` regenerates the base `Caddyfile` from a template that does
+  NOT carry `trusted_proxies`** (nor the apex landing-page / www-redirect
+  blocks the tracked file has). It is a one-time bootstrap script; re-running
+  it on a live host silently reverts this fix. Restore from git after any run.
+- The visitor IP is only as good as the last hop that agreed to pass it on:
+  when adding a NEW service, give it the `--forwarded-allow-ips 127.0.0.1`
+  (or framework equivalent) in its manifest `start_command`. Caddy's side is
+  now global and needs no per-project work.

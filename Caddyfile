@@ -1,5 +1,17 @@
 {
     admin localhost:2019
+
+    # cloudflared runs on this Mac and dials Caddy over loopback, so EVERY
+    # request arrives from 127.0.0.1. Caddy treats an untrusted peer's
+    # X-Forwarded-For as spoofable and REPLACES it with the peer address —
+    # which means without this block every hosted app sees 127.0.0.1 as the
+    # visitor, and any per-IP rate limit becomes one shared league-wide
+    # bucket. Trusting the loopback hop restores the real client IP that
+    # Cloudflare put in the header. See
+    # .context/modules/hosting/CONTEXT.md § Gotchas.
+    servers {
+        trusted_proxies static 127.0.0.1/32 ::1/128
+    }
 }
 
 # Public landing page at apex — lists hosted projects

@@ -1,5 +1,45 @@
 # Changelog: hosting
 
+## 2026-09-10 — Caddy `trusted_proxies`: stop discarding visitor IPs
+
+**Agent task**: pickem whole-branch review fix wave (T18) — finding 7.
+
+**Files changed**:
+- `Caddyfile` — added a `servers { trusted_proxies static 127.0.0.1/32
+  ::1/128 }` block to the global options, with a comment pointing at the
+  hosting CONTEXT.
+- `.context/modules/hosting/CONTEXT.md` — new "Visitor IPs: both hops must be
+  trusted" subsection under Traffic flow, plus four Gotchas entries (the
+  symptom, the live evidence, the `setup-caddy.sh` regeneration footgun, and
+  the per-project `--forwarded-allow-ips` reminder).
+
+**Why**: cloudflared runs on this Mac and dials Caddy over loopback, so every
+request in the world reaches Caddy from 127.0.0.1. Caddy treats an untrusted
+peer's `X-Forwarded-For` as spoofable and **replaces** it with the peer
+address instead of appending — so Cloudflare's real-visitor IP was discarded
+at the door and every hosted app saw 127.0.0.1 as the client. Confirmed live
+in `volumes/logs/project.pickem.out.log`, where every line read
+`INFO: 127.0.0.1:<port> - "GET ..."` for genuine internet traffic. The
+practical damage is silent, not loud: pickem's per-IP AI-analysis rate limit
+was collapsed into a single bucket shared by the entire league (and by
+everyone else on the internet). The app-side pin was already correct —
+pickem's manifest `start_command` carries `--proxy-headers
+--forwarded-allow-ips 127.0.0.1` for the Caddy→uvicorn hop — but that is the
+*second* hop; fixing it alone cannot help, because uvicorn was faithfully
+forwarding the 127.0.0.1 Caddy had already substituted.
+
+**Side effects**: global — applies to every vhost and every hosted project at
+once, which is correct (the tunnel topology is identical for all of them).
+Trust is scoped to loopback only, so nothing off-box can spoof `XFF`;
+requests can only reach Caddy via cloudflared or from this Mac. Applied to
+production with `caddy reload --config ./Caddyfile` (no restart, no tunnel
+touch, zero downtime). **Footgun recorded**: `scripts/setup-caddy.sh`
+regenerates the base `Caddyfile` from a template that does not carry this
+block (nor the apex landing-page / www-redirect blocks the tracked file has
+had for a while) — re-running that one-time bootstrap on a live host would
+silently revert this. Noted in CONTEXT.md Gotchas; the template itself was
+deliberately left alone as out of scope for this wave.
+
 ## 2026-09-01 — atlas-weekly-reports session_timeout_seconds → 3600
 
 **Agent task**: review-and-improve — raise session_timeout_seconds to 3600
