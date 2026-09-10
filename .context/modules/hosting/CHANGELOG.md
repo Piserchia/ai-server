@@ -491,3 +491,13 @@ clone's .env) shows no run inside 26h (74h Mondays), DM the owner — rate-
 limited 1/12h, silent-safe pre-deploy. Out-of-band by design (the scheduler
 cannot watchdog itself; spec 2026-08-27 v3 §6.2 R18). Session: trading-bots
 implementation.
+
+## 2026-09-10 (writeback: XFF gotcha correction)
+- CONTEXT.md Gotchas: removed the stale "app-side --forwarded-allow-ips was
+  already correct" claim (the exact half-fix misdirection the 2026-09-10
+  trusted_proxies work disproved); Gotcha now states BOTH hops are required.
+- skills/pickem-sync/SKILL.md: mismatch-string prose updated for the NULL-side
+  sentinel shape; stale "most common cause" (pre-guard freeze) replaced with
+  the open-week symptom + orphaned-PENDING escalation path.
+- scripts/seed-schedules.sh: comment coupling the pickem cron to the site's
+  76h stale-banner window.

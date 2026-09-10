@@ -85,14 +85,21 @@ with:
 ⚠️ PICKEM RECONCILE MISMATCH
 ```
 
-Then, prominently: every string in `mismatches` **verbatim** (they name the
-player and the two counts that disagree), the weeks involved, and this
-reading: our stored `CORRECT` counts disagree with CBS's `periodScore`, so the
-leaderboard is showing numbers CBS does not agree with. Say that the standard
-repair is `.venv/bin/python -m app.sync --all` (re-derives every pick-bearing
-week from CBS) and that the most common cause is a week that was marked
-`final` in the gap between the last whistle and CBS setting `pickStatus`,
-freezing that week's picks as `PENDING`. Recommend the `--all` repair; do not
+Then, prominently: every string in `mismatches` **verbatim**, the weeks
+involved, and this reading. Two string shapes exist: per-player lines name
+the player and the two counts that disagree (our stored `CORRECT` count vs
+CBS's `periodScore` — the leaderboard is showing numbers CBS does not agree
+with); sentinel lines of the form "N graded picks with unknown side in week
+W" mean the spread/side mapping failed for a game and the bottom-race /
+stats math is silently skewed — treat those as at least as urgent. Say that
+the standard repair is `.venv/bin/python -m app.sync --all` (re-derives
+every pick-bearing week from CBS). Note: the sync now refuses to mark a
+week `final` while graded games still carry `PENDING` picks (the old
+freeze-in-the-grading-gap cause), so a week that stays open for days with
+PENDING picks on final games is the symptom to escalate — `--all` re-syncs
+it, but if PENDING rows persist across runs the pick rows may be orphaned
+(CBS stopped returning them) and a human needs to look. Recommend the
+`--all` repair; do not
 run it yourself in the same session unless the job description explicitly
 asked for a repair — a scheduled run's job is to report.
 

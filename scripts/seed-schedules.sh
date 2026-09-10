@@ -165,6 +165,9 @@ upsert 'atlas-value-evaluate' '0 17 * * 0' 'atlas-value-evaluate' 'atlas-value-e
 # and the skill body cd's to the production checkout explicitly. This skill
 # needs no project scoping: isolation is `none` (no workspace clone), it is
 # not a deploy skill, and it provisions no env_files.
+# NOTE: pickem's stale-banner window (_STALE_AFTER in pickem app/api.py) is
+# derived from this cron's longest gap (Tue->Fri = 72h; window 76h). If you
+# change this cadence, revisit that constant or the site cries wolf/goes mute.
 upsert 'pickem-sync' '0 9 * * 0,1,2,5' 'pickem-sync' 'Pickem CBS sync (Sun/Mon/Tue/Fri post-slate)'
 
 echo "Schedules seeded."

@@ -186,8 +186,11 @@ real origin IP.
   2026-09-10: every line in `volumes/logs/project.pickem.out.log` read
   `INFO: 127.0.0.1:<port> - "GET /healthz"` for real internet visitors, so
   pickem's per-IP analysis cap was one bucket shared by the whole league.
-  The app-side `--forwarded-allow-ips` was already correct — it is the Caddy
-  hop that was missing, and fixing only the app end cannot help.
+  BOTH hops needed fixing: Caddy's `trusted_proxies` (or the chain dies at
+  Caddy) AND the app's `--forwarded-allow-ips '127.0.0.1,::1'` (cloudflared
+  reaches Caddy over `::1` on macOS, so app-side `127.0.0.1` alone stops one
+  hop short — the `::1:0` half-fixed state below). Fixing either end alone
+  reads as fixed in a naive check and is not.
 - **`setup-caddy.sh` regenerates the base `Caddyfile` from a template that does
   NOT carry `trusted_proxies`** (nor the apex landing-page / www-redirect
   blocks the tracked file has). It is a one-time bootstrap script; re-running
