@@ -2,6 +2,44 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-10 — three atlas skill frontmatter tweaks (review-and-improve proposals from job ec792bc4)
+
+**Agent task**: apply three `review-and-improve` proposals from the
+idle-queue retrospective (2026-09-10, 30d window). All are small SKILL.md
+frontmatter edits — no source code, no tests.
+
+**Files changed**:
+- `skills/atlas-value-monitor/SKILL.md` — raised `max_turns` 30 → 50 per
+  proposal `a0792164-94bb-40ae-bfb7-744577f53026`. Rationale: 2 of 8 runs
+  in the last 30 days (25%) hit `error_max_turns` at the current ceiling;
+  the previous 20→30 bump on 2026-09-08 was re-hit the next day (job
+  `b1f8cf18`, 2026-09-09 14:10). Successful runs complete in 60–150 s with
+  fewer turns; busy days with expiries/assignments consume more. This
+  raises the ceiling one more step without changing behavior.
+- `skills/atlas-swing-trade/SKILL.md` — appended `.context/PROJECT_PROTOCOL.md`
+  to `context_files` per proposal `bf94e0cb-0b77-44da-865d-b5cc533cbc2e`.
+  Rationale: file was Read on 7 of 9 runs (78%). Preloading eliminates one
+  Read tool call per run.
+- `skills/atlas-trader-paper/SKILL.md` — appended `.context/PROJECT_PROTOCOL.md`
+  to `context_files` per proposal `b5b252f7-9c15-439b-8ea4-5edeb2158141`.
+  Rationale: file was Read on 6 of 11 runs (55%). Same pattern as
+  atlas-swing-trade.
+
+**Why**: closes the review-and-improve loop for three highest-signal
+proposals from the retrospective. `context_files` preloads content the
+session was already going to Read — same file, one turn earlier, no
+behavior change. The `max_turns` bump is defense-in-depth against a
+recurrent ceiling hit.
+
+**Side effects**: none. `.context/PROJECT_PROTOCOL.md` exists at
+`settings.server_root` (validator `registry/skills.py` and lint
+`scripts/lint_docs.py:check_context_files_exist` both pass). The
+`max_turns` raise is a ceiling change (no new authority, no new tools).
+
+**Gotchas discovered**: none — this is the standard proposal-application
+pattern established by the 2026-08-31 entry (atlas-report + ops-manager
+context_files preload).
+
 ## 2026-09-08 — atlas-value-monitor: inline bootstrap + max_turns 20→30
 
 **Files created**: none
