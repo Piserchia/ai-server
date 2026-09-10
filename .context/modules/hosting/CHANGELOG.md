@@ -9,9 +9,12 @@
   ::1/128 }` block to the global options, with a comment pointing at the
   hosting CONTEXT.
 - `.context/modules/hosting/CONTEXT.md` — new "Visitor IPs: both hops must be
-  trusted" subsection under Traffic flow, plus four Gotchas entries (the
-  symptom, the live evidence, the `setup-caddy.sh` regeneration footgun, and
-  the per-project `--forwarded-allow-ips` reminder).
+  trusted" subsection under Traffic flow (with the three-row outcome table),
+  plus Gotchas entries: the symptom, the live evidence, the `setup-caddy.sh`
+  regeneration footgun, the per-project `--forwarded-allow-ips '127.0.0.1,::1'`
+  reminder, and `::1:0` as the half-fixed state.
+- pickem `manifest.yml` (separate repo, commit `7ac09d5`) —
+  `--forwarded-allow-ips '127.0.0.1,::1'`.
 
 **Why**: cloudflared runs on this Mac and dials Caddy over loopback, so every
 request in the world reaches Caddy from 127.0.0.1. Caddy treats an untrusted
@@ -22,11 +25,12 @@ in `volumes/logs/project.pickem.out.log`, where every line read
 `INFO: 127.0.0.1:<port> - "GET ..."` for genuine internet traffic. The
 practical damage is silent, not loud: pickem's per-IP AI-analysis rate limit
 was collapsed into a single bucket shared by the entire league (and by
-everyone else on the internet). The app-side pin was already correct —
-pickem's manifest `start_command` carries `--proxy-headers
---forwarded-allow-ips 127.0.0.1` for the Caddy→uvicorn hop — but that is the
-*second* hop; fixing it alone cannot help, because uvicorn was faithfully
-forwarding the 127.0.0.1 Caddy had already substituted.
+everyone else on the internet). pickem's manifest `start_command` already
+carried `--proxy-headers --forwarded-allow-ips 127.0.0.1` for the
+Caddy→uvicorn hop, but that is the *second* hop and it could not help on its
+own: uvicorn was faithfully forwarding the 127.0.0.1 Caddy had already
+substituted. (That app-side value turned out to need widening too — see the
+next paragraph. Caddy was the blocking half, not the whole fix.)
 
 **Second hop, found while verifying**: the Caddy fix alone moved the logged
 client from `127.0.0.1:<port>` to `::1:0` — better, but still one shared
