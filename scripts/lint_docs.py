@@ -619,7 +619,16 @@ UNISOLATED_WRITER_ALLOWLIST = {
     "atlas-swing-evaluate", "atlas-trader-evaluate", "atlas-value-evaluate",
     "delivery-manager", "delivery-ops-reconciler", "deploy-director",
     "gap-auditor", "idea-generation", "insight-router", "knowledge-manager",
-    "new-project", "ops-manager", "plan", "project-redeploy",
+    "new-project", "ops-manager",
+    # pickem (2026-09-09): both MUST see the live production checkout. The
+    # sync needs the real .venv/.env/sqlite db under volumes/pickem (a clone
+    # has none of them and would sync a throwaway copy while reporting
+    # success); the analysis skill needs the PRODUCTION admin token from
+    # projects/pickem/.env — a clone carries the dev token, which the live
+    # API rejects. Both are report-or-POST only and write no repo file;
+    # rationale is restated in each SKILL.md.
+    "pickem-analysis", "pickem-sync",
+    "plan", "project-redeploy",
     "project-update-poll", "research-deep", "research-report", "restore",
     "review-and-improve", "self-diagnose", "server-deploy", "server-upkeep",
     "system-manager",

@@ -149,6 +149,17 @@ upsert 'atlas-value-monitor' '10 18 * * 1-5' 'atlas-value-monitor' 'atlas-value-
 upsert 'atlas-value-research' '0 13 * * 2' 'atlas-value-research' 'atlas-value-research: weekly advisor research cycle under value/evaluation/PROTOCOL.md -> one sealed card, additive improvements (skills/atlas-value-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 upsert 'atlas-value-evaluate' '0 17 * * 0' 'atlas-value-evaluate' 'atlas-value-evaluate: weekly advisor governor -> shadow-ledger grade vs SPY (regime-annotated), process compliance, STOP_READING verdict authority (skills/atlas-value-evaluate)'
 
+# ── Pickem league dashboard (projects/pickem, port 8793, 2026-09-09) ───────
+# CBS sync 4x/week at 09:00 UTC (05:00 ET) — after Sunday's late window
+# (Mon), after Monday Night (Tue), after Thursday Night (Fri), and Sunday
+# morning so the site is fresh before the early slate. 09:00 is clear of
+# every other row (the earliest today is the 11:00 loop block). The sync is
+# cheap (5 requests steady state) and idempotent, so a missed slot self-heals
+# at the next one. Payload scopes the job to the project per the spec §5.4;
+# the skill body cd's to the PRODUCTION checkout explicitly because dev-repo
+# topology otherwise starts the session in the dev clone.
+upsert 'pickem-sync' '0 9 * * 0,1,2,5' 'pickem-sync' 'Pickem CBS sync (Sun/Mon/Tue/Fri post-slate)' '{"project_slug":"pickem"}'
+
 echo "Schedules seeded."
 echo ""
 echo "NOTE: review-and-improve runs via idle-queue trigger in events.py"

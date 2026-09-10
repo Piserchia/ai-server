@@ -10,3 +10,4 @@
 8790: baseball-bingo          # FastAPI backend (web companion)
 8791: atlas                   # Next.js web (dash-scheduler + pm-edge run portless under launchd)
 8792: content-forge           # FastAPI workshop dashboard (CF Access gated)
+8793: pickem                  # FastAPI + React SPA — Arlington Degenerates pick'em dashboard
