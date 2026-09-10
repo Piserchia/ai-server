@@ -1,5 +1,70 @@
 # Changelog: hosting
 
+## 2026-09-10 — Caddy `trusted_proxies`: stop discarding visitor IPs
+
+**Agent task**: pickem whole-branch review fix wave (T18) — finding 7.
+
+**Files changed**:
+- `Caddyfile` — added a `servers { trusted_proxies static 127.0.0.1/32
+  ::1/128 }` block to the global options, with a comment pointing at the
+  hosting CONTEXT.
+- `.context/modules/hosting/CONTEXT.md` — new "Visitor IPs: both hops must be
+  trusted" subsection under Traffic flow (with the three-row outcome table),
+  plus Gotchas entries: the symptom, the live evidence, the `setup-caddy.sh`
+  regeneration footgun, the per-project `--forwarded-allow-ips '127.0.0.1,::1'`
+  reminder, and `::1:0` as the half-fixed state.
+- pickem `manifest.yml` (separate repo, commit `7ac09d5`) —
+  `--forwarded-allow-ips '127.0.0.1,::1'`.
+
+**Why**: cloudflared runs on this Mac and dials Caddy over loopback, so every
+request in the world reaches Caddy from 127.0.0.1. Caddy treats an untrusted
+peer's `X-Forwarded-For` as spoofable and **replaces** it with the peer
+address instead of appending — so Cloudflare's real-visitor IP was discarded
+at the door and every hosted app saw 127.0.0.1 as the client. Confirmed live
+in `volumes/logs/project.pickem.out.log`, where every line read
+`INFO: 127.0.0.1:<port> - "GET ..."` for genuine internet traffic. The
+practical damage is silent, not loud: pickem's per-IP AI-analysis rate limit
+was collapsed into a single bucket shared by the entire league (and by
+everyone else on the internet). pickem's manifest `start_command` already
+carried `--proxy-headers --forwarded-allow-ips 127.0.0.1` for the
+Caddy→uvicorn hop, but that is the *second* hop and it could not help on its
+own: uvicorn was faithfully forwarding the 127.0.0.1 Caddy had already
+substituted. (That app-side value turned out to need widening too — see the
+next paragraph. Caddy was the blocking half, not the whole fix.)
+
+**Second hop, found while verifying**: the Caddy fix alone moved the logged
+client from `127.0.0.1:<port>` to `::1:0` — better, but still one shared
+bucket for the whole internet. cloudflared's ingress targets
+`http://localhost:80` and macOS resolves `localhost` to `::1` first, so
+Caddy's peer is IPv6 loopback and Caddy appends `::1` to the chain; uvicorn
+walks the chain from the right and stops at the first untrusted host, which
+with only `127.0.0.1` allowed was `::1`. Fixed in the pickem repo
+(`manifest.yml` → `--forwarded-allow-ips '127.0.0.1,::1'`, commit `7ac09d5`)
+and the plist regenerated with `./scripts/register-project.sh pickem`. The
+lesson is generalized in CONTEXT.md as a three-row table: all three
+configurations serve traffic perfectly and only one reports the real client,
+so **this must be verified by reading the project log, never by reasoning**.
+
+**Verified end to end 2026-09-10**: `curl https://pickem.chrispiserchia.com/healthz`
+over IPv6 logged `2600:4040:44af:...:fda3:0`, over IPv4 logged
+`173.73.118.137:0` — both matching this Mac's egress IP as independently
+reported by `cloudflare.com/cdn-cgi/trace`. A forged
+`X-Forwarded-For: 203.0.113.99` sent from off-box did NOT take effect
+(Cloudflare overwrites client-supplied XFF), so no spoofing hole was opened.
+Apex, health and pickem all still 200 after the reload.
+
+**Side effects**: global — applies to every vhost and every hosted project at
+once, which is correct (the tunnel topology is identical for all of them).
+Trust is scoped to loopback only, so nothing off-box can spoof `XFF`;
+requests can only reach Caddy via cloudflared or from this Mac. Applied to
+production with `caddy reload --config ./Caddyfile` (no restart, no tunnel
+touch, zero downtime). **Footgun recorded**: `scripts/setup-caddy.sh`
+regenerates the base `Caddyfile` from a template that does not carry this
+block (nor the apex landing-page / www-redirect blocks the tracked file has
+had for a while) — re-running that one-time bootstrap on a live host would
+silently revert this. Noted in CONTEXT.md Gotchas; the template itself was
+deliberately left alone as out of scope for this wave.
+
 ## 2026-09-03 — healthcheck-all cadence-slip false alarm (atlas 84th recurrence)
 
 **Agent task**: self-diagnose job `4cbadd62` — atlas flagged unhealthy 20+ min.
@@ -446,3 +511,13 @@ clone's .env) shows no run inside 26h (74h Mondays), DM the owner — rate-
 limited 1/12h, silent-safe pre-deploy. Out-of-band by design (the scheduler
 cannot watchdog itself; spec 2026-08-27 v3 §6.2 R18). Session: trading-bots
 implementation.
+
+## 2026-09-10 (writeback: XFF gotcha correction)
+- CONTEXT.md Gotchas: removed the stale "app-side --forwarded-allow-ips was
+  already correct" claim (the exact half-fix misdirection the 2026-09-10
+  trusted_proxies work disproved); Gotcha now states BOTH hops are required.
+- skills/pickem-sync/SKILL.md: mismatch-string prose updated for the NULL-side
+  sentinel shape; stale "most common cause" (pre-guard freeze) replaced with
+  the open-week symptom + orphaned-PENDING escalation path.
+- scripts/seed-schedules.sh: comment coupling the pickem cron to the site's
+  76h stale-banner window.
