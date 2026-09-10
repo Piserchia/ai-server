@@ -33,19 +33,24 @@ SERVER_ROOT="${SERVER_ROOT:-$HOME/Library/Application Support/ai-server}"
 PICKEM="$SERVER_ROOT/projects/pickem"
 ```
 
-**Read this before running anything.** The schedule carries payload
-`{"project_slug":"pickem"}` and pickem is **dev-repo topology**, so the runner
-scopes your session's cwd to the *dev clone* `~/Documents/repos/pickem`, NOT
-to `$PICKEM`. The dev clone has its own `.env` pointing at a **different
-database**. Running the sync from your starting cwd would spend real CBS
-requests, fill the dev DB, print a perfectly healthy JSON line, and leave the
-live site stale — a success report over a silent outage. Always `cd "$PICKEM"`
-first, and always confirm the data dir before you trust a green result.
+**Read this before running anything.** Your session starts in the **ai-server
+server root**, not in the pickem project — this job carries no project
+scoping, so the runner leaves cwd at `$SERVER_ROOT`. You must `cd "$PICKEM"`
+yourself; nothing else puts you there.
+
+Getting that wrong is not a harmless error. A checkout of pickem also exists
+on this machine at `~/Documents/repos/pickem` (the dev clone), with its own
+`.env` pointing at a **different database**. Running the sync from anywhere
+but `$PICKEM` would spend real CBS requests, fill the wrong database, print a
+perfectly healthy JSON line, and leave the live site stale — a success report
+over a silent outage. So: `cd` first, confirm the data dir (§1), and confirm
+the run landed in the production database (§3) before you trust a green
+result.
 
 ## 1. Run the sync
 
 ```bash
-cd "$PICKEM" || { echo "FATAL: $PICKEM missing"; exit 1; }
+cd "${PICKEM:?PICKEM unset}" || { echo "FATAL: $PICKEM missing"; exit 1; }
 set -a; . ./.env; set +a
 echo "data_dir=$PICKEM_DATA_DIR"
 .venv/bin/python -m app.sync; echo "EXIT=$?"

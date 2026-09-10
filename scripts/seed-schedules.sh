@@ -155,10 +155,17 @@ upsert 'atlas-value-evaluate' '0 17 * * 0' 'atlas-value-evaluate' 'atlas-value-e
 # morning so the site is fresh before the early slate. 09:00 is clear of
 # every other row (the earliest today is the 11:00 loop block). The sync is
 # cheap (5 requests steady state) and idempotent, so a missed slot self-heals
-# at the next one. Payload scopes the job to the project per the spec §5.4;
-# the skill body cd's to the PRODUCTION checkout explicitly because dev-repo
-# topology otherwise starts the session in the dev clone.
-upsert 'pickem-sync' '0 9 * * 0,1,2,5' 'pickem-sync' 'Pickem CBS sync (Sun/Mon/Tue/Fri post-slate)' '{"project_slug":"pickem"}'
+# at the next one.
+#
+# DELIBERATELY NO PAYLOAD (do not "fix" this by adding project_slug): pickem
+# is dev-repo topology, so a project_slug would scope this non-deploy session
+# to the DEV clone (~/Documents/repos/pickem) via resolve_delivery_cwd — the
+# sync would then fill the dev database, print a healthy JSON line, and leave
+# the live site stale. With no payload the session starts in the server root
+# and the skill body cd's to the production checkout explicitly. This skill
+# needs no project scoping: isolation is `none` (no workspace clone), it is
+# not a deploy skill, and it provisions no env_files.
+upsert 'pickem-sync' '0 9 * * 0,1,2,5' 'pickem-sync' 'Pickem CBS sync (Sun/Mon/Tue/Fri post-slate)'
 
 echo "Schedules seeded."
 echo ""

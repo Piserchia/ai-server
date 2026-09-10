@@ -127,14 +127,25 @@ The callback is admin-authenticated. Read the token from the production
 `.env` and **never print it** — not in a command echo, not in the report.
 
 ```bash
-set -a; . "$PICKEM/.env"; set +a     # provides PICKEM_ADMIN_TOKEN
+# Extract ONLY the admin token. Do NOT `source` the whole .env: it also holds
+# PICKEM_GATEWAY_TOKEN (the server's WEB_AUTH_TOKEN), and nothing here needs
+# it in the session environment.
+# (`cut -f2-` keeps any `=` inside the value; `tr -d '\042\047'` strips the
+#  optional surrounding " or ' that dotenv files allow.)
+PICKEM_ADMIN_TOKEN=$(grep -E '^PICKEM_ADMIN_TOKEN=' "${PICKEM:?PICKEM unset}/.env" \
+                     | head -1 | cut -d= -f2- | tr -d '\042\047')
+[ -n "$PICKEM_ADMIN_TOKEN" ] || { echo "FATAL: no PICKEM_ADMIN_TOKEN in $PICKEM/.env"; exit 1; }
+
 MD_FILE="$(mktemp -t pickem-analysis)"   # unique: analyses can run concurrently
 
 cat > "$MD_FILE" <<'MD'
 <your markdown here>
 MD
 
-MD_FILE="$MD_FILE" PLAYER_ID=<id> THROUGH_WEEK=<week> python3 - <<'PY'
+# The token is passed to THIS child process only — it is never exported into
+# the session environment.
+MD_FILE="$MD_FILE" PLAYER_ID=<id> THROUGH_WEEK=<week> \
+PICKEM_ADMIN_TOKEN="$PICKEM_ADMIN_TOKEN" python3 - <<'PY'
 import json, os, urllib.request, urllib.error
 body = json.dumps({
     "player_id": int(os.environ["PLAYER_ID"]),
