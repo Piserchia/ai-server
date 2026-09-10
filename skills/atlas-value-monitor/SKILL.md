@@ -5,7 +5,7 @@ model: claude-sonnet-4-6
 effort: medium
 permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
-max_turns: 30
+max_turns: 50
 isolation: workspace
 role: worker
 division: atlas

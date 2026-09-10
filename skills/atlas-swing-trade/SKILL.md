@@ -10,7 +10,7 @@ isolation: workspace
 role: worker
 division: atlas
 privilege_class: guarded-writer
-context_files: ["skills/atlas-swing-trade/GOTCHAS.md"]
+context_files: ["skills/atlas-swing-trade/GOTCHAS.md", ".context/PROJECT_PROTOCOL.md"]
 tags: [atlas, swing, trading, scheduled-capable]
 ---
 
