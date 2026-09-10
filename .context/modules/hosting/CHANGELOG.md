@@ -28,6 +28,27 @@ pickem's manifest `start_command` carries `--proxy-headers
 *second* hop; fixing it alone cannot help, because uvicorn was faithfully
 forwarding the 127.0.0.1 Caddy had already substituted.
 
+**Second hop, found while verifying**: the Caddy fix alone moved the logged
+client from `127.0.0.1:<port>` to `::1:0` — better, but still one shared
+bucket for the whole internet. cloudflared's ingress targets
+`http://localhost:80` and macOS resolves `localhost` to `::1` first, so
+Caddy's peer is IPv6 loopback and Caddy appends `::1` to the chain; uvicorn
+walks the chain from the right and stops at the first untrusted host, which
+with only `127.0.0.1` allowed was `::1`. Fixed in the pickem repo
+(`manifest.yml` → `--forwarded-allow-ips '127.0.0.1,::1'`, commit `7ac09d5`)
+and the plist regenerated with `./scripts/register-project.sh pickem`. The
+lesson is generalized in CONTEXT.md as a three-row table: all three
+configurations serve traffic perfectly and only one reports the real client,
+so **this must be verified by reading the project log, never by reasoning**.
+
+**Verified end to end 2026-09-10**: `curl https://pickem.chrispiserchia.com/healthz`
+over IPv6 logged `2600:4040:44af:...:fda3:0`, over IPv4 logged
+`173.73.118.137:0` — both matching this Mac's egress IP as independently
+reported by `cloudflare.com/cdn-cgi/trace`. A forged
+`X-Forwarded-For: 203.0.113.99` sent from off-box did NOT take effect
+(Cloudflare overwrites client-supplied XFF), so no spoofing hole was opened.
+Apex, health and pickem all still 200 after the reload.
+
 **Side effects**: global — applies to every vhost and every hosted project at
 once, which is correct (the tunnel topology is identical for all of them).
 Trust is scoped to loopback only, so nothing off-box can spoof `XFF`;

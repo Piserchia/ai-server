@@ -124,17 +124,43 @@ it:
   to it — so Cloudflare's `CF-Connecting-IP`-derived XFF is discarded at the
   door and every app downstream sees 127.0.0.1. Added 2026-09-10; see
   Gotchas.
-- **The app** (`--forwarded-allow-ips 127.0.0.1` in the project's
+- **The app** (`--forwarded-allow-ips '127.0.0.1,::1'` in the project's
   `start_command`, for uvicorn apps). Same logic one hop later: uvicorn only
   honours `X-Forwarded-For` from a peer it trusts, and its peer is Caddy on
-  loopback.
+  loopback. **List BOTH loopback forms** — see below.
 
-Fix only one and visitor IPs still die — the Caddy side is upstream, so
-without it uvicorn faithfully forwards the 127.0.0.1 Caddy already
-substituted. Anything keyed on client IP (per-IP rate limits, abuse
-throttles, geo logic) silently degrades into ONE shared bucket for every
-visitor, and it degrades *quietly*: the app keeps working, the caps just
-apply to the whole internet at once.
+**Why `::1` and not just `127.0.0.1`:** cloudflared's ingress targets
+`http://localhost:80`, and macOS resolves `localhost` to `::1` first, so the
+cloudflared→Caddy hop is IPv6 loopback. Caddy therefore appends `::1` (not
+`127.0.0.1`) to the forwarded chain, leaving
+`X-Forwarded-For: <real visitor>, ::1`. uvicorn's `ProxyHeadersMiddleware`
+walks that chain **from the right** and returns the first host it does not
+trust — so with only `127.0.0.1` trusted it stops on `::1` and reports THAT
+as the client.
+
+Fix only one hop and visitor IPs still die, and they die *looking fixed*:
+
+| Caddy `trusted_proxies` | app `--forwarded-allow-ips` | app sees |
+|---|---|---|
+| absent | `127.0.0.1` | `127.0.0.1` — Caddy replaced the header |
+| set | `127.0.0.1` | `::1` — uvicorn stopped one hop short |
+| set | `127.0.0.1,::1` | the real visitor IP ✓ |
+
+All three of those serve traffic perfectly and only the third is correct.
+Anything keyed on client IP (per-IP rate limits, abuse throttles, geo logic)
+silently degrades into ONE shared bucket for every visitor in the first two
+rows — the app keeps working, the caps just apply to the whole internet at
+once. **Verify by log, never by reasoning**: hit the public URL and read the
+project's `volumes/logs/project.<slug>.out.log`; the client must be a real
+public IP. A `:0` port on that line is normal (it means the address came
+from the forwarded header, which is exactly what you want).
+
+Trusting `X-Forwarded-For` does **not** open a spoofing hole here:
+Cloudflare overwrites any client-supplied `X-Forwarded-For` with the true
+connecting IP, and Caddy's trust is scoped to loopback, which nothing
+off-box can occupy. Verified 2026-09-10 by sending a forged
+`X-Forwarded-For: 203.0.113.99` from off-box — the log still recorded the
+real origin IP.
 
 ## External monitoring
 
@@ -167,6 +193,13 @@ apply to the whole internet at once.
   blocks the tracked file has). It is a one-time bootstrap script; re-running
   it on a live host silently reverts this fix. Restore from git after any run.
 - The visitor IP is only as good as the last hop that agreed to pass it on:
-  when adding a NEW service, give it the `--forwarded-allow-ips 127.0.0.1`
-  (or framework equivalent) in its manifest `start_command`. Caddy's side is
-  now global and needs no per-project work.
+  when adding a NEW service, give it `--forwarded-allow-ips '127.0.0.1,::1'`
+  (or the framework equivalent) in its manifest `start_command` — **both**
+  loopback forms, because cloudflared reaches Caddy over `::1` on macOS.
+  Caddy's side is now global and needs no per-project work. Changing a
+  manifest `start_command` only takes effect after
+  `./scripts/register-project.sh <slug>` regenerates the launchd plist.
+- **`::1:0` in a project log is the half-fixed state**, not a healthy one: it
+  means Caddy is forwarding the chain but the app trusts only `127.0.0.1` and
+  stopped one hop short. Per-IP limits are still collapsed league-wide. See
+  the table under Traffic flow.
