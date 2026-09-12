@@ -11,7 +11,7 @@ escalation:
     model: claude-opus-4-7
     effort: high
 context_files: [".context/SYSTEM.md", "skills/atlas-report/SKILL.md"]
-tags: [atlas, finance, research, scheduled-capable]
+tags: [atlas, finance, research, scheduled-capable, needs-dispatch-mcp]
 ---
 
 # Atlas Report Sweep

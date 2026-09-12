@@ -81,7 +81,7 @@ def create_server(spawning_job=None):
         "Enqueue a new job by kind and description. Returns the new job's ID. "
         "Pass depends_on=[job ids] to defer this job until those complete.",
         {
-            "kind": Annotated[str, "Job kind (e.g. 'task', 'research_report', 'app_patch')"],
+            "kind": Annotated[str, "Job kind (e.g. 'task', 'research-report', 'app-patch')"],
             "description": Annotated[str, "Human-readable description of what to do"],
             "payload": Annotated[dict, "Optional extra payload for the job"],
             "depends_on": Annotated[list, "Optional job IDs that must complete first"],
