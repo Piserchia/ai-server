@@ -2,6 +2,31 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-12 — mcp_dispatch: fix `enqueue_job` kind example to use hyphens
+
+**Agent task**: apply review-and-improve proposal 2f214c24 from
+retrospective f4e2fdea (idle-queue, 30d window).
+
+**Files changed**: `src/runner/mcp_dispatch.py`.
+
+**Why**: the `enqueue_job` tool's Annotated `kind` description showed
+`'research_report'` and `'app_patch'` (underscored), which actively coached
+LLM sessions to enqueue underscore-form kinds. The runner normalizes at
+`session.py:634` so execution works, but the Job row is stored with the
+underscore form, fragmenting every kind-based aggregate: rows table showed
+deploy_director 31 vs deploy-director 22; server_deploy 26 vs server-deploy
+0; atlas_redeploy 13 vs atlas-redeploy 10; server_patch 3 vs server-patch
+14 over the last 30 days. Swapping the two examples to
+`'research-report'`, `'app-patch'` steers new sessions to the canonical
+hyphenated form. Docstring-only; behaviour unchanged.
+
+**Side effects**: none. `_validate_enqueue_args` still accepts any
+non-empty string. The deeper enqueue-time normalization
+(`src/gateway/jobs.py`) remains stuck proposal 2f4f34c1, flagged out of
+scope by the retrospective.
+
+**Gotchas discovered**: none.
+
 ## 2026-09-03 — session._build_options: log effective ClaudeAgentOptions (INV-1 observability)
 
 **Files changed**: `src/runner/session.py`.
