@@ -2,6 +2,32 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-13 — atlas-firm-rollup: preload .context/PROJECT_PROTOCOL.md (review-and-improve proposal 2b51e8b1)
+
+**Agent task**: apply the `review-and-improve` context-files proposal
+`2b51e8b1-c6d7-43d6-8e75-aecd6fb1e7d2` from job `6cdb9de7`.
+
+**Files changed**:
+- `skills/atlas-firm-rollup/SKILL.md` — appended `.context/PROJECT_PROTOCOL.md`
+  to `context_files`. Rationale: file was Read on 6 of 8 runs (75%) in the
+  last 30 days. Preloading eliminates one Read tool call per run and aligns
+  the frontmatter with sibling atlas project-workspace skills
+  (`atlas-swing-trade`, `atlas-trader-paper`) that already carry the same
+  preload after the 2026-09-10 sweep.
+
+**Why**: closes the review-and-improve loop for the third and final
+atlas project-workspace skill (`atlas-firm-rollup`) — same pattern as the
+2026-09-10 sweep for its two siblings. `context_files` preloads content the
+session was already going to Read — same file, one turn earlier, no
+behavior change.
+
+**Side effects**: none. `.context/PROJECT_PROTOCOL.md` exists at
+`settings.server_root` (validator `registry/skills.py:109-115` and lint
+`scripts/lint_docs.py` both pass).
+
+**Gotchas discovered**: none — standard proposal-application pattern from
+the 2026-09-10 entry.
+
 ## 2026-09-10 — three atlas skill frontmatter tweaks (review-and-improve proposals from job ec792bc4)
 
 **Agent task**: apply three `review-and-improve` proposals from the
