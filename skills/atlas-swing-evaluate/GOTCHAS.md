@@ -56,3 +56,30 @@
   (D-0001 registers S1–S5 at `stage=candidate` in prose only). PROTOCOL §4
   demotions are then un-appliable. Flag it as a DECISION-REQUEST — seeding
   those rows is an engineering act, outside the frozen governor's authority.
+
+## Coverage denominator (learned G-0002, 2026-09-13)
+
+- Compute coverage from `assistant` **`jobs` rows, NOT `swing.runs` rows.**
+  Run rows are not 1:1 with sessions: `Executor._ensure_run_row`/`_report`
+  (swing/swing/executor.py:152,168) write a row **per executor invocation**,
+  with no per-slot guard. An agent that re-invokes `python -m swing.executor`
+  while troubleshooting silently forges an extra "session". Observed 09-10:
+  ONE `atlas-swing-trade` job produced TWO `screen` rows 20s apart (distinct
+  UUIDs, identical git_sha+config_hash). Grading off run rows would have
+  reported 9/8 slots — phantom over-coverage.
+- Corollary: before calling a run-row count a session count, cross-check it
+  against `jobs` rows for the same window. Discrepancy = re-invocation, not
+  double dispatch — confirm by counting jobs in the hour.
+- Order-level idempotency DOES exist (`executor.py:608`,
+  `find_orders_by_tag(tag) → continue`) keyed on setup/symbol/date/index, so a
+  re-run should not duplicate broker orders. But it has **never executed
+  against a broker** (0 orders lifetime) — another vacuous zero. Don't cite it
+  as proof re-runs are safe, and don't cry duplicate-order either; state both
+  halves.
+
+## Not-recurring ≠ fixed
+
+- A finding whose failure did not repeat this week is NOT closeable. DR-0004
+  (off-host watchdog) survived G-0002 only because the host stayed up — the
+  control is still absent, only the failure is. Close findings on evidence
+  that the control exists, never on a quiet week.
