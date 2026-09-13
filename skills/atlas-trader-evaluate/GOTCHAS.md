@@ -69,3 +69,46 @@ rewrite old entries.
   demotion thresholds: `v1_dailygate` **0.188521** (T-0008), NOT the
   `v1_monthend` control 0.307268 that T-0005 used. The executor runs the
   daily gate, so the correct thresholds are ~39% tighter.
+- 2026-09-13: run `select status, count(*) from trader.runs where ts >= ...
+  group by 1` EVERY week and treat `stale_data` as a failure, not a row.
+  Coverage ("did a row appear?") and productive coverage ("did the executor
+  finish its path?") are different numbers — T-0013 was 4/4 = 100% on the
+  first and 1/4 = 25% on the second. Always report both.
+- 2026-09-13: `stale_data` returns at executor step 5, BEFORE the kernel
+  (step 7) and the equity/benchmark snapshot (step 9). So a stale session
+  writes NO `equity_curve` row and NEVER evaluates `daily_loss_halt_pct` or
+  `max_drawdown_kill_pct` — the book sits unguarded. Step 4 still honours
+  *standing* halts; it is detection of a NEW breach that disappears. Never
+  read `stale_data` as "a safe no-op".
+- 2026-09-13: the usual cause of `stale_data` is `missing: ["SGOV"]`, and it
+  is structural, not market conditions. `settings.yaml` uses
+  `data_feed: iex` + `stale_quote_halt_minutes: 10`, and SGOV has near-zero
+  IEX market share — it had ZERO IEX prints in the 17:00–17:35Z band on 2 of
+  4 sessions in T-0013's week while SPY printed ~900. Confirm per session
+  with `GET data.alpaca.markets/v2/stocks/trades?symbols=SGOV&
+  start=<day>T17:00:00Z&end=<day>T17:35:00Z&feed=iex` and compare the last
+  print time against the 17:30Z run.
+- 2026-09-13: `ledgerlink.prior_close_equity` returns the last
+  `equity_curve` row that EXISTS, not the previous session. Every hole in the
+  curve silently widens the "daily" loss breaker's window (T-0013: 09-10's
+  check measured a 5-session move against a 1-day limit). When grading, always
+  recompute the true day-over-day equity path yourself before accepting
+  "0 breaker trips" — the trip counter is produced by a mechanism that may
+  have run on a minority of sessions.
+- 2026-09-13: T-0002 observable (a) admits `stale_data` as a SATISFYING
+  status, so it scores 100% in a week the executor worked once in four.
+  Score it as written anyway (PROTOCOL §1 — never re-read a sealed clause to
+  reach a preferred outcome, in either direction) and record the gap as a
+  card-design finding + proposal. Sealed cards are never amended; a successor
+  card is the only route.
+- 2026-09-13: cheap ex-dividend check for the benchmark pair — pull the same
+  bars twice, `adjustment=all` and `adjustment=split`, over the window. If
+  the two series are identical, no distribution went ex and F5 has zero
+  magnitude that week; if they differ, the split series understates total
+  return. Faster and more reliable than eyeballing for a ~29bp drop.
+- 2026-09-13: the skill's GOTCHAS/SKILL live in TWO places — the prod
+  checkout `skills/atlas-trader-evaluate/` (where sessions write) and the
+  atlas repo `integrations/ai-server/skills/atlas-trader-evaluate/` (the
+  staged copy). They drift: T-0010's six appends never reached the atlas copy
+  and were re-synced in T-0013. `diff` them at the start of every grade and
+  re-sync as part of the ledger commit.
