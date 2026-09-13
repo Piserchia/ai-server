@@ -1,6 +1,13 @@
 # atlas-report-sweep — Gotchas
 
-## `enqueue_job` MCP tool is NOT wired up in this skill (2026-08-23)
+## `enqueue_job` MCP tool is NOT wired up in this skill (2026-08-23 — RESOLVED 2026-09-12)
+
+**RESOLVED (2026-09-12, retrospective f4e2fdea, proposal 636e79a0)**: the
+`needs-dispatch-mcp` tag was added to the SKILL.md frontmatter, so the
+runner now injects `mcp__dispatch__enqueue_job` for this skill. Fan-out
+mode (step 2) works as designed; sequential fallback (step 3) is only
+exercised if the MCP wiring itself breaks. Historical context preserved
+below.
 
 **Symptom**: sweep session runs, tries to fan out, and finds no
 `mcp__dispatch__enqueue_job` tool. The skill's SKILL.md tells you to fall
