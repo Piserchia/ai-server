@@ -150,7 +150,8 @@ projects/<slug>/
 
 | I need to... | Read these |
 |---|---|
-| Understand the alpha-lab design (owner submits an alpha idea → autonomous triage/backtest chain → GO / NO-GO / BLOCKED-ON-DATA verdict memo; verdicts only, no build, no order path) — spec approved 2026-09-14, implementation not started | `docs/superpowers/specs/2026-09-14-alpha-lab-design.md` |
+| Understand the alpha-lab vertical (owner submits an alpha idea → autonomous triage/backtest chain → GO / NO-GO / BLOCKED-ON-DATA verdict memo; verdicts only, no build, no order path) — spec approved 2026-09-14 (see its Amendments section), implemented same day | `docs/superpowers/specs/2026-09-14-alpha-lab-design.md`; plan `docs/superpowers/plans/2026-09-14-alpha-lab-implementation.md`; atlas `alpha-lab/CLAUDE.md` |
+| Work on the alpha-lab loop skills | `skills/alpha-{intake,research,governor}/SKILL.md`; atlas `alpha-lab/evaluation/PROTOCOL.md` (binding) |
 
 ## Update this file
 

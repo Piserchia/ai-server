@@ -264,3 +264,30 @@ Defaults are deliberately conservative; the owner tunes the yaml directly.
    validation + verdict stages).
 4. `alpha-governor` + schedule row.
 5. End-to-end acceptance runs (§9), registry/doc updates, LOOP.md §6 lines.
+
+## Amendments (2026-09-14, discovered at implementation planning)
+
+1. **Intake is read-only + dispatch (§4 revised).** A router-created job
+   carries no `project_slug` payload, so a workspace-isolated intake
+   would clone the ai-server repo, not atlas
+   (`session._resolve_project`); an unisolated writer would need an
+   `UNISOLATED_WRITER_ALLOWLIST` entry in `scripts/lint_docs.py` — a
+   protected path. Intake therefore dedups read-only against the atlas
+   dev clone and dispatches a FILE-mode `alpha-research` job carrying
+   the idea text; the stage worker is the vertical's single writer.
+2. **Governor is workspace-isolated and DAILY (§6 revised).** Shared
+   dev-clone posture would also require the protected-path allowlist
+   edit; workspace isolation avoids it and adds guard hooks. Daily
+   (09:30 UTC) instead of weekly because chain resumption is the
+   governor's job: with a weekly governor, any cap-stall or crashed
+   stage would freeze a chain for up to a week, contradicting the
+   approved continuous-until-verdict pacing.
+3. **`max_alpha_jobs_per_day` default is 6, not 2 (§7 revised).** At 2,
+   a 5–7-job idea chain mathematically stalls to the governor every
+   day; 6 lets one idea traverse its whole chain within a day while
+   still bounding quota. Owner-tunable in `alpha-lab/config/budget.yaml`
+   as before.
+4. **Charter roster rows landed with their skills (Task 11 §3).** lint's
+   check_org_charters requires every skill to be claimed by exactly one
+   division charter, so the three atlas roster rows were added in the
+   same commits as their skills (Tasks 8–10), not at documentation time.
