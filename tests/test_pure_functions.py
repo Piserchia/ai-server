@@ -48,6 +48,12 @@ class TestRouter:
         ("new skill: daily BTC price summary", "new-skill"),
         ("brainstorm startup ideas", "idea-generation"),
 
+        # Alpha-lab intake (anchored prefix — unanchored "alpha" words must
+        # NOT match; "research alpha decay" stays a research-report)
+        ("alpha: overnight gap fades in small caps", "alpha-intake"),
+        ("alpha idea: VIX term structure inversion predicts SPY reversal", "alpha-intake"),
+        ("research alpha decay in momentum strategies", "research-report"),
+
         # Atlas operations
         ("redeploy atlas", "atlas-redeploy"),
         ("atlas redeploy please", "atlas-redeploy"),

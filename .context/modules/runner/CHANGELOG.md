@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-14 — router: alpha-lab intake rule
+
+Added anchored rule `^alpha( idea)?:` → `alpha-intake` (before the
+coding-intent rules; anchored so "research alpha decay…" keeps routing to
+research-report). Part of the alpha-lab vertical
+(docs/superpowers/plans/2026-09-14-alpha-lab-implementation.md).
+
 ## 2026-09-12 — mcp_dispatch: fix `enqueue_job` kind example to use hyphens
 
 **Agent task**: apply review-and-improve proposal 2f214c24 from
