@@ -146,6 +146,12 @@ projects/<slug>/
 |---|---|
 | Understand the pick'em league dashboard (CBS GraphQL ingest, prize/leaderboard engine, AI analysis lane) — **live** at pickem.chrispiserchia.com since 2026-09-10: site, `pickem-sync`/`pickem-analysis` skills and the 4×/week sync schedule (Sun/Mon/Tue/Fri 09:00 UTC) all shipped | `docs/superpowers/specs/2026-09-09-pickem-league-design.md`; project `~/Documents/repos/pickem` (its `.context/CONTEXT.md` + `CHANGELOG.md`); `.context/SKILLS_REGISTRY.md` |
 
+## Additions 2026-09-14 (alpha-lab — owner-idea triage vertical, DESIGN approved)
+
+| I need to... | Read these |
+|---|---|
+| Understand the alpha-lab design (owner submits an alpha idea → autonomous triage/backtest chain → GO / NO-GO / BLOCKED-ON-DATA verdict memo; verdicts only, no build, no order path) — spec approved 2026-09-14, implementation not started | `docs/superpowers/specs/2026-09-14-alpha-lab-design.md` |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
