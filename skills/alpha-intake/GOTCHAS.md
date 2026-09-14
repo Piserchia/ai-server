@@ -5,7 +5,9 @@
   clone the AI-SERVER repo, not atlas — that is why filing belongs to
   the dispatched FILE-mode alpha-research job, which carries the slug
   in its payload.
-- (2026-09-14, design) Plain-text Telegram messages go through
-  triage_plain_text; a very short "alpha: X" can be triaged to chat
-  instead of a task job. `/task alpha: <idea>` is the deterministic
-  path; mention it to the owner if an idea seems to have vanished.
+- (2026-09-14, corrected at final review) Plain-text "alpha: ..." messages
+  are safe: triage_plain_text consults the rule router FIRST, and the
+  alpha rule sits at the top of _RULES, so any "alpha:"-prefixed message
+  becomes a task job. The real front-door hazard was rule ORDERING
+  (plan-rule connectives like "and then" used to hijack prefixed ideas —
+  fixed 2026-09-14 by moving the alpha rule first).

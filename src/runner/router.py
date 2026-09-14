@@ -23,19 +23,23 @@ import re
 # Rule format: (pattern, skill_name). First match wins.
 # Patterns are lowercased regex fragments run against the lowercased description.
 _RULES: list[tuple[str, str]] = [
-    # ── Multi-step asks → the plan decomposer (checked FIRST: an ask that
-    #    needs decomposition should never be swallowed by a single-skill rule).
-    #    Kept deliberately narrow; the LLM fallback also returns "plan" for
-    #    complex asks that these regexes miss. ──
+    # ── Alpha-lab idea intake (FIRST: an explicit "alpha:" prefix is a
+    #    stronger intent signal than any heuristic below — plan-rule
+    #    connectives like "and then" occur naturally inside trading ideas
+    #    and must not hijack them. The ^ anchor means this rule can shadow
+    #    nothing else. route() lowercases+strips first. Unprefixed alpha
+    #    ideas reach alpha-intake via the LLM fallback on the skill's
+    #    description.) ──
+    (r"^alpha( idea)?:", "alpha-intake"),
+
+    # ── Multi-step asks → the plan decomposer (checked FIRST among the
+    #    remaining rules: an ask that needs decomposition should never be
+    #    swallowed by a single-skill rule). Kept deliberately narrow; the
+    #    LLM fallback also returns "plan" for complex asks these regexes
+    #    miss. ──
     (r"\bplan[:\s]", "plan"),
     (r"\b(and then|then also|after that)\b", "plan"),
     (r"\bmulti[- ]step\b", "plan"),
-
-    # ── Alpha-lab idea intake (anchored: only an explicit "alpha:" prefix
-    #    routes; route() lowercases+strips first, so ^ is the message start.
-    #    Unprefixed alpha ideas reach alpha-intake via the LLM fallback on
-    #    the skill's description.) ──
-    (r"^alpha( idea)?:", "alpha-intake"),
 
     # ── Coding intent (routes to app-patch which defaults to Opus 4.7 / high) ──
     (r"\b(write|implement|build|refactor|fix|debug|optimize|add|update|patch|rewrite)\s+"

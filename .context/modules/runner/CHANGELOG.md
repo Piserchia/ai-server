@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-14 — router: alpha rule moved to top of _RULES (final review)
+
+Final whole-branch review verified live that the plan-decomposer rules
+("and then", "then also") hijacked "alpha:"-prefixed ideas containing
+those connectives. The anchored alpha rule now runs first — it can
+shadow nothing (^ anchor). Two regression cases added.
+
 ## 2026-09-14 — router: alpha-lab intake rule
 
 Added anchored rule `^alpha( idea)?:` → `alpha-intake` (before the

@@ -51,7 +51,9 @@ Duties, in order:
 3. **Budget audit**: `cd alpha-lab && .venv/bin/python -m alphalab.cli
    audit`. Non-zero exit → append a PROTOCOL-VIOLATION ledger entry
    quoting the violation lines verbatim. A discrepancy is a finding to
-   report, never something to "fix" by editing state or ledger.
+   report, never something to "fix" by editing state or ledger. A
+   violation that is ledger-global (duplicate E-id, unknown type) cites
+   the sentinel first body line `Idea: -` instead of an idea id.
 4. **Verdict spot-check** (only when a DECISION entry is newer than the
    newest AUDIT entry): for the newest DECISION's idea, verify — the
    HYPOTHESIS card E-id precedes the first RESULT E-id; trials.jsonl

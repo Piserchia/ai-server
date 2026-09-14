@@ -53,6 +53,8 @@ class TestRouter:
         ("alpha: overnight gap fades in small caps", "alpha-intake"),
         ("alpha idea: VIX term structure inversion predicts SPY reversal", "alpha-intake"),
         ("research alpha decay in momentum strategies", "research-report"),
+        ("alpha: stocks that gap up and then fade after the open", "alpha-intake"),
+        ("alpha: buy the dip, then also hedge with puts", "alpha-intake"),
 
         # Atlas operations
         ("redeploy atlas", "atlas-redeploy"),

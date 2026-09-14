@@ -35,8 +35,10 @@ Mode from payload:
 - **`idea_text` present (FILE mode):** count non-terminal ideas
   (`ideas/*/state.json` with stage != "verdict"). At/over budget.yaml
   `max_active_ideas` → append the idea to `evaluation/INBOX.md` as an
-  unchecked `- [ ] <text> (owner, <today>)` line, commit, push, report
-  "queued at capacity"; STOP (no dispatch). Otherwise: assign the next
+  unchecked `- [ ] <text> (owner, <today>)` line (only if no identical
+  unchecked entry already exists — the governor may have dispatched you
+  from that very line), commit, push, report "queued at capacity"; STOP
+  (no dispatch). Otherwise: assign the next
   A-#### (max existing ideas/ id + 1, A-0001 if none), create
   `ideas/A-####/state.json` via `alphalab.state.new_state` (max_cycles
   from budget.yaml), record the idea in INBOX — checked, with
@@ -76,9 +78,12 @@ fills, walk-forward/purged CV, placebo M≥200, `manifest.json`
 provenance — PROTOCOL §3). Append trials.jsonl lines for EVERY variant
 evaluated, then RESULT and VERDICT ledger entries; increment
 cycles_used. Success or kill criterion met AS WRITTEN → advance to
-`validated`. Neither met, budget remaining → stay `backtesting` (the
-NEXT cycle needs an amended card first: new HYPOTHESIS entry, ≤2 params
-changed — that is the next job's first act). Budget exhausted → terminal
+`validated`. Neither met, budget remaining → stay `backtesting`. A repeat
+cycle's amended card (new HYPOTHESIS entry, ≤2 params changed) is that
+job's FIRST act and is committed AND pushed on its own BEFORE the cycle
+runs (PROTOCOL §2 seal-before-run); cycle jobs with an amended card
+therefore make TWO commits — card seal, then results — an explicit
+exemption from the one-commit rule below. Budget exhausted → terminal
 NO-GO "budget death" (deterministic; skip validation) → VERDICT
 close-out now.
 
@@ -100,14 +105,19 @@ further dispatch — the chain ends here.
 
 1. Gates: `cd alpha-lab && .venv/bin/python -m pytest -q` green;
    code-review subagent LGTM on any code diff; secrets grep. ONE
-   commit, footers `Alpha-Idea: A-####` + `Job: <job-id8>`.
+   commit, footers `Alpha-Idea: A-####` + `Job: <job-id8>`. Every
+   stage's state.json write also refreshes `last_advanced_at` (UTC
+   now) and `last_job_id` — the governor's liveness sweep keys on them;
+   a stale timestamp gets your chain double-dispatched.
 2. `git pull --rebase origin master`, then push (on reject: rebase,
    retry ONCE; still failing → report divergence, do NOT dispatch).
 3. Budget check: `psql assistant -tAc "SELECT count(*) FROM jobs WHERE
-   kind IN ('alpha-intake','alpha-research') AND created_at > now() -
+   kind = 'alpha-research' AND created_at > now() -
    interval '24 hours'"`. At/over budget.yaml `max_alpha_jobs_per_day`
-   → skip the dispatch and say "cap-stalled" in your summary (the daily
-   governor resumes it).
+   → skip the dispatch ("cap-stalled" in your summary; the daily
+   governor resumes it). The cap bounds stage jobs; intake jobs run
+   under kind 'task' (router) and are cheap, owner-initiated, and
+   self-limiting.
 4. Dispatch AFTER the push: `enqueue_job`, kind `alpha-research`,
    description `alpha-research: <next stage> A-#### — <short idea
    tag>`, payload `{"project_slug": "atlas", "idea_id": "A-####",
