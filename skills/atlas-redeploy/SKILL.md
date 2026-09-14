@@ -147,6 +147,21 @@ else
 fi
 ```
 
+Alpha-lab gate — same deterministic pattern (added 2026-09-14 with the
+alpha-lab vertical; manifest.yml declares it, this skill executes it):
+
+```bash
+if git -C "$ATLAS" diff --name-only "$RANGE_BASE..$AFTER" | grep -q '^alpha-lab/'; then
+  cd "$ATLAS/alpha-lab" || exit 1
+  if [ ! -x .venv/bin/python ]; then    # self-heal: venv is an allowed runtime-clone write
+    python3.12 -m venv .venv && .venv/bin/pip install -q pytest pyyaml
+  fi
+  .venv/bin/python -m pytest -q         # must be green
+else
+  echo "no alpha-lab/ changes in range — alpha-lab gate skipped"
+fi
+```
+
 **Any failure → STOP. Do not build, do not restart.** Summary = the failing output + the
 commit range, so the fix lands in the dev repo first.
 
