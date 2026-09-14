@@ -45,6 +45,7 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-firm-rollup` | worker | guarded-writer | Daily firm-vertical deterministic run: firm.cli rollup+check+liveness in workspace clone, verify firm.* rows, breach-first risk-officer report; advisory only, writes only schema firm (weekdays 19:15) |
 | `atlas-cio` | worker | guarded-writer | Weekly investment committee: firm spine + all governor grades → ONE attention-allocation memo (F-#### ledger entry + firm.decisions), owner DM digest; frozen evaluator, advisory ceiling per firm/FIRM_AUTHORITY.md (Mon 16:00) |
 | `alpha-intake` | worker | read-only | Owner alpha-idea intake for the atlas alpha-lab vertical: read-only dedup sweep over every vertical's ledger/trials in the atlas dev clone, then dispatches the first `alpha-research` stage job with the idea text in its payload. Write-free by design (router rule: `/task alpha: <idea>`) |
+| `alpha-research` | worker | guarded-writer | Alpha-lab stage worker: advances ONE idea exactly one lifecycle stage per job under alpha-lab/evaluation/PROTOCOL.md (file+triage → seal card → one backtest cycle w/ placebo + trials.jsonl → adversarial validation → verdict GO/NO-GO/BLOCKED-ON-DATA), then dispatches the next stage after the push (card sealed+pushed before any backtest — E-0032 discipline) |
 
 ## Standards
 
