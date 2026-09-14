@@ -9,6 +9,71 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: `review-and-improve` fails with `error_max_turns (30)` after finishing data-gathering
+
+### Root cause (diagnosed 2026-09-14, job `a1292d78`, self-diagnose child `f9a74701`)
+
+The skill's Procedure gathered all 6 SQL snapshots in ~20 turns, identified a real
+defect (server_deploy sleep-20 too short → 17.9% SIGTERM failures), then died
+trying to record the finding. Two orthogonal defects collide:
+
+1. **Design conflict**: Rec 10 "Proposal tracking" tells the agent to call
+   `src.runner.proposals.insert_proposal(...)` for dedup — a database write.
+   But the skill's frontmatter is `privilege_class: read-only`, whose profile
+   correctly blocks `psql INSERT` and `pipenv run python3` calls that mutate
+   state. The skill's own Gotchas even say "Read-only, hook-enforced: you
+   cannot and should not modify files. Your output is analysis and a dispatch."
+   Yet Rec 10 requires a mutating call. There is no path through that succeeds
+   from a read-only session.
+2. **Guard false-positive amplifier**: the first `pipenv run python3` attempt
+   embedded the string `'nohup sleep 20 && launchctl kickstart -k … runner'`
+   in the *rationale* passed to `insert_proposal`. The `launchctl` mutation
+   guard regex (`\blaunchctl\b[^\n;|&]*\b(?:kickstart|kill|…)`) matches on
+   the raw command string with no awareness of heredoc quoting, so it fired
+   on the description of the bug rather than a real command. The agent then
+   retried with direct `psql INSERT` → correctly blocked by the write-verb
+   guard → out of turns.
+
+### Recovery (this run — nothing user-facing broke)
+
+- The interesting finding (`server_deploy` step-4 `sleep 20` vs. post-nohup
+  writes) is preserved here so it isn't lost when the audit log ages out.
+- The event-triggered self-diagnose burned no additional resources fixing;
+  see risk classification below.
+
+### Fix (owner approval required — both files are protected paths)
+
+- **Preferred (skill fix, `skills/review-and-improve/SKILL.md`)**: drop the
+  in-session `insert_proposal` call entirely. Move the proposals-table
+  insert into the dispatched `server-patch` job's payload/handler — that
+  job already has write privileges and is the natural place to record a
+  proposal it's about to implement. Keep `find_recent_duplicate` (SELECT-only)
+  in the read-only session for dedup. This resolves defect #1 permanently.
+- **Alternative (guard whitelist)**: add a narrow write allowance for
+  `INSERT INTO proposals` in `src/runner/guards.py`'s read-only profile. Less
+  clean — proposals is metadata, but every widening of a read-only profile
+  weakens the "no state change" contract; prefer the skill fix.
+- **Independent (guard robustness)**: consider making the `launchctl`
+  mutation regex ignore matches inside `<<'HEREDOC'`-bounded ranges. Low
+  priority; workaround = don't embed shell mutation keywords in text
+  payloads. Both files (`SKILL.md`, `guards.py`) are protected paths, so
+  this needs a human-approved `server-patch` — no autonomous merge.
+
+### Companion finding to preserve
+
+Before dying, the session diagnosed `server_deploy`'s 5/28 (17.9%) failures
+in the last 30 days: every failure is exit 143 (SIGTERM), followed within
+~90s by a same-commit retry that succeeds. Latest example `f937e1d5`
+(2026-09-14 18:17): step 4 fires `nohup sleep 20 && launchctl kickstart -k
+… runner` at 18:18:22; kickstart lands at 18:18:42; a `Write GOTCHAS.md`
+started at 18:18:39 is cut off at 18:18:43 when the runner restart tears
+down the SDK session. Fix candidate: bump step-4 `sleep 20` → `sleep 60`
+in `skills/server-deploy/SKILL.md`, or reorder so runtime GOTCHAS/CHANGELOG
+writes happen *before* the nohup fires. Expected impact: 17.9% → ~0-2%.
+Also a protected-path fix.
+
+---
+
 ## Symptom: `atlas-value-monitor` fails with `error_max_turns (30)` on `provisioning_gap` monitor output
 
 ### Root cause (diagnosed 2026-09-09, job `b1f8cf18`, self-diagnose child `31d5784f`)
