@@ -46,6 +46,7 @@ deploys. Atlas is a product sub-org with its own dev-repo topology
 | `atlas-cio` | worker | guarded-writer | Weekly investment committee: firm spine + all governor grades → ONE attention-allocation memo (F-#### ledger entry + firm.decisions), owner DM digest; frozen evaluator, advisory ceiling per firm/FIRM_AUTHORITY.md (Mon 16:00) |
 | `alpha-intake` | worker | read-only | Owner alpha-idea intake for the atlas alpha-lab vertical: read-only dedup sweep over every vertical's ledger/trials in the atlas dev clone, then dispatches the first `alpha-research` stage job with the idea text in its payload. Write-free by design (router rule: `/task alpha: <idea>`) |
 | `alpha-research` | worker | guarded-writer | Alpha-lab stage worker: advances ONE idea exactly one lifecycle stage per job under alpha-lab/evaluation/PROTOCOL.md (file+triage → seal card → one backtest cycle w/ placebo + trials.jsonl → adversarial validation → verdict GO/NO-GO/BLOCKED-ON-DATA), then dispatches the next stage after the push (card sealed+pushed before any backtest — E-0032 discipline) |
+| `alpha-governor` | worker | guarded-writer | Daily alpha-lab governor (09:30 UTC): resume stalled idea chains (26h staleness, double-dispatch guarded via jobs query), drain INBOX hand-edits within capacity caps, budget audit via `alphalab.cli audit` (discrepancy = PROTOCOL-VIOLATION entry), verdict evidence spot-check, AUDIT ledger appends (workspace-isolated, project_slug: atlas) |
 
 ## Standards
 

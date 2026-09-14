@@ -170,6 +170,18 @@ upsert 'atlas-value-evaluate' '0 17 * * 0' 'atlas-value-evaluate' 'atlas-value-e
 # change this cadence, revisit that constant or the site cries wolf/goes mute.
 upsert 'pickem-sync' '0 9 * * 0,1,2,5' 'pickem-sync' 'Pickem CBS sync (Sun/Mon/Tue/Fri post-slate)'
 
+# ── Alpha-lab (atlas alpha-lab/, owner-idea triage vertical, 2026-09-14) ───
+# The research chain is dispatch-driven (intake -> stage job -> next stage);
+# only the governor is cron'd. DAILY so cap-stalled or crashed chains resume
+# within a day (continuous-until-verdict pacing, spec 2026-09-14 as
+# amended). 09:30 UTC is clear every day: managers 06:00, pickem-sync 09:00
+# (Sun/Mon/Tue/Fri), builds 10:00 (Tue/Fri), 11:00 loop block, daily-brief
+# 12:00. Workspace-isolated with project_slug (unlike the weekly vertical
+# governors): it writes only ledger AUDIT appends + dispatches, and the
+# clone posture avoids an UNISOLATED_WRITER_ALLOWLIST entry in
+# lint_docs.py (protected path).
+upsert 'alpha-governor' '30 9 * * *' 'alpha-governor' 'alpha-governor: daily alpha-lab governor -> resume stalled idea chains, drain INBOX, budget audit via alphalab.cli, verdict spot-check (skills/alpha-governor)' '{"project_slug":"atlas"}'
+
 echo "Schedules seeded."
 echo ""
 echo "NOTE: review-and-improve runs via idle-queue trigger in events.py"
