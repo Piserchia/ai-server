@@ -219,3 +219,41 @@ migration. That is deploy *lag*, which costs nothing, not deploy *drift*, which 
 
 Read the range before scoring it. The line that separates the two is: does it contain a migration or
 app code? If not, say so explicitly in the scorecard so the next run does not re-raise it.
+
+## The `assistant` schema in this file's example SQL is wrong — check `\d` first (2026-09-14)
+
+Three column names used by the procedure's own example queries do not exist:
+
+- `jobs.finished_at` → the column is **`completed_at`**
+- `schedules.cron` → the column is **`cron_expression`**
+- `feed_status.status` → there is **no** status column. Derive freshness:
+  `CASE WHEN last_success IS NULL THEN 'NEVER'
+        WHEN now()-last_success > stale_after THEN 'STALE' ELSE 'FRESH' END`
+
+And in the `atlas` DB the domain tables are **plural**: `assets`, `holdings` (not `asset`/`holding`).
+Open with `psql assistant -c '\d jobs'` / `\dt public.*` rather than trusting a remembered column
+name; each wrong guess costs a round trip and the psycopg error names the column, not the fix.
+
+## macOS has no `shuf` and no `timeout` (2026-09-14)
+
+Both appear in habit-formed one-liners and both fail with `command not found` on the Mini. Sample a
+file with `awk 'NR%36==1'` instead of `shuf -n`; for pytest just run it without a timeout wrapper
+(the suite is ~45s). `gtimeout` exists only if coreutils is installed — do not assume it.
+
+## A `completed` job can leave its whole output uncommitted in the shared tree (2026-09-14)
+
+The 09-13 `atlas-value-evaluate` job wrote a complete G-0004 grade into `value/evaluation/LEDGER.md`
+and exited `completed` without committing. This run met it as
+`error: cannot pull with rebase: You have unstaged changes` on the opening command.
+
+Do **not** stash or discard. Check for a live sibling first (`.git/index.lock`, rebase-in-progress,
+and the owning job's status in `jobs`) — if a job is still running, stop and report per the
+shared-working-tree rule. If the owner has finished, the content is orphaned work: commit it
+**verbatim** under its own message attributing the originating job, then proceed with your pull. It
+is also a `[ops]`-class finding for the scorecard, not just a chore.
+
+## Closing order is stage → commit → pull --rebase → push (2026-09-14)
+
+The SKILL text reads `git pull --rebase origin master && git push origin master` as the last
+commands. Taken literally that fails on your own dirty tree — you have just written the scorecard,
+the backlog, the matrices and the CHANGELOG. Commit first, then rebase, then push.
