@@ -15,3 +15,16 @@
   Same family: with 3 active chains + the governor all appending to one
   LEDGER.md, occasional rebase conflicts on push are expected — report,
   never force; the daily governor resumes the stalled chain.
+- (2026-09-14, A-0001 triage, ledger E-0002) Daily-frequency survivorship-aware
+  backtests ARE feasible on the free tier (SEC company_tickers.json universe +
+  EDGAR formerNames[] point-in-time naming + near-universal free daily-bar
+  retention per momentum E-0026) — do not reflexively verdict BLOCKED-ON-DATA
+  on survivorship grounds; measure first. Corollary from A-0002: historical
+  SIP consolidated top-of-book quotes are also free (nanosecond timestamps);
+  the honest free ceiling for microstructure is ~60-80ms top-of-book, not
+  "no tick data".
+- (2026-09-14, A-0002) An in-session code-review CHANGES REQUESTED on probe
+  code triggers a fix→rerun→re-review loop that can blow the 45-min budget
+  (A-0002 ran ~80 min). Budget for it: run probes early, keep them small, and
+  if the clock is gone after fixes, seal what is reviewed and let the chain
+  resume rather than rehashing.
