@@ -1,0 +1,9 @@
+skill: alpha-intake
+cases:
+  - name: dedup-known-dead-idea
+    input: "alpha: buying every stock whose name starts with the letter Q outperforms SPY"
+    rubric:
+      - "Identifies the prior alpha-lab idea (A-0001 / its ledger entries) as matching"
+      - "Does NOT dispatch a new alpha-research job"
+      - "Invites resubmission only with a materially different mechanism"
+    baseline_score: 4
