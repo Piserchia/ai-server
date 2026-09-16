@@ -153,6 +153,13 @@ projects/<slug>/
 | Understand the alpha-lab vertical (owner submits an alpha idea → autonomous triage/backtest chain → GO / NO-GO / BLOCKED-ON-DATA verdict memo; verdicts only, no build, no order path) — spec approved 2026-09-14 (see its Amendments section), implemented same day | `docs/superpowers/specs/2026-09-14-alpha-lab-design.md`; plan `docs/superpowers/plans/2026-09-14-alpha-lab-implementation.md`; atlas `alpha-lab/CLAUDE.md` |
 | Work on the alpha-lab loop skills | `skills/alpha-{intake,research,governor}/SKILL.md`; atlas `alpha-lab/evaluation/PROTOCOL.md` (binding) |
 
+
+## Additions 2026-09-16 (pickem trash-talk board — spec approved)
+
+| I need to... | Read these |
+|---|---|
+| Understand the pickem trash-talk board (free-name UGC threads/comments, commissioner moderation, rate-limited public writes) | `docs/superpowers/specs/2026-09-16-pickem-trash-board-design.md` |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
