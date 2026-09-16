@@ -154,7 +154,7 @@ projects/<slug>/
 | Work on the alpha-lab loop skills | `skills/alpha-{intake,research,governor}/SKILL.md`; atlas `alpha-lab/evaluation/PROTOCOL.md` (binding) |
 
 
-## Additions 2026-09-16 (pickem trash-talk board — spec approved)
+## Additions 2026-09-16 (pickem trash-talk board — LIVE same day)
 
 | I need to... | Read these |
 |---|---|
