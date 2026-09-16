@@ -3162,6 +3162,88 @@ circuit on the shared-timestamp fingerprint before
 tool-calling deep. Live-probe gate + self-suppress
 guard STILL un-landed after 88 recurrences.)
 
+## Symptom: `atlas-daily-brief` fails with `error_max_turns (14)` on the happy path — `atlas-dash packet` succeeds, brief is written and chat-saved, session dies before final summary
+
+### Root cause (diagnosed 2026-09-16, jobs `7cbba04c` + escalation child `0e733c68`, self-diagnose `c3722f18`)
+
+Two consecutive runs today (08:00 schedule + 08:02 opus/high escalation) failed
+IDENTICALLY: both completed all substantive work — three gathers succeeded
+(`chat-context --market`, `packet` returned 118 KB, `signals`), a 203-word brief
+was authored, `chat-save --market --content-file` returned a message id and
+`SAVED` — then hit `max_turns: 14` before the model could emit its final
+assistant text (the message that becomes the Telegram summary). Escalation to
+`claude-opus-4-7 effort:high` blew the same budget the same way; this is not a
+model capability issue.
+
+Turn-by-turn (parent `7cbba04c`, 26 assistant turns / 55 lines):
+- Turns 1–3: happy path (3 gathers in parallel, DB scout count) → all OK
+- Turns 4–9: SIX successive `python3 -c` inspections of the packet JSON shape
+  (top-level keys → packet keys → per_asset structure → totals → per_asset
+  rows → glossary type), because the skill doesn't tell the session what the
+  packet actually contains
+- Turns 10–12: extract trailing market chat / last user messages / glossary
+  entries — legitimate context for the brief
+- Turn 13: Write /tmp/brief-<job>.md
+- Turn 14: chat-save (SUCCESS)
+- No turn left for final assistant text → `error_max_turns: 14`
+
+Same shape in child `0e733c68` (opus): 20 tool_use blocks across 14 turns,
+same JSON-key-exploration detour, same terminal chat-save before the budget
+ran out.
+
+The seven prior daily runs 2026-09-08 → 2026-09-15 finished under 14 turns
+because the model got the packet shape right on fewer inspection passes; this
+is intermittent-under-tight-budget, same class as the `_writeback` /
+`_learning_apply` / `atlas-value-monitor` recurrences (see other sections).
+
+Distinct from the 2026-08-04 failure at this budget (that one was
+`atlas-dash packet` raising `decimal.InvalidOperation` — fixed and deployed;
+today's packet returned 118 KB cleanly).
+
+### Fix (proposed — server code, needs dev-repo commit + `/task deploy server`)
+
+Two changes in `skills/atlas-daily-brief/SKILL.md`, both belong in the dev
+repo (`~/Documents/repos/ai-server`):
+
+1. **Frontmatter**: `max_turns: 14` → `max_turns: 24`. Headroom for the
+   inspection detours the current prompt implicitly invites, matching the
+   `atlas-value-monitor` bump (20 → 30) from 2026-09-08.
+2. **Prompt hardening (durable answer)**: document the packet & chat-context
+   JSON schemas inline in the skill so sessions don't need to inspect
+   `list(pk.keys())` six times. Add a "Data shapes you'll receive" section
+   between step 1 (Gather) and step 2 (Author) listing the fields the brief
+   actually uses (VIX, VIX3M, MOVE, HY_OAS, per_asset totals, glossary
+   entries for MVRV_Z / NUPL, glossary type, last N chat messages).
+
+Optional third change: teach the skill to author the brief in the final
+assistant text rather than writing `/tmp/brief-<job>.md` + `chat-save
+--content-file` — saves 2 turns, but changes the delivery contract to the
+`/indicators` market chat.
+
+### Diagnostic (repro)
+```bash
+JOB=<job_id>
+python3 -c "
+import json
+lines = open('volumes/audit_log/${JOB}.jsonl').readlines()
+turns = sum(1 for l in lines if json.loads(l).get('kind')=='tool_use')
+last = json.loads(lines[-2]); fail = json.loads(lines[-1])
+print(f'tool_uses={turns} last_tool={last.get(\"tool_name\")} last_result_ok={last.get(\"input\") is not None} err={fail.get(\"error\")}')
+"
+# → tool_uses=20 last_tool=Bash err=error_max_turns (14)   — the smoking gun:
+#   work finished, no turn left for the final assistant summary
+```
+
+### Recurrence guard
+
+If the frontmatter bump lands and this recurs, the durable answer is prompt
+hardening (schema documentation) — not raising `max_turns` further.
+Recurrence count so far: 2 (`7cbba04c`, `0e733c68`, both 2026-09-16 within 2
+minutes of each other; count parent + escalation-child as one event since
+the child inherits the same skill body).
+
+---
+
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
 ### Diagnostic
