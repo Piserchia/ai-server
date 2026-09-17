@@ -1,5 +1,14 @@
 # atlas-redeploy CHANGELOG
 
+## 2026-09-17 — deploy 5e8d3b0..16966f8 (quant adversarial-audit remediation + R-0005..R-0008)
+
+- Range: 2 commits — fix(quant): adversarial-audit remediation (real fills check, turnover/cost-drag, live sizing config, redeploy dispatch step, cadence/tripwire fixes); research(quant): weekly sweep R-0005..R-0008 (4/4 REJECT, health clean, D-0001 filed)
+- No migrations
+- Gates: dashboard pytest 233 passed ✅; pmedge pytest 45 passed ✅; quant pytest 72 passed, 1 skipped ✅ (triggered by quant/ path change); web build SKIPPED (no web/ changes)
+- Services restarted: atlas-dash-scheduler (pid 91925) → RUNNING ✅; atlas + atlas-pm-edge already running
+- Healthcheck: / → 200 ✅
+- Marker advanced: 16966f88c31f821cdacb6e609fc85a0b2cb72471
+
 ## 2026-09-01 — deploy 3fdb696..ce82c14 (firm vertical)
 
 - Range: 11 commits — feat(firm): full vertical scaffold (migration 0049, books/risk/rollup/liveness/cli, advisory-ceiling guard, CIO+risk-officer charters, atlas-cio+atlas-firm-rollup loop skills); feat(web): /firm consolidated risk-book page + Nav link; tradingcore.marks graduated from advisors; knowledge role-archetype handbooks
