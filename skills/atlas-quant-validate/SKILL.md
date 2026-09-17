@@ -18,7 +18,7 @@ role: worker
 division: atlas
 privilege_class: guarded-writer
 context_files: ["skills/atlas-quant-validate/GOTCHAS.md"]
-tags: [atlas, quant, research, scheduled-capable]
+tags: [atlas, quant, research, scheduled-capable, needs-dispatch-mcp]
 ---
 
 # atlas-quant-validate — run the desk, report the verdicts
@@ -47,8 +47,16 @@ Procedure, in order:
    LEDGER.md entries; message `research(quant): weekly sweep R-#### ..`
    with footer `Job: <job-id8>`. `git pull --rebase origin master`, push
    (one retry on reject; still failing → report divergence, do NOT force).
+6. **Surface the reports**: if the sweep produced new R-#### directories,
+   dispatch ONE gated redeploy via `enqueue_job` (kind `atlas-redeploy`,
+   description `redeploy atlas: surface weekly quant sweep <R-ids> on
+   /quant`, no payload) — the /quant page reads the runtime clone's
+   filesystem, which only advances on a redeploy (2026-09-17 audit
+   finding: without this the page trails the desk by a week). The
+   redeploy's own gates keep old code serving on any red.
    Final message = Telegram TL;DR: per-strategy verdict + DSR + worst
-   fold, any HALT from the health pass, any BLOCKED with its reason.
+   fold, any HALT from the health pass, any BLOCKED with its reason, and
+   the dispatched redeploy job id.
 
 ## Gotchas
 

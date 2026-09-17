@@ -303,3 +303,11 @@ in prod paths, lint_docs PASS.
   autonomously. Design decisions D1–D7 taken under that delegation; the
   LOOP.md/CLAUDE.md `[system]` edits it requires are recorded as
   owner-authority actions in the final report.
+- 2026-09-17 (post-adversarial-audit corrections): governor cadence shipped
+  as Tue **12:20** UTC (not 10:20 as §7 first read) to clear the Tue 10:00
+  atlas-build slot. The desk shipped ARMED at birth under the delegation
+  above; steady-state switch flips are owner-only (LOOP.md §6). The
+  validate skill gained a post-push gated redeploy dispatch so /quant
+  surfaces each sweep (the page reads the runtime clone). The critic's
+  `fills` check now audits real OHLC containment when bars are supplied.
+  Findings register: `docs/QUANT_STACK_ADVERSARIAL_2026-09-16.md`.
