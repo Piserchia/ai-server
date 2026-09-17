@@ -182,6 +182,16 @@ upsert 'pickem-sync' '0 9 * * 0,1,2,5' 'pickem-sync' 'Pickem CBS sync (Sun/Mon/T
 # lint_docs.py (protected path).
 upsert 'alpha-governor' '30 9 * * *' 'alpha-governor' 'alpha-governor: daily alpha-lab governor -> resume stalled idea chains, drain INBOX, budget audit via alphalab.cli, verdict spot-check (skills/alpha-governor)' '{"project_slug":"atlas"}'
 
+# ── Quant validation desk (atlas quant/, 2026-09-16 spec) ──────────────────
+# The vertical's TURN-ON SWITCH is three-layered (quant/CLAUDE.md): these
+# rows (pause/resume — the seeder never un-pauses), quant/config/
+# settings.yaml `enabled` (cli preflight no-ops when false), and the Rule-1
+# grep tripwire in the deploy gate. Sun 14:10 is clear of the Sunday
+# governor block (15:00/16:00/17:00/18:00); Tue 12:20 sits between
+# atlas-build (10:00) and value-research (13:00).
+upsert 'atlas-quant-validate' '10 14 * * 0' 'atlas-quant-validate' 'atlas-quant-validate: weekly validation-desk sweep -> quantlab stack (costed backtest, walk-forward worst-fold, 8-check critic, deflated Sharpe vs lifetime N) -> R-#### reports + health pass, commit+push, TL;DR (skills/atlas-quant-validate)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
+upsert 'atlas-quant-governor' '20 12 * * 2' 'atlas-quant-governor' 'atlas-quant-governor: weekly quant-desk audit -> validate-row liveness, trials-before-report ordering, independent DSR recompute from metrics.json (mismatch = PROTOCOL-VIOLATION), FLAG acknowledgement, AUDIT ledger entry (skills/atlas-quant-governor)' '{"project_slug":"atlas"}'
+
 echo "Schedules seeded."
 echo ""
 echo "NOTE: review-and-improve runs via idle-queue trigger in events.py"
