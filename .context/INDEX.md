@@ -160,7 +160,6 @@ projects/<slug>/
 |---|---|
 | Understand the quant validation desk (the "$200K quant stack": pure-stdlib backtest engine with the shift(1) law + turnover costs, Sharpe/MDD/Calmar metrics, Bailey–López de Prado Deflated Sharpe vs lifetime trial N, walk-forward judged on the worst fold, 8-check leakage critic, sizing + pre-committed kill conditions, weekly automated reports at atlas /quant; three-layer turn-on switch; no order path ever) | `docs/superpowers/specs/2026-09-16-quant-stack-design.md`; plan `docs/superpowers/plans/2026-09-16-quant-stack-implementation.md`; atlas `quant/CLAUDE.md` + `quant/evaluation/PROTOCOL.md` |
 | Work on the quant loop skills | `skills/atlas-quant-{validate,governor}/SKILL.md` (staged byte-identical from atlas `integrations/ai-server/`) |
-| See the adversarial execution review of the build | `docs/QUANT_STACK_ADVERSARIAL_2026-09-16.md` |
 
 ## Additions 2026-09-16 (pickem trash-talk board — LIVE same day)
 
