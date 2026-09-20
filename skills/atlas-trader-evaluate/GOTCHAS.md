@@ -112,3 +112,46 @@ rewrite old entries.
   staged copy). They drift: T-0010's six appends never reached the atlas copy
   and were re-synced in T-0013. `diff` them at the start of every grade and
   re-sync as part of the ledger commit.
+- 2026-09-20: the SGOV freshness clock is the last **ROUND-LOT** print, not
+  the last print. `/v2/stocks/trades/latest` (what `alpaca.get_latest_trades`
+  calls) honours the consolidated-tape convention and excludes odd lots
+  (condition `I`), so T-0013's "count IEX prints in the 17:00–17:31Z band"
+  method OVERSTATES freshness and mispredicts: 09-18 had a print 8m10s before
+  the run (inside the 10-min limit → predicts `ok`) but the row is
+  `stale_data`, because that print was 4 shares and the last qualifying print
+  was 34m old. Always filter `"I" not in t["c"]` before computing staleness.
+  With the filter, all five sessions of T-0017's week resolve exactly.
+- 2026-09-20: the paper account credits **no distributions at all**. `GET
+  paper-api.alpaca.markets/v2/account/activities` (unfiltered) returned 20
+  lifetime rows — 18 `FILL`, 1 `FEE`, 1 `JNLC`, **zero `DIV`** — while two
+  ex-dates passed with the positions held (SGOV 09-01 $0.305×99, SPY 09-18
+  $1.89×117 = $251.33 = 25bp of opening equity, never received). So
+  `equity_curve.equity` is a PRICE-return series too. Check the activity feed
+  before quoting any total-return comparison; `cash` sitting unchanged for
+  weeks is the cheap tell.
+- 2026-09-20: **correction to the 2026-09-07 F5 entry** — the benchmark
+  price-vs-total-return error is NOT one-directional. Because the book itself
+  receives no distributions (see above), the error flatters the book against
+  **SPY** (both sides understated; the book, at ~89.5% SPY, slightly less) and
+  **penalises** it against **BIL** (book understated ~22bp, BIL unaffected
+  when no bill-fund ex-date falls in the window). T-0017: +10.2bp/−85.2bp on
+  the price convention vs +7.6bp/−63.1bp corrected. Always state which
+  convention the grade used.
+- 2026-09-20: `trader.orders` rows stuck at `pending_new` are NOT missing
+  data — the fills are at the broker. `GET /v2/account/activities?
+  activity_types=FILL` reconciles 1:1 to `broker_order_id` with qty and price
+  (T-0017: all 10 rows fully filled, SPY vwap 765.6799). Before carrying
+  observable (c) as "unscorable" another week, check the broker; the
+  distinction between "no data" and "unreconciled data" is the whole finding.
+- 2026-09-20: a week can arrive where **neither** benchmark endpoint exists in
+  `equity_curve` (T-0017: both 09-11 and 09-18 were `stale_data`). Reconstruct
+  from the last IEX print before 17:31Z and VALIDATE the method on the days
+  the record does contain — T-0017 reproduced `bil_close` exactly and
+  `spy_close` to 0.3–1.6bp on 09-14/09-15, and reproduced T-0013's
+  independently-derived 09-11 SPY mark to the cent. Say in the entry that the
+  pair was rebuilt; a grade that must rebuild the mandated pair is a failing
+  result on its own terms.
+- 2026-09-20: BIL is thin on IEX too — **zero** prints in the 17:00–17:31Z
+  band on 09-18 and 7 all session. Widen the tape query to the full day when
+  pulling a BIL mark, and state the mark's age (09-18's was 1h39m stale, ≤1bp
+  of distortion on an instrument that moves ~1bp/day, but say it).
