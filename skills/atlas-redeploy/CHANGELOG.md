@@ -1,5 +1,13 @@
 # atlas-redeploy CHANGELOG
 
+## 2026-09-20 — deploy ad3ee7b..f91b519 (quant weekly sweep R-0009..R-0012 + swing C-0003 close-out)
+
+- Range: 4 commits — research(quant): weekly sweep R-0009..R-0012 (4/4 REJECT, sma_gate first DSR crossing); research(swing): C-0003 close-out INDETERMINATE; chore(advisors): 2026-09-19 digest; docs(swing): trade run blocked gotcha
+- Gates: dashboard 472 passed, pmedge 67 passed, quant 72 passed/1 skipped, swing 72 passed — all green
+- Web build: skipped (no web/ changes in range)
+- Services restarted: none (no web/dashboard/pmedge changes); all 3 services confirmed RUNNING, healthcheck 200
+- Marker advanced to f91b519
+
 ## 2026-09-17 — deploy 5e8d3b0..16966f8 (quant adversarial-audit remediation + R-0005..R-0008)
 
 - Range: 2 commits — fix(quant): adversarial-audit remediation (real fills check, turnover/cost-drag, live sizing config, redeploy dispatch step, cadence/tripwire fixes); research(quant): weekly sweep R-0005..R-0008 (4/4 REJECT, health clean, D-0001 filed)
