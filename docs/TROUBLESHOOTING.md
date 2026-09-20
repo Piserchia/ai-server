@@ -3416,6 +3416,62 @@ Job status is not proof of output. Watchdogs must check artifacts:
 schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
 open follow-up.
 
+## Symptom: `volumes/telemetry/schedule_adherence.json` reports `findings: []` and `launchctl list` shows `com.assistant.schedule-monitor` last exit **0**, but the file's `generated_at` is days or weeks old
+
+Found 2026-09-20 by the swing governor (atlas LEDGER G-0003). The
+schedule-adherence watchdog had failed **every launchd run since 2026-09-02** —
+15 consecutive firings, all `rc=127` — while presenting as perfectly healthy.
+Its artifact stayed frozen at `2026-09-01T21:26Z` and kept answering
+`findings: []` for all 33 schedules. Tally over the whole log:
+`rc=0 × 1, rc=127 × 15`; the single success was an *interactive* run, which is
+why it was never caught.
+
+Two independent defects, both required for the failure to stay invisible:
+
+1. **`pipenv` is unreachable in the launchd environment.** It lives only inside
+   the project virtualenv
+   (`~/.local/share/virtualenvs/ai-server-bpzo5SVu/bin/pipenv`), which is not in
+   the PATH that `scripts/schedule-monitor.sh:12` exports
+   (`/opt/homebrew/bin:…:/sbin:$PATH`). Reproduce:
+   `env -i PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" bash -c 'command -v pipenv'`
+   → nothing. Interactively it resolves, so manual testing always passes.
+2. **The script swallows collector failure by design.**
+   `scripts/schedule-monitor.sh:25` is
+   `(( rc != 0 )) && exit 0   # collector failure already logged; not a finding`.
+   A dead collector therefore returns success to launchd, sends **no owner DM**,
+   and leaves the previous artifact in place to be read as current.
+
+Blast radius: `skills/atlas-firm-rollup/SKILL.md:74` consumes that artifact, so
+the firm rollup reported fleet schedule health as green off a file that predated
+the reporting period. Treat all schedule-adherence assurances dated after the
+artifact's `generated_at` as void and re-derive from `jobs` rows.
+
+### Diagnosis
+
+```bash
+cd "$SRV"
+python3 -c "import json;print(json.load(open('volumes/telemetry/schedule_adherence.json'))['generated_at'])"
+grep -oE 'rc=[0-9]+' volumes/logs/schedule-monitor.log | sort | uniq -c
+```
+
+`launchctl list` is **not** evidence here — a script that `exit 0`s on internal
+failure always looks green there. Read the script's own log.
+
+### Fix
+
+Invoke the venv interpreter directly instead of resolving `pipenv` from PATH
+(the pattern the other plists already use — see `skills/server-deploy/SKILL.md`
+"pipenv in launchd context"), and replace the `(( rc != 0 )) && exit 0` branch
+with a P0 alert path that DMs the owner and exits non-zero. Code change: goes
+through the dev repo under the normal server-patch lane.
+
+### Prevention
+
+A watchdog that cannot run must be its own loudest finding. Any consumer of a
+telemetry artifact must compare `generated_at` against now and refuse to report
+green on a stale file — staleness is a finding, not an absence of findings. Same
+class as the 08-17 governor-dark incident: silence read as health.
+
 ## Adding entries to this file
 ## Symptom: `atlas-momo-research` hits `session_timeout` at 60 min while the engineer probe is still running
 

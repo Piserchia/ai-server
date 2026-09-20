@@ -77,6 +77,27 @@
   as proof re-runs are safe, and don't cry duplicate-order either; state both
   halves.
 
+## The watchdog itself (learned G-0003, 2026-09-20)
+
+- `volumes/telemetry/schedule_adherence.json` being stale is not a hypothetical:
+  as of G-0003 it had been frozen at `2026-09-01T21:26Z` for **19 days** while
+  still reporting `findings: []`. Root cause, reproduced: `pipenv` lives only in
+  the project venv (`~/.local/share/virtualenvs/ai-server-*/bin/pipenv`) and is
+  NOT on the PATH `scripts/schedule-monitor.sh:12` exports, so every launchd
+  firing since 2026-09-02 exited **rc=127** (`rc=0 × 1, rc=127 × 15` over the
+  whole log). The one success was an interactive run.
+- The failure stayed invisible because `scripts/schedule-monitor.sh:25` reads
+  `(( rc != 0 )) && exit 0  # collector failure … not a finding`. launchd
+  therefore records exit status **0** and no owner DM is sent. **Never read
+  `launchctl list`'s exit status as evidence a timer's work happened** — read
+  the script's own log and the artifact's `generated_at`.
+- Always check `volumes/logs/schedule-monitor.log` (not just the JSON) during
+  the liveness sweep; `grep -oE "rc=[0-9]+" … | sort | uniq -c` gives the whole
+  history in one line.
+- `skills/atlas-firm-rollup/SKILL.md:74` consumes that artifact, so a frozen
+  watchdog silently greens the firm rollup too. Widen the finding to every
+  consumer, not just swing.
+
 ## Not-recurring ≠ fixed
 
 - A finding whose failure did not repeat this week is NOT closeable. DR-0004
