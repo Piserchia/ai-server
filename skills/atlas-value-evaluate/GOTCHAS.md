@@ -33,3 +33,33 @@
   as `"status": "ok"` with `"observed_job_at": null` — it will NOT flag a
   governor that has never fired. Read the `jobs` table directly for
   liveness; the watchdog is corroboration, not evidence.
+- **`jsonb` silently eats duplicate keys — read the row back after inserting.**
+  G-0006's `value.grades` payload used `"bar"` twice inside `stop_reading`;
+  Postgres kept the last and dropped the other threshold with no error. Always
+  `SELECT payload->'…'` the fields you care about after the INSERT, and if you
+  repair your own row, declare the repair in the ledger entry rather than
+  fixing it quietly.
+- **Do not inherit a predecessor grade's claim about the code — re-read the
+  call site.** G-0004 recorded the SPY/200-DMA regime leg as "Tradier-gated and
+  therefore unobtainable"; it is `self._data().get_daily_bars` (Alpaca,
+  credentialed and working). The Tradier call is the line *above* it. A prior
+  grade is evidence about the prior grader, never about today's code. The
+  regime annotation is mandatory — if a leg looks unobtainable, try to fetch it
+  before writing that it cannot be.
+- **Audit gate writers for the SILENT skip, not just the false `pass`.** The
+  `msp` branch of `theses.py:gate()` declares its own blindness
+  (`evals["sizing"] = "portfolio-blind: …"`); the `long` branch is
+  `if kind == "long" and pv:` with **no else**, so a missing portfolio writes
+  nothing and the card's gates blob reads as "cap checked, not breached". Grep
+  every gate branch for a guard with no else — absence-by-silence is the same
+  provenance defect class as a false `pass`, and it is harder to see.
+- **Read the week's worker job summaries, not only the `value.*` rows.** A
+  worker that correctly declines an owner-surface change and "routes the
+  decision to the governor" has no write surface on `evaluation/LEDGER.md` —
+  if the governor does not file the DR, the finding evaporates. G-0006's
+  DR-0006 item 3 existed only because the Monday theses job summary was read.
+- **Verify apparent dead code before filing it.** `weekly.py:285` hardcodes
+  `"regime_breaker_on": False` with a comment claiming it is applied upstream;
+  it is (`weekly.py:211` converts the card to a half-slug `long`), so the
+  `theses.py` regime-FAIL branch is unreachable *by design*. That was one read
+  away from being a false finding in a grade.
