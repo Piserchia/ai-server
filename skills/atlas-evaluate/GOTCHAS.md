@@ -257,3 +257,35 @@ is also a `[ops]`-class finding for the scorecard, not just a chore.
 The SKILL text reads `git pull --rebase origin master && git push origin master` as the last
 commands. Taken literally that fails on your own dirty tree — you have just written the scorecard,
 the backlog, the matrices and the CHANGELOG. Commit first, then rebase, then push.
+
+## Coverage-matrix status parsing: `LIVE-with-signal` is the trap (2026-09-21)
+
+Counting LIVE rows per sector looks like a one-line grep and is not. Three stocks rows and four
+crypto rows read **`LIVE-with-signal`**, and a strict `cell == "LIVE"` test drops them silently —
+this run's first parser reported crypto 5/13 and stocks 22/26 against the previous run's 8/16 and
+25/28. Nothing errors; you just publish a fabricated regression.
+
+Three rules for the parser, all learned the hard way here:
+
+1. Match on a **word boundary**, not a prefix: `re.match(rf"^{tok}\b", up) or up.startswith(tok+"-")`.
+   A bare `up.startswith(tok)` is worse than useless — my *cross-check* script used it and
+   confidently reported zero unmatched rows while three rows were being dropped.
+2. Order the token list so **`LIVE` is LAST**. `PIPELINE_BUILT`, `FEED_SPECCED`, `DEFERRED` and
+   `DEGRADED` must all get first refusal, otherwise a status containing the substring wins early.
+3. Make the parser print an **UNMATCHED list that must be empty**, and skip the header row
+   explicitly (`cells[0].lower() == "indicator"`). A count with no unmatched-row assertion is an
+   unverified count.
+
+Then reconcile against the previous scorecard entry before writing. A sector count that moves by
+more than the promotions you personally made this run is a parser bug until proven otherwise.
+
+## Rank the backlog for the builder's selection rule, not for your own sense of priority (2026-09-21)
+
+`atlas-build` takes the **topmost builder-eligible item** and a window has ~2 slots. An item parked
+at slot 4 with a green probe and a READY spec is not "queued" — it is **unreachable**, and it will
+stay unreachable forever while you keep writing "carried, still unpicked" in the scorecard.
+
+Commodities proved this over **seven consecutive windows**: EIA petroleum and CFTC COT sat at slots
+4–5 the whole time, and five separate scorecards blamed throughput. Throughput was never the cause;
+the ordering was, and the ordering is the evaluator's own lever. If you have written "still unpicked"
+about the same item twice, stop diagnosing the builder and **move it to slot 1**.
