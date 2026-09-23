@@ -14,7 +14,7 @@ isolation: workspace
 role: worker
 division: atlas
 privilege_class: guarded-writer
-context_files: ["skills/alpha-governor/GOTCHAS.md"]
+context_files: ["skills/alpha-governor/GOTCHAS.md", ".context/PROJECT_PROTOCOL.md"]
 tags: [atlas, alpha-lab, evaluation, scheduled-capable, needs-dispatch-mcp]
 ---
 

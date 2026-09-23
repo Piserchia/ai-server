@@ -10,7 +10,7 @@ role: connector
 division: executive
 privilege_class: read-only
 tags: [management, connector, read-only]
-context_files: [".context/org/ORG.md", ".context/org/divisions/delivery/CHARTER.md", ".context/org/divisions/platform-ops/CHARTER.md", ".context/SYSTEM.md"]
+context_files: [".context/org/ORG.md", ".context/org/divisions/delivery/CHARTER.md", ".context/org/divisions/platform-ops/CHARTER.md", ".context/SYSTEM.md", "scripts/healthcheck-all.sh"]
 ---
 
 # Delivery↔Ops Reconciler — the handoff connector
