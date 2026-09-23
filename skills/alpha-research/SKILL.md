@@ -73,9 +73,14 @@ backtest stage is dispatched — dispatch only after the push succeeds
 **backtest cycle** (carded → backtesting; backtesting → backtesting |
 validated | verdict): ONE confirmatory cycle against the sealed card.
 Build the harness under `ideas/A-####/research/cycle-<n>/` where n =
-cycles_used + 1 (stdlib + pyyaml only; costs ≥3bps/side, pessimistic
-fills, walk-forward/purged CV, placebo M≥200, `manifest.json`
-provenance — PROTOCOL §3). Append trials.jsonl lines for EVERY variant
+cycles_used + 1 (stdlib + pyyaml only; for DAILY-BAR ideas import
+`quantlab` — venv: `.venv/bin/pip install -q -e ../quant` — for
+engine/metrics/DSR/walk-forward/critic instead of hand-rolling them
+(owner-approved 2026-09-23, PROTOCOL §3); intraday ideas stay bespoke;
+costs ≥3bps/side, pessimistic fills, walk-forward/purged CV, placebo
+M≥200, `manifest.json` provenance — PROTOCOL §3). Lifetime N and V[SR]
+for any DSR use `quantlab.trials.distinct_n` / `distinct_sr_variance`
+(distinct (family, params_hash) — PROTOCOL §4). Append trials.jsonl lines for EVERY variant
 evaluated, then RESULT and VERDICT ledger entries; increment
 cycles_used. Success or kill criterion met AS WRITTEN → advance to
 `validated`. Neither met, budget remaining → stay `backtesting`. A repeat
@@ -96,10 +101,27 @@ findings as a VERDICT ledger entry, then run the VERDICT close-out.
 **VERDICT close-out** (terminal, from any path above): set state.json
 stage="verdict" with verdict.outcome ∈ GO / NO-GO / BLOCKED-ON-DATA and
 a one-line reason; append the DECISION ledger entry citing evidence
-E-ids. A GO must state lifetime N (trials.jsonl), the Deflated Sharpe
-Ratio against it, the placebo percentile, a recommended target vertical
-(trader / swing / value / momentum), and a ≤5-line build sketch. NO
-further dispatch — the chain ends here.
+E-ids, then append exactly ONE lesson line to `evaluation/LESSONS.md`
+(`- [A-####] <family> | <kill-class> | <reusable constraint>` —
+PROTOCOL §6; for a GO the "constraint" states what made it pass). A GO
+must state lifetime N (distinct pairs, `quantlab.trials.distinct_n`),
+the Deflated Sharpe Ratio against it, the placebo percentile, a
+recommended target vertical (trader / swing / value / momentum), a
+≤5-line build sketch — and, for daily-frequency rules, a ready-to-paste
+quant-roster graduation OFFER line (`{idea, strategy, symbols, params}`
++ "reply 'graduate A-####' to add it to the quant desk's weekly
+roster"); applying it is the owner's reply, never yours. Reserve the
+LAST ~15 turns of any stage for this close-out chain — an unpushed
+workspace is worthless (INV-16; the c6cfbf6b loss).
+
+**Near-miss refinement** (optional, after a NO-GO close-out only): if a
+decisive kill clause landed within 20% of its threshold (state the
+numbers in the DECISION), and the idea's refinement_depth <
+`max_refinement_depth`, and no sibling refinement exists, you MAY
+dispatch ONE FILE-mode job for a single refined variant (payload
+idea_text citing `parent: A-####`, `refinement_depth: <depth+1>`,
+family unchanged) — budget-checked like any dispatch. This is the only
+dispatch a terminal stage may make (PROTOCOL §2c).
 
 ## Chain mechanics (after every NON-terminal stage)
 

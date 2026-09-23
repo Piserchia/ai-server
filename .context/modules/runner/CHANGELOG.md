@@ -2,6 +2,26 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-23 — events: idle-queue alpha drainer (flywheel)
+
+- **Agent task**: alpha-flywheel implementation (owner-approved spec
+  2026-09-23-alpha-flywheel-design.md), interactive owner session.
+- **Files changed**: `src/runner/events.py` (+`_should_trigger_idle_alpha`,
+  `_check_idle_queue_alpha`, constants ALPHA_IDLE_COOLDOWN_HOURS=4 /
+  ALPHA_DAILY_JOB_VALVE=12; wired into event_loop beside the idle review
+  check, breaker-exempt), `tests/test_events.py` (+TestIdleQueueAlpha, 7
+  cases).
+- **Why**: turn idle queue hours into flywheel hours — enqueue an
+  alpha-governor (payload project_slug atlas) when the queue is empty, the
+  last completed governor is ≥4h old, and alpha-research jobs in 24h are
+  under the valve mirroring budget.yaml's 12/day.
+- **Side effects**: up to ~5 extra governor runs/day on quiet days (each
+  no-ops cheaply on a quiet vertical); any queued job suppresses the
+  trigger so every other loop wins by construction.
+- **Gotchas discovered**: none new; the valve constant intentionally
+  duplicates the atlas-side budget (server code must not parse atlas repo
+  files) — if the owner changes budget.yaml, revisit ALPHA_DAILY_JOB_VALVE.
+
 ## 2026-09-14 — router: alpha rule moved to top of _RULES (final review)
 
 Final whole-branch review verified live that the plan-decomposer rules

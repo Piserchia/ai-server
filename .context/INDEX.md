@@ -154,6 +154,14 @@ projects/<slug>/
 | Work on the alpha-lab loop skills | `skills/alpha-{intake,research,governor}/SKILL.md`; atlas `alpha-lab/evaluation/PROTOCOL.md` (binding) |
 
 
+## Additions 2026-09-23 (alpha flywheel — continuous generate→evaluate→learn loop)
+
+| I need to... | Read these |
+|---|---|
+| Understand the flywheel (alpha-scout generator fenced by FAMILIES.md + LESSONS.md, near-miss refinement depth ≤ 2, distinct-pair lifetime N resolving D-0001, quantlab as alpha-lab's daily-bar harness engine, idle-queue governor drainer, 12/day + 4-active budgets, GO = memo + graduation offer) | `docs/superpowers/specs/2026-09-23-alpha-flywheel-design.md`; plan `docs/superpowers/plans/2026-09-23-alpha-flywheel-implementation.md`; atlas `alpha-lab/evaluation/{PROTOCOL.md,FAMILIES.md,LESSONS.md}` |
+| Work on the flywheel skills | `skills/alpha-scout/SKILL.md` (new), `skills/alpha-{research,governor}/SKILL.md` (amended via LOOP.md §7 front door) |
+| Understand the idle drainer | `src/runner/events.py` `_should_trigger_idle_alpha` + `.context/modules/runner/CHANGELOG.md` |
+
 ## Additions 2026-09-16 (quant stack — validation-desk vertical)
 
 | I need to... | Read these |

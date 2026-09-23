@@ -360,6 +360,75 @@ def _should_trigger_idle_review(
     return last_review_at < cutoff
 
 
+ALPHA_IDLE_COOLDOWN_HOURS = 4
+ALPHA_DAILY_JOB_VALVE = 12  # server-side mirror of alpha-lab budget.yaml
+
+
+def _should_trigger_idle_alpha(
+    queued_or_running: int,
+    last_governor_at: datetime | None,
+    alpha_jobs_24h: int,
+    cooldown_hours: int = ALPHA_IDLE_COOLDOWN_HOURS,
+    daily_valve: int = ALPHA_DAILY_JOB_VALVE,
+) -> bool:
+    """
+    Pure function: idle queue + stale alpha-governor + daily alpha job
+    count under the valve → run the governor now (it resumes stalled
+    chains and drains INBOX within the vertical's own budget caps).
+    Turns quiet hours into flywheel hours (owner decision 2026-09-23,
+    spec 2026-09-23-alpha-flywheel-design.md); any queued job suppresses
+    it, so kernel ops and every other loop always win.
+    """
+    if queued_or_running > 0:
+        return False
+    if alpha_jobs_24h >= daily_valve:
+        return False
+    if last_governor_at is None:
+        return True
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)
+    return last_governor_at <= cutoff
+
+
+async def _check_idle_queue_alpha() -> None:
+    """If the queue is idle, the last alpha-governor ended >4h ago, and the
+    24h alpha-research job count is under the valve, enqueue a governor."""
+    async with async_session() as s:
+        result = await s.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(Job.status.in_([JobStatus.queued.value, JobStatus.running.value]))
+        )
+        active_count = result.scalar() or 0
+
+        result = await s.execute(
+            select(Job.completed_at)
+            .where(Job.resolved_skill == "alpha-governor")
+            .where(Job.status == JobStatus.completed.value)
+            .order_by(Job.completed_at.desc())
+            .limit(1)
+        )
+        row = result.first()
+        last_governor = row[0] if row else None
+
+        result = await s.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(Job.kind == "alpha-research")
+            .where(Job.created_at > datetime.now(timezone.utc) - timedelta(hours=24))
+        )
+        alpha_jobs_24h = result.scalar() or 0
+
+    if _should_trigger_idle_alpha(active_count, last_governor, alpha_jobs_24h):
+        await enqueue_job(
+            "alpha-governor: idle-queue flywheel run -> resume stalled chains, "
+            "drain INBOX, audits (skills/alpha-governor)",
+            kind="alpha-governor",
+            payload={"project_slug": "atlas"},
+            created_by="event-trigger:idle-queue",
+        )
+        logger.info("idle-queue alpha-governor enqueued")
+
+
 async def _check_idle_queue_review() -> None:
     """If queue is idle and review-and-improve hasn't run in 24h, enqueue one."""
     async with async_session() as s:
@@ -428,6 +497,13 @@ async def event_loop(shutdown: asyncio.Event) -> None:
             await _check_idle_queue_review()
         except Exception:
             logger.exception("event loop: idle queue review check error (non-fatal)")
+
+        # Idle-queue alpha drainer (flywheel): same breaker exemption and
+        # rationale as the review check above.
+        try:
+            await _check_idle_queue_alpha()
+        except Exception:
+            logger.exception("event loop: idle queue alpha check error (non-fatal)")
 
         try:
             await asyncio.wait_for(shutdown.wait(), timeout=POLL_INTERVAL_SECONDS)

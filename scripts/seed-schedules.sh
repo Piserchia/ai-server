@@ -180,7 +180,12 @@ upsert 'pickem-sync' '0 9 * * 0,1,2,5' 'pickem-sync' 'Pickem CBS sync (Sun/Mon/T
 # governors): it writes only ledger AUDIT appends + dispatches, and the
 # clone posture avoids an UNISOLATED_WRITER_ALLOWLIST entry in
 # lint_docs.py (protected path).
-upsert 'alpha-governor' '30 9 * * *' 'alpha-governor' 'alpha-governor: daily alpha-lab governor -> resume stalled idea chains, drain INBOX, budget audit via alphalab.cli, verdict spot-check (skills/alpha-governor)' '{"project_slug":"atlas"}'
+upsert 'alpha-governor' '30 9 * * *' 'alpha-governor' 'alpha-governor: daily alpha-lab governor -> resume stalled idea chains, drain INBOX, budget audit via alphalab.cli, verdict spot-check + flywheel audits (skills/alpha-governor)' '{"project_slug":"atlas"}'
+# Flywheel generator (owner-approved 2026-09-23): twice daily, read-only +
+# dispatch (no payload — reads the dev clone like alpha-intake); the
+# idle-queue drainer in events.py adds governor runs between these.
+upsert 'alpha-scout-am' '10 8 * * *' 'alpha-scout' 'alpha-scout: morning idea generation -> FAMILIES/LESSONS-fenced mechanism-first candidates, dedup, FILE-mode dispatch within caps (skills/alpha-scout)'
+upsert 'alpha-scout-pm' '10 20 * * *' 'alpha-scout' 'alpha-scout: evening idea generation -> FAMILIES/LESSONS-fenced mechanism-first candidates, dedup, FILE-mode dispatch within caps (skills/alpha-scout)'
 
 # ── Quant validation desk (atlas quant/, 2026-09-16 spec) ──────────────────
 # The vertical's TURN-ON SWITCH is three-layered (quant/CLAUDE.md): these

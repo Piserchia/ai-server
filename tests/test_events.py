@@ -363,3 +363,34 @@ class TestEventLoopStartup:
             asyncio.run(event_loop(shutdown))
         finally:
             ev_logger.setLevel(prior)
+
+
+class TestIdleQueueAlpha:
+    """Idle-queue alpha drainer (flywheel, 2026-09-23): enqueue an
+    alpha-governor when the queue is idle, the last governor is stale,
+    and the 24h alpha-research job count is under the safety valve."""
+
+    def _predicate(self):
+        from src.runner.events import _should_trigger_idle_alpha
+        return _should_trigger_idle_alpha
+
+    def test_idle_never_run_triggers(self):
+        assert self._predicate()(0, None, 0) is True
+
+    def test_idle_stale_governor_triggers(self):
+        assert self._predicate()(0, NOW - timedelta(hours=5), 3) is True
+
+    def test_recent_governor_no_trigger(self):
+        assert self._predicate()(0, NOW - timedelta(hours=2), 0) is False
+
+    def test_busy_queue_no_trigger(self):
+        assert self._predicate()(2, None, 0) is False
+
+    def test_daily_valve_blocks(self):
+        assert self._predicate()(0, NOW - timedelta(hours=9), 12) is False
+
+    def test_exactly_at_cooldown_triggers(self):
+        assert self._predicate()(0, NOW - timedelta(hours=4), 0) is True
+
+    def test_just_under_cooldown(self):
+        assert self._predicate()(0, NOW - timedelta(hours=3, minutes=59), 0) is False
