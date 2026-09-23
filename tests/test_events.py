@@ -313,12 +313,16 @@ class TestEventLoopBreakerGating:
 
         async def fake_idle():
             calls.append("idle")
-            shutdown.set()  # end the loop after one full cycle
+
+        async def fake_idle_alpha():
+            calls.append("idle_alpha")
+            shutdown.set()  # end the loop after one full cycle (last check in the loop)
 
         monkeypatch.setattr(events_mod, "_check_circuit_breaker", breaker)
         monkeypatch.setattr(events_mod, "_check_skill_failures", fake_skill)
         monkeypatch.setattr(events_mod, "_check_project_health", fake_project)
         monkeypatch.setattr(events_mod, "_check_idle_queue_review", fake_idle)
+        monkeypatch.setattr(events_mod, "_check_idle_queue_alpha", fake_idle_alpha)
         asyncio.run(event_loop(shutdown))
         return calls
 
@@ -326,19 +330,19 @@ class TestEventLoopBreakerGating:
         async def breaker():
             return True
 
-        assert self._run_cycle(monkeypatch, breaker) == ["idle"]
+        assert self._run_cycle(monkeypatch, breaker) == ["idle", "idle_alpha"]
 
     def test_breaker_inactive_runs_all_checks(self, monkeypatch):
         async def breaker():
             return False
 
-        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle"]
+        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle", "idle_alpha"]
 
     def test_breaker_crash_fails_open_and_loop_survives(self, monkeypatch):
         async def breaker():
             raise RuntimeError("redis down")
 
-        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle"]
+        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle", "idle_alpha"]
 
 
 class TestEventLoopStartup:
