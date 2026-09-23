@@ -5,7 +5,7 @@ model: claude-sonnet-4-6
 effort: medium
 permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
-max_turns: 14
+max_turns: 22
 escalation:
   on_failure:
     model: claude-opus-4-7
