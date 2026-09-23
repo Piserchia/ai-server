@@ -28,3 +28,11 @@
   (A-0002 ran ~80 min). Budget for it: run probes early, keep them small, and
   if the clock is gone after fixes, seal what is reviewed and let the chain
   resume rather than rehashing.
+- 2026-09-23 (A-0003, job c6cfbf6b): the budget failure mode is TURNS, not
+  just minutes — a FILE+triage session exhausted max_turns (80) at close-out
+  with everything still in the workspace; the clone was discarded and the
+  entire session's work vanished (INV-16: only pushes survive). Reserve the
+  last ~15 turns for the close-out chain (ledger, state, INBOX, CHANGELOG,
+  ONE commit, rebase, push, dispatch) and prefer pushing a leaner triage
+  over one more probe refinement. The retry (5c1cbf39) with exactly that
+  discipline finished in ~35 turns.
