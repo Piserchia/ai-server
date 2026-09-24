@@ -2,6 +2,40 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-09-23 — mcp_dispatch: normalize dispatched job kinds
+
+**Files created**: none
+**Files changed**: `src/runner/mcp_dispatch.py` (+`_normalize_kind` pure
+helper; called in `enqueue_job_tool` right after `_validate_enqueue_args`
+returns clean, before the DB write / queue push), `tests/test_mcp_tools.py`
+(+`TestNormalizeKind` class, 9 cases).
+**Why**: implements proposal `abd0a223-44e9-4b8c-9a65-02be7458bcfc`. The
+runner already normalized at skill-resolution time (`session.py:_resolve_skill`
+— underscored kinds still ran the correct skill), but the DB stored the raw
+`kind` from the LLM, so 30-day rollups split each skill into two buckets
+(`server_deploy` 17 + `server-deploy` 3 = 20 real runs, `deploy_director` 17
++ `deploy-director` 17 = 34, etc.). The prior docstring-only fix (commit
+6781f31, 2026-09-12) didn't move the needle — 15/17 subsequent
+`server_deploy` dispatches still came in underscored. This normalizes at
+dispatch time so `jobs.kind` has one canonical hyphenated spelling per skill
+going forward. Existing rows keep their raw kinds; underscored buckets fade
+naturally.
+**Side effects**: none observed. Retrospective/rollup queries by
+`Job.kind` see fewer synthetic splits; downstream consumers that already
+handled either spelling continue to work. Historical rows unchanged (no
+migration).
+**Gotchas discovered**: the proposal's example test case for
+`_learning_apply` (→ `_learning-apply`) would have broken skill resolution
+because the on-disk skill directory is literally `skills/_learning_apply/`
+and `session.py:_resolve_skill` leaves `_`-prefixed kinds untouched.
+Implementation mirrors `session.py:_resolve_skill` verbatim instead:
+kinds starting with `_` pass through unchanged (documented in the helper's
+docstring and the test `test_leading_underscore_kind_passes_through_verbatim`).
+Renaming `skills/_learning_apply/` → `skills/_learning-apply/` is out of
+scope; internal-`_` kinds are enqueued only by the runner itself
+(`main._verify_writeback`, `main._spawn_evaluate`, `learning.maybe_extract_and_enqueue`),
+never by LLM MCP dispatch in practice, so this is theoretical.
+
 ## 2026-09-23 — events: idle-queue alpha drainer (flywheel)
 
 - **Agent task**: alpha-flywheel implementation (owner-approved spec

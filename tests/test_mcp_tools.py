@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.runner.mcp_dispatch import _validate_enqueue_args
+from src.runner.mcp_dispatch import _normalize_kind, _validate_enqueue_args
 from src.runner.mcp_projects import _format_project, _read_log_tail
 
 
@@ -189,3 +189,57 @@ class TestValidateEnqueueArgs:
     def test_valid_real_kinds(self) -> None:
         for kind in ("task", "research_report", "app_patch", "self_diagnose"):
             assert _validate_enqueue_args(kind, "do something") == []
+
+
+# ── _normalize_kind tests ─────────────────────────────────────────────────
+
+
+class TestNormalizeKind:
+    """Belt-and-suspenders normalization for dispatched kinds.
+
+    The runner already normalizes at skill-resolution time
+    (`session.py:_resolve_skill`), so both variants RUN correctly today —
+    the fix here is to canonicalize the value STORED in `jobs.kind` so
+    aggregations (30d rollups, retrospectives) count one bucket per skill
+    instead of splitting `server_deploy` vs `server-deploy`.
+    """
+
+    def test_underscore_becomes_hyphen(self) -> None:
+        assert _normalize_kind("server_deploy") == "server-deploy"
+
+    def test_already_hyphenated_idempotent(self) -> None:
+        assert _normalize_kind("atlas-redeploy") == "atlas-redeploy"
+
+    def test_multiple_underscores_all_hyphenate(self) -> None:
+        assert _normalize_kind("deploy_director_verify") == "deploy-director-verify"
+
+    def test_leading_underscore_preserved_no_inner(self) -> None:
+        # _writeback / _evaluate: literal filesystem name, no inner _ to
+        # convert either way.
+        assert _normalize_kind("_writeback") == "_writeback"
+        assert _normalize_kind("_evaluate") == "_evaluate"
+
+    def test_leading_underscore_kind_passes_through_verbatim(self) -> None:
+        # `_learning_apply` matches the on-disk skill directory
+        # `skills/_learning_apply/` — session.py:_resolve_skill leaves
+        # `_`-prefixed kinds untouched, so we do too. Rewriting the inner
+        # underscore would break skill resolution.
+        assert _normalize_kind("_learning_apply") == "_learning_apply"
+
+    def test_strips_whitespace(self) -> None:
+        assert _normalize_kind("  server_patch  ") == "server-patch"
+
+    def test_empty_passes_through(self) -> None:
+        # Empty stays empty so `_validate_enqueue_args` still rejects it
+        # with the caller's raw input in the message.
+        assert _normalize_kind("") == ""
+        assert _normalize_kind("   ") == ""
+
+    def test_non_string_passes_through(self) -> None:
+        # Validator will reject; normalizer must not crash on wrong types.
+        assert _normalize_kind(None) is None  # type: ignore[arg-type]
+        assert _normalize_kind(123) == 123  # type: ignore[arg-type]
+
+    def test_plain_kind_untouched(self) -> None:
+        assert _normalize_kind("task") == "task"
+        assert _normalize_kind("chat") == "chat"
