@@ -104,3 +104,31 @@
   (off-host watchdog) survived G-0002 only because the host stayed up — the
   control is still absent, only the failure is. Close findings on evidence
   that the control exists, never on a quiet week.
+
+## The dirty-tree precondition (learned 2026-09-27, G-0004 NOT written)
+
+- The shared clone `~/Documents/repos/atlas` is shared with the **trader**
+  governor, which runs Sundays ~11:00 ET — i.e. **immediately before** this
+  skill's 12:00 ET slot. 2026-09-27: job `b62a387d` (atlas-trader-evaluate)
+  ran 15:00–15:23Z, wrote a complete 756-line T-0022 grade, and **exited
+  without committing**. The swing governor then found a dirty tree and, per
+  its own precondition, could not write G-0004. Expect this collision; check
+  `git log --oneline -3` + `git status` mtimes against the sibling's audit log
+  (`volumes/audit_log/<id>.jsonl` first/last ts) to identify the owner.
+- The precondition is **operationally real, not ceremonial**: even committing
+  only `swing/evaluation/LEDGER.md` by pathspec still leaves the mandated
+  "rebase, push" step blocked, because `git pull --rebase` refuses to run with
+  uncommitted changes and the only way through is to stash the sibling's work
+  — which is exactly the forbidden "clean up someone else's state".
+- Correct action: **STOP the write, but still do the full read-only evidence
+  pull and liveness sweep**, and report the grade in the final message with
+  the orphaned sibling work as the TOP owner-attention item. A silent stop
+  loses two grades; an evidenced stop loses none of the findings. Never commit
+  another governor's unreviewed output under your own `Swing-Grade:` footer.
+- Do NOT write the ledger entry and leave it uncommitted "so it isn't lost" —
+  that adds a 4th dirty file and invites the next agent to sweep your grade
+  into their commit. Leave `swing/` provably clean and say so.
+- Corollary on convergence: two governors independently hitting the same
+  infrastructure defect in the same hour (here, the 22/22 rc=127 watchdog —
+  swing F6/DR-0007 and trader F15) is **corroboration, not duplication**.
+  Report it as two independent detections; it raises the priority.

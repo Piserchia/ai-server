@@ -3426,6 +3426,17 @@ Its artifact stayed frozen at `2026-09-01T21:26Z` and kept answering
 `rc=0 × 1, rc=127 × 15`; the single success was an *interactive* run, which is
 why it was never caught.
 
+> **STILL OPEN as of 2026-09-27 — and worse.** Re-verified by the swing governor
+> one week later: the tally is now **`rc=0 × 1, rc=127 × 22`** (7 further failed
+> firings, through `2026-09-27T11:15:03Z`) and the artifact is still frozen at
+> `2026-09-01T21:26:27Z` — **26 days stale, still reporting `findings: []`**.
+> Neither fix below has been applied. Independently re-detected the same day by
+> the *trader* governor (atlas T-0022 finding F15), which additionally showed the
+> real cost: the watchdog's purpose-built `stuck` detector would have caught a
+> genuinely lost trading session on 2026-09-25 and did not. Two verticals'
+> governors converging on one defect is corroboration — treat as P0, not as a
+> duplicate filing. Tracked as swing DR-0007 / DR-0004 and trader T-0010/T-0013.
+
 Two independent defects, both required for the failure to stay invisible:
 
 1. **`pipenv` is unreachable in the launchd environment.** It lives only inside
