@@ -155,3 +155,50 @@ rewrite old entries.
   band on 09-18 and 7 all session. Widen the tape query to the full day when
   pulling a BIL mark, and state the mark's age (09-18's was 1h39m stale, ≤1bp
   of distortion on an instrument that moves ~1bp/day, but say it).
+- 2026-09-27: `schedules.last_run_at` is stamped when the runner **ENQUEUES**,
+  not when the job finishes — so a schedule whose job was enqueued and then
+  stranded prints a perfect cadence. T-0022's 09-25 paper job shows
+  `last_run_at` on time while `trader.runs` has no row for the session. Build
+  liveness on terminal job **status**, and add this to the weekly sweep:
+  `psql assistant -c "select id,kind,status,created_at,error_message from jobs
+  where status in ('queued','running') and created_at < now() - interval '3
+  hours' order by created_at;"` — a `queued` row older than a few hours is a
+  lost session, and nothing else in the stack reports it.
+- 2026-09-27: the quota-requeue path has a publish-before-commit race.
+  `src/runner/main.py:449` LPUSHes the job id to the queue HEAD *before*
+  `:450-455` commits the row back to `queued`; a consumer winning that window
+  reads `running` and returns at `:332-333` with **no log line and no audit
+  event**. Signature: status `queued`, `error_message = "queued for quota reset
+  (…)"`, `started_at` still the FIRST claim, last audit event
+  `job_requeued_for_quota`. Corroborate from `volumes/logs/runner.out.log`: if a
+  job RPUSHed to the TAIL after the stranding starts the instant the pause
+  expires, the head entry was already consumed. Eliminate the alternatives
+  cheaply — `redis-cli info server` uptime (a restart loses the list),
+  `/clear` sets `cancelled` not `queued`, last `runner starting` line predating
+  the stranding rules out a restart, and `reconcile.requeue_stranded_queued()`
+  is **startup-only** and writes a `REQUEUE_EVENT` when it fires.
+- 2026-09-27: `scripts/schedule-monitor.sh` — the watchdog installed after the
+  08-17 governor-dark incident — has failed **every** scheduled run since
+  2026-09-02 (`pipenv: command not found`, rc=127: `pipenv` lives at
+  `~/.local/share/virtualenvs/ai-server-*/bin/pipenv`, not on the PATH line 12
+  exports). Line 25 (`(( rc != 0 )) && exit 0  # not a finding`) then exits
+  before the DM block, so a dead collector is indistinguishable from an
+  all-clear — including the unconditional Sunday one. NEVER read the absence of
+  a schedule-monitor alert as health; `tail volumes/logs/schedule-monitor.log`
+  and check for `rc=0` before crediting it.
+- 2026-09-27: ex-date ≠ pay-date. T-0017 asserted $251.33 of distributions
+  "silently foregone" from ex-dates alone; only SGOV's $30.20 (ex 09-01, pay
+  ≈09-03) was actually overdue — SPY's $221.13 (ex 09-18) pays ≈09-30. An 8×
+  overstatement. Before calling a credit missing, confirm the **pay** date has
+  passed, then check `GET paper-api.alpaca.markets/v2/account/activities`.
+- 2026-09-27: Alpaca trade timestamps carry a VARIABLE fractional-second width
+  (5 to 9 digits seen in one week), so both `fromisoformat` and a fixed-width
+  regex fail. Zero-pad and truncate to exactly 6:
+  `h,f=s.rstrip("Z").split("."); datetime.fromisoformat(h+"."+(f+"000000")[:6])`.
+- 2026-09-27: the round-lot staleness method (F10) is now **9/9 over two
+  weeks** — it predicted all 4 of T-0022's `ok`/`stale_data` outcomes exactly.
+  Treat it as the settled way to explain a `stale_data` row before opening any
+  new hypothesis.
+- 2026-09-27: in the `assistant` DB the schedule on/off column is `paused`
+  (boolean, default false) — there is NO `enabled` column. `\d schedules`
+  first; add it to the list of name drifts already recorded for 2026-08-30.
