@@ -63,3 +63,57 @@
   it is (`weekly.py:211` converts the card to a half-slug `long`), so the
   `theses.py` regime-FAIL branch is unreachable *by design*. That was one read
   away from being a false finding in a grade.
+- **If you are an escalation child, find out what your parent already did
+  BEFORE re-running anything.** G-0007's session timed out at 30 min *after*
+  inserting `value.grades` and appending the ledger, but *before* committing.
+  Re-grading from scratch would have double-inserted the week. Check in this
+  order: `select id, week, verdict, ts from value.grades order by ts desc`
+  (did the row land?), `tail` the parent's
+  `volumes/audit_log/<parent>.jsonl` (where did it die?), and
+  `git status --short` + `git diff` (what is sitting in the tree?). The
+  parent job id is in the audit log's `escalation_spawned` event.
+- **A timed-out session leaves FALSE past-tense claims in the record.**
+  G-0007 §8 and its `value.grades` payload both stated "staged ONLY
+  value/evaluation/LEDGER.md" and "wrote my CHANGELOG entry" — neither had
+  happened; the session died *reading* the CHANGELOG it claimed to have
+  written. The grade's *analysis* was complete and correct; only its account
+  of its own wrap-up was fiction, and nothing in the DB would ever have
+  contradicted it. Two rules follow: (1) never narrate wrap-up actions in the
+  past tense before performing them — write that section last, after the
+  commit; (2) as the child, verify the parent's self-reported process claims
+  against `git diff --cached` and the actual file contents, not against its
+  prose. Correct by APPEND (a `[G-####a] COMPLETION + CORRECTION` entry), never
+  by editing the predecessor's text — the ledger's rule 3 outranks tidiness.
+- **"A prior grade is evidence about the prior grader" applies to your own
+  parent job too.** Re-read every load-bearing call site yourself. G-0007's
+  F1–F4 all held on re-read, but that is a result, not a reason to skip it.
+- **You CAN write a shared file that carries another lane's uncommitted work —
+  build the index from HEAD instead of staging the worktree.** `git add -p` is
+  interactive and unavailable. Recipe: `git show HEAD:CHANGELOG.md` → insert
+  your entry only → write that to the file → `git add` → restore the worktree
+  to HEAD + your entry + theirs. The commit then carries zero lines of the
+  foreign work and leaves it intact and dirty for its own lane. Verify with
+  `git diff --cached <file> | grep -c '<their headline>'` → must be 0. This
+  dissolves the false choice between going governor-dark and laundering a
+  sibling's output through your commit.
+- **Read the composition root, not only the gate — the corollary to the N=0
+  rule.** G-0007's lead finding was that `Weekly` has lazy builders for five of
+  its seven injected dependencies; `_ivstore()` and `_guards()` were never
+  written, so the only production construction (`weekly.py:344 Weekly()`) runs
+  permanently blind and the sole `msp` producer is unreachable. Four prior
+  grades read the symptom (no cards) as a missing credential. `ruff` had been
+  printing the two dangling imports as `F401` the whole time — **run the
+  linter on the composition root; unused-import warnings on injected
+  dependencies are the signature of this defect class.**
+- **78 green tests proved nothing about F1–F4 because no test constructs the
+  object.** `grep 'Weekly(' value/tests/*.py` returned nothing. When a suite
+  tests every collaborator directly with hand-built dicts, the wiring between
+  them is exactly the uncovered seam. Ask "what constructs this in
+  production?" before crediting a passing suite.
+- **Distinguish "awaiting an owner action" from "structurally unbuildable" —
+  the ladder scores them identically.** Five zero-output cycles graded CONCERN
+  look the same to an owner whether the cause is an unprovisioned token or
+  code that cannot emit the product. That is a real gap in the deterministic
+  ladder; say so in the verdict and file it as a DR. Do NOT harden the bars by
+  judgment to compensate — that is the mirror image of softening them, and
+  equally forbidden.
