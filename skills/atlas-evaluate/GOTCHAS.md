@@ -289,3 +289,45 @@ Commodities proved this over **seven consecutive windows**: EIA petroleum and CF
 4–5 the whole time, and five separate scorecards blamed throughput. Throughput was never the cause;
 the ordering was, and the ordering is the evaluator's own lever. If you have written "still unpicked"
 about the same item twice, stop diagnosing the builder and **move it to slot 1**.
+
+## Backlog SLOT POSITION is a confirmed actuator — and effort-tier ranking is what buries items (2026-09-28)
+
+This is the single most useful thing the evaluator has learned about its own job,
+and it was established by a controlled test, not a hunch.
+
+**The setup.** Commodities held two items (EIA petroleum `fde3615d`, CFTC COT
+`a75f8173`) that were spec-READY with green live probes since 2026-08-04. For
+**seven consecutive windows** they were ranked at backlog slots 4–5 and were never
+picked, while the builder shipped 2–3 items a week from slots 1–3. Four separate
+runs wrote "still unpicked" and blamed builder capacity.
+
+**The test.** The 09-21 run moved exactly those two items to slots **1 and 2** and
+changed nothing else — not the builder, not the schedule, not the budget, not the
+item text. **Both shipped that week** (`5aaa003` 09-22, `50894e6` 09-25) and both
+promoted `built → live` on row evidence. Commodities moved 2.0 → 3.5.
+
+**The rule that follows.** LOOP.md §4.3 says the builder takes the *topmost eligible*
+item, and a two-build week never reaches slot 4. So:
+
+- If you have written "still unpicked" about an item **twice**, stop diagnosing the
+  builder. Move it to slot 1. The next run has a clean falsification: if it is *still*
+  unpicked from slot 1, the defect really is in the builder's selection rule, and the
+  right move then is to read `atlas-build`'s session transcript to see what it ranked
+  on — not to re-rank again.
+- Every starvation in the ledger is **the evaluator's fault** until it has been ranked
+  at the top and still gone unpicked. "The builder didn't pick it" is not a finding
+  when you put it at slot 6.
+
+**The trap that caused it, which is subtler.** The starvation was not carelessness —
+it was a *policy*: "rank M items below the S block, because throughput is uncertain."
+That sounds prudent and is actively harmful. It is a proxy for throughput, throughput
+was measurably ~2 builds/week for six weeks, and the proxy was permanently burying the
+highest-value items in the file (the #1 filing cluster sat at slots 4–6 for six windows
+because it happened to be sized M). **Retired 2026-09-28.** Rank strictly by
+(money-decision impact × score delta) ÷ effort and let the ratio handle effort — do not
+apply a second, categorical effort penalty on top of the one already in the denominator.
+
+Corollary for writing the file: the rationale header should name which slot assignments
+are *experiments* and state the falsification condition, so the next run can read the
+result instead of re-deriving the hypothesis. Both the 09-21 and 09-28 runs did this and
+it is why the result was legible at all.
