@@ -54,6 +54,8 @@ docs/
   EVALUATION_2026-08-30.md          ← LATEST: third-party grokbot audit + 2026-08-31 remediation disposition
   superpowers/plans/                ← Executable implementation plans (incl. 2026-07-10 remediation)
   superpowers/specs/                ← Specs behind shipped plans
+  research/llm-landscape-2026-09/   ← LLM vendor/runtime research set (2026-09-24); 00-comparison-matrix.md is the index
+    design-panel/                    ← the six architecture proposals + synthesis + current-state map the multi-model spec cites ("state map §n", "interface-first §n", …)
   TROUBLESHOOTING.md                ← Failure modes + fixes
   PHASE_3_PLAN.md through PHASE_6_PLAN.md  ← Historical (all shipped)
   README.md                         ← Reading order guide
@@ -97,7 +99,7 @@ projects/<slug>/
 | Read the audit that motivated all of this | `docs/AUDIT_2026-07-12.md` |
 | Understand the management hierarchy (agents-as-org) | `.context/org/ORG.md` (chart + operating model), `.context/org/divisions/<div>/CHARTER.md` (per-division), `docs/superpowers/plans/2026-07-28-management-hierarchy.md` (design + rollout) |
 | Understand the autonomous execution lane (no-approval merge/deploy, read-only+dispatch tier, breaker, autopilot) | `docs/superpowers/plans/2026-07-31-autonomous-execution.md` (design + safety inventory), MISSION.md § M, SYSTEM.md INV-4/INV-20 |
-| Understand the multi-provider model-router plan (Codex/Gemini/OpenRouter/local lanes, INV-21) | `docs/superpowers/plans/2026-08-10-model-router.md` (APPROVED 2026-08-17 — MISSION non-goals amended, free-tiers-only; implementation R0 not started) |
+| Understand the multi-provider model-router plan (Codex/Gemini/OpenRouter/local lanes, INV-21) | `docs/superpowers/plans/2026-08-10-model-router.md` (APPROVED 2026-08-17 — MISSION non-goals amended, free-tiers-only; never started; **superseded in scope by `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md`**, see Additions 2026-09-25) |
 
 ## Additions 2026-07-27 (SDK-native overhaul)
 
@@ -179,3 +181,14 @@ projects/<slug>/
 ## Update this file
 
 When you add a new documentation file, add it to this index.
+
+## Additions 2026-09-25 (multi-model platform — research, spec, P0 plan; all PROPOSED)
+
+| I need to... | Read these |
+|---|---|
+| Know what every major LLM vendor/runtime offers, costs, permits (terms), and is best at — as of 2026-09-24 | `docs/research/llm-landscape-2026-09/00-comparison-matrix.md` (start here; §5 resolves 31 cross-doc contradictions), then the per-vendor doc (`claude-anthropic.md`, `chatgpt-openai.md`, `grok-xai.md`, `gemini-google.md`, …) |
+| Know whether a consumer subscription may be scripted from this server | `docs/research/llm-landscape-2026-09/crosscut-subscription-automation-tos.md` §3.7 (vendor × surface allowed/grey/banned matrix) |
+| Know what the 2026 evidence says about LLMs and trading | `docs/research/llm-landscape-2026-09/crosscut-finance-trading-ai.md` §5, §8 |
+| Understand the proposed multi-model platform (control plane, Deliverable Contract, cross-vendor grading, provider registry/quota, executor seam, phases P0–P6, owner decisions) | `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md` (§0 decision summary; §0a/§0b amendments to the 2026-08-10 plan; §12 decisions; Appendix A provenance) |
+| Execute the first slice (migration 007, ResultMessage capture, notify outbox + origin, ghost commands, Haiku swap, canary, ops hygiene) | `docs/superpowers/plans/2026-09-25-multi-model-platform-p0.md` |
+| Read the design panel behind the multi-model spec (six proposals, synthesis, code-level current-state map with the C1–C26 constraints table) | `docs/research/llm-landscape-2026-09/design-panel/` (`current-state-map.md`, `design-synthesis.md`, `design-*.md`) |
