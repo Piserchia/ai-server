@@ -370,7 +370,28 @@ land the CHANGELOG + commit. Server-code fixes below remain the durable answer;
 prioritize `session.py` `_resolve_cwd` honoring `payload.cwd` and raising
 `_writeback` `max_turns` to 12 in the dev repo.
 
-Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`.
+Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`, `054408fd`
+(2026-09-29, parent `c0210752` `alpha-research` on atlas dev repo).
+
+**5th occurrence (2026-09-29, job `054408fd`)**: `max_turns` has since been
+raised from 6 → 20, but the underlying `_resolve_cwd` bug still bites.
+Parent was `alpha-research` (project_id likely absent or `alpha-research`
+rather than `atlas`); payload.cwd was `~/Documents/repos/atlas` with 26
+modified/untracked files listed (`.agents/skills/*/SKILL.md`,
+`.codex/agents/*.toml`, `AGENTS.md`). The child job's top-level `cwd`
+resolved to `/Users/…/ai-server` (server root — WRONG). The session ran
+`git status` at server root (saw unrelated in-tree edits), listed
+`projects/`, searched `find` twice (one background hang), eventually
+located `~/Documents/repos/atlas/.agents`, tried to parse the parent's
+audit log via `python3 -c`, misread the event schema (`kind` vs `type`),
+retried three times — and hit `max_turns: 20` without issuing a single
+Edit. Twenty turns is now the ceiling and it STILL exhausts on the wrong
+cwd. Uncommitted atlas dev-repo state at diagnosis time: `M CHANGELOG.md`,
+`?? .agents/`, `?? .codex/`, `?? AGENTS.md` — the parent's research
+scaffolding lives, but the CHANGELOG entry and commit are missing. A human
+or a properly-cwd'd session needs to land it. Server fix (session.py
+`_resolve_cwd` honoring `payload.cwd`) is still the durable answer;
+raising max_turns without it just wastes larger budgets.
 
 ### Diagnostic
 
