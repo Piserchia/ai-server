@@ -372,7 +372,26 @@ prioritize `session.py` `_resolve_cwd` honoring `payload.cwd` and raising
 
 Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`, `054408fd`
 (2026-09-29, parent `c0210752` `alpha-research` on atlas dev repo), `3c39e6cc`
-(2026-10-01, parent `3b8b075a` `alpha-research` on atlas dev repo — same files).
+(2026-10-01, parent `3b8b075a` `alpha-research` on atlas dev repo — same files),
+`0c04056d` (2026-10-01, parent `cb648cfa` `alpha-research` on atlas dev repo —
+7th occurrence, identical untracked tree `.agents/`, `.codex/`, `AGENTS.md`
+still present 3+ days after 5th occurrence first called it out).
+
+**7th occurrence (2026-10-01, job `0c04056d`)**: identical to #5 and #6. Parent
+`cb648cfa` committed its A-0012 alpha-lab work cleanly to `origin/wip/cb648cfa`
+(4 files, +2501 lines, zero touches to `.agents/`/`.codex/`/`AGENTS.md`). The
+same pre-existing untracked tree in `~/Documents/repos/atlas` triggered
+writeback via `.codex/agents/*.toml` (not matched by `_is_doc_path`). Child
+session's cwd resolved to server root; spent 20 turns on filesystem hunts
+(two backgrounded `find` calls, one stuck in background), reading the parent
+audit log, then `git log` on the atlas dev repo — hit `max_turns: 20` before
+any Edit. Zero CHANGELOG updates. The three server-code fixes identified in
+occurrence 5 (`_resolve_cwd` honoring `payload.cwd`, `_is_doc_path`
+recognizing `.agents/`+`.codex/` as docs, higher `max_turns`) remain unfilled;
+without the first fix, raising max_turns just lengthens the fruitless search.
+The atlas dev repo's untracked scaffolds (`.agents/`, `.codex/`, `AGENTS.md`)
+have now gone 3+ days unhandled since the 5th occurrence first flagged them —
+owner decision (gitignore vs commit) is the fastest unblock.
 
 **6th occurrence (2026-10-01, job `3c39e6cc`)**: identical reproduction of the
 5th. Parent `3b8b075a` alpha-research scoped to atlas dev-repo (`topology:
