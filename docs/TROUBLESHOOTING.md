@@ -375,7 +375,33 @@ Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`, `054408fd`
 (2026-10-01, parent `3b8b075a` `alpha-research` on atlas dev repo — same files),
 `0c04056d` (2026-10-01, parent `cb648cfa` `alpha-research` on atlas dev repo —
 7th occurrence, identical untracked tree `.agents/`, `.codex/`, `AGENTS.md`
-still present 3+ days after 5th occurrence first called it out).
+still present 3+ days after 5th occurrence first called it out),
+`7a6e113b` (2026-10-01 ~20:40Z, parent `f8204991` `alpha-research` on atlas dev
+repo — 8th occurrence, SAME pre-existing untracked tree yet again, now 3+ days
+and 4 recurrences since 5th occurrence first flagged it).
+
+**8th occurrence (2026-10-01, job `7a6e113b`)**: carbon copy of #5–#7. Parent
+`f8204991` alpha-research on atlas dev repo (`payload.cwd =
+~/Documents/repos/atlas`, 23 modified/untracked files listed —
+`.agents/skills/*.SKILL.md` ×7, `.codex/agents/*.toml` ×15, `AGENTS.md`).
+Child `_writeback` cwd resolved to `/Users/.../ai-server` (server root — wrong
+again); session ran `git status` at server root (seeing unrelated edits like
+`skills/atlas-value-monitor/GOTCHAS.md`), listed `projects/`, searched for
+`SKILL.md` under `projects/atlas/` (missed — those live in the dev repo
+outside the server tree), searched workspace clones (found old
+`37adacc9-atlas` ones under `.claude/skills/`, not `.agents/skills/`), ran a
+long `find` across `/Users/alfredbot.ai.butler/` as a background task that
+was still running when turn 20 fired. Zero Edits, zero CHANGELOG updates.
+The three server-code fixes identified in occurrence #5 (`session.py::_resolve_cwd`
+honoring `payload.cwd` under `server_root`, `writeback.py::_is_doc_path`
+recognizing `.agents/`+`.codex/`+`.superpowers/` as docs, raise `_writeback`
+`max_turns`) remain unlanded. Status re-confirmed by grepping both files in
+this diagnostic session: `_resolve_cwd` still just forwards to `_resolve_project`
+(session.py:855–858), and `_is_doc_path` still has no `.codex/.agents/.superpowers`
+cases (writeback.py:78–95). The untracked atlas-dev-repo tree is now 3+ days
+old across 4 recurrences — the `.gitignore`-or-commit decision is still the
+only immediate unblock; without it, every subsequent atlas alpha-research run
+will trigger a new `_writeback` failure.
 
 **7th occurrence (2026-10-01, job `0c04056d`)**: identical to #5 and #6. Parent
 `cb648cfa` committed its A-0012 alpha-lab work cleanly to `origin/wip/cb648cfa`
