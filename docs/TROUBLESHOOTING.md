@@ -371,7 +371,28 @@ prioritize `session.py` `_resolve_cwd` honoring `payload.cwd` and raising
 `_writeback` `max_turns` to 12 in the dev repo.
 
 Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`, `054408fd`
-(2026-09-29, parent `c0210752` `alpha-research` on atlas dev repo).
+(2026-09-29, parent `c0210752` `alpha-research` on atlas dev repo), `3c39e6cc`
+(2026-10-01, parent `3b8b075a` `alpha-research` on atlas dev repo — same files).
+
+**6th occurrence (2026-10-01, job `3c39e6cc`)**: identical reproduction of the
+5th. Parent `3b8b075a` alpha-research scoped to atlas dev-repo (`topology:
+dev-repo`, `scoped_to_dev_repo: true` per event 0). Parent did real A-0013
+alpha work (ledger E-0083/E-0084 + INBOX + CHANGELOG) but LEFT UNTOUCHED the
+same `?? .agents/`, `?? .codex/`, `?? AGENTS.md` untracked tree from
+occurrence 5 — nothing cleaned them up in 48h. Payload.cwd correctly pointed
+at `~/Documents/repos/atlas` with 26 files listed. Child `_writeback`
+cwd resolved to server root; session ran `git status` at server root, listed
+`projects/`, re-ran the same two `find` attempts, parsed the parent audit log
+(correctly this time — used `kind` not `type`), inspected atlas commits —
+and hit `max_turns: 20` at the exact tool_use just before issuing an Edit.
+Zero Edits again. The server-code fix in `session.py::_resolve_cwd` to honor
+`payload.cwd` under `server_root` remains unfilled and is now the clear
+critical path — raising `max_turns` further will not help because the session
+first has to re-locate the dev repo by brute force. **Immediate low-risk
+remediation**: either `cd ~/Documents/repos/atlas && git add .agents .codex
+AGENTS.md && git commit -m "..."` (with owner approval — unclear what these
+scaffolds are for) or `.gitignore` them in the dev repo. Until done, every
+subsequent `alpha-research` job on atlas will re-trigger this failure.
 
 **5th occurrence (2026-09-29, job `054408fd`)**: `max_turns` has since been
 raised from 6 → 20, but the underlying `_resolve_cwd` bug still bites.
