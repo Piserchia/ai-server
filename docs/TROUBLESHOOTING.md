@@ -378,7 +378,32 @@ Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`, `054408fd`
 still present 3+ days after 5th occurrence first called it out),
 `7a6e113b` (2026-10-01 ~20:40Z, parent `f8204991` `alpha-research` on atlas dev
 repo — 8th occurrence, SAME pre-existing untracked tree yet again, now 3+ days
-and 4 recurrences since 5th occurrence first flagged it).
+and 4 recurrences since 5th occurrence first flagged it), `0204fc1f`
+(2026-10-02 ~09:49Z, parent `c434fc62` `alpha-governor` on atlas dev repo —
+9th occurrence, SAME untracked tree, now 4 days / 5 recurrences unlanded).
+
+**9th occurrence (2026-10-02, job `0204fc1f`)**: identical to #5–#8 but parent
+was `alpha-governor` (not `alpha-research`) — confirms the defect is skill-
+agnostic: it fires on any atlas-scoped parent whose payload.cwd points at the
+dev repo. Parent `c434fc62` alpha-governor ran against workspace clone of
+`~/Documents/repos/atlas` (24 modified/untracked files listed —
+`.agents/skills/*.SKILL.md` ×7, `.codex/agents/*.toml` ×16, `AGENTS.md`).
+`payload.cwd` set to `~/Documents/repos/atlas`, `project_id` NULL (scheduler-
+dispatched, no project binding), no `project_slug` propagated into the child
+payload. Child `_writeback` cwd resolved via `_resolve_project` → server root
+(because `_project_slug` returned None); session ran `git status` at server
+root, listed `projects/`, found `.claude/skills/design-system/` (the WRONG
+tree — workspace clone's old path), searched `atlas/.codex/agents/` (correct
+path but on the runtime clone, not dev repo), parsed the parent audit log for
+Edit/Write events (none logged — those tool_use entries aren't in the audit
+JSONL), ran `git log` on the dev repo, and hit `max_turns: 20` before any
+Edit. Zero CHANGELOG updates. Escalation child `88faa541` (this session) is
+diagnosing. All three server-code fixes from occurrence #5 remain unlanded,
+and the atlas dev-repo untracked tree (`.agents/`, `.codex/`, `AGENTS.md`) is
+now 4 days old. **Fastest unblock still unchanged**: owner decides whether to
+`.gitignore` or commit that scaffolding in the atlas dev repo. Until done,
+every atlas-scoped parent (alpha-research, alpha-governor, momo-*, etc.) will
+spawn a doomed `_writeback` child.
 
 **8th occurrence (2026-10-01, job `7a6e113b`)**: carbon copy of #5–#7. Parent
 `f8204991` alpha-research on atlas dev repo (`payload.cwd =
