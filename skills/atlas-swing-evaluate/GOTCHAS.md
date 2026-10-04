@@ -132,3 +132,40 @@
   infrastructure defect in the same hour (here, the 22/22 rc=127 watchdog —
   swing F6/DR-0007 and trader F15) is **corroboration, not duplication**.
   Report it as two independent detections; it raises the priority.
+
+## The precondition is now a measured DoS (learned 2026-10-04, G-0004 again NOT written)
+
+- **2 of 2 consecutive scheduled grades have been lost to the dirty-tree
+  precondition** (09-27 and 10-04), i.e. three calendar weeks with no ledger
+  grade since G-0003. The rule is correct as a safety rule and has become a
+  **denial-of-service on the governor function**. Say that out loud in the
+  grade; it is a finding about the skill, not an excuse.
+- It is NOT always a sibling governor. 10-04 the trader behaved (T-0027
+  committed+pushed as `8193ef4` *before* this slot). The dirty state was
+  instead two **orphaned writeback/build artifacts**: `M CHANGELOG.md` (a
+  redundant entry for build job `c3fa7845` whose real entry already landed on
+  origin at a *different path* — `dashboard/atlas_dash/fundamentals.py`, not
+  the `engine/stocks/...` paths the orphan claims) plus untracked `.agents/`,
+  `.codex/`, `AGENTS.md` from job `2842fbca`, whose CHANGELOG entry **is
+  committed** while the files it documents were never `git add`ed.
+- That orphan class **recurs**: `git stash list` showed
+  `stash@{0}: scout-rescue: prior alpha-governor .agents/.codex uncommitted
+  work (job af787ec7 parked)` — the same scaffold had already been rescued
+  once and reappeared. Expect the shared clone to accumulate orphans
+  continuously, so expect the precondition to fire most weeks.
+- **Check `git status --porcelain -- swing/` separately from the whole-tree
+  status.** On 10-04 `swing/` was *provably clean* while the tree was dirty —
+  i.e. a path-scoped precondition would have let the grade through. Report
+  both facts; the gap between them is the evidence for the DR.
+- Always diff the orphan against `origin/master` before calling it lost work:
+  `git show origin/master:CHANGELOG.md | grep -c '<headline>'`. Beware
+  `grep -c` returning 0 → exit 1, which silently breaks an `&&` chain.
+- The clone also drifts **behind** (10-04: 16 behind, 2 ahead with unpushed
+  `Write-back for …` commits). Being behind matters for grading substance:
+  the C-0004 research RESULT had landed on origin and was absent locally.
+  Read evidence with `git show origin/master:<path>` — read-only, needs no
+  rebase, and cannot disturb the dirty tree.
+- The ai-server-side GOTCHAS/CHANGELOG append is **always still available**:
+  it is a different repo (production checkout, runtime-learnings lane,
+  auto-published by `sync-learnings.sh`). A blocked atlas write never means
+  the session has nothing to record.
