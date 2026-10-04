@@ -202,3 +202,52 @@ rewrite old entries.
 - 2026-09-27: in the `assistant` DB the schedule on/off column is `paused`
   (boolean, default false) — there is NO `enabled` column. `\d schedules`
   first; add it to the list of name drifts already recorded for 2026-08-30.
+- 2026-10-04: the tape endpoint silently breaks the round-lot staleness method
+  on liquid symbols. `/v2/stocks/trades` returns **ascending** and truncates at
+  `limit`, so a wide intraday window (13:30Z → run time) hands you a page whose
+  LAST element is mid-session, not the last print. T-0027 read SPY as STALE by
+  97.5/67.3/120.6 min on three sessions that were `ok` — all three pages were
+  exactly 10000 rows. Tell: `len(trades) >= limit`. Fix: query a NARROW window
+  (40 min before the run resolved all 5 sessions exactly) or follow
+  `next_page_token`. Never trust the last element of a capped page.
+- 2026-10-04: BIL and SGOV go ex on the FIRST BUSINESS DAY of the month —
+  together. 2026-10-01 took BIL $0.265 and SGOV $0.305 on the same day, which
+  hits the benchmark (BIL) and the book (SGOV holding) simultaneously and in
+  OPPOSITE directions for the comparison. A raw-price weekly read showed BIL at
+  **−20.74bp** (a T-bill fund cannot lose 21bp/wk — that IS the tell) and
+  flattered the book by +32.79bp against it. Always run the
+  `adjustment=all` vs `adjustment=split` diff before quoting the pair.
+- 2026-10-04: when the dev clone is dirty (LOOP.md R1) the grade does NOT have
+  to be lost. `git clone` origin/master to `/tmp`, author the ledger entry
+  there, commit and push from that clone, and leave the shared clone untouched
+  — no stash, no reset, no clean, nothing forced. Declare the deviation in the
+  ledger entry so it is auditable. Losing a week's durable grade is the worse
+  failure; mutating another loop's state is the forbidden one.
+- 2026-10-04: to recover a decoy round's answer-key plaintext (the governor must
+  publish it, and it is delivered "out-of-band" i.e. NOT in the repo), grep the
+  research job's audit log on the host:
+  `grep -o 'bb06cce5' volumes/audit_log/<research_job_id>.jsonl` then read
+  ~1500 chars of context — the key's construction is captured verbatim in the
+  `tool_use` input. ALWAYS re-hash the reconstructed plaintext and compare to
+  the committed digest before publishing; a mismatch voids the round and is
+  itself the finding. Corollary worth reporting every time: this means the
+  "out-of-band" channel is host-local cleartext co-located with the artifacts,
+  which PROTOCOL §6 forbids (T-0027 F19).
+- 2026-10-04: `trader.runs.equity` is populated even on `stale_data` rows while
+  `equity_curve` is NOT — so the true day-over-day equity path is always
+  recoverable from `runs` when the curve has holes. Use it to re-derive the
+  daily-loss breaker independently (the F12 `prior_close_equity` widening makes
+  the system's own check untrustworthy). T-0027: curve 4/5 but runs 5/5.
+- 2026-10-04: a zero-order rebalance day can be arithmetically CORRECT —
+  reproduce `diff_to_intents` before calling it a dead code path. On a $100k
+  book at 90/10, SPY's rounding gap is routinely < one $765 share (`qty=0`) and
+  SGOV's < `min_order_notional` $50, so the monthly rebalance legitimately
+  emits nothing. Related standing fact: `cash` has been exactly $450.10 in
+  every `equity_curve` row since inception because the floor sleeve gets a flat
+  10% weight and there is NO residual-cash sweep, despite the YAML comment
+  claiming the floor "receives all idle/residual cash" (T-0027 F20).
+- 2026-10-04: check `jobs` for OLD stranded rows every week, not just the
+  graded window — T-0022's two F14 casualties were still sitting in `queued`
+  ten days later and nothing in the stack reaps or alerts on them. A fixed
+  finding and an unreaped one look identical unless you re-query by status
+  rather than by date.
