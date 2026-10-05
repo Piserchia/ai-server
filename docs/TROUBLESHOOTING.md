@@ -926,7 +926,22 @@ of resumed `_learning_apply` jobs at 18:00:20 (`46acc317`, `b96a4976`,
 `15ffc401`) all failed identically — confirming this is deterministic for
 any job whose first attempt hit preflight rejection. Live counter:
 `grep -c "Session ID .* is already in use" volumes/logs/runner.err.log`
-= 22 as of last diagnosis run.
+= 24 as of 2026-10-05 (was 22 on 2026-08-23).
+
+**Fifth confirmed instance (2026-10-05, re-diagnosed by escalation
+`1acd73da` for `8f415798` atlas-advisors-ingest)**: shape identical to the
+`46acc317` family. First attempt 2026-09-24 10:00 was preflight-rejected
+(`rate_limit_status: rejected`, window=five_hour) and requeued; the SDK
+subprocess spawned anyway and registered the session file. The runner
+restarted on 2026-10-05 06:28, `queued_requeued: queued row had no Redis
+entry at runner startup` fired, and the retry 2 seconds later hit
+`Session ID 8f415798-… is already in use` → exit 1. Twice-weekly schedule
+healed itself — runs on 2026-09-28 and 2026-10-01 completed normally. No
+deliverable to salvage (first attempt was preflight-rejected before any
+Claude work). Remediation: job row marked `cancelled` with explanatory
+error_message. No orphan session artifacts found on disk at diagnosis time
+(already garbage-collected). Bug still unfixed — server-patch (Phase 5)
+needed per the Fix section below.
 
 **Fourth confirmed instance (same 18:00:20 batch, re-diagnosed 2026-08-23
 by escalation `7613573f` for `15ffc401`)**: identical shape to `46acc317` /
