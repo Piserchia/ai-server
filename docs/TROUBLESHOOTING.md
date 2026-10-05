@@ -937,6 +937,24 @@ Orphan CLI session state for `15ffc401` was cleaned by the escalation
 (`~/.claude/projects/…/15ffc401-….jsonl`,
 `~/.claude/session-env/15ffc401-…/`) — hygiene only, does not fix the bug.
 
+**Fifth / sixth confirmed instances 2026-10-05 (INV-15 variant — stale
+queued rows across runner restart)**: jobs `37adacc9` (atlas-trader-paper,
+created 2026-09-25) and `8f415798` (atlas-advisors-ingest, created
+2026-09-24). Both quota-rejected at preflight on first attempt (preflight
+registered the session file as in prior instances). Instead of being
+retried after the quota window, they sat in the `queued` DB state for
+~10 days until a runner restart at 2026-10-05 06:28, when INV-15
+(`queued_requeued`: queued row had no Redis entry) re-enqueued them.
+Same collision on both: `Session ID … is already in use` → exit 1 → failed
+→ self-diagnose escalations (`48ca3cc5`, `1acd73da`). No deliverable
+existed either time (preflight-reject on both attempts). Stale CLI
+session files and workspace clones cleaned by this escalation. Live
+counter: `grep -c "Session ID .* is already in use"
+volumes/logs/runner.err.log` = 24 at this diagnosis. This variant means
+the bug ALSO fires on long-stale queued rows revived at runner startup,
+not just within a single quota pause/resume window — any first-attempt
+preflight-reject leaves a landmine for every subsequent runner restart.
+
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
    16:14, technical lens saved 16:19, aggregate report saved 16:23 with score

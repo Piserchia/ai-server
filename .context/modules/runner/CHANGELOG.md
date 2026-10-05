@@ -2,6 +2,231 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-05 — self-diagnose: hygiene cleanup for session_id collision bug (no code change)
+
+**Files created**: none
+**Files changed**: `docs/TROUBLESHOOTING.md` (+fifth/sixth confirmed-instance block
+for session_id collision; counter updated 22 → 24; added "INV-15 variant: stale
+queued rows revived across runner restart" to the known-sequence section).
+**Why**: self-diagnose job `48ca3cc5` on failures of `37adacc9`
+(atlas-trader-paper) and `8f415798` (atlas-advisors-ingest). Both were
+quota-rejected at preflight on 2026-09-24/25 and sat `queued` in the DB for
+~10 days; a runner restart at 2026-10-05 06:28 re-enqueued them via INV-15
+(`queued_requeued: queued row had no Redis entry at runner startup`) and both
+collided on the stale `~/.claude/projects/.../<uuid>.jsonl` → exit 1. No
+deliverable existed either time; both jobs stay `failed`. Stale CLI session
+files + workspace clones removed. Permanent fix dispatched to `server-patch`
+as job `33ca5268` (rotate `session_id` on requeue, both paths; add a
+collision-recovery short-circuit).
+**Risk**: very low (docs + runtime hygiene only; no code or config touched).
+
+## 2026-09-23 — mcp_dispatch: normalize dispatched job kinds
+
+**Files created**: none
+**Files changed**: `src/runner/mcp_dispatch.py` (+`_normalize_kind` pure
+helper; called in `enqueue_job_tool` right after `_validate_enqueue_args`
+returns clean, before the DB write / queue push), `tests/test_mcp_tools.py`
+(+`TestNormalizeKind` class, 9 cases).
+**Why**: implements proposal `abd0a223-44e9-4b8c-9a65-02be7458bcfc`. The
+runner already normalized at skill-resolution time (`session.py:_resolve_skill`
+— underscored kinds still ran the correct skill), but the DB stored the raw
+`kind` from the LLM, so 30-day rollups split each skill into two buckets
+(`server_deploy` 17 + `server-deploy` 3 = 20 real runs, `deploy_director` 17
++ `deploy-director` 17 = 34, etc.). The prior docstring-only fix (commit
+6781f31, 2026-09-12) didn't move the needle — 15/17 subsequent
+`server_deploy` dispatches still came in underscored. This normalizes at
+dispatch time so `jobs.kind` has one canonical hyphenated spelling per skill
+going forward. Existing rows keep their raw kinds; underscored buckets fade
+naturally.
+**Side effects**: none observed. Retrospective/rollup queries by
+`Job.kind` see fewer synthetic splits; downstream consumers that already
+handled either spelling continue to work. Historical rows unchanged (no
+migration).
+**Gotchas discovered**: the proposal's example test case for
+`_learning_apply` (→ `_learning-apply`) would have broken skill resolution
+because the on-disk skill directory is literally `skills/_learning_apply/`
+and `session.py:_resolve_skill` leaves `_`-prefixed kinds untouched.
+Implementation mirrors `session.py:_resolve_skill` verbatim instead:
+kinds starting with `_` pass through unchanged (documented in the helper's
+docstring and the test `test_leading_underscore_kind_passes_through_verbatim`).
+Renaming `skills/_learning_apply/` → `skills/_learning-apply/` is out of
+scope; internal-`_` kinds are enqueued only by the runner itself
+(`main._verify_writeback`, `main._spawn_evaluate`, `learning.maybe_extract_and_enqueue`),
+never by LLM MCP dispatch in practice, so this is theoretical.
+
+## 2026-09-23 — events: idle-queue alpha drainer (flywheel)
+
+- **Agent task**: alpha-flywheel implementation (owner-approved spec
+  2026-09-23-alpha-flywheel-design.md), interactive owner session.
+- **Files changed**: `src/runner/events.py` (+`_should_trigger_idle_alpha`,
+  `_check_idle_queue_alpha`, constants ALPHA_IDLE_COOLDOWN_HOURS=4 /
+  ALPHA_DAILY_JOB_VALVE=12; wired into event_loop beside the idle review
+  check, breaker-exempt), `tests/test_events.py` (+TestIdleQueueAlpha, 7
+  cases).
+- **Why**: turn idle queue hours into flywheel hours — enqueue an
+  alpha-governor (payload project_slug atlas) when the queue is empty, the
+  last completed governor is ≥4h old, and alpha-research jobs in 24h are
+  under the valve mirroring budget.yaml's 12/day.
+- **Side effects**: up to ~5 extra governor runs/day on quiet days (each
+  no-ops cheaply on a quiet vertical); any queued job suppresses the
+  trigger so every other loop wins by construction.
+- **Gotchas discovered**: none new; the valve constant intentionally
+  duplicates the atlas-side budget (server code must not parse atlas repo
+  files) — if the owner changes budget.yaml, revisit ALPHA_DAILY_JOB_VALVE.
+
+## 2026-09-14 — router: alpha rule moved to top of _RULES (final review)
+
+Final whole-branch review verified live that the plan-decomposer rules
+("and then", "then also") hijacked "alpha:"-prefixed ideas containing
+those connectives. The anchored alpha rule now runs first — it can
+shadow nothing (^ anchor). Two regression cases added.
+
+## 2026-09-14 — router: alpha-lab intake rule
+
+Added anchored rule `^alpha( idea)?:` → `alpha-intake` (before the
+coding-intent rules; anchored so "research alpha decay…" keeps routing to
+research-report). Part of the alpha-lab vertical
+(docs/superpowers/plans/2026-09-14-alpha-lab-implementation.md).
+
+## 2026-09-12 — mcp_dispatch: fix `enqueue_job` kind example to use hyphens
+
+**Agent task**: apply review-and-improve proposal 2f214c24 from
+retrospective f4e2fdea (idle-queue, 30d window).
+
+**Files changed**: `src/runner/mcp_dispatch.py`.
+
+**Why**: the `enqueue_job` tool's Annotated `kind` description showed
+`'research_report'` and `'app_patch'` (underscored), which actively coached
+LLM sessions to enqueue underscore-form kinds. The runner normalizes at
+`session.py:634` so execution works, but the Job row is stored with the
+underscore form, fragmenting every kind-based aggregate: rows table showed
+deploy_director 31 vs deploy-director 22; server_deploy 26 vs server-deploy
+0; atlas_redeploy 13 vs atlas-redeploy 10; server_patch 3 vs server-patch
+14 over the last 30 days. Swapping the two examples to
+`'research-report'`, `'app-patch'` steers new sessions to the canonical
+hyphenated form. Docstring-only; behaviour unchanged.
+
+**Side effects**: none. `_validate_enqueue_args` still accepts any
+non-empty string. The deeper enqueue-time normalization
+(`src/gateway/jobs.py`) remains stuck proposal 2f4f34c1, flagged out of
+scope by the retrospective.
+
+**Gotchas discovered**: none.
+
+## 2026-09-03 — session._build_options: log effective ClaudeAgentOptions (INV-1 observability)
+
+**Files changed**: `src/runner/session.py`.
+
+Added a single `logger.info` at the tail of `_build_options` recording the
+resolved job id, skill, model, effort, `max_turns`, and `permission_mode`.
+The existing `job_started` audit event carries model / effort / isolation
+but omits `max_turns` and `permission_mode`, so an SDK-side termination
+like `error_max_turns: Reached maximum number of turns (N)` used to leave
+no trace of what the SDK was actually configured with. Root case: on
+2026-09-01, `_writeback` job `f6c9e375-376f-423f-9566-40a686131f60`
+failed with N=6 while the *current* `SKILL.md` says 10 — the 6 → 10 bump
+(commit `12a7851`) landed on 2026-09-02, so at run time SKILL.md really
+was 6. Diagnosing that required git-archaeology on the SKILL.md history
+because nothing in the audit log said "SDK max_turns=6". Pure additive
+observability — the returned `ClaudeAgentOptions` and every existing test
+expectation are unchanged.
+
+## 2026-09-01 — schedule-adherence monitor: the missing-run axis (firm WS1)
+
+**Files changed**: `src/runner/schedule_adherence.py` (new),
+`tests/test_schedule_adherence.py` (new), `scripts/schedule-monitor.sh`
+(new), `scripts/install-launchd.sh`.
+
+`schedule_rollup` grades runs that exist; nothing noticed a schedule that
+silently stopped producing runs (08-17 governor-dark: scheduler-task death
+looks healthy; scout-never-ran: a row that never fired sorts as fine). New
+pure fold `adherence_report(schedules, jobs, now)` → findings
+DARK / NEVER_RAN / STUCK / FAILURE_STREAK + per-schedule status rows;
+schedule_id join, never kind (2026-08-17 review doctrine). CLI main writes
+`volumes/telemetry/schedule_adherence.json` (consumed by atlas firm
+`liveness.py`, spec 2026-09-01-atlas-firm-org-design). Out-of-band delivery:
+`scripts/schedule-monitor.sh` on launchd timer `com.assistant.schedule-monitor`
+(daily 07:15 local) — the scheduler must not watchdog itself — with the
+healthcheck-all curl-DM idiom, 12h alert rate limit, Sunday always-summary.
+Artifact shape: `{generated_at, findings[], schedules[{name, cron, paused,
+status: ok|paused|dark|never_ran|failing|stuck, last_expected,
+observed_job_at}]}`. First live run 2026-09-01: 33 schedules, 0 findings.
+Review catch (same day, INV-13 pass): status overwrites now run in
+ascending severity (failing → stuck → dark/never_ran) so a hung job is
+never downgraded to "failing" by a coincident streak; overlap test added.
+
+## 2026-08-31 — review catches on the F1 hardening (same session)
+
+The INV-4 code-review pass on the remediation diff found two real holes:
+
+- **BLOCKER — `POST /api/jobs` was a third god door**: `web.create_job`
+  passed `req.kind` through unvalidated, so any unisolated skill able to
+  read `WEB_AUTH_TOKEN` could post `kind=god`. Now 403s with a pointer to
+  Telegram /god (`tests/test_web_god_gate.py`).
+- **MAJOR — corrupt SUBAGENT frontmatter killed the parent**:
+  `agents.build_subagents` didn't catch the new `SkillFrontmatterError`, so
+  one broken subagent skill (e.g. the exact unquoted-`:` class just fixed)
+  would fail every parent that lists it (19 skills list subagents). Now
+  skipped with a warning, matching the function's contract.
+
+## 2026-08-31 — F2 queue honesty: slot-before-BLPOP, stranded-queued healing, honest /health, launchd-aware run.sh, status constraint (EVALUATION_2026-08-30)
+
+**Files changed**: `src/runner/main.py`, `src/runner/reconcile.py`,
+`src/gateway/web.py`, `scripts/run.sh`,
+`alembic/versions/006_job_status_constraint.py`, tests.
+
+- **Job loop acquires a semaphore slot BEFORE `BLPOP`** (new
+  `_run_with_held_slot`). Previously ids were popped eagerly and parked on
+  in-process semaphore waiters — a runner death lost every waiting id from
+  Redis while rows stayed `queued` in Postgres forever (observed live:
+  Redis LLEN 0 vs 15 PG-queued).
+- **`reconcile.requeue_stranded_queued()`** (startup, after orphan
+  reconciliation): re-RPUSHes every `queued` row absent from Redis; audit
+  event `queued_requeued`. Pure helper `stranded_queued_ids`.
+- **`/health`**: `queue_depth` is now the Postgres queued count (was Redis
+  LLEN alone — reported 0 with 15 queued). New fields `redis_llen`,
+  `pg_queued`, `pg_running`, `pg_deferred`. Health verdict logic unchanged.
+- **`run.sh`**: when `com.assistant.*` launchd units are loaded, `status`
+  reports launchd truth (was: PID files → "not running" while everything
+  ran) and `start` refuses (was: would bind :8080 against live uvicorn).
+- **Migration 006**: maps the illegal `status='succeeded'` row (wrote by a
+  session via SQL; its 3 deferred children stranded 8 days because
+  promotion only recognises `completed`) to `completed`, fails any other
+  unknown status, and adds CHECK `ck_jobs_status_valid`.
+
+## 2026-08-31 — F1 hardening: fail-closed skill contracts, tighten-only isolation, dispatch guards (EVALUATION_2026-08-30)
+
+**Agent task**: interactive remediation of `docs/EVALUATION_2026-08-30.md` F1.
+
+**Files changed**: `src/registry/skills.py`, `src/runner/session.py`,
+`src/runner/workspaces.py`, `src/runner/mcp_dispatch.py`,
+`src/runner/main.py`, `src/gateway/telegram_bot.py`,
+`tests/test_registry_failclosed.py` (new), `tests/test_workspaces.py`.
+
+- **Registry fails closed**: corrupt SKILL.md frontmatter now raises
+  `SkillFrontmatterError` instead of silently running the skill on registry
+  defaults (full toolset, acceptEdits, isolation none). `list_all()` skips
+  corrupt skills with an ERROR log. Three atlas skills (atlas-chat,
+  atlas-k401-review, atlas-portfolio) had unparseable descriptions (unquoted
+  `"name: arg"` trigger text) and ran defaulted for weeks — descriptions now
+  block-scalar quoted.
+- **`session._resolve_skill` raises `SkillResolutionError`** (terminal, not
+  escalated — new handler in `main._process_job`, error_category
+  `skill_contract`) when an explicit kind's skill is missing or corrupt, and
+  when a router match resolves to a corrupt skill.
+- **`workspaces.resolve_isolation`**: payload may only TIGHTEN isolation
+  (anything → workspace). Payload `host`/`none` relaxation is ignored with a
+  warning; unknown tiers fail closed to `workspace` (was `none`).
+- **Generic unmatched task** (`kind=task`, no skill contract) is forced onto
+  the guarded `workspace` tier (audit event `isolation_forced`). Owner host
+  work goes through /god.
+- **Dispatch MCP**: `enqueue_job` rejects `kind='god'` (owner-invoked only,
+  via Telegram /god) and strips `isolation`/`permission_mode`/`permission`
+  from dispatched payloads (logged). Telegram `/task --kind=god` is rejected
+  with a pointer to /god.
+- **Gateway**: httpx logger raised to WARNING (one INFO line per 10s
+  getUpdates long-poll had grown bot.err.log to ~46MB, F7.3).
+
 ## 2026-08-23 — Second variant of session_id collision bug documented (`_learning_apply` preflight rejection)
 
 **Agent task**: self-diagnose — escalation `b8767cb3` for failed `_learning_apply` job `46acc317` (parent 18257848). Root cause is the known `Session ID … is already in use` bug (TROUBLESHOOTING.md §468), but this instance widens the diagnosis: the first attempt was **preflight-rejected** by quota (`rate_limit_status: rejected` → `job_requeued_for_quota`) BEFORE any Claude work ran, and yet the SDK subprocess still created the session file on disk. When the retry fired ~1h37m later, it collided. Unlike the atlas-report variant (48ad692d), no deliverable existed to salvage. Remediation: manually appended the intended PATTERN entry to `.context/modules/runner/skills/PATTERNS.md`, updated TROUBLESHOOTING.md to note the preflight-rejection variant + `_learning_apply` failure mode. Fix still requires server-patch (Phase 5): rotate `session_id` on any requeue (quota preflight OR post-work `QuotaExhausted`), or short-circuit-on-`already-in-use` in `session._run_in_process`. Total `Session ID … is already in use` hits in `runner.err.log` still 22 (this incident is entry #22).
