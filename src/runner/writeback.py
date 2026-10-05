@@ -86,10 +86,22 @@ def _is_doc_path(path: str) -> bool:
     if path.endswith("SKILL.md") or "/skills/" in path or path.startswith("skills/"):
         # Skill files are their own record
         return True
+    # Agent-config directories (same bucket as /skills/): these are
+    # declarative config for assistant/agent behavior, not code requiring a
+    # CHANGELOG. Projects like atlas routinely leave `.codex/agents/*.toml`,
+    # `.agents/skills/*.md`, and `.claude/agents/*` modified during their work;
+    # writeback should not fire on them. See proposals a164301b / dcd79c03
+    # (2026-10-05).
+    if (
+        path.startswith(".codex/agents/")
+        or path.startswith(".agents/")
+        or path.startswith(".claude/agents/")
+    ):
+        return True
     if path.startswith("docs/"):
         return True
     # Top-level markdown files (README.md, MISSION.md, SERVER.md, CLAUDE.md,
-    # TEARDOWN.md, GETSTARTED.md) are documentation, not code.
+    # AGENTS.md, TEARDOWN.md, GETSTARTED.md) are documentation, not code.
     if "/" not in path and path.endswith(".md"):
         return True
     return False

@@ -1,3 +1,33 @@
+## 2026-10-05 — max_turns 20 → 30 (headroom for atlas-size writebacks)
+
+**Agent task**: Implement review-and-improve proposal
+`dcd79c03-322f-470c-9e66-99dfc7633300`: bump `_writeback` max_turns so
+exhaustion stops aborting legitimate writebacks.
+**Files changed**:
+- `SKILL.md` — `max_turns: 20` → `max_turns: 30` (frontmatter-only).
+
+**Why**: Over the preceding 30 days, 5 of 23 `_writeback` jobs (21.7%)
+died at `max_turns=20`. All five parents were atlas-repo sessions
+touching 3+ files across multiple directories (`.codex/agents/*.toml`,
+`AGENTS.md`, `.agents/skills/*.md`), where the Rec-13 "Why" quality gate
+forces audit-log dives spanning many Read/Edit/Write/Bash events. The
+companion structural fix (proposal `a164301b`, same session) will shrink
+the set of jobs that reach writeback at all, but legitimate multi-module
+writebacks still need headroom. 20 → 30 keeps the same safety ceiling
+character (budgeted, not open-ended) while covering the observed tail.
+
+**Side effects**: A genuinely stalled `_writeback` burns 10 extra turns
+before escalation. Acceptable: the skill's Hard limits forbid code
+mutations, and the only consumer is the runner spawning it as a child —
+no user-facing surface.
+
+**Gotchas discovered**: this bump is paired with the structural fix in
+`src/runner/writeback.py`. Watch the two together: if the agent-dir
+reclassification already drops the writeback dispatch rate to near zero
+for the atlas pattern, the max_turns bump may never fire in practice.
+That's fine — the bump is cheap insurance for the long tail of
+legitimately broad writebacks.
+
 ## 2026-09-03 — max_turns 10 → 20 (headroom for Rec-13 audit-log dives)
 
 **Agent task**: Fix _writeback max_turns discrepancy; add observability for
