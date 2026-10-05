@@ -2,19 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Re-pointed 2026-10-05 at the cut spec.** The authoritative document is now `docs/superpowers/specs/2026-10-05-observability-and-trading-unblock-design.md`, and the authoritative scope row is its **§9 phase table, row "1 — Observability and hygiene"** (with that row's Entry, Exit and Switch cells); that spec's §15 names this plan "the executable form of Phase 1". The row it was cut from — the superseded-in-scope `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md` §9 **P0** row — remains the origin, and all three of that spec's applied review rounds stay folded into this document unchanged. **This plan was re-pointed, not re-cut:** it still stands at ≈10,700 lines for 20 tasks, which is a known debt — the new spec's §0 size argument is about the *spec*, and its §15 says so. **One task left with the cut:** the `SDK_RECORD=1` raw recorder (old Task 15), which existed only to collect fixtures for the deleted audit-replay gate (new spec §10 last row, §14 item 9) — see the 2026-10-05 Verification log entry. This plan keeps its own **P0** vocabulary for itself (P0 = the new spec's Phase 1), and every `spec §…` citation below still refers to the superseded spec, which the new spec keeps as the reference for them (its §15: table shapes, column names, event kinds, check names, card renderings, phase mechanics and every `file:line` citation are kept verbatim). Where the new spec carries the same material under its own numbers: §2.3 (data model / migration 007 rows), §2.4 (event and audit model, typed terminal reasons), §2.5 (cost and quota ledger — the old §2.8), §3 (interfaces, cards, notifications), §5 (the credential canary), §6 (settings-override refusal, audit redactor, telemetry-off env, startup assertion, alembic manifest, dev commit guard), §7 (the trading blockers — the old §8.3), §9 (phases, rollback rule, kill switches), §14 (everything deferred). **On the P-numbers that appear below:** they are the superseded spec's six phases, not the new spec's four. Read P1 → Phase 2, P2 → Phase 3, and P4/P5 → Phase 4 (the models registry, in-process `utility_call`, `ScriptExecutor`, `retro`, `CONTRACTS_MODE=enforce`, the `tasks:notify` deletion). Everything the old **P3** column held that the new spec's §14 names is **deferred, not scheduled** — the executor seam and `ClaudeSdkExecutor`/`claude_sdk.py` (item 9), `providers.yml`/`routing-policy.yml` and `restraints.py` with the tracked-settings content-hash pin (item 10), the vendor keys in `.env` and the free utility lanes (items 1–2), the grading belts (item 6). The superseded spec's **P6** ("owner-gated / deferred" — the SDK pin bump behind the replay gate, the isolation default flip, Routines, xAI/Perplexity, read-only data MCPs, the remote `ai-mcp` door) maps to **deferred** as well: new spec §14 items 5, 12 and 13, plus its §7 data-MCP default-no. Nothing in P0 depends on any of it, which is why no task below has a P3 dependency; a sentence that says "X waits for P3" now means "X is deferred". **On the D-numbers:** the new spec re-derived 26 decisions into eight, so a bare `D<n>` below is the **superseded** spec's unless it says "new spec". The survivors map old → new as **D1 → D1, D25 → D3, D3/D4 → D4, D12 → D5, D2 → D6, D10 → D7, D22 → D8**; every other old decision is deleted or deferred (new spec §14 item 14), **D21 and D13 included**. **On §14:** the *old* §14 is "Open questions" (the source of the "spec §14 Q2" probe this plan depends on) and the *new* §14 is "Deferred" — this plan writes **`new spec §14`** whenever it means the latter.
+
 > **Re-cut 2026-09-25 against round 1 of the reviewed spec; the round-2 and round-3 deltas were both applied 2026-09-27, and a fourth pass on 2026-09-27 applied the twenty-one findings filed against the plan itself (see the last Verification log entry). Rounds 1-3 are applied — the spec is frozen after round 3, so this plan is the document findings are filed against.** This plan was first drafted from the pre-review spec, then re-cut against the spec's **round-1** review log (rows #16, #17, #27, #28, #29, #31, #50, #51, #61, #64 and the window-labelling rule of #4 — round-1 numbering). The spec's **round 2** restarts its own numbering at #1 and has 58 rows; its P0-relevant rows (#2, #3, #4, #6, #8, #18, #19, #22, #28, #29, #32, #43, #48, #49, #50, #56, #58) were applied on **2026-09-27**. The spec's **round 3** (terminal, 2026-09-27) numbers its verified findings #1–#14, its majors M1–M50 and its minors m1–m19; its P0-relevant rows were applied the same day — **see "Alignment with the reviewed spec" for the three per-round tables and the Verification log entries of 2026-09-25 and 2026-09-27 for what changed, what was already satisfied and what was skipped.** The authoritative P0 scope is the spec's §9 table row "P0" plus its test-gate and rollback paragraphs, the §14 questions it names, the §12/§12a runbook rows that name P0, and every review-log row (any round) whose disposition names P0. **Merging this re-cut is itself a P0 *entry* criterion** (spec §9 P0 entry cell, Appendix B). **D1 approves P0–P1 only** (spec §12 D1, review r1 #51): P2 starts only after the owner reads the P1 retro.
 >
-> **What changed in the plan-findings pass (2026-09-27, one line — details in the last Verification log entry):** the settings-override allowance re-keyed on **provenance** instead of the cwd path (a workspace clone is a copy of the canonical, so the path form would have refused every write-capable job) plus an audited-not-refused arm for the one hosted project whose own tracked settings file carries `hooks`; the protected-path guard moved from `pre-commit` to **`commit-msg`** (only that hook receives the message file) and its list completed with `.context/org/ORG.md` and `src/gateway/web.py`; Task 13 Step 6b re-pointed at `events.py` with the `tests/test_events.py` sweep it needs to stay green; Task 20's `sdk_record` steps moved into Task 15, which now imports the shared redactor instead of defining a second pattern set; the recordings sweep raised to 90 days so it cannot outrun P3; the credential canary pins `setting_sources` and clears both settings scopes before pinging; and the M20 30-d baseline recorded as exit evidence.
+> **What changed in the plan-findings pass (2026-09-27, one line — details in the last Verification log entry):** the settings-override allowance re-keyed on **provenance** instead of the cwd path (a workspace clone is a copy of the canonical, so the path form would have refused every write-capable job) plus an audited-not-refused arm for the one hosted project whose own tracked settings file carries `hooks`; the protected-path guard moved from `pre-commit` to **`commit-msg`** (only that hook receives the message file) and its list completed with `.context/org/ORG.md` and `src/gateway/web.py`; Task 13 Step 6b re-pointed at `events.py` with the `tests/test_events.py` sweep it needs to stay green; the credential canary pins `setting_sources` and clears both settings scopes before pinging; and the M20 30-d baseline recorded as exit evidence.
 >
-> **What changed in the round-3 pass (one line, details in "Alignment with the reviewed spec" → "Round 3 rows applied"):** `jobs.sdk_cost_usd` beside a runner-computed `cost_usd_list`; the settings-file refusal widened from auth keys to the whole settings channel; a dev protected-path commit-msg guard; three vendor-enforcement terminal reasons; recordings moved out of the audit directory; the §14 Q2 probe; the idle `server-patch` dispatcher removed unconditionally; the weekly-allowance calibration; the absolute build ceiling in place of "15 % of the window"; and Task 16 moved ahead of Task 3 in the execution order. No task numbers changed.
+> **What changed in the round-3 pass (one line, details in "Alignment with the reviewed spec" → "Round 3 rows applied"):** `jobs.sdk_cost_usd` beside a runner-computed `cost_usd_list`; the settings-file refusal widened from auth keys to the whole settings channel; a dev protected-path commit-msg guard; three vendor-enforcement terminal reasons; the §14 Q2 probe; the idle `server-patch` dispatcher removed unconditionally; the weekly-allowance calibration; the absolute build ceiling in place of "15 % of the window"; and Task 16 moved ahead of Task 3 in the execution order. No task numbers changed.
 
-**Goal:** Make every job observable and every launch notified — tokens/cost/provider/terminal reason land in Postgres, `cost_usd_list` is the runner's own computation from tokens (`src/runner/pricing.py`) with the SDK's figure stored beside it as `jobs.sdk_cost_usd`, and a two-window cost-reconcile script proves the two against each other and against the JSONL ledger (they agree within 1 %, or the divergence is recorded together with the cache-write rate the CLI implies); **every human-launched job DMs on completion or failure, and every scheduled job DMs on failure** — spec §4.2 "Card eligibility": `notify=failures` is the default for all 41 schedule rows, so a scheduled run produces a FailedCard and never a completion DM (completion DMs for a schedule need `notify=always`, a migration-008 column in P1) — through a durable outbox that survives bot restarts while the legacy `tasks:notify`/`_job_to_chat` consumer stays wired (dual-write, `NOTIFY_OUTBOX=0` is a real switch); the four ghost Telegram commands become real, `/clear` asks first, `AskUserQuestion` leaves the default tool list; a daily credential canary proves the Keychain subscription login still serves through the runner's own SDK path with the runner's env; every Claude subprocess runs with error reporting and telemetry off and a clone's `.claude/settings*.json` can no longer override hooks, permissions, MCP servers or auth; the autonomous `server-patch` idle dispatcher is removed unconditionally; an opt-in raw SDK recorder (`SDK_RECORD=1`) accumulates the ≥20 real fixtures the P3 replay gate needs in `volumes/sdk_recordings/`; the alembic chain gains the "every applied revision exists on disk" test, a runner-startup check against the live `alembic_version` and the rollback rule; a dev **commit-msg** guard makes "protected path" mechanical (a `commit-msg` hook, not `pre-commit`: git hands the message file only to `commit-msg`, and the CHANGELOG `pre-commit` hook stays untouched); and the owner gets a runbook for the DR/host hygiene debt and the §12a rows marked P0. The Haiku 4.5 retirement swap ships **ahead of P0** as a standalone `server-patch` (Task 0).
+**Goal:** Make every job observable and every launch notified — tokens/cost/provider/terminal reason land in Postgres, `cost_usd_list` is the runner's own computation from tokens (`src/runner/pricing.py`) with the SDK's figure stored beside it as `jobs.sdk_cost_usd`, and a two-window cost-reconcile script proves the two against each other and against the JSONL ledger (they agree within 1 %, or the divergence is recorded together with the cache-write rate the CLI implies); **every human-launched job DMs on completion or failure, and every scheduled job DMs on failure** — spec §4.2 "Card eligibility": `notify=failures` is the default for all 41 schedule rows, so a scheduled run produces a FailedCard and never a completion DM (completion DMs for a schedule need `notify=always`, a migration-008 column in P1) — through a durable outbox that survives bot restarts while the legacy `tasks:notify`/`_job_to_chat` consumer stays wired (dual-write, `NOTIFY_OUTBOX=0` is a real switch); the four ghost Telegram commands become real, `/clear` asks first, `AskUserQuestion` leaves the default tool list; a daily credential canary proves the Keychain subscription login still serves through the runner's own SDK path with the runner's env; every Claude subprocess runs with error reporting and telemetry off and a clone's `.claude/settings*.json` can no longer override hooks, permissions, MCP servers or auth; the autonomous `server-patch` idle dispatcher is removed unconditionally; the alembic chain gains the "every applied revision exists on disk" test, a runner-startup check against the live `alembic_version` and the rollback rule; a dev **commit-msg** guard makes "protected path" mechanical (a `commit-msg` hook, not `pre-commit`: git hands the message file only to `commit-msg`, and the CHANGELOG `pre-commit` hook stays untouched); and the owner gets a runbook for the DR/host hygiene debt and the §12a rows marked P0. The Haiku 4.5 retirement swap ships **ahead of P0** as a standalone `server-patch` (Task 0).
 
-**Architecture:** Everything is additive. Migration 007 adds nullable columns on `jobs`/`tasks` and a new `notifications` outbox table; `jobs.status` and its CHECK constraint (migration 006) are untouched. A new pure module `src/runner/result_capture.py` reads the full SDK `ResultMessage` (today `session.py:1095` keeps only `usage`) and derives a typed `terminal_reason`; `session.py`/`main.py` stamp the columns. A new package `src/notify/` owns the outbox rows, a Telegram renderer that is the only code that knows the 4096-char / 64-byte / 8-button limits, and a `python -m src.notify send` CLI; the runner writes rows on job terminal + task lifecycle events **and** keeps publishing the legacy channels byte-identically (dual-write), the bot delivers whichever renderer the switch selects (pub/sub nudge + 30 s poll, so a restart loses nothing), out-of-band bash alerters call the CLI. Three small runner-side belts ride along: `src/runner/sdk_record.py` (opt-in raw message recorder to `volumes/sdk_recordings/<id>.json` — deliberately outside `volumes/audit_log/`, which three consumers glob with `*.jsonl`; secrets redacted), `claude_env.claude_subprocess_env()` (the `ClaudeAgentOptions.env` overlay carrying `DISABLE_ERROR_REPORTING=1`/`DISABLE_TELEMETRY=1` into every Claude subprocess — the runner's, the router's, the learning classifier's, the reviewer's, the canary's), and `src/runner/pricing.py` + `scripts/cost-reconcile.py` (list-price ledger from `job_started.model` × `job_completed.usage`). `pricing.py` is the **single definition of `cost_usd_list`** (spec §2.8, round-3 #10): the runner calls `price_usage` when it stamps the row, the SDK's `total_cost_usd` is stored separately as `jobs.sdk_cost_usd`, and the reconcile script is what compares them — which is why `pricing.py` is built (Task 16) *before* the session wiring that consumes it (Task 3). The canary (`python -m src.runner.canary`) pings through `claude_agent_sdk.query()` with the same options builder conventions, the same env overlay and the same `result_capture` assertion the runner uses — the P0 stand-in for the P3 `ClaudeSdkExecutor` path. `alembic/applied_history.txt` + its two pytest assertions make the spec's rollback rule enforceable inside the gate `server-deploy` already runs; `scripts/alembic-current-check.sh` rides along as an owner-run diagnostic and is deliberately **not** wired into the protected `server-deploy/SKILL.md` (spec §9 rollback paragraph; the §9 P0 "Protected touches" cell is `none`).
+**Architecture:** Everything is additive. Migration 007 adds nullable columns on `jobs`/`tasks` and a new `notifications` outbox table; `jobs.status` and its CHECK constraint (migration 006) are untouched. A new pure module `src/runner/result_capture.py` reads the full SDK `ResultMessage` (today `session.py:1095` keeps only `usage`) and derives a typed `terminal_reason`; `session.py`/`main.py` stamp the columns. A new package `src/notify/` owns the outbox rows, a Telegram renderer that is the only code that knows the 4096-char / 64-byte / 8-button limits, and a `python -m src.notify send` CLI; the runner writes rows on job terminal + task lifecycle events **and** keeps publishing the legacy channels byte-identically (dual-write), the bot delivers whichever renderer the switch selects (pub/sub nudge + 30 s poll, so a restart loses nothing), out-of-band bash alerters call the CLI. Two small runner-side belts ride along: `claude_env.claude_subprocess_env()` (the `ClaudeAgentOptions.env` overlay carrying `DISABLE_ERROR_REPORTING=1`/`DISABLE_TELEMETRY=1` into every Claude subprocess — the runner's, the router's, the learning classifier's, the reviewer's, the canary's), and `src/runner/pricing.py` + `scripts/cost-reconcile.py` (list-price ledger from `job_started.model` × `job_completed.usage`). `pricing.py` is the **single definition of `cost_usd_list`** (spec §2.8, round-3 #10): the runner calls `price_usage` when it stamps the row, the SDK's `total_cost_usd` is stored separately as `jobs.sdk_cost_usd`, and the reconcile script is what compares them — which is why `pricing.py` is built (Task 16) *before* the session wiring that consumes it (Task 3). The canary (`python -m src.runner.canary`) pings through `claude_agent_sdk.query()` with the same options builder conventions, the same env overlay and the same `result_capture` assertion the runner uses — the stand-in for the runner's own session path, which it mirrors (the executor seam the superseded spec put in P3 is deferred: new spec §14 item 9). `alembic/applied_history.txt` + its two pytest assertions make the spec's rollback rule enforceable inside the gate `server-deploy` already runs; `scripts/alembic-current-check.sh` rides along as an owner-run diagnostic and is deliberately **not** wired into the protected `server-deploy/SKILL.md` (spec §9 rollback paragraph; the §9 P0 "Protected touches" cell is `none`).
 
 **Tech Stack:** Python 3.12, SQLAlchemy 2 async + Alembic, Redis (`redis.asyncio`, `fakeredis` in tests), python-telegram-bot 22.8 (Pipfile.lock; `reply_to_message_id` is still accepted by `send_message`), httpx, `claude-agent-sdk>=0.1.81,<0.2` (bundled CLI 2.1.139; `ClaudeAgentOptions.env` is an overlay on the inherited `os.environ`, `subprocess_cli.py:430-436`), pytest (`asyncio_mode=auto`), bash under launchd.
 
-**Spec:** `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md` (review rounds 1–3 applied in the spec, which is **frozen** after round 3; **rounds 2 and 3 applied to this plan 2026-09-27**) — **§9 P0 row + its test-gate paragraph + its rollback paragraph** (authoritative scope), §9 kill-switch paragraph (`NOTIFY_OUTBOX=0` dual-write semantics), §9 "Who executes" (the absolute ≈ 28 M tokens ≈ $30/week `build`-lane ceiling — round 3 struck the 15 % form — and D1 = P0–P1), §9 "Shipped ahead of P0" (Haiku swap as a standalone patch), §0 (decision summary), §0a rows 5–6 and the last rows (Ollama, Haiku retirement, Keychain-primary auth, sealed setup-token, canary through the runner's path, `plutil` exit test), §2.3 (migration 007 rows), §2.4 (`SDK_RECORD=1` recorder, executor env + telemetry flags), §2.7 (event model), §2.8 (cost ledger + the 30-d calibration table the reconcile script reproduces; window figures labelled by source), §3 (Anthropic row: auth + env), §4.5 (notifications), §10 (`tasks:notify` legacy path deleted only in P5), §11 (canary/pin-bump risk row), §12 D1/D3/D4/D12/D17, **§12a rows 0, 1, 2, 2b, 4, 4b, 5, 6, 6b** (owner runbook rows due at P0 entry / P0 exit; row 3 = `claude setup-token` is **P3, not P0**) and row 23 (P0 sign-off); §4.2 "Card eligibility"; §8.3 "Blockers" (P0 trading blockers); **§14 Q2** (the Seatbelt / project-scope-settings probe, moved into the P0 gate list by round 3); round-1 review-log rows **#4, #16, #17, #27, #28, #29, #31, #50, #51, #61, #64**, round-2 rows **#2, #3, #4, #6, #8, #18, #19, #22, #28, #29, #32, #43, #48, #49, #50, #56, #58** and round-3 rows **#1, #3, #4, #6, #7, #10, #12, #14, M8, M9, M16, M20, M22, M26, M27, m5–m8, m13–m16, m17–m19** (each applied — see the Alignment section's three tables, which now carry an M20 row of their own and an m5–m8 row; **M20** is a P0 *output* — the rolling-30-d `cost_usd_list` baseline the P2 alarm keys +25 % off — so it appears as an exit-evidence line, and **M27**'s hand-off is stated in §9's own words: P0 writes and prints the seed, the owner pastes it into `LANE_WEEKLY_BUDGET_JSON` in `Settings` at P2). Current-state citations: the 2026-09-24 state map (§2.1 executor path, §2.2 job lifecycle, §2.3 user surfaces, §2.8 ops, §3 constraints C1–C26, §4 coupling inventory). List prices: `docs/research/llm-landscape-2026-09/claude-anthropic.md` §4 table. Every `file:line` below was re-read on 2026-09-25.
+**Spec:** `docs/superpowers/specs/2026-10-05-observability-and-trading-unblock-design.md` — **its §9 phase table's Phase-1 row ("Observability and hygiene") with that row's Entry/Exit/Switch cells, plus §9's rollback and kill-switch paragraphs** (authoritative scope; that spec's §15 names this plan the executable form of Phase 1, minus the task its §10 cut). **Origin, and still the document every `spec §…` number below refers to:** the superseded-in-scope `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md` (review rounds 1–3 applied in it, **frozen** after round 3; **rounds 2 and 3 applied to this plan 2026-09-27**), whose **§9 P0 row + its test-gate paragraph + its rollback paragraph** this scope was cut from and whose rounds 1–3 are folded in here unchanged — §9 kill-switch paragraph (`NOTIFY_OUTBOX=0` dual-write semantics), §9 "Who executes" (the absolute ≈ 28 M tokens ≈ $30/week `build`-lane ceiling — round 3 struck the 15 % form — and D1 = P0–P1), §9 "Shipped ahead of P0" (Haiku swap as a standalone patch), §0 (decision summary), §0a rows 5–6 and the last rows (Ollama, Haiku retirement, Keychain-primary auth, sealed setup-token, canary through the runner's path, `plutil` exit test), §2.3 (migration 007 rows), §2.4 (executor env + telemetry flags), §2.7 (event model), §2.8 (cost ledger + the 30-d calibration table the reconcile script reproduces; window figures labelled by source), §3 (Anthropic row: auth + env), §4.5 (notifications), §10 (`tasks:notify` legacy path deleted only in P5), §11 (canary/pin-bump risk row), §12 D1/D3/D4/D12/D17, **§12a rows 0, 1, 2, 2b, 4, 4b, 5, 6, 6b** (owner runbook rows due at P0 entry / P0 exit; row 3 = `claude setup-token` is **P3, not P0**) and row 23 (P0 sign-off); §4.2 "Card eligibility"; §8.3 "Blockers" (P0 trading blockers); **§14 Q2** (the Seatbelt / project-scope-settings probe, moved into the P0 gate list by round 3); round-1 review-log rows **#4, #16, #17, #27, #28, #29, #31, #50, #51, #61, #64**, round-2 rows **#2, #3, #4, #6, #8, #18, #19, #22, #28, #29, #32, #43, #48, #49, #50, #56, #58** and round-3 rows **#1, #3, #4, #6, #7, #10, #12, #14, M9, M16, M20, M22, M26, M27, m5–m8, m13–m16, m17–m19** (each applied — see the Alignment section's three tables, which now carry an M20 row of their own and an m5–m8 row; **M20** is a P0 *output* — the rolling-30-d `cost_usd_list` baseline the P2 alarm keys +25 % off — so it appears as an exit-evidence line, and **M27**'s hand-off is stated in §9's own words: P0 writes and prints the seed, the owner pastes it into `LANE_WEEKLY_BUDGET_JSON` in `Settings` at P2). Current-state citations: the 2026-09-24 state map (§2.1 executor path, §2.2 job lifecycle, §2.3 user surfaces, §2.8 ops, §3 constraints C1–C26, §4 coupling inventory). List prices: `docs/research/llm-landscape-2026-09/claude-anthropic.md` §4 table. Every `file:line` below was re-read on 2026-09-25.
 
 ## Global Constraints
 
@@ -28,10 +30,9 @@ Every task's requirements implicitly include this section.
 - **CHANGELOG per module per commit**: the pre-commit hook (`.git/hooks/pre-commit`) rejects any commit touching `src/` without a `CHANGELOG.md` in the same commit. Module changelogs live at `.context/modules/{runner,gateway,db,hosting,registry,notify}/CHANGELOG.md`, newest entry at top, PROTOCOL.md §3.1 format (`## YYYY-MM-DD — summary` + Agent task / Files changed / Why / Side effects / Gotchas discovered).
 - **Kill switch `NOTIFY_OUTBOX=0`** (env → `settings.notify_outbox: bool`; ships `False` in Task 5 and is flipped to `True` in the same commit that adds the bot consumer, Task 7): P0 **dual-writes** (spec §9 kill-switch paragraph, §10 row "`tasks:notify` string vocabulary…", review #28). The runner ALWAYS publishes `tasks:notify` and `jobs:done:<id>` byte-identically to today and, only when the switch is on, ALSO writes the outbox row. The switch is **renderer-side**: the bot's legacy `_done_listener`/`_task_notifier` send only when it is off, `_outbox_listener` runs only when it is on — so a bot-only restart flips delivery. The legacy consumer (`_done_listener`, `_job_to_chat`, `_task_notifier`, the nine `tasks:notify` types) is **kept, never deleted, through P5** (spec §10 "Delete (P5, after two releases of outbox soak)"); the P0 test `test_done_message_sends_legacy_when_outbox_off` (Task 7) is the spec's exit-criterion test "with `NOTIFY_OUTBOX=0` a Telegram-launched job still DMs via the legacy path".
 - **Rollback rule (spec §9 rollback paragraph, review #29)**: to roll P0 back, flip `NOTIFY_OUTBOX=0`, then `git revert` **application code only** — `alembic/versions/007_p0_observability.py` is never reverted (its columns are nullable and ignored by older ORM models; reverting it leaves prod `alembic_version` pointing at a revision with no script on disk and the next `server-deploy`'s `alembic upgrade head` fails with "Can't locate revision" mid-incident). If the migration itself must go: `alembic downgrade -1` on prod **before** removing the file, and remove its line from `alembic/applied_history.txt` in the same commit (Task 18 makes the test fail otherwise). The P0 PR description carries a rollback note naming the switch and the merge SHA (Task 14 Step 5).
-- **Auth posture (spec §0a last rows, §3 Anthropic row, review #31)**: the Keychain `claude login` on the Mini is the live credential and the only one P0 code ever uses. The `claude setup-token` is **minted before P3, NOT at P0** (§12a row 3 as round 2 re-scoped it: "the Keychain login is the only credential until the executor seam exists; the sealed token is unused before P3") — this plan therefore asks the owner for no token, and the Owner-actions table carries it as a "P3, not P0" line. When it is minted it is sealed 0600 outside any workspace and is a **canary-triggered fallback for P3's `ClaudeSdkExecutor`** — it is never read by P0 code, never written to `.env`, never exported into any launchd plist, never passed to the canary (which must prove the Keychain login, not the token). P0 exit test (§0a): `plutil -p ~/Library/LaunchAgents/com.assistant.*.plist | grep -c CLAUDE_CODE_OAUTH_TOKEN` → `0` (runbook §7; pinned at the installer level by `tests/test_claude_env.py::test_installer_never_exports_credentials`, Task 17).
-- **Claude subprocess env (spec §2.4, §3, review #61)**: every `ClaudeAgentOptions` the server builds carries `env=claude_env.claude_subprocess_env()` = `{"DISABLE_ERROR_REPORTING": "1", "DISABLE_TELEMETRY": "1"}` (the SDK overlays it on the inherited env, `subprocess_cli.py:430-436`), and the service + timer plists export the same two keys (Task 17, Task 12). Vendor keys (`GEMINI_*`, `CEREBRAS_*`, `GROQ_*`, `CODEX_*`, `OPENROUTER_*`) never enter `os.environ`: the runner refuses to start if any is set (Task 17 startup assertion beside `_check_subscription_auth`). The full explicit-`env=` replacement (no inheritance) is P3's `claude_sdk.py`, not P0.
-- **Raw SDK recorder (spec §2.4, §9 P0 row, review #27, round-3 M8)**: `SDK_RECORD=1` (env → `settings.sdk_record: bool = False`) makes `_run_in_process` append every SDK message it receives, in arrival order, to **`volumes/sdk_recordings/<job_id>.json`** (dataclass → JSON, secrets redacted by the **shared** `src/runner/secret_redact.redact` that Task 20 creates for the always-on JSONL/stream path — `sdk_record` imports it so there is one pattern set, never a second copy). **The directory is the load-bearing part**: recordings must live **outside `volumes/audit_log/`**, because three consumers glob that directory with `*.jsonl` (`audit_index.py:167`, `retrospective.py:214`, `:364`) and would index full-fidelity untruncated `tool_use.input`/`tool_result`/`SystemMessage` as audit entries — wrong shape, double-counted events, and untruncated proprietary text flowing into an Anthropic retro prompt. The file is **JSON Lines** (one record per line, appended as messages arrive so a crash mid-job keeps what was written) under the `.json` name spec §9's P0 row gives it; P3's replay gate globs `volumes/sdk_recordings/*.json` and reads it line-delimited (the spec's P3 cell calls the same file "the raw `.sdk.jsonl`" — same content, and the P0 row's path is the one that ships). The recorder is opt-in, best-effort (a write error is logged once and never fails the job), records exactly what the loop sees (no `StreamEvent`s unless `include_partial_messages` is ever turned on), and ≥ 20 jobs across skill classes must be recorded before P3 (`python -m src.runner.sdk_record coverage`). **`SDK_RECORD` is off in prod outside a recording window**: the owner turns it on in prod `.env` (protected path) and off again once coverage is met, and the P0 exit test asserts the flag is unset after the ≥ 20 jobs are captured (`coverage` exits non-zero while coverage is met and the flag is still on — Task 15).
-- **Always-on audit/stream redaction (spec §2.4 "Audit/stream redaction (P0)", round-2 #3, round-3 M8/M9)**: `session._handle_message` runs `src/runner/secret_redact.redact()` over every `tool_result` preview and every `text` **before** the per-job JSONL append and the `jobs:stream:<id>` publish (Task 20). Spec §2.4 places the redactor "at the ExecEvent normaliser … so all four executors pass through it" — **in P0 `_handle_message` *is* that normaliser** (it is the only path from any executor to the audit log and the stream; P3 moves the same function behind `executors/base.py` and the other three executors join it there), so the P0 placement satisfies the rule and is not a narrower reading of it. This is *not* the opt-in recorder: with `SDK_RECORD=0` — the shipped default — the durable trace is still redacted, so a `printenv` or a `curl -H 'Authorization: …'` in any of the 72 skills never lands a credential value in `volumes/audit_log/<id>.jsonl`, in the stream, in `ai-mcp` reads or in the learning extractor's input. Pattern set: `sk-ant-…`, `Authorization: Bearer …`, `NAME=value` assignments/dumps for `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_*`, `GEMINI_*`, `CEREBRAS_*`, `GROQ_*`, `CODEX_*`, `OPENROUTER_*`, `OPENAI_*`, `XAI_*` and any `*_TOKEN|*_SECRET|*_API_KEY|*_PASSWORD` name, **and the private-key shape `-----BEGIN [A-Z ]*PRIVATE KEY----- … -----END …-----` together with the literal path `~/.config/ai-server/publish-key`** (round-3 M9: the P4 `publish.py` deploy key is a *file*, so its exposure is a `cat`/`Read` in any unhooked session, and the key material never matched a `NAME=value` pattern; the pattern ships in P0 even though the file is minted in P4, because the redactor is the thing that must already be right when it appears). P0 test gate: `test_audit_redactor`.
+- **Auth posture (spec §0a last rows, §3 Anthropic row, review #31)**: the Keychain `claude login` on the Mini is the live credential and the only one P0 code ever uses. The `claude setup-token` is **not minted at P0** (§12a row 3 as round 2 re-scoped it: "the Keychain login is the only credential until the executor seam exists; the sealed token is unused before P3") — this plan therefore asks the owner for no token, and the Owner-actions table carries it as a "not P0" line. When it is minted it is sealed 0600 outside any workspace and is a **canary-triggered fallback for a later phase** (the executor seam the quoted row names is deferred — new spec §14 item 9) — it is never read by P0 code, never written to `.env`, never exported into any launchd plist, never passed to the canary (which must prove the Keychain login, not the token). P0 exit test (§0a): `plutil -p ~/Library/LaunchAgents/com.assistant.*.plist | grep -c CLAUDE_CODE_OAUTH_TOKEN` → `0` (runbook §7; pinned at the installer level by `tests/test_claude_env.py::test_installer_never_exports_credentials`, Task 17).
+- **Claude subprocess env (spec §2.4, §3, review #61)**: every `ClaudeAgentOptions` the server builds carries `env=claude_env.claude_subprocess_env()` = `{"DISABLE_ERROR_REPORTING": "1", "DISABLE_TELEMETRY": "1"}` (the SDK overlays it on the inherited env, `subprocess_cli.py:430-436`), and the service + timer plists export the same two keys (Task 17, Task 12). Vendor keys (`GEMINI_*`, `CEREBRAS_*`, `GROQ_*`, `CODEX_*`, `OPENROUTER_*`) never enter `os.environ`: the runner refuses to start if any is set (Task 17 startup assertion beside `_check_subscription_auth`). The full explicit-`env=` replacement (no inheritance) would have come with the executor seam, which is deferred (new spec §14 item 9); the overlay is what ships.
+- **Always-on audit/stream redaction (spec §2.4 "Audit/stream redaction (P0)", round-2 #3, round-3 M8/M9)**: `session._handle_message` runs `src/runner/secret_redact.redact()` over every `tool_result` preview and every `text` **before** the per-job JSONL append and the `jobs:stream:<id>` publish (Task 20). Spec §2.4 places the redactor "at the ExecEvent normaliser … so all four executors pass through it" — **in P0 `_handle_message` *is* that normaliser** (it is the only path from any executor to the audit log and the stream; the seam that would have moved the same function behind `executors/base.py` is deferred — new spec §14 item 9 — which leaves `_handle_message` the normaliser of record), so the P0 placement satisfies the rule and is not a narrower reading of it. The durable trace is redacted unconditionally — there is no switch that turns it off — so a `printenv` or a `curl -H 'Authorization: …'` in any of the 72 skills never lands a credential value in `volumes/audit_log/<id>.jsonl`, in the stream, in (deferred) `ai-mcp` reads or in the learning extractor's input. Pattern set: `sk-ant-…`, `Authorization: Bearer …`, `NAME=value` assignments/dumps for `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_*`, `GEMINI_*`, `CEREBRAS_*`, `GROQ_*`, `CODEX_*`, `OPENROUTER_*`, `OPENAI_*`, `XAI_*` and any `*_TOKEN|*_SECRET|*_API_KEY|*_PASSWORD` name, **and the private-key shape `-----BEGIN [A-Z ]*PRIVATE KEY----- … -----END …-----` together with the literal path `~/.config/ai-server/publish-key`** (round-3 M9: the P4 `publish.py` deploy key is a *file*, so its exposure is a `cat`/`Read` in any unhooked session, and the key material never matched a `NAME=value` pattern; the pattern ships in P0 even though `publish.py` and its key are deferred (new spec §14 item 7), because the redactor is the thing that must already be right when it appears). P0 test gate: `test_audit_redactor`.
 - **`pipenv run` exports `.env` into `os.environ`** (verified on this host: `pipenv run` prints "Loading .env environment variables…" and its values *win* over inherited ones — `SERVER_ROOT=$PWD pipenv run …` does **not** override the `.env` value, while `pipenv run env SERVER_ROOT=$PWD …` does). Two consequences this plan must respect: (1) any test that needs `settings` pointed at the repo's own tree runs as `pipenv run env SERVER_ROOT="$PWD" pytest …` (or monkeypatches the property), because the dev `.env` points `SERVER_ROOT` at the **production** checkout; (2) once a vendor key lands in `.env` (P3, §12a rows 10/11) Task 17's fail-closed startup assertion would refuse a `pipenv`-launched runner, so `scripts/run.sh` sets `PIPENV_DONT_LOAD_ENV=1` on its three `_start_one` lines (Task 17 Step 3; launchd runs the venv python directly and is unaffected).
 - **Window figures are labelled by source (spec §2.8 Claude row, review #4)**: no P0 surface may present a Claude 5-h/7-d figure as vendor-sourced unless a `RateLimitEvent` carried it. In P0 the only such surface is the `quota_paused` DM: its "Reset at …" line says `(vendor)` when the reset time came from `RateLimitInfo.resets_at` and `(estimated)` when it came from the text heuristic or the default pause window (Task 7 Step 3b; `quota.pause_queue(..., source=)`).
 - **Phase economics — the spec's own figures, verbatim (spec §9 "Who executes", §2.8 "Load during build", §13; round-1 #51, round-2 #22, round-3 #6/#7/M26)**: build sessions draw the same Max window as the 41 live schedules and cost **≈ 28 M tokens ≈ $30 `cost_usd_list` per week ≈ $115/month list-equivalent for ~13 weeks, `purpose=build`, on a `build` lane** (§2.8: server-patch's measured shape, 15 jobs / 52.3 M tokens / $50 at 1-h rates ≈ $0.95/M). **The cap is that absolute figure, not a percentage** (round 3 struck "15 % of the weekly window": the percentage was computed against the trailing-30-d mean that §2.5 forbids as a seed, it grew the build's absolute budget exactly as the window tightened, and it could not bind at all while phase PRs landed on the exempt `owner` lane). It is re-cut each week from the reconcile script alongside the lane budgets, never re-derived as a percentage; the weekly denominator it is measured against is **≈ $200/week `cost_usd_list`**, calibrated from the `seven_day` utilization series and re-derived weekly (§2.8; Task 16 prints it). **D1 must still state what build displaces**, but the lever changed: *either* a **LOOP.md §7 proposal against alpha-lab `budget.yaml`** capping `alpha-research` jobs/day and ≤ 4 M/job — sized from the measured 47–86 M/day (mean ≈ 51 M) and, per round-3 #7, **the only lever that actually moves that load** — *or* D1 explicitly accepts "N `rejected` windows/week during build". **`ALPHA_DAILY_JOB_VALVE` 12 → 6 is not that lever and is not offered as one**: the constant is a suppression threshold on the *idle drainer*, which enqueues an `alpha-governor` job of ≈ 2.3 M tokens, so the round-2 "≈ −40 M/day" saving does not exist (spec §2.8 line item, read from `events.py:364`, `:379-382`, `:412-418`, `:420-429`). **Independently of D1**, `review-and-improve`'s idle trigger is removed in P0 **unconditionally** (Task 13 Step 6b) as a containment item, ≈ −30 M/month. The P0 PR template (Task 14 Step 5) carries the displacement sentence and the absolute ceiling. Runtime delta of the Haiku→Sonnet swap: **+≈ $8/month list-equivalent, 0 token change** (a model swap changes price, not tokens — round-2 #49; the old "+≈ 8 M tokens/month" phrasing was wrong, and the dollar figure is never added into a token sum — round-3 m13–m16). **D1 approves P0–P1 only**; nothing in this plan pre-empts P2.
@@ -39,9 +40,9 @@ Every task's requirements implicitly include this section.
 - **Telegram limits (C23)**: 4096 chars per message, 64 bytes per `callback_data`, ≤ 8 inline buttons per keyboard. Enforced in `src/notify/telegram.py` only; every other module hands it unbounded text.
 - **Tests are pure-function / fixture style**: no network, no live SDK subprocess (constructing the SDK's message dataclasses in a test is fine; spawning the CLI is not), no Postgres (DB-backed tests stay opt-in behind `AI_SERVER_RUN_DB_TESTS=1`); Redis paths use the `fake_redis` fixture from `tests/conftest.py`. **Running `bash` on a repo script is in scope** — `tests/test_scripts_syntax.py` already does `bash -n`, and `tests/test_protected_paths_hook.py` (Task 13) drives `scripts/install-dev-hooks.sh check` over two fixture files. That is a local process with no network, no DB and no CLI; anything that would spawn `claude` is a hand-run script instead (Task 19's §14 Q2 probe). `tests/test_migrations.py` keeps the chain single-headed **and** (Task 18) asserts every revision in `alembic/applied_history.txt` has its script on disk.
 - **SDK pin `>=0.1.81,<0.2`** (`pyproject.toml`) is not touched; `ResultMessage` fields used are exactly those in the installed `claude_agent_sdk/types.py:1143-1166` (`@dataclass` at :1143; `subtype, duration_ms, duration_api_ms, is_error, num_turns, stop_reason, total_cost_usd, usage, result, model_usage, permission_denials, errors, api_error_status`).
-- **Runner keeps working after every commit**: each commit is deployable on its own with `pipenv run alembic upgrade head` + restart. **Execution order** (task numbers are stable; the 09-25 re-cut appended 15–18 and moved the Haiku swap to Task 0; the 09-27 round-2 delta appended 19–21; the round-3 delta moved **16 ahead of 3**, because `pricing.py` is now the single definition of `cost_usd_list` and Task 3 imports it — round-3 #10): **0** (pre-P0 standalone patch, its own PR + deploy) → **1** (migration) → **18** (alembic history manifest + the runner-startup `alembic_version` check) → **2** → **16** (`pricing.py` + the cost-reconcile script — pure and JSONL-only until Task 3 deploys; its `--db` leg is verified at P0 exit) → **3** (capture — imports `pricing.price_usage`) → **19** (settings-override refusal + the §14 Q2 probe — edits the `run_session` path Task 3 touches) → **20** (always-on audit/stream redactor — `_handle_message`, which Task 3 also touches) → **15** (raw SDK recorder — hooks into Task 3's `_run_in_process`, imports Task 20's redactor) → **17** (Claude subprocess env + startup assertion + the utility `model_usage` check) → **4** (origin) → **5** → **6** → **21** (scheduler `provisioning_gap` pre-check — needs Task 6's outbox producer) → **7** (notify + bot) → **8** → **9** → **10** (Telegram hygiene) → **12** (canary — needs 2, 5, 17) → **13** (ops hygiene + runbook + the dev protected-path guard + the unconditional idle-trigger removal) → **14** (docs, PR note, deploy). Task 11 is **not a task** — it is a retired number pointing at Task 0; do not dispatch it.
+- **Runner keeps working after every commit**: each commit is deployable on its own with `pipenv run alembic upgrade head` + restart. **Execution order** (task numbers are stable; the 09-25 re-cut appended 15–18 and moved the Haiku swap to Task 0; the 2026-10-05 cut deleted Task 15; the 09-27 round-2 delta appended 19–21; the round-3 delta moved **16 ahead of 3**, because `pricing.py` is now the single definition of `cost_usd_list` and Task 3 imports it — round-3 #10): **0** (pre-P0 standalone patch, its own PR + deploy) → **1** (migration) → **18** (alembic history manifest + the runner-startup `alembic_version` check) → **2** → **16** (`pricing.py` + the cost-reconcile script — pure and JSONL-only until Task 3 deploys; its `--db` leg is verified at P0 exit) → **3** (capture — imports `pricing.price_usage`) → **19** (settings-override refusal + the §14 Q2 probe — edits the `run_session` path Task 3 touches) → **20** (always-on audit/stream redactor — `_handle_message`, which Task 3 also touches) → **17** (Claude subprocess env + startup assertion + the utility `model_usage` check) → **4** (origin) → **5** → **6** → **21** (scheduler `provisioning_gap` pre-check — needs Task 6's outbox producer) → **7** (notify + bot) → **8** → **9** → **10** (Telegram hygiene) → **12** (canary — needs 2, 5, 17) → **13** (ops hygiene + runbook + the dev protected-path guard + the unconditional idle-trigger removal) → **14** (docs, PR note, deploy). Task 11 is **not a task** — it is a retired number pointing at Task 0; do not dispatch it. Task 15 is **gone**: the raw SDK recorder left with the 2026-10-05 cut (new spec §10/§14 item 9); do not dispatch it either.
 
-  **File order ≠ execution order.** The task sections appear in this file as **0, 1, 2, 3, 19, 20, 4, 5, 6, 21, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 14** (the 09-25 re-cut appended 15-18 after 13; the 09-27 delta placed 19/20 beside Task 3 and 21 beside Task 6, where a reader looking for them will be; the round-3 delta changed only where Task 16 *executes*, not where it sits in the file). Every task heading therefore carries an `**Execution position:**` line naming its predecessor and successor, and Tasks 12, 15, 16, 17, 18, 19, 20 and 21 each open with a **Step 0 prerequisite check** — a one-line import/grep probe that stops with "execute Task &lt;n&gt; first" when its dependency is not in the tree yet. A subagent-driven runner that dispatches one agent per checkbox-bearing heading must follow the order above, not the file order.
+  **File order ≠ execution order.** The task sections appear in this file as **0, 1, 2, 3, 19, 20, 4, 5, 6, 21, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 14** (the 09-25 re-cut appended 15-18 after 13; the 09-27 delta placed 19/20 beside Task 3 and 21 beside Task 6, where a reader looking for them will be; the round-3 delta changed only where Task 16 *executes*, not where it sits in the file; the 2026-10-05 cut removed Task 15 from both orders). Every task heading therefore carries an `**Execution position:**` line naming its predecessor and successor, and Tasks 12, 16, 17, 18, 19, 20 and 21 each open with a **Step 0 prerequisite check** — a one-line import/grep probe that stops with "execute Task &lt;n&gt; first" when its dependency is not in the tree yet. A subagent-driven runner that dispatches one agent per checkbox-bearing heading must follow the order above, not the file order.
 
   **Line numbers are as-of the pre-P0 tree.** `session.py`, `main.py` and `telegram_bot.py` are edited by several tasks; any task that runs after another task edited the same file must re-locate its anchors **by symbol** (function/constant name) rather than trusting the `file:line` citation, which will have drifted by the number of lines the earlier task inserted above it.
 - **Single-writer topology (C20)**: all commits are born in this dev repo; `git fetch origin && git merge origin/main` before starting and before pushing; never commit on prod.
@@ -60,11 +61,9 @@ The five failure modes the spec implies but no task's tests would otherwise exer
 
 Added by the 2026-09-25 re-cut (each pinned in the named task):
 
-6. **The recorder must never cost a job** — with `SDK_RECORD=1` a full disk, a read-only `volumes/`, or an unserialisable message must be logged once and the job must finish exactly as it would with the switch off. Pinned in Task 15 (`test_write_error_never_raises`, `test_unserialisable_message_is_recorded_as_repr`).
-7. **A tool result that echoes a secret must not land in a recording** — `curl -H 'Authorization: Bearer …'` command text and `.env` dumps routinely appear in Bash tool results (spec §2.4, `learning.py:138-170`); the raw recording is the one file that keeps them verbatim unless redacted. Pinned in Task 15 (`test_redaction_covers_bearer_env_and_anthropic_keys`, `test_nested_content_is_redacted`).
-8. **The canary must fail loudly on every "logged out" shape and must never prove the wrong credential** — `is_error` with `authentication_failed`, a `ResultMessage` that never arrives (CLI exits early), `model_usage` missing, zero API time; and it must run without `CLAUDE_CODE_OAUTH_TOKEN` in its env so a pass means the Keychain login works. Pinned in Task 12 (`test_no_result_message_fails`, `test_is_error_fails`, `test_missing_model_usage_fails`, `test_canary_never_reads_the_setup_token`) and Task 17 (`test_installer_never_exports_credentials`).
-9. **Reverting the P0 merge must not strand prod's `alembic_version`** — a revert that deletes `007_p0_observability.py` while prod is at 007 breaks the next deploy's `alembic upgrade head`; the failure must surface in the pytest gate, not mid-incident. Pinned in Task 18 (`test_every_revision_in_applied_history_exists_on_disk`, `test_applied_history_matches_disk_chain`).
-10. **A job whose `job_started.model` is a bare alias or an unknown id must be counted, never mispriced** — web/dispatch launches pass free-text models (state map §2.3), and Opus 5.5 / Sonnet 5 ids will appear after D13; the reconcile table must list them under `unpriced` with their token counts rather than dropping them or pricing them as another family. Pinned in Task 16 (`test_unknown_model_is_reported_not_priced`, `test_longest_prefix_wins`).
+6. **The canary must fail loudly on every "logged out" shape and must never prove the wrong credential** — `is_error` with `authentication_failed`, a `ResultMessage` that never arrives (CLI exits early), `model_usage` missing, zero API time; and it must run without `CLAUDE_CODE_OAUTH_TOKEN` in its env so a pass means the Keychain login works. Pinned in Task 12 (`test_no_result_message_fails`, `test_is_error_fails`, `test_missing_model_usage_fails`, `test_canary_never_reads_the_setup_token`) and Task 17 (`test_installer_never_exports_credentials`).
+7. **Reverting the P0 merge must not strand prod's `alembic_version`** — a revert that deletes `007_p0_observability.py` while prod is at 007 breaks the next deploy's `alembic upgrade head`; the failure must surface in the pytest gate, not mid-incident. Pinned in Task 18 (`test_every_revision_in_applied_history_exists_on_disk`, `test_applied_history_matches_disk_chain`).
+8. **A job whose `job_started.model` is a bare alias or an unknown id must be counted, never mispriced** — web/dispatch launches pass free-text models (state map §2.3), and Opus 5.5 / Sonnet 5 ids will appear after the next pinned-SDK bump (old D13; the replay gate that used to guard it is deferred — new spec §14 item 9); the reconcile table must list them under `unpriced` with their token counts rather than dropping them or pricing them as another family. Pinned in Task 16 (`test_unknown_model_is_reported_not_priced`, `test_longest_prefix_wins`).
 
 ## File structure (what is created / modified and why)
 
@@ -73,11 +72,10 @@ Added by the 2026-09-25 re-cut (each pinned in the named task):
 | `alembic/versions/007_p0_observability.py` (create) | additive columns on `jobs`/`tasks`, `notifications` table, token/provider/origin backfill |
 | `src/models.py` (modify) | ORM columns for the above + `Notification` model |
 | `src/runner/result_capture.py` (create) | pure: `ResultCapture`, `capture_result_message`, `derive_terminal_reason`, `served_model_violation`, `result_columns`, `terminal_reason_for_exception`, `parse_cli_version`, `same_model`, `requested_matches_served` |
-| `src/runner/session.py` (modify) | wire capture into `_run_in_process`/`run_session`; stamp columns; `job_completed` extra fields; default tool list without `AskUserQuestion`; `SdkRecorder` hook at the top of the message loop (Task 15); `claude_subprocess_env()` + `env=` on `_build_options` (Task 17); `QuotaExhausted(source=)` on the `RateLimitEvent` path (Task 7) |
+| `src/runner/session.py` (modify) | wire capture into `_run_in_process`/`run_session`; stamp columns; `job_completed` extra fields; default tool list without `AskUserQuestion`; `claude_subprocess_env()` + `env=` on `_build_options` (Task 17); `QuotaExhausted(source=)` on the `RateLimitEvent` path (Task 7) |
 | `src/runner/main.py` (modify) | `queue_wait_ms`; `terminal_reason` on failure branches; `_notify_task` → outbox; `_finish_job` → job notice; scheduler origin; `awaiting_since`; vendor-key startup assertion (Task 17); `pause_queue(..., source=exc.source)` (Task 7) |
 | `src/runner/quota.py` (modify) | `pause_queue(reset_at, reason, *, source)` stores `quota:last_source`; `last_source()` (Task 7 — window figures labelled by source) |
 | `src/runner/secret_redact.py` (create) | **always-on** secret redactor (`redact`, `redact_tree`) applied in `session._handle_message` before every JSONL append and `jobs:stream` publish — P0, spec §2.4 (Task 20) |
-| `src/runner/sdk_record.py` (create) | opt-in raw SDK message recorder (`SdkRecorder`, `message_to_record`, `coverage_report`, `python -m src.runner.sdk_record coverage`) writing to **`volumes/sdk_recordings/<id>.json`** — the P3 replay-gate fixtures; re-exports `secret_redact.redact` so there is one pattern set (Task 15) |
 | `src/runner/pricing.py` (create) | list-price table (`claude-anthropic.md §4`), `family_for`, `cache_write_buckets`, `price_usage` (each TTL bucket at its own rate), `lane_for`, `summarize`/`summarize_windows`, `render_table`, `lane_seed`, `weekly_allowance` — **the single definition of `cost_usd_list`** (spec §2.8; the runner calls `price_usage` in Task 3) and the pure core of the two-window cost reconcile (Task 16) |
 | `src/registry/manifest.py` (modify) | `Manifest.env_required` is **read** (it was ignored) so the scheduler can pre-check provisioning (Task 21) |
 | `scripts/cost-reconcile.py`, `scripts/cost-reconcile-run.sh` (create) | CLI over `pricing.py`: **both** windows (30 d + 7 d) per model, the per-kind step table, SDK-reported vs computed cost, `--db` leg against `jobs.cost_usd_list`, `--seed-lane-budgets`; the `-run.sh` wrapper is what the weekly `com.assistant.cost-reconcile` timer executes (Task 16) |
@@ -85,7 +83,7 @@ Added by the 2026-09-25 re-cut (each pinned in the named task):
 | `src/runner/main.py` (modify, Task 18) | `migration_gap()` (pure) + `_check_alembic_history()` — the **runner-startup** check spec §9's P0 row and rollback paragraph name: the live `alembic_version` must name a revision with a script on disk, or the runner refuses to start with `possible_bad_rollback` (round-3 m17: the manifest test runs with no DB, so it never proved anything about prod's `alembic_version`) |
 | `scripts/install-dev-hooks.sh` (create) | dev **commit-msg** **protected-path guard** (never `pre-commit` — only `commit-msg` receives the message file as `$1`; the CHANGELOG `pre-commit` hook is a separate file and is left alone): a staged diff touching a MISSION §M path is refused unless the commit message carries `Approved-Protected-Path: ap-<id>`; its `check` mode is what `test_protected_paths_hook` drives (Task 13; spec §9 P0 row, round-3 #3) |
 | `scripts/q2-settings-sandbox-probe.sh` (create) | one-off, hand-run probe answering spec **§14 Q2** on the pinned CLI: does it honour `sandbox.failIfUnavailable`/`strictAllowlist`, and does it honour `apiKeyHelper`/`env.ANTHROPIC_*`/`ANTHROPIC_BASE_URL` from *project* scope (Task 19; the answer is recorded, the refusal ships either way) |
-| `src/runner/session.py` (modify, Task 19) | `settings_override(cwd, *, canonical)` + `TRACKED_SETTINGS_ALLOWED_KEYS`/`TRACKED_SETTINGS_FILES` + `settings_override_observe_only()` + `ProviderRefused` — a clone's `.claude/settings*.json` carrying any of `hooks`/`permissions`/`mcpServers`/`enableAllProjectMcpServers`/`apiKeyHelper`/`env`/`ANTHROPIC_BASE_URL` refuses the job fail-closed **unless the file is its canonical checkout's own tracked copy, byte-identical, carrying only `enabledPlugins`/`permissions`** (the allowance is keyed on **provenance**, never on the cwd path — a workspace-tier job's cwd is a git clone of the canonical, so a path test would refuse every write-capable job); the content-**hash** pin is P3 (`restraints.py`). INV-3 third enforcement point, spec §2.4 as round-3 #1 rewrote it |
+| `src/runner/session.py` (modify, Task 19) | `settings_override(cwd, *, canonical)` + `TRACKED_SETTINGS_ALLOWED_KEYS`/`TRACKED_SETTINGS_FILES` + `settings_override_observe_only()` + `ProviderRefused` — a clone's `.claude/settings*.json` carrying any of `hooks`/`permissions`/`mcpServers`/`enableAllProjectMcpServers`/`apiKeyHelper`/`env`/`ANTHROPIC_BASE_URL` refuses the job fail-closed **unless the file is its canonical checkout's own tracked copy, byte-identical, carrying only `enabledPlugins`/`permissions`** (the allowance is keyed on **provenance**, never on the cwd path — a workspace-tier job's cwd is a git clone of the canonical, so a path test would refuse every write-capable job); the byte-identical-to-canonical **provenance** rule is the whole mechanism (new spec §6); the content-**hash** pin is **deferred** with `src/runner/restraints.py` (new spec §14 item 10). INV-3 third enforcement point, spec §2.4 as round-3 #1 rewrote it |
 | `src/runner/main.py` (modify, Task 21) | `provisioning_gap` / `env_keys_present` / `PROVISIONING_EXEMPT` + the `_tick_schedules` pre-check: a due row whose project `.env` lacks a manifest-required key defers with `schedule_deferred{provisioning_gap}` + one DM/day instead of burning a session (spec §8.3) |
 | `src/gateway/jobs.py` (modify) | `enqueue_job(origin_*)`, `origin_from_created_by`, `cancel_action_for_status`, `remove_from_queue`, `cancel_job_durable` |
 | `src/gateway/web.py` (modify) | origin on web launches; new `JobOut` fields; durable DELETE |
@@ -98,16 +96,16 @@ Added by the 2026-09-25 re-cut (each pinned in the named task):
 | `src/runner/canary.py` (create), `scripts/credential-canary.sh` (create), `scripts/install-launchd.sh` (modify) | daily canary **through `claude_agent_sdk.query()`** with the runner's options conventions, env overlay and `result_capture` assertion (the P0 stand-in for `ClaudeSdkExecutor`); `timers-only` installer mode; timer plists get `PATH`/`VENV_PY` + the two telemetry keys; service plists get the two telemetry keys (Task 17) |
 | `scripts/backup.sh` (modify), `scripts/restore-drill.sh` (create), `scripts/healthcheck-all.sh`, `scripts/schedule-monitor.sh` (modify) | atlas dump, sealed secrets, restore drill, alerters call `notify send` first |
 | `docs/runbooks/2026-09-25-p0-ops-hygiene.md` (create) | owner-run steps (pmset, Ollama, R2, seal key, drill, timer install, the dev protected-path hook install, the §14 Q2 probe) |
-| `tests/test_migrations.py`, `tests/test_result_capture.py`, `tests/test_origin.py`, `tests/test_notify_outbox.py`, `tests/test_notify_telegram.py`, `tests/test_notify_runner_hooks.py`, `tests/test_notify_bot.py`, `tests/test_cancel_durable.py`, `tests/test_telegram_commands.py`, `tests/test_default_tools.py`, `tests/test_utility_model.py`, `tests/test_canary.py`, `tests/test_scripts_syntax.py`, `tests/test_sdk_record.py`, `tests/test_pricing.py`, `tests/test_claude_env.py`, `tests/test_quota.py`, **`tests/test_settings_auth_override.py`** (Task 19 — holds both `test_settings_auth_override` and **`test_settings_no_hooks`**), **`tests/test_audit_redactor.py`** (Task 20), **`tests/test_provisioning_gap.py`** (Task 21), **`tests/test_protected_paths_hook.py`** (Task 13) (append/create) | one test file per deliverable; the named P0 test gates are `test_result_capture` (incl. the `account_on_hold`/`oauth_revoked`/`billing_error` mapping and the `cost_usd_list` ↔ `sdk_cost_usd` reconcile), `test_startup_env`, `test_settings_auth_override`, **`test_settings_no_hooks`**, `test_audit_redactor`, **`test_protected_paths_hook`** and `test_pricing` (spec §9 test-gate paragraph as round 3 left it) |
+| `tests/test_migrations.py`, `tests/test_result_capture.py`, `tests/test_origin.py`, `tests/test_notify_outbox.py`, `tests/test_notify_telegram.py`, `tests/test_notify_runner_hooks.py`, `tests/test_notify_bot.py`, `tests/test_cancel_durable.py`, `tests/test_telegram_commands.py`, `tests/test_default_tools.py`, `tests/test_utility_model.py`, `tests/test_canary.py`, `tests/test_scripts_syntax.py`, `tests/test_pricing.py`, `tests/test_claude_env.py`, `tests/test_quota.py`, **`tests/test_settings_auth_override.py`** (Task 19 — holds both `test_settings_auth_override` and **`test_settings_no_hooks`**), **`tests/test_audit_redactor.py`** (Task 20), **`tests/test_provisioning_gap.py`** (Task 21), **`tests/test_protected_paths_hook.py`** (Task 13) (append/create) | one test file per deliverable; the named P0 test gates are `test_result_capture` (incl. the `account_on_hold`/`oauth_revoked`/`billing_error` mapping and the `cost_usd_list` ↔ `sdk_cost_usd` reconcile), `test_startup_env`, `test_settings_auth_override`, **`test_settings_no_hooks`**, `test_audit_redactor`, **`test_protected_paths_hook`** and `test_pricing` (spec §9 test-gate paragraph as round 3 left it) |
 | `.context/modules/notify/{CONTEXT.md,CHANGELOG.md,skills/*}` (create), other module CONTEXT/CHANGELOG, `.context/SYSTEM.md`, `.context/INDEX.md`, `docs/README.md`, `docs/TROUBLESHOOTING.md` | documentation per CLAUDE.md's update map |
 
 ---
 
 ### Task 0 (PRE-P0 STANDALONE `server-patch`): Haiku 4.5 retirement — the four edit sites → `claude-sonnet-4-6` @ `low`
 
-**Execution position:** 1 of 21 — previous: none, next: Task 1 (see Global Constraints "Execution order"). Ships on its own PR and is deployed before Task 1 starts.
+**Execution position:** 1 of 20 — previous: none, next: Task 1 (see Global Constraints "Execution order"). Ships on its own PR and is deployed before Task 1 starts.
 
-**Ships ahead of P0, not gated on D1** (spec §9 "Shipped ahead of P0", §11 Haiku row, review #50). Haiku 4.5 retires ≥ 2026-10-15 (`claude-anthropic.md` §1 [56]); after that date the router fallback (`llm_router.py:148`), the learning classifier (`learning.py:258`), the one skill still pinned to it (`skills/project-update-poll/SKILL.md:4`) and any `/task --model=haiku` launch (`telegram_bot.py:132-133`) fail as `unrecognized_model`. This task is its **own `server-patch` PR** on the INV-4 lane (in-session `code-review` LGTM + owner notification, per `skills/server-patch/SKILL.md` — protected, read-only for this task), merged and deployed with `/task deploy server` **before Task 1 starts**. Rollback = `git revert` of the one commit (no migration). Only the registry alias (`registry/models.py`) waits for P3. The P0 test gate "registry-less Haiku swap smoke" (spec §9 test-gate paragraph) is Step 4's live check.
+**Ships ahead of P0, not gated on D1** (spec §9 "Shipped ahead of P0", §11 Haiku row, review #50). Haiku 4.5 retires ≥ 2026-10-15 (`claude-anthropic.md` §1 [56]); after that date the router fallback (`llm_router.py:148`), the learning classifier (`learning.py:258`), the one skill still pinned to it (`skills/project-update-poll/SKILL.md:4`) and any `/task --model=haiku` launch (`telegram_bot.py:132-133`) fail as `unrecognized_model`. This task is its **own `server-patch` PR** on the INV-4 lane (in-session `code-review` LGTM + owner notification, per `skills/server-patch/SKILL.md` — protected, read-only for this task), merged and deployed with `/task deploy server` **before Task 1 starts**. Rollback = `git revert` of the one commit (no migration). Only the registry alias (`registry/models.py`) waits for the registry phase (new spec §9 Phase 4). The P0 test gate "registry-less Haiku swap smoke" (spec §9 test-gate paragraph) is Step 4's live check.
 
 **Files:**
 - Modify: `src/config.py` (add `utility_model`), `src/runner/llm_router.py:145-154`, `src/runner/learning.py:255-264`
@@ -119,9 +117,9 @@ Added by the 2026-09-25 re-cut (each pinned in the named task):
 - Consumes: nothing new.
 - Produces:
   - `settings.utility_model: str = "claude-sonnet-4-6"` (env `UTILITY_MODEL`).
-  - `llm_router.router_options() -> ClaudeAgentOptions` and `learning.classifier_options() -> ClaudeAgentOptions` — the extracted option builders (model = `settings.utility_model`, `effort="low"`, `permission_mode="plan"`, `allowed_tools=[]`, `max_turns=2`, the module's `output_format`). Both `llm_route` and `extract_learning` call them; behaviour otherwise unchanged. Task 17 adds `env=claude_subprocess_env()` to both; P3's `utility_call` replaces them.
+  - `llm_router.router_options() -> ClaudeAgentOptions` and `learning.classifier_options() -> ClaudeAgentOptions` — the extracted option builders (model = `settings.utility_model`, `effort="low"`, `permission_mode="plan"`, `allowed_tools=[]`, `max_turns=2`, the module's `output_format`). Both `llm_route` and `extract_learning` call them; behaviour otherwise unchanged. Task 17 adds `env=claude_subprocess_env()` to both; the in-process `utility_call` replaces them in new spec §9 Phase 4.
   - `_MODEL_ALIASES["haiku"] == _MODEL_ALIASES["haiku-4-5"] == "claude-sonnet-4-6"`. Consequence: `VALID_MODELS` (`tests/test_skill_contracts.py:24`, derived from the alias VALUES) no longer contains `claude-haiku-4-5-20251001`, so every `SKILL.md` must be off Haiku in the same commit. `grep -rln "claude-haiku" skills/` → **three** files: `skills/project-update-poll/SKILL.md:4` (the only real skill, repointed below) plus `skills/README.md:12` and `skills/TEMPLATE.md:15` — authoring docs that `registry.list_all()` never sees (`src/registry/skills.py:145-146` walks only directories containing a `SKILL.md`), so they break no test, but `TEMPLATE.md` is what new skills are copied from and both are repointed in the same commit.
-  - Left alone on purpose: `session.py:467` (`_MODEL_BUDGETS` haiku key — dead, harmless, deleted with the table in P3 per spec §10).
+  - Left alone on purpose: `session.py:467` (`_MODEL_BUDGETS` haiku key — dead, harmless, deleted with the table when the registry lands, new spec §10/§9 Phase 4).
   - **Not built here:** the spec's P0 exit criterion "`model_usage` on utility calls lists only the requested model" (§9 exit cell, §2.8 Claude row, round-2 #49) needs the `ResultMessage` inspection that Task 17 adds to `llm_route`/`extract_learning`. Task 0 only records the *pre*-swap baseline for it (Step 4); the assertion, its pure test and the audit event `utility_model_usage` land in **Task 17 Step 2**. Its purpose is to reveal whether the harness's Haiku side request (`claude-anthropic.md` line 157 — every `-p`/SDK call also bills one) survives the swap, so it can be ledgered `purpose=harness` rather than silently mispriced; a second model in the list is a **finding to record, not a job failure**.
 
 - [ ] **Step 1: Write the failing tests**
@@ -226,7 +224,7 @@ Expected: `ImportError: cannot import name 'classifier_options'` (collection fai
     # Utility model for the two one-shot classifier calls (router fallback,
     # learning extractor). Was claude-haiku-4-5-20251001 — Haiku 4.5 retires
     # ≥ 2026-10-15 (spec §0a row 6); Sonnet at effort=low is the pinned
-    # CLI's cheapest known id. P3 moves these calls to utility_call().
+    # CLI's cheapest known id. Phase 4 moves these calls to utility_call().
     utility_model: str = "claude-sonnet-4-6"
 ```
 
@@ -272,7 +270,7 @@ and inside `extract_learning` use `options = classifier_options()`.
 `src/gateway/telegram_bot.py:132-133` — repoint both aliases:
 
 ```python
-    "haiku": "claude-sonnet-4-6",       # Haiku 4.5 retires ≥ 2026-10-15; Sonnet @ low is the cheap lane until P3's registry
+    "haiku": "claude-sonnet-4-6",       # Haiku 4.5 retires ≥ 2026-10-15; Sonnet @ low is the cheap lane until the Phase-4 registry
     "haiku-4-5": "claude-sonnet-4-6",
 ```
 
@@ -282,7 +280,7 @@ and in the comment block above the dict (lines 119-121) replace `Bare-name defau
 
 `skills/README.md:12` and `skills/TEMPLATE.md:15`: drop `claude-haiku-4-5-20251001` from the model-choice lists (`model: claude-sonnet-4-6 | claude-opus-4-7` and `model: <claude-opus-4-7 | claude-sonnet-4-6>`). Neither is read by `registry.list_all()`, so no test enforces it — but `TEMPLATE.md` is the file new skills are copied from, and after 2026-10-15 that id stops resolving.
 
-`src/gateway/web.py:691`: delete the line `      <option value="claude-haiku-4-5-20251001">haiku 4.5</option>` (the dropdown is replaced by the registry-fed picker in P3, spec §10).
+`src/gateway/web.py:691`: delete the line `      <option value="claude-haiku-4-5-20251001">haiku 4.5</option>` (the dropdown is replaced by the registry-fed picker in new spec §9 Phase 4, §10).
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -361,7 +359,7 @@ Then the INV-4 lane merge (in-session `code-review` LGTM, owner notification) an
 
 ### Task 1: Migration 007 — additive columns + `notifications` outbox + backfill
 
-**Execution position:** 2 of 21 — previous: Task 0 (shipped and deployed as its own patch), next: Task 18 (see Global Constraints "Execution order").
+**Execution position:** 2 of 20 — previous: Task 0 (shipped and deployed as its own patch), next: Task 18 (see Global Constraints "Execution order").
 
 **Prerequisite check (host only — needs DB access; skip in an isolated worktree and confirm with the owner instead).** Task 0 must be merged and deployed before 007 lands, because the swap is a separate PR:
 
@@ -378,7 +376,7 @@ psql assistant -tAc "SELECT resolved_model FROM jobs WHERE resolved_model LIKE '
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `Job.resolved_provider, model_served, executor, cli_version, lane, origin_channel, origin_ref, origin_thread, queue_wait_ms, first_event_at, input_tokens, output_tokens, cache_read_tokens, cache_write_1h_tokens, cache_write_5m_tokens, num_turns, duration_api_ms, cost_usd_list, sdk_cost_usd, terminal_reason, task_class, sensitivity` (all nullable — **no `priority` column**: spec §2.3 row 007 as round-2 #56 left it, "lanes replace priority and `--priority` is explicitly not built"; the two `cache_write_*` columns are the round-2 #19 shape, sourced from `usage.cache_creation.ephemeral_{1h,5m}_input_tokens` and priced at their own rates; the two cost columns are the round-3 #10 shape — `cost_usd_list` runner-computed from tokens via `pricing.py`, `sdk_cost_usd` the SDK's own `total_cost_usd`, stored side by side so the P0 exit can compare them instead of comparing the SDK figure to itself); `Task.origin_channel, origin_ref, origin_thread, awaiting_since`; `class Notification(Base)` with columns `id, notice_kind, subject_type, subject_id, severity, body, actions, channel, target, thread, external_ref, status, attempts, last_error, next_attempt_at, sent_at, created_at`. Consumed by Tasks 2–9.
+- Produces: `Job.model_served, cli_version, lane, origin_channel, origin_ref, origin_thread, queue_wait_ms, first_event_at, input_tokens, output_tokens, cache_read_tokens, cache_write_1h_tokens, cache_write_5m_tokens, num_turns, duration_api_ms, cost_usd_list, sdk_cost_usd, terminal_reason, task_class, sensitivity` (all nullable — **no `priority` column**: spec §2.3 row 007 as round-2 #56 left it, "lanes replace priority and `--priority` is explicitly not built"; the two `cache_write_*` columns are the round-2 #19 shape, sourced from `usage.cache_creation.ephemeral_{1h,5m}_input_tokens` and priced at their own rates; the two cost columns are the round-3 #10 shape — `cost_usd_list` runner-computed from tokens via `pricing.py`, `sdk_cost_usd` the SDK's own `total_cost_usd`, stored side by side so the P0 exit can compare them instead of comparing the SDK figure to itself; **and no `resolved_provider`, `executor` or `sensitivity`** — the 2026-10-05 cut spec's §2.3 row 007 lists none of the three: the provider and executor dimensions went with the deleted vendor scope (new spec §14 items 1/8/9/10) and `sensitivity` is new spec §14 item 11, so all three are in `FORBIDDEN_007_COLUMNS` beside `priority`; `model_served` + `cli_version` are the served-identity columns this scope keeps); `Task.origin_channel, origin_ref, origin_thread, awaiting_since`; `class Notification(Base)` with columns `id, notice_kind, subject_type, subject_id, severity, body, actions, channel, target, thread, external_ref, status, attempts, last_error, next_attempt_at, sent_at, created_at`. Consumed by Tasks 2–9.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -388,7 +386,7 @@ Append to `tests/test_migrations.py` (after `test_revision_chain_walkable`):
 # ── Layer 1b: migration 007 shape (no DB) ───────────────────────────────────
 
 P0_JOB_COLUMNS = (
-    "resolved_provider", "model_served", "executor", "cli_version", "lane",
+    "model_served", "cli_version", "lane",
     "origin_channel", "origin_ref", "origin_thread", "queue_wait_ms",
     "first_event_at", "input_tokens", "output_tokens", "cache_read_tokens",
     # Two cache-write columns, not one: the subscription's TTL is 1 h and prod
@@ -402,11 +400,15 @@ P0_JOB_COLUMNS = (
     # is the SDK's own ResultMessage.total_cost_usd, stored beside it and never
     # assumed to be the same figure. The P0 exit criterion compares them.
     "num_turns", "duration_api_ms", "cost_usd_list", "sdk_cost_usd",
-    "terminal_reason", "task_class", "sensitivity",
+    "terminal_reason", "task_class",
 )
 # NOT in 007: `priority`. Round-2 #56 dropped it — lanes replace priority and
 # `--priority` is on the explicit NOT-building list (spec §0, §2.3 row 007).
-FORBIDDEN_007_COLUMNS = ("priority",)
+# NOT in 007 either, dropped by the 2026-10-05 cut: `resolved_provider` and
+# `executor` (the vendor/executor dimensions of deleted scope — new spec §14
+# items 1/8/9/10) and `sensitivity` (new spec §14 item 11, "their only consumer
+# was vendor routing"). The new spec's §2.3 row 007 lists none of the three.
+FORBIDDEN_007_COLUMNS = ("priority", "resolved_provider", "executor", "sensitivity")
 P0_TASK_COLUMNS = ("origin_channel", "origin_ref", "origin_thread", "awaiting_since")
 P0_NOTIFICATION_COLUMNS = (
     "id", "notice_kind", "subject_type", "subject_id", "severity", "body", "actions",
@@ -439,7 +441,8 @@ def test_models_declare_every_007_column():
     task_cols = set(Task.__table__.columns.keys())
     notif_cols = set(Notification.__table__.columns.keys())
     assert set(P0_JOB_COLUMNS) <= job_cols
-    assert not (set(FORBIDDEN_007_COLUMNS) & job_cols), "priority is not a 007 column"
+    assert not (set(FORBIDDEN_007_COLUMNS) & job_cols), \
+        "priority/resolved_provider/executor/sensitivity are not 007 columns"
     assert set(P0_TASK_COLUMNS) <= task_cols
     assert set(P0_NOTIFICATION_COLUMNS) == notif_cols
     assert Notification.__tablename__ == "notifications"
@@ -466,13 +469,15 @@ In `class Job`, after the `review_outcome` column **and its explanatory comment*
     # ── P0 observability + origin (migration 007; every column nullable) ──
     # Spec §2.3 row 007. Stamped by runner/session.py (result capture) and
     # runner/main.py (queue wait, terminal reason); origin_* by the producers
-    # (gateway/jobs.py enqueue_job, scheduler). lane/task_class/
-    # sensitivity/first_event_at are RESERVED here so P1–P3 need no migration;
-    # they stay NULL in P0. There is deliberately NO `priority` column: lanes
-    # replace it and `--priority` is never built (spec §2.3 row 007).
-    resolved_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # (gateway/jobs.py enqueue_job, scheduler). lane/task_class/first_event_at
+    # are RESERVED here so the later phases need no migration; they stay NULL in
+    # P0. There is deliberately NO `priority` column (lanes replace it and
+    # `--priority` is never built), and no `resolved_provider`/`executor`/
+    # `sensitivity`: the 2026-10-05 cut spec's §2.3 row 007 lists none of the
+    # three — the first two are the deleted vendor/executor dimensions (new spec
+    # §14 items 1/8/9/10) and the third is new spec §14 item 11. `model_served`
+    # and `cli_version` are the served-identity columns that remain.
     model_served: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    executor: Mapped[str | None] = mapped_column(String(24), nullable=True)
     cli_version: Mapped[str | None] = mapped_column(String(24), nullable=True)
     lane: Mapped[str | None] = mapped_column(String(16), nullable=True)
     origin_channel: Mapped[str | None] = mapped_column(String(16), nullable=True)
@@ -500,9 +505,9 @@ In `class Job`, after the `review_outcome` column **and its explanatory comment*
     terminal_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # ^ ok | max_turns | interrupted | timeout | api_error | rate_limited |
     #   auth_expired | unrecognized_model | account_on_hold | oauth_revoked |
-    #   billing_error | error                      (runner/result_capture.py)
+    #   billing_error | provider_refused | error   (runner/result_capture.py;
+    #   Task 19 appends provider_refused — 13 values, new spec §2.4)
     task_class: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    sensitivity: Mapped[str | None] = mapped_column(String(16), nullable=True)
 ```
 
 In `class Task`, after `thread_message_id` (line 286) add:
@@ -569,8 +574,9 @@ Spec: docs/superpowers/specs/2026-09-25-multi-model-platform-design.md §2.3
 row 007. Adds the ResultMessage columns session.py:1095 used to drop, the
 persisted job/task origin that replaces the bot's in-process _job_to_chat
 dict, and the notifications outbox. Backfills token columns from
-jobs.result->'usage' (642 completed rows on 2026-09-24), provider/executor
-for every claude-* row, and origin from created_by. jobs.status and its
+jobs.result->'usage' (642 completed rows on 2026-09-24) and origin from
+created_by. There is no provider/executor backfill: the 2026-10-05 cut spec's
+row 007 has no such columns. jobs.status and its
 CHECK (006) are untouched.
 
 Revision ID: 007
@@ -589,9 +595,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 _JOB_COLUMNS: list[sa.Column] = [
-    sa.Column("resolved_provider", sa.String(32), nullable=True),
     sa.Column("model_served", sa.String(64), nullable=True),
-    sa.Column("executor", sa.String(24), nullable=True),
     sa.Column("cli_version", sa.String(24), nullable=True),
     sa.Column("lane", sa.String(16), nullable=True),
     sa.Column("origin_channel", sa.String(16), nullable=True),
@@ -612,7 +616,6 @@ _JOB_COLUMNS: list[sa.Column] = [
     sa.Column("sdk_cost_usd", sa.Numeric(10, 4), nullable=True),
     sa.Column("terminal_reason", sa.String(32), nullable=True),
     sa.Column("task_class", sa.String(32), nullable=True),
-    sa.Column("sensitivity", sa.String(16), nullable=True),
 ]
 
 _TASK_COLUMNS: list[sa.Column] = [
@@ -654,11 +657,6 @@ WHERE input_tokens IS NULL
   AND COALESCE(result->'usage'->>'cache_creation_input_tokens', '0') ~ '^[0-9]+$'
   AND COALESCE(result->'usage'->'cache_creation'->>'ephemeral_1h_input_tokens', '0') ~ '^[0-9]+$'
   AND COALESCE(result->'usage'->'cache_creation'->>'ephemeral_5m_input_tokens', '0') ~ '^[0-9]+$'
-"""
-
-_BACKFILL_PROVIDER = """
-UPDATE jobs SET resolved_provider = 'anthropic', executor = 'claude_sdk'
-WHERE resolved_provider IS NULL AND resolved_model LIKE 'claude-%'
 """
 
 # NULLIF on both ref arms: a bare `telegram:` (or empty created_by) must give
@@ -719,7 +717,6 @@ def upgrade() -> None:
                     postgresql_where=sa.text("status = 'pending'"))
 
     op.execute(_BACKFILL_TOKENS)
-    op.execute(_BACKFILL_PROVIDER)
     op.execute(_BACKFILL_ORIGIN)
     op.execute(_BACKFILL_TASK_ORIGIN)
 
@@ -746,7 +743,7 @@ Expected: PASS (creates a throwaway DB, upgrades to head, drops it).
 
 - [ ] **Step 6: Apply the migration to the dev database**
 
-Run: `pipenv run alembic upgrade head && psql assistant -tAc "SELECT count(*) FROM jobs WHERE input_tokens IS NOT NULL" && psql assistant -tAc "SELECT count(*) FROM jobs WHERE jsonb_typeof(result->'usage')='object'" && psql assistant -tAc "SELECT count(*) FROM jobs WHERE resolved_provider='anthropic'"`
+Run: `pipenv run alembic upgrade head && psql assistant -tAc "SELECT count(*) FROM jobs WHERE input_tokens IS NOT NULL" && psql assistant -tAc "SELECT count(*) FROM jobs WHERE jsonb_typeof(result->'usage')='object'" && psql assistant -tAc "SELECT count(*) FROM jobs WHERE model_served IS NULL"`
 Expected: `Running upgrade 006 -> 007`, then three non-zero counts: the first is close to the second (every completed row with a `result->'usage'` object backfills — all-zero usage passes the digit-regex guard and lands as 0, so the count is ≥ 642, not ≈ 642), and the third ≈ 1500 on the 2026-09-24 baseline. Also `psql assistant -tAc "SELECT count(*) FROM jobs WHERE origin_ref = ''"` → `0` (the NULLIF arms).
 
 - [ ] **Step 7: CHANGELOG + commit**
@@ -757,9 +754,9 @@ Prepend to `.context/modules/db/CHANGELOG.md`:
 ## 2026-09-25 — migration 007: P0 observability columns, task origin, notifications outbox
 
 - **Agent task**: multi-model platform P0 (plan `docs/superpowers/plans/2026-09-25-multi-model-platform-p0.md`, Task 1).
-- **Files changed**: `alembic/versions/007_p0_observability.py` (new), `src/models.py` (22 nullable Job columns, 4 Task columns, `Notification` model), `tests/test_migrations.py` (head==007, shape + model consistency).
+- **Files changed**: `alembic/versions/007_p0_observability.py` (new), `src/models.py` (19 nullable Job columns, 4 Task columns, `Notification` model), `tests/test_migrations.py` (head==007, shape + model consistency).
 - **Why**: `session.py:1095` dropped num_turns/duration_api_ms/total_cost_usd/model_usage/stop_reason/api_error_status; `models.py` promised a tokens column that did not exist; the bot's `_job_to_chat` dict was the only job→chat binding. Columns first so every later P0 task is a small write.
-- **Side effects**: backfills tokens from `result->'usage'`, provider/executor for claude-* rows, origin from created_by. No status/CHECK change (C16). `lane/task_class/sensitivity/first_event_at` stay NULL until P2/P3; **both cost columns stay NULL on backfilled rows** — `session.py:1095` never kept `total_cost_usd`, so there is nothing in `result` to backfill either of them from, and inventing one from tokens for pre-P0 rows would put an unaudited figure in the same column the reconcile checks; there is no `priority` column (spec §2.3 row 007).
+- **Side effects**: backfills tokens from `result->'usage'` and origin from created_by; **no provider/executor backfill and no `resolved_provider`/`executor`/`sensitivity` columns** (2026-10-05 cut spec §2.3 row 007 — deleted vendor scope, new spec §14 items 1/8/9/10 and 11). No status/CHECK change (C16). `lane/task_class/first_event_at` stay NULL until the later phases; **both cost columns stay NULL on backfilled rows** — `session.py:1095` never kept `total_cost_usd`, so there is nothing in `result` to backfill either of them from, and inventing one from tokens for pre-P0 rows would put an unaudited figure in the same column the reconcile checks; there is no `priority` column (spec §2.3 row 007).
 - **Gotchas discovered**: `jobs.result` is JSONB in the DB (migration 001) although models.py declares `JSON` — `->>` works either way; the backfill guards every value with a digit regex so one odd row cannot fail the migration.
 ```
 
@@ -773,7 +770,7 @@ git commit -m "feat(db): migration 007 — P0 observability columns, task origin
 ### Task 2: `result_capture.py` — typed `ResultMessage` capture + terminal reason (pure)
 
 
-**Execution position:** 4 of 21 — previous: Task 18, next: Task 16 (see Global Constraints "Execution order"; the round-3 delta put Task 16's `pricing.py` between this task and Task 3, because Task 3 now imports `price_usage` to fill `cost_usd_list`).
+**Execution position:** 4 of 20 — previous: Task 18, next: Task 16 (see Global Constraints "Execution order"; the round-3 delta put Task 16's `pricing.py` between this task and Task 3, because Task 3 now imports `price_usage` to fill `cost_usd_list`).
 
 **Files:**
 - Create: `src/runner/result_capture.py`
@@ -1025,7 +1022,6 @@ class TestColumnsAndHelpers:
         cols = result_columns(capture_result_message(_msg()), terminal_reason="ok",
                               cli_version="2.1.139", cost_usd_list=Decimal("0.0975"))
         assert cols == {
-            "resolved_provider": "anthropic", "executor": "claude_sdk",
             "cli_version": "2.1.139", "model_served": "claude-sonnet-4-6",
             "input_tokens": 15, "output_tokens": 9363, "cache_read_tokens": 379675,
             "cache_write_1h_tokens": 12000, "cache_write_5m_tokens": 0,
@@ -1371,8 +1367,6 @@ def result_columns(capture: ResultCapture, *, terminal_reason: str,
     is kept, separately, in `sdk_cost_usd`; neither is ever a bill.
     """
     return {
-        "resolved_provider": "anthropic",
-        "executor": "claude_sdk",
         "cli_version": (cli_version or None),
         "model_served": capture.model_served,
         "input_tokens": capture.input_tokens,
@@ -1461,7 +1455,7 @@ git commit -m "feat(runner): result_capture — typed ResultMessage capture, ter
 ### Task 3: Wire capture into `session.py` / `main.py` / `web.py` — columns, `job_completed` fields, silent-empty-success rejection, `queue_wait_ms`
 
 
-**Execution position:** 6 of 21 — previous: Task 16, next: Task 19 (see Global Constraints "Execution order"). Tasks 19, 20 and 15 all edit the functions this task touches, so their anchors must be re-located by symbol.
+**Execution position:** 6 of 20 — previous: Task 16, next: Task 19 (see Global Constraints "Execution order"). Tasks 19 and 20 both edit the functions this task touches, so their anchors must be re-located by symbol.
 
 - [ ] **Step 0: Prerequisite check** — `pipenv run python -c "from src.runner.pricing import price_usage; print('ok')"` must print `ok`. If it fails: **execute Task 16 first.** `cost_usd_list` has exactly one definition and it lives in `pricing.py` (spec §2.8, round-3 #10); this task stamps the column by calling it, so the module has to exist before the wiring does.
 
@@ -1721,7 +1715,7 @@ After the existing banner check (lines 1124-1128) and before `return summary_tex
 
         # Silent-empty-success trap (spec §0a row 6 / §2.4): the pinned CLI can
         # return a 'success' with no text, zero usage and zero API time for an
-        # id it does not know (Opus 5.5 / Sonnet 5 before the D13 bump). Typed
+        # id it does not know (e.g. Opus 5.5 / Sonnet 5 on this pin). Typed
         # check beside the banner regex above; fails the job so escalation
         # (a known-good model) engages instead of recording a completed no-op.
         violation = served_model_violation(capture, options.model or "", summary_text)
@@ -1733,15 +1727,13 @@ After the existing banner check (lines 1124-1128) and before `return summary_tex
         return summary_text, usage, capture
 ```
 
-In `run_session`, change the `resolved_*` UPDATE (lines 975-983) to also stamp provider/executor/CLI so failed jobs carry them:
+In `run_session`, change the `resolved_*` UPDATE (lines 975-983) to also stamp the served CLI version so failed jobs carry it (there is no provider/executor column to stamp — 2026-10-05 cut spec §2.3 row 007):
 
 ```python
             sql_update(Job).where(Job.id == job.id).values(
                 resolved_skill=skill_name or None,
                 resolved_model=options.model,
                 resolved_effort=effort_used,
-                resolved_provider="anthropic",
-                executor="claude_sdk",
                 cli_version=cli_version(),
             )
 ```
@@ -2024,7 +2016,7 @@ git commit -m "feat(runner): capture full ResultMessage into jobs columns, typed
 
 ### Task 19: Project-scope **settings** override is refused before the session starts — `provider_refused{settings_override}` — plus the two tracked settings files' hash pin and the spec §14 Q2 probe
 
-**Execution position:** 7 of 21 — previous: Task 3, next: Task 20 (see Global Constraints "Execution order"). It edits the `run_session` path Task 3 has just touched.
+**Execution position:** 7 of 20 — previous: Task 3, next: Task 20 (see Global Constraints "Execution order"). It edits the `run_session` path Task 3 has just touched.
 
 - [ ] **Step 0: Prerequisite check, and the blast-radius inventory this refusal needs before it ships**
 
@@ -2055,7 +2047,7 @@ Recorded result of that sweep on 2026-09-27 (dev **and** prod agree):
 
 **Round 3 widened this from an auth check to a settings check, and that is the larger half of the hole.** A settings file carries `hooks` (arbitrary commands at SessionStart/PreToolUse), `permissions.allow`, `mcpServers`/`enableAllProjectMcpServers`, `apiKeyHelper` and `env` — arbitrary owner-privilege code execution on every later session, bypassing `guards.py`, `lint_docs.py` and the whole belt architecture in one commit. On top of that, `apiKeyHelper`, `env.ANTHROPIC_API_KEY`, `env.ANTHROPIC_AUTH_TOKEN`, `env.CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_BASE_URL` **outrank the Keychain `/login`** (`claude-anthropic.md` line 53), so they also re-bill or redirect Max work. Atlas is GitHub-canonical with other machines committing to it, so such a file can arrive without anyone here doing anything — and neither the `guards.py` Bash-assignment deny nor Task 17's `os.environ` assertion can see any of it.
 
-**The second belt: this repo's own two files are tracked and unprotected — and the allowance for them must be keyed on PROVENANCE, not on the cwd path.** `git ls-files .claude/` → `settings.json` (carrying `enabledPlugins`) and `settings.local.json` (carrying `permissions`), both tracked, on no protected-path list, in no lint rule, and the dev pre-commit hook fires only on `^src/`. So the refusal above cannot be absolute — this repo's *own* `permissions` block sits at the cwd of every `isolation: none` job. **And it sits at the cwd of every workspace-tier job too:** `session.py:921-925` sets `cwd = ws.path`, a per-job `git clone` of the canonical checkout (`workspaces.py:151`), and both tracked files travel with the clone. `session.py:914-918` additionally *forces* `isolation="workspace"` for every skill-less job, and `server-patch`/`new-skill`/`atlas-build` are workspace-tier — so an allowance keyed on `cwd == settings.server_root` would refuse essentially every write-capable job on this box, **including the execution lane's own executors**. That is why the check takes the canonical checkout as a second argument: the allowance asks "is this file the canonical's own tracked copy, byte-for-byte?", which a clone satisfies (a clone is a copy) and a hook committed *into* the clone does not. Two narrow allowances then carry it: such a file may contain **exactly** `enabledPlugins`/`permissions` and nothing else (`hooks`, `mcpServers`, `env`, `apiKeyHelper`, `ANTHROPIC_BASE_URL` are refused there too — the allowance is per key, never per path), and **`test_settings_no_hooks` pins their contents inside the `pytest -q` gate `server-deploy` already runs**, so a commit that adds a hook to either file fails before it can be deployed. Spec §2.4 asks for a content **hash** pinned in the protected `src/runner/restraints.py`; that file is a **P3** deliverable added by owner PR #1a, and a hash literal in `session.py` would be editable by the very patch that edits the file it pins — so the hash lands in P3 with `restraints.py`, in the same move `settings_override()` itself makes into `ClaudeSdkExecutor`. The residual until then (a settings file edited **directly on prod**, which is pull-only and pre-commit-guarded) is stated in Step 3 rather than papered over. The two files also join the protected-path list in PR #1a (P3) and the D16 residual; **nothing in this plan edits them**.
+**The second belt: this repo's own two files are tracked and unprotected — and the allowance for them must be keyed on PROVENANCE, not on the cwd path.** `git ls-files .claude/` → `settings.json` (carrying `enabledPlugins`) and `settings.local.json` (carrying `permissions`), both tracked, on no protected-path list, in no lint rule, and the dev pre-commit hook fires only on `^src/`. So the refusal above cannot be absolute — this repo's *own* `permissions` block sits at the cwd of every `isolation: none` job. **And it sits at the cwd of every workspace-tier job too:** `session.py:921-925` sets `cwd = ws.path`, a per-job `git clone` of the canonical checkout (`workspaces.py:151`), and both tracked files travel with the clone. `session.py:914-918` additionally *forces* `isolation="workspace"` for every skill-less job, and `server-patch`/`new-skill`/`atlas-build` are workspace-tier — so an allowance keyed on `cwd == settings.server_root` would refuse essentially every write-capable job on this box, **including the execution lane's own executors**. That is why the check takes the canonical checkout as a second argument: the allowance asks "is this file the canonical's own tracked copy, byte-for-byte?", which a clone satisfies (a clone is a copy) and a hook committed *into* the clone does not. Two narrow allowances then carry it: such a file may contain **exactly** `enabledPlugins`/`permissions` and nothing else (`hooks`, `mcpServers`, `env`, `apiKeyHelper`, `ANTHROPIC_BASE_URL` are refused there too — the allowance is per key, never per path), and **`test_settings_no_hooks` pins their contents inside the `pytest -q` gate `server-deploy` already runs**, so a commit that adds a hook to either file fails before it can be deployed. Spec §2.4 asked for a content **hash** pinned in the protected `src/runner/restraints.py`; the 2026-10-05 cut **defers that file and states that the hash pin does not travel with it** (new spec §14 item 10, §6), and a hash literal in `session.py` would in any case be editable by the very patch that edits the file it pins — so the provenance rule is the whole runtime mechanism and there is no later phase that adds a hash. The residual (a settings file edited **directly on prod**, which is pull-only and pre-commit-guarded) is stated in Step 3 rather than papered over, and the new spec closes it a different way: both tracked files and this guard's path list join MISSION §M in **D6's first half, an owner PR at Phase-1 entry**, so the `commit-msg` guard refuses a poisoning commit from week 1. **Nothing in this plan edits them.**
 
 **The third belt, and the one place P0 deliberately observes instead of refusing: a hosted project's own tracked settings file.** Step 0's inventory found exactly one — `projects/baseball-bingo/.claude/settings.json`, one key, `hooks`. Fail-closing on it would take a live public service's entire job set down on the deploy (bingo's update-poll, evaluate, deploy and event-triggered self-diagnose rows), and the forward risk is larger than the one file: **Claude Code itself writes `permissions` into `<project>/.claude/settings.local.json` whenever a session approves a tool**, in any project, with no path exempt — so a blanket project-side refusal would start failing honest jobs at random. P0 therefore splits this arm by what the offending key can do and where the file came from:
 
@@ -2063,7 +2055,7 @@ Recorded result of that sweep on 2026-09-27 (dev **and** prod agree):
 - **A settings file that is NOT its canonical checkout's own tracked copy fails closed everywhere** — that is the case round-3 #1 is actually about: a file that arrived in the clone, was added by another machine's commit, or was edited inside the workspace.
 - **A code-channel key (`hooks`/`permissions`/`mcpServers`/`enableAllProjectMcpServers`/`env`) in a PROJECT canonical's own tracked copy is audited and DM'd, and the job runs** — `provider_refused{reason: settings_override, observed_only: true}` plus one DM per project per day. The server root's own files get no such pass: a hook there is refused, per key, exactly as above.
 
-That is a **stated, bounded** exception with an owner exit, not a hole. The Owner-actions table and runbook §13 ask the owner to retire or relocate bingo's PostToolUse hook **through the bingo repo's own delivery path** (it is a project change, never an INV-4 server patch), and `test_project_settings_inventory` fails the gate the moment a project settings file appears that this plan did not size — so the observe arm cannot silently grow. Flipping the project arm from observe to refuse is a **P1** line once the inventory is empty; it is in the deferred list beside the `restraints.py` hash pin.
+That is a **stated, bounded** exception with an owner exit, not a hole. The Owner-actions table and runbook §12 ask the owner to retire or relocate bingo's PostToolUse hook **through the bingo repo's own delivery path** (it is a project change, never an INV-4 server patch), and `test_project_settings_inventory` fails the gate the moment a project settings file appears that this plan did not size — so the observe arm cannot silently grow. Flipping the project arm from observe to refuse is a **Phase-2** line once the inventory is empty; it is in the deferred list beside the `restraints.py` hash pin (new spec §14 item 10).
 
 **Files:**
 - Modify: `src/runner/session.py` (a new pure `settings_override()` + `settings_override_observe_only()` near `_build_options`, the `TRACKED_SETTINGS_ALLOWED_KEYS`/`TRACKED_SETTINGS_FILES` allowance — **not** a `TRACKED_SETTINGS_DIGESTS` hash pin; the hash lives in P3's protected `restraints.py` — and one call in `run_session` immediately before `options = _build_options(...)` — `:950` in the pre-P0 tree, **locate it by symbol**: Task 3 inserted code above it. `canonical_cwd` and `cwd` are both already local there, `:921`/`:867`)
@@ -2100,7 +2092,7 @@ code execution on every later session — and the auth keys among them outrank
 the Keychain /login. A clone carrying any of them must refuse fail-closed,
 unless the file is this repo's own tracked file (or a byte-identical copy of it
 in a workspace clone) carrying only `enabledPlugins`/`permissions`. The
-content-hash pin is P3 (`restraints.py`), not this file.
+content-hash pin is deferred with `restraints.py` (new spec §14 item 10), not in this file.
 
 Pure: tmp_path fixture clones, no SDK, no DB. The no-hooks gate reads the two
 tracked files from the repo root and nothing else; the inventory gate reads
@@ -2529,7 +2521,7 @@ def _same_dir(a: Path, b: Path) -> bool:
 
 (`json` and `Path` are already imported in `session.py`; `settings` comes from `src.config`, which `session.py` already imports — check and add only what is missing.)
 
-**What this does not do, stated rather than implied.** Spec §2.4 allows a pinned file through by **content hash** held in the protected `src/runner/restraints.py`. `restraints.py` is a **P3** deliverable and a protected path added by owner PR #1a, so P0 has no protected home for a hash and a hash literal in `session.py` would be a constant a patch could edit in the same commit as the file it pins — no stronger than the key rule above, and one more thing to keep in sync. So P0 pins the two tracked files' **contents in the deploy gate** instead: `test_settings_no_hooks` fails `pytest` — which `server-deploy` already runs — the moment either file gains a key beyond `enabledPlugins`/`permissions`. The residual, honestly: a file edited **directly on prod** (pull-only, pre-commit-guarded, but not impossible) would not be caught at runtime until P3 puts the hash in `restraints.py`. That is a P3 line item, not a P0 pretence.
+**What this does not do, stated rather than implied.** Spec §2.4 allowed a pinned file through by **content hash** held in the protected `src/runner/restraints.py`. That file is **deferred with the vendor scope** (new spec §14 item 10, which states the hash pin does not travel with it), so there is no protected home for a hash at all and a hash literal in `session.py` would be a constant a patch could edit in the same commit as the file it pins — no stronger than the key rule above, and one more thing to keep in sync. So P0 pins the two tracked files' **contents in the deploy gate** instead: `test_settings_no_hooks` fails `pytest` — which `server-deploy` already runs — the moment either file gains a key beyond `enabledPlugins`/`permissions`. The residual, honestly: a file edited **directly on prod** (pull-only, pre-commit-guarded, but not impossible) would not be caught at runtime until P3 puts the hash in `restraints.py`. The new spec's answer to that residual is not a hash but the **D6 first-half owner PR at Phase-1 entry**, which puts both tracked files and this guard's path list on MISSION §M so the `commit-msg` guard refuses the poisoning commit (new spec §6). Not a P0 pretence either way.
 
 In `run_session`, immediately before `options = _build_options(` (**find it by symbol** — `:950` in the pre-P0 tree, moved by Task 3):
 
@@ -2570,7 +2562,7 @@ In `run_session`, immediately before `options = _build_options(` (**find it by s
             )
 ```
 
-**Why the observe arm carries no DM at this commit, and where the DM lands.** `src/notify/` does not exist yet at execution position 7 (Task 5 builds it at position 12), and importing it here would make this task undeployable on its own. So Task 19 ships the audit event (`provider_refused{observed_only: true}`) plus the `WARNING`, which is what the P0 exit evidence greps; the once-per-project-per-day DM is added in **Task 6 Step 3** — the commit where the runner first reaches the outbox — as a `build_ops_notice(kind="ops_alert", severity="warn", …)` naming the key, the file, the project root and runbook §13, claimed through the same three-line Redis `set(..., nx=True, ex=129600)` shape Task 21's `_claim_gap_notice` uses (keyed on the project root and the UTC date). **Task 6's Files, Interfaces and test list carry that bullet** so it cannot be skipped, and Task 6's SYSTEM.md step adds `notify.outbox` to `session.py`'s Depends-on cell as well as `main.py`'s.
+**Why the observe arm carries no DM at this commit, and where the DM lands.** `src/notify/` does not exist yet at execution position 7 (Task 5 builds it at position 12), and importing it here would make this task undeployable on its own. So Task 19 ships the audit event (`provider_refused{observed_only: true}`) plus the `WARNING`, which is what the P0 exit evidence greps; the once-per-project-per-day DM is added in **Task 6 Step 3** — the commit where the runner first reaches the outbox — as a `build_ops_notice(kind="ops_alert", severity="warn", …)` naming the key, the file, the project root and runbook §12, claimed through the same three-line Redis `set(..., nx=True, ex=129600)` shape Task 21's `_claim_gap_notice` uses (keyed on the project root and the UTC date). **Task 6's Files, Interfaces and test list carry that bullet** so it cannot be skipped, and Task 6's SYSTEM.md step adds `notify.outbox` to `session.py`'s Depends-on cell as well as `main.py`'s.
 
 In `src/runner/result_capture.py`: add `"provider_refused"` to `TERMINAL_REASONS`, and in `terminal_reason_for_exception` add, before the text heuristics:
 
@@ -2710,7 +2702,7 @@ Prepend to `.context/modules/runner/CHANGELOG.md`:
 - **Agent task**: multi-model P0, Task 19 (spec §2.4 "INV-3 from project scope (P0)", §9 P0 scope + test gates `test_settings_auth_override` / `test_settings_no_hooks`, §14 Q2; round-2 #4, round-3 #1).
 - **Files changed**: `session.py` (`SETTINGS_OVERRIDE_KEYS`, `SETTINGS_AUTH_KEYS`, `TRACKED_SETTINGS_ALLOWED_KEYS`/`TRACKED_SETTINGS_FILES`, `ProviderRefused`, `settings_override()`, one call before `_build_options`), `result_capture.py` (`provider_refused` terminal reason), `scripts/q2-settings-sandbox-probe.sh` (new, hand-run), `tests/test_settings_auth_override.py` (new — both named gates + the probe's pins), runner CONTEXT.md (C1 row).
 - **Why**: `setting_sources=["project"]` loads the clone's `.claude/settings*.json` — and the **server root's own** for the ~48 `isolation: none` skills. Those files carry `hooks`, `permissions`, `mcpServers`, `apiKeyHelper` and `env`: owner-privilege code execution on every later session, bypassing `guards.py`, `lint_docs.py` and the §2.5 belts in one commit; the auth keys among them additionally outrank the Keychain `/login`, moving Max work onto API billing. `guards.py` only denies Bash-side assignment; the startup assertion only sees `os.environ`. Round 3 raised this as critical because the earlier check looked for *auth* keys only.
-- **Side effects**: a job whose cwd carries any of the seven keys fails immediately with `terminal_reason=provider_refused` and is NOT escalated (a policy refusal, like `DeployRefused`). New audit kind `provider_refused` (with `auth_key: bool` and `observed_only: bool`, so an owner can tell a committed hook from redirected billing, and an observed project hook from a refusal). This repo's own two tracked files keep working — **and so do their copies inside every workspace clone**, because the allowance is keyed on provenance (canonical == server root + byte-identical file) rather than on the cwd path; `test_settings_no_hooks` fails the deploy gate if their contents change. **One live service is deliberately observed, not refused**: `projects/baseball-bingo/.claude/settings.json` carries `hooks` and is tracked in the bingo repo, so bingo's jobs keep running with an audited `observed_only: true` event and one DM a day until the owner relocates it (runbook §13); `test_project_settings_inventory` goes red if any other project settings file appears.
+- **Side effects**: a job whose cwd carries any of the seven keys fails immediately with `terminal_reason=provider_refused` and is NOT escalated (a policy refusal, like `DeployRefused`). New audit kind `provider_refused` (with `auth_key: bool` and `observed_only: bool`, so an owner can tell a committed hook from redirected billing, and an observed project hook from a refusal). This repo's own two tracked files keep working — **and so do their copies inside every workspace clone**, because the allowance is keyed on provenance (canonical == server root + byte-identical file) rather than on the cwd path; `test_settings_no_hooks` fails the deploy gate if their contents change. **One live service is deliberately observed, not refused**: `projects/baseball-bingo/.claude/settings.json` carries `hooks` and is tracked in the bingo repo, so bingo's jobs keep running with an audited `observed_only: true` event and one DM a day until the owner relocates it (runbook §12); `test_project_settings_inventory` goes red if any other project settings file appears.
 - **Gotchas discovered**: the allowance CANNOT be keyed on `cwd == server_root`. `session.py:921-925` sets `cwd = ws.path` (a `git clone` of the canonical, `workspaces.py:151`) and `:914-918` forces `isolation="workspace"` for every skill-less job, so a path test would have refused `server-patch`, `new-skill`, `atlas-build` and the execution lane's own executors — every write-capable job on the box. Provenance (canonical == server root **and** the file's bytes equal the canonical's) is what a clone satisfies and a poisoned clone does not. `settings.local.json` is the likelier carrier (gitignored in most repos) and wins over `settings.json` in the CLI, so it is checked first. `env` is a refused key, but the message names the specific auth key *inside* it — "env" alone tells the owner nothing. Malformed JSON is deliberately **not** an override — treating it as one would fail honest jobs on a typo. The check never edits or strips the offending file: rewriting another machine's committed settings from a job is how you lose the audit trail. The exemption for this repo's own files is **per key, never per path** — a hook committed into our own `.claude/settings.json` is refused at runtime as well as by the gate. Spec §2.4's content-**hash** pin waits for P3's protected `restraints.py`; a hash literal in `session.py` would be editable by the same patch that edits the file it pins, so P0 pins contents in the pytest gate instead and the residual (a file edited directly on prod) is written down rather than papered over.
 ```
 
@@ -2724,11 +2716,11 @@ git commit -m "fix(runner): refuse a project-scope settings override before the 
 
 ### Task 20: Always-on audit/stream secret redactor — `src/runner/secret_redact.py` wired into `_handle_message`
 
-**Execution position:** 8 of 21 — previous: Task 19, next: Task 15 (which imports this module's `redact` when it is created, so its own copy is never written; **this task therefore touches no `sdk_record` file, test or graph row — none of them exist yet**). See Global Constraints "Execution order".
+**Execution position:** 8 of 20 — previous: Task 19, next: Task 17 (see Global Constraints "Execution order").
 
 - [ ] **Step 0: Prerequisite check** — `pipenv run python -c "import inspect; from src.runner import session; assert 'tool_result' in inspect.getsource(session._handle_message); print('ok')"` must print `ok`. If it fails: **execute Task 3 first** (it edits the same function).
 
-**Why this is P0 and separate from Task 15.** Spec §2.4 has a dedicated "**Audit/stream redaction (P0)**" paragraph: `_handle_message` (`session.py:1138-1170`) "runs the §8.3 secret redactor over `tool_result` previews and `text` before the JSONL/`jobs:stream` write, with `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_*` and every vendor-key name in its pattern set, so a `printenv` in any session never lands a credential value in the per-job JSONL, the stream, `ai-mcp` reads or the learning extractor's input". `test_audit_redactor` is a named P0 test gate (§9). Round-2 #3 added it because the setup-token fallback makes any leaked value a **one-year** credential. Task 15's recorder is **opt-in** (`SDK_RECORD=0` ships), so it protects the side file and nothing else: without this task the always-on `volumes/audit_log/<id>.jsonl` and `jobs:stream:<id>` keep a `printenv` or a `curl -H 'Authorization: …'` verbatim. Task 15's own Review Focus item 7 concedes those results "routinely appear in Bash tool results".
+**Why this is P0.** Spec §2.4 has a dedicated "**Audit/stream redaction (P0)**" paragraph: `_handle_message` (`session.py:1138-1170`) "runs the §8.3 secret redactor over `tool_result` previews and `text` before the JSONL/`jobs:stream` write, with `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_*` and every vendor-key name in its pattern set, so a `printenv` in any session never lands a credential value in the per-job JSONL, the stream, `ai-mcp` reads or the learning extractor's input". `test_audit_redactor` is a named P0 test gate (§9). Round-2 #3 added it because the setup-token fallback makes any leaked value a **one-year** credential. Nothing else redacts the durable trace: without this task the always-on `volumes/audit_log/<id>.jsonl` and `jobs:stream:<id>` keep a `printenv` or a `curl -H 'Authorization: …'` verbatim, and such results routinely appear in Bash tool results (`learning.py:138-170` reads the command text back).
 
 **Files:**
 - Create: `src/runner/secret_redact.py` (pure, import-free apart from `re`)
@@ -2743,7 +2735,6 @@ git commit -m "fix(runner): refuse a project-scope settings override before the 
   - `secret_redact.redact(text: str) -> str` — pure; byte-identical output for text with nothing credential-shaped. Pattern set (the spec's): bare `sk-ant-…` keys, `Authorization: Bearer …`, `NAME=value` / `NAME: value` assignments for `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_*`, `GEMINI_*`, `CEREBRAS_*`, `GROQ_*`, `CODEX_*`, `OPENROUTER_*`, `OPENAI_*`, `XAI_*` and any `*_TOKEN|*_SECRET|*_API_KEY|*_PASSWORD` name, **and the private-key shape `-----BEGIN [A-Z ]*PRIVATE KEY----- … -----END …-----` plus the un-armoured OpenSSH blob** (spec §2.4 names the PEM shape and the literal `~/.config/ai-server/publish-key` path; round-3 M9 — the P4 deploy key is a file, so a `cat` of it in one of the 48 unhooked skills is the exposure, and no `NAME=value` pattern ever matched key material). The path itself is kept in the output: knowing *which* key was read is the finding. Keeps the **name** and replaces only the value, so a redacted `printenv` is still useful for debugging ("`ANTHROPIC_BASE_URL=[REDACTED]` was set" is the finding).
   - `secret_redact.redact_tree(value: Any) -> Any` — the same over nested dict/list/tuple structures (what `tool_use.input` needs).
   - `session._handle_message` applies `redact()` to `block.text` (both the `audit_log.append(job_id, "text", …)` and the `_publish_stream` payload), to `block.thinking`, to `_preview_text(block.content)` for `tool_result`, and `redact_tree()` to `_truncate_for_log(block.input)` for `tool_use` — **after** truncation, so the pattern set sees whole lines.
-  - Task 15's `sdk_record` imports `redact`/`redact_tree` from here instead of defining its own (one pattern set, per the Global Constraints bullet).
 - **Explicitly not changed**: `final_text_chunks` keeps the **unredacted** text. That list becomes the job's `result`/summary the owner reads and the marker parser scans (`session.py:405-460`); redacting it could break a `TASK_COMPLETE:` line and would change job outcomes, not just the trace. The durable trace is what §2.4 names. Note it in the CONTEXT.md entry so P2 does not "fix" the asymmetry by accident.
 
 - [ ] **Step 1: Write the failing test**
@@ -2757,7 +2748,7 @@ Always-on audit/stream redaction (P0; spec §2.4 "Audit/stream redaction (P0)",
 
 A `printenv` or `curl -H 'Authorization: …'` in ANY of the 72 skills must not
 land a credential value in volumes/audit_log/<id>.jsonl or jobs:stream:<id> —
-with SDK_RECORD=0, which is the shipped default.
+unconditionally: there is no switch that turns redaction off.
 
 Pure: fake SDK blocks, monkeypatched audit_log/publish. No SDK, no Redis.
 
@@ -2899,8 +2890,7 @@ Expected: collection error `ModuleNotFoundError: No module named 'src.runner.sec
 Secret redaction for the durable trace (P0; spec §2.4 "Audit/stream redaction",
 §8.3 redactor).
 
-ALWAYS ON — unlike the SDK_RECORD recorder (src/runner/sdk_record.py), which is
-opt-in and only protects its own side file. Every `tool_result` preview and
+ALWAYS ON — no switch turns it off. Every `tool_result` preview and
 every assistant `text` passes through redact() before it is appended to
 volumes/audit_log/<id>.jsonl or published to jobs:stream:<id>, so a `printenv`
 or a `curl -H 'Authorization: …'` in any of the 72 skills cannot leave a
@@ -2911,8 +2901,7 @@ A leaked CLAUDE_CODE_OAUTH_TOKEN is a ONE-YEAR credential (spec §0a).
 The NAME is kept and only the VALUE is replaced, so the trace still says which
 variable was set — that is the finding a debugger needs.
 
-Pure module: no I/O, no src imports (session.py, sdk_record.py and P3's
-executors all import it).
+Pure module: no I/O, no src imports (session.py imports it).
 """
 
 from __future__ import annotations
@@ -3016,16 +3005,10 @@ Then wire it into `_handle_message` (locate the function by name; Task 3 has edi
 
 with `from src.runner import secret_redact` in the imports. `final_text_chunks` stays raw on purpose: it becomes the job's `result`/summary and feeds the `TASK_COMPLETE:` marker parser (`session.py:405-460`), so redacting it could change job outcomes rather than just the trace. §2.4 names the trace.
 
-- [ ] **Step 4: (nothing to do here — `sdk_record` does not exist yet)**
-
-**This task runs at position 8; Task 15 builds `src/runner/sdk_record.py` at position 9.** So there is no recorder to make delegate, no `tests/test_sdk_record.py` to run, and no `sdk_record` row in `.context/SYSTEM.md` to anchor against. An earlier cut of this step said "If Task 15 already landed (it does, in execution order it comes next …)" — self-contradictory, and acting on it makes this commit fail three ways: `pytest tests/test_sdk_record.py` exits 4 (file not found), the added `test_sdk_record_uses_the_shared_redactor` raises `ImportError`, and `git add src/runner/sdk_record.py tests/test_sdk_record.py` aborts with "pathspec did not match any files" and stages **nothing**, so the commit never happens.
-
-The delegation is therefore **owned entirely by Task 15**, which is where the module is born: its code block imports `REDACTED`/`redact`/`redact_tree` from here instead of defining its own, its Interfaces bullet points at this module, its `SYSTEM.md` row carries the `runner.secret_redact` Depends-on, and `test_sdk_record_uses_the_shared_redactor` lives in `tests/test_sdk_record.py`. Nothing about that belongs in this task. **Do not create a stub `sdk_record.py` here** to make an import resolve.
-
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `pipenv run pytest tests/test_audit_redactor.py tests/test_api_terminal.py -v`
-Expected: all PASS (`test_api_terminal` proves the banner regex belt still sees what it needs — the API-error banner is not credential-shaped, so redaction does not touch it). `tests/test_sdk_record.py` is deliberately **absent** from this line: Task 15 creates it.
+Expected: all PASS (`test_api_terminal` proves the banner regex belt still sees what it needs — the API-error banner is not credential-shaped, so redaction does not touch it).
 
 **Host check (skip in an isolated worktree).** One real job that prints its environment, in a scratch project only:
 
@@ -3035,10 +3018,10 @@ grep -c 'sk-ant-\|oat01' volumes/audit_log/<job>.jsonl     # → 0
 grep -c 'REDACTED' volumes/audit_log/<job>.jsonl           # → ≥ 1 if anything was set
 ```
 
-- [ ] **Step 6: Docs the lint gate needs, CHANGELOG, commit**
+- [ ] **Step 5: Docs the lint gate needs, CHANGELOG, commit**
 
 - `.context/modules/runner/CONTEXT.md`: append `` , `src/runner/secret_redact.py` `` to the `**Paths:**` line (`check_runner_context` fails otherwise), plus a public-interface bullet: "`secret_redact.redact(text)` / `redact_tree(value)` — always-on redaction of every `tool_result` preview, `text`, `thinking` and `tool_use.input` before the JSONL/stream write (P0, spec §2.4). `final_text_chunks` is deliberately NOT redacted (it is the job result and the marker-parser input)."
-- `.context/SYSTEM.md` module graph — **append the row after the last `src/runner/*` row** and add `, runner.secret_redact` to the `src/runner/session.py` row's Depends-on cell. **No `sdk_record` anchor and no `sdk_record` Depends-on edit here**: that row does not exist until Task 15, which adds `, runner.secret_redact` to its own row when it creates it. The Used-by cell below therefore names only `runner.session`; Task 15 appends itself.
+- `.context/SYSTEM.md` module graph — **append the row after the last `src/runner/*` row** and add `, runner.secret_redact` to the `src/runner/session.py` row's Depends-on cell. The Used-by cell below names `runner.session`.
 
 ```markdown
 | `src/runner/secret_redact.py` | Always-on secret redaction for the audit JSONL and `jobs:stream` (pure, import-free) | — | runner.session |
@@ -3052,10 +3035,10 @@ Prepend to `.context/modules/runner/CHANGELOG.md`:
 ## 2026-09-25 — always-on secret redaction on the audit JSONL and jobs:stream
 
 - **Agent task**: multi-model P0, Task 20 (spec §2.4 "Audit/stream redaction (P0)", §9 P0 scope + test gate `test_audit_redactor`, round-2 #3).
-- **Files changed**: `src/runner/secret_redact.py` (new, pure), `session._handle_message` (four call sites), `tests/test_audit_redactor.py` (new), runner CONTEXT.md Paths + interface, SYSTEM.md row. (`sdk_record` is **not** in this commit — it does not exist until Task 15, which imports this module's pattern set when it is born.)
-- **Why**: `SDK_RECORD` ships OFF, so the opt-in recorder's redaction protected nothing by default while the always-on per-job JSONL, `jobs:stream:<id>`, `ai-mcp` reads and the learning extractor's input kept a `printenv` or `curl -H 'Authorization: …'` verbatim. A leaked `CLAUDE_CODE_OAUTH_TOKEN` is a one-year credential.
+- **Files changed**: `src/runner/secret_redact.py` (new, pure), `session._handle_message` (four call sites), `tests/test_audit_redactor.py` (new), runner CONTEXT.md Paths + interface, SYSTEM.md row.
+- **Why**: nothing redacted the durable trace, so the always-on per-job JSONL, `jobs:stream:<id>`, (deferred) `ai-mcp` reads and the learning extractor's input kept a `printenv` or `curl -H 'Authorization: …'` verbatim. A leaked `CLAUDE_CODE_OAUTH_TOKEN` is a one-year credential.
 - **Side effects**: audit entries and stream payloads for `text`/`thinking`/`tool_use.input`/`tool_result` now carry `[REDACTED]` in place of credential-shaped values. Names are kept, so the trace still says which variable was set. Job results, summaries and the `TASK_COMPLETE:` marker path are untouched.
-- **Gotchas discovered**: redact AFTER truncation (`_truncate_for_log`), or a cut line can hide half a pattern from the regex. `final_text_chunks` must stay raw — it is the job result and the marker-parser input, not the trace. One pattern set only: `sdk_record` (Task 15, the **next** task) imports this module's `redact`/`redact_tree` rather than defining its own, pinned there by `test_sdk_record_uses_the_shared_redactor`, so a future narrowing of the recorder cannot silently leave the always-on path behind — and the delegation is written where the module is born, because this commit predates it. The PEM pattern runs **before** the line-oriented ones: a key body is newlines and base64, and every `NAME=value` pattern walks straight past it (round-3 M9). `_handle_message` **is** the P0 ExecEvent normaliser spec §2.4 names — it is the only path from any executor to the JSONL and the stream — and P3 carries the same function, with the same call sites, behind `executors/base.py` where the other three executors join it.
+- **Gotchas discovered**: redact AFTER truncation (`_truncate_for_log`), or a cut line can hide half a pattern from the regex. `final_text_chunks` must stay raw — it is the job result and the marker-parser input, not the trace. One pattern set only: this module is the single definition, and any later consumer imports its `redact`/`redact_tree` rather than writing a second set. The PEM pattern runs **before** the line-oriented ones: a key body is newlines and base64, and every `NAME=value` pattern walks straight past it (round-3 M9). `_handle_message` **is** the P0 ExecEvent normaliser spec §2.4 names — it is the only path from any executor to the JSONL and the stream — and the seam that would have carried the same function behind `executors/base.py` is deferred (new spec §14 item 9).
 ```
 
 ```bash
@@ -3068,7 +3051,7 @@ git commit -m "feat(runner): always-on secret redaction of the audit JSONL and j
 ### Task 4: Persisted origin on jobs and tasks + `awaiting_since`
 
 
-**Execution position:** 11 of 21 — previous: Task 17, next: Task 5 (see Global Constraints "Execution order").
+**Execution position:** 10 of 20 — previous: Task 17, next: Task 5 (see Global Constraints "Execution order").
 
 **Files:**
 - Modify: `src/gateway/jobs.py:16-47` (`enqueue_job`), add `origin_from_created_by`
@@ -3505,7 +3488,7 @@ git commit -m "feat(gateway+runner): persist job/task origin on every launch; ta
 ### Task 5: `src/notify/` — outbox rows, Telegram renderer with limits, `python -m src.notify` CLI
 
 
-**Execution position:** 12 of 21 — previous: Task 4, next: Task 6 (see Global Constraints "Execution order").
+**Execution position:** 11 of 20 — previous: Task 4, next: Task 6 (see Global Constraints "Execution order").
 
 **Files:**
 - Create: `src/notify/__init__.py`, `src/notify/outbox.py`, `src/notify/telegram.py`, `src/notify/__main__.py`
@@ -4604,11 +4587,11 @@ git commit -m "feat(notify): outbox rows + Telegram renderer (4096/64B/8-button 
 ### Task 6: Runner writes the outbox — job terminals and every task lifecycle card
 
 
-**Execution position:** 13 of 21 — previous: Task 5, next: Task 21 (see Global Constraints "Execution order").
+**Execution position:** 12 of 20 — previous: Task 5, next: Task 21 (see Global Constraints "Execution order").
 
 **Files:**
 - Modify: `src/runner/main.py` — imports; `_finish_job` (after `publish_done`, originally `:1300`); `_notify_task` (originally `:885-888`); the five direct `redis.publish("tasks:notify", …)` sites (originally `:732-739` — the local `from src.db import redis as _redis` at 732 plus the publish at 733-739, both deleted together — `:1111-1119`, `:1128-1135`, `:1215-1222`, `:1259-1266`)
-- Modify: `src/runner/session.py` — **the one deferred half of Task 19**: its `settings_override` observe arm currently only logs a `WARNING` (the outbox did not exist at position 7). Add the once-per-project-per-day ops DM there, in the `if observe:` branch — `build_ops_notice(kind="ops_alert", severity="warn", text=…)` naming the key, the file, the project root and runbook §13, claimed through `redis.set(f"settings_override_notified:<sha256(root)[:12]>:<YYYY-MM-DD>", "1", nx=True, ex=129600)` exactly as Task 21's `_claim_gap_notice` does. The audit event stays unconditional.
+- Modify: `src/runner/session.py` — **the one deferred half of Task 19**: its `settings_override` observe arm currently only logs a `WARNING` (the outbox did not exist at position 7). Add the once-per-project-per-day ops DM there, in the `if observe:` branch — `build_ops_notice(kind="ops_alert", severity="warn", text=…)` naming the key, the file, the project root and runbook §12, claimed through `redis.set(f"settings_override_notified:<sha256(root)[:12]>:<YYYY-MM-DD>", "1", nx=True, ex=129600)` exactly as Task 21's `_claim_gap_notice` does. The audit event stays unconditional.
 - Modify: `.context/modules/runner/CHANGELOG.md`, `.context/SYSTEM.md` (`main.py` **and `session.py`** Depends-on gain `notify.outbox` — the row exists since Task 5, so both imports are lint-checked)
 - Test: `tests/test_notify_runner_hooks.py` (+ one case: the observe arm DMs once per project per day and never twice)
 
@@ -4963,7 +4946,7 @@ Live check (runner restarted with `launchctl kickstart -k gui/$(id -u)/com.assis
 
 - [ ] **Step 5: SYSTEM.md Depends-on, CHANGELOG, commit**
 
-`main.py` **and `session.py`** now import `src.notify.outbox`, whose row exists since Task 5, so `check_module_graph_imports` warns until both Depends-on cells name it. In `.context/SYSTEM.md` append `, notify.outbox` to the `src/runner/main.py` cell (it already ends `…, audit_log, runner.result_capture` after Task 3) **and** to the `src/runner/session.py` cell (it ends `…, runner.result_capture, runner.sdk_record, runner.claude_env` after Task 17).
+`main.py` **and `session.py`** now import `src.notify.outbox`, whose row exists since Task 5, so `check_module_graph_imports` warns until both Depends-on cells name it. In `.context/SYSTEM.md` append `, notify.outbox` to the `src/runner/main.py` cell (it already ends `…, audit_log, runner.result_capture` after Task 3) **and** to the `src/runner/session.py` cell (it ends `…, runner.result_capture, runner.claude_env` after Task 17).
 
 Run: `pipenv run pytest tests/test_doc_lint.py -q && pipenv run python scripts/lint_docs.py` → Expected: PASS and `All clean!`.
 
@@ -4987,7 +4970,7 @@ git commit -m "feat(runner): job terminals and task lifecycle cards dual-write t
 
 ### Task 21: Interim scheduler `provisioning_gap` pre-check — a schedule whose manifest needs a key the project's `.env` lacks defers with a DM instead of burning a session
 
-**Execution position:** 14 of 21 — previous: Task 6, next: Task 7 (see Global Constraints "Execution order"). It needs Task 6's outbox producer for the DM.
+**Execution position:** 13 of 20 — previous: Task 6, next: Task 7 (see Global Constraints "Execution order"). It needs Task 6's outbox producer for the DM.
 
 - [ ] **Step 0: Prerequisite check** — `pipenv run python -c "from src.notify.outbox import build_ops_notice; print('ok')"` must print `ok`. If it fails: **execute Tasks 5 and 6 first.**
 
@@ -5282,7 +5265,7 @@ git commit -m "feat(runner): interim scheduler provisioning_gap pre-check — de
 ### Task 7: Bot delivers the outbox — listener + 30 s poll, `Details` button, `format_job_status`, quota notices
 
 
-**Execution position:** 15 of 21 — previous: Task 21, next: Task 8 (see Global Constraints "Execution order").
+**Execution position:** 14 of 20 — previous: Task 21, next: Task 8 (see Global Constraints "Execution order").
 
 **Files:**
 - Modify: `src/gateway/telegram_bot.py` — imports (`:26-31`), `_handle_button` (`:820-860` head), `_done_listener` (`:1019-1048`), `_quota_notifier` (`:1054-1081`), `_task_notifier` (`:1087-1100` loop head — switch gate), `_post_init` (`:1274-1277`); add `format_job_status`, `_handle_done_message`, `_drain_outbox`, `_outbox_listener`
@@ -5874,7 +5857,7 @@ git commit -m "feat(gateway): bot delivers the notifications outbox (claim + pub
 ### Task 8: Ghost commands become real — durable `/cancel <prefix>`, `/status <prefix>`, `/proposals`; `/rate` leaves the copy
 
 
-**Execution position:** 16 of 21 — previous: Task 7, next: Task 9 (see Global Constraints "Execution order").
+**Execution position:** 15 of 20 — previous: Task 7, next: Task 9 (see Global Constraints "Execution order").
 
 **Files:**
 - Modify: `src/gateway/jobs.py` — add `cancel_action_for_status`, `remove_from_queue`, `cancel_job_durable`
@@ -6161,7 +6144,7 @@ git commit -m "feat(gateway): durable /cancel <prefix> (LREM + flip), /status <p
 ### Task 9: `/clear` requires a confirm button
 
 
-**Execution position:** 17 of 21 — previous: Task 8, next: Task 10 (see Global Constraints "Execution order").
+**Execution position:** 16 of 20 — previous: Task 8, next: Task 10 (see Global Constraints "Execution order").
 
 **Files:**
 - Modify: `src/gateway/telegram_bot.py` — `cmd_clear` (`:484-517`), `_handle_button` (job-level branch from Task 7), add `clear_token_valid`, `_do_clear`
@@ -6341,7 +6324,7 @@ git commit -m "feat(gateway): /clear requires a confirm button (token, 120s TTL)
 ### Task 10: `AskUserQuestion` leaves the default tool list
 
 
-**Execution position:** 18 of 21 — previous: Task 9, next: Task 12 (see Global Constraints "Execution order").
+**Execution position:** 17 of 20 — previous: Task 9, next: Task 12 (see Global Constraints "Execution order").
 
 **Files:**
 - Modify: `src/registry/skills.py:46-49` (dataclass default), `:123-125` (loader default) — introduce `DEFAULT_REQUIRED_TOOLS`
@@ -6481,7 +6464,7 @@ A subagent-driven runner that dispatches one agent per checkbox-bearing heading 
 
 ### Task 12: Daily credential canary — a ping through the runner's own SDK path with the runner's env, served-model + API-time assertion, failure → `notify send`
 
-**Execution position:** 19 of 21 — previous: Task 10, next: Task 13 (see Global Constraints "Execution order"). **It appears in this file BEFORE Tasks 15-21 but runs after them**: `tests/test_canary.py` and `canary_options()` import `claude_env.claude_subprocess_env()`, which **Task 17** creates. A runner that walks headings in file order gets a collection error at Step 1.
+**Execution position:** 18 of 20 — previous: Task 10, next: Task 13 (see Global Constraints "Execution order"). **It appears in this file BEFORE Tasks 16-21 but runs after them**: `tests/test_canary.py` and `canary_options()` import `claude_env.claude_subprocess_env()`, which **Task 17** creates. A runner that walks headings in file order gets a collection error at Step 1.
 
 - [ ] **Step 0: Prerequisite check** — `pipenv run python -c "from src.runner.claude_env import claude_subprocess_env; from src.runner.session import settings_override; print('ok')"` must print `ok`. If it fails: **execute Task 17 first** (and Tasks 2, 5 and **19** before it — the canary also needs `result_capture.served_model_violation`, `python -m src.notify send` and Task 19's `session.settings_override`).
 
@@ -6757,7 +6740,7 @@ class TestTelemetryAndMain:
         assert q.calls[0][1].model == settings.utility_model
 
     def test_canary_never_reads_the_setup_token(self):
-        # Review Focus 8 / Global Constraints "Auth posture": the canary must
+        # Review Focus 6 / Global Constraints "Auth posture": the canary must
         # prove the Keychain login. Neither file may mention the token or --bare.
         for rel in ("src/runner/canary.py", "scripts/credential-canary.sh"):
             src = (REPO / rel).read_text()
@@ -6877,8 +6860,8 @@ a ClaudeAgentOptions built with the runner's one-shot conventions
 (llm_router.router_options) and the runner's `claude_subprocess_env()`
 overlay — and is judged by the SAME rule the runner applies to every
 session (result_capture.served_model_violation), tightened for a probe.
-P3 swaps the `query()` call for `ClaudeSdkExecutor.start(spec)`; nothing
-else changes. Never the brew `claude`; never the CLI's bare mode (it skips
+The executor seam is deferred (new spec §14 item 9), so this path stays
+as it is. Never the brew `claude`; never the CLI's bare mode (it skips
 OAuth — the flag name is kept out of this file on purpose, the tests grep
 for it); never the sealed setup-token — a pass means the Keychain login
 the fleet runs on serves.
@@ -7338,7 +7321,7 @@ git commit -m "feat(ops): daily Claude credential canary through the runner's SD
 
 ### Task 13: Ops hygiene — atlas dump + sealed secrets + the 60-day R2 retention rule in `backup.sh`, `restore-drill.sh`, alerters call `notify send`, owner runbook, the D1 displacement
 
-**Execution position:** 20 of 21 — previous: Task 12, next: Task 14 (see Global Constraints "Execution order").
+**Execution position:** 19 of 20 — previous: Task 12, next: Task 14 (see Global Constraints "Execution order").
 
 **Files:**
 - Modify: `scripts/backup.sh:20-33` (dumps + config snapshot), `:46-59` (the rclone block **gains the 60-day retention rule** — spec §9 P0 ops-debt cell, §12a row 4, round-2 #50; today `:59` reads "# 7. No retention cap locally — 2TB SSD, keep everything" and the bucket grows one tarball per day forever, which is what round 2 flagged when it qualified R2's "free" as "free ≤ 10 GB-month, payment method required, retention rule 60 d")
@@ -7382,11 +7365,6 @@ def test_backup_has_retention_rule():
     assert "--min-age 60d" in src                 # off-site prune
     assert "-mtime +60" in src                    # local prune
     assert "No retention cap locally" not in src  # the old comment is gone
-    # Raw SDK recordings: bounded here and NOWHERE else (they sit outside
-    # volumes/audit_log/, so rotate_audit_logs never sees them — round-3 M8),
-    # and deliberately absent from the tarball.
-    assert "volumes/sdk_recordings" in src
-    assert 'tar -czf' not in src.split("volumes/sdk_recordings")[1][:400]
 
 
 def test_alerters_prefer_notify_send_with_curl_fallback():
@@ -7408,9 +7386,9 @@ def test_runbook_exists():
     for needle in ("pmset -a autorestart 1", "ollama rm", "qwen3.5:4b", "embeddinggemma",
                    "rclone config", "backup-seal.key", "restore-drill.sh", "timers-only",
                    # reviewed-spec rows: §12a 1/2/2b auth posture, §0a plutil
-                   # exit test, SDK_RECORD fixtures, the alembic diagnostic,
+                   # exit test, the alembic diagnostic,
                    # the R2 60-day retention rule (round-2 #50)
-                   "Login method: Claude account", "plutil -p", "SDK_RECORD=1",
+                   "Login method: Claude account", "plutil -p",
                    "alembic-current-check.sh", "overflow_credits", "--min-age 60d"):
         assert needle in doc, needle
     # The old runbook offered to put the token in the launchd env; the reviewed
@@ -7508,44 +7486,17 @@ and replace step 7's comment (`:59`, `# 7. No retention cap locally — 2TB SSD,
 #    now carries the atlas dump and the sealed secrets bundle, so "keep
 #    everything" is no longer free in either place.
 find "$BACKUP_DIR" -name 'backup-*.tar.gz' -mtime +60 -delete 2>/dev/null || true
-
-# 7b. Raw SDK recordings (spec §2.4 "recordings are deleted once P3's replay
-#     fixtures are frozen", round-3 M8). They are NOT in the tarball: up to
-#     ~100 MB per recording window of reproducible fixtures, which the 60-day
-#     R2 rule would pay to keep twice. They are also outside volumes/audit_log/,
-#     so retention.rotate_audit_logs never sees them — this sweep is the only
-#     thing that bounds the directory.
-#
-#     90 DAYS, NOT 30, and the number is load-bearing: the recordings are
-#     collected in P0 (spec §9, weeks 0-1) and frozen into tests/replay/ by P3
-#     (weeks 6-8 in the same table). A 30-day sweep would delete the P0
-#     deliverable ">=20 recorded jobs across skill classes" two to four weeks
-#     before P3 can copy it, and re-recording is not available: the P0 exit
-#     criterion is that SDK_RECORD is UNSET afterwards. The second guard is the
-#     freeze itself — once tests/replay/ is non-empty the fixtures exist, so the
-#     sweep then applies at any age.
-if [ -n "$(ls -A "$PROJECT_DIR/tests/replay" 2>/dev/null)" ]; then
-    find "$PROJECT_DIR/volumes/sdk_recordings" -name '*.json' -delete 2>/dev/null || true
-else
-    find "$PROJECT_DIR/volumes/sdk_recordings" -name '*.json' -mtime +90 -delete 2>/dev/null || true
-fi
 ```
 
-(check the actual variable names when implementing — `scripts/backup.sh` defines the backup and project directories near the top; the needles the test greps for are `-mtime +60`, `-mtime +90`, `volumes/sdk_recordings` and `tests/replay`.)
+(check the actual variable names when implementing — `scripts/backup.sh` defines the backup and project directories near the top; the needles the test greps for are `-mtime +60` and `--min-age 60d`.)
 
-`test_backup_has_retention_rule` pins **both** numbers and the freeze branch, so nobody can quietly shorten the window that holds the P3 fixtures:
+`test_backup_has_retention_rule` pins both halves of the rule, local and off-site:
 
 ```python
 def test_backup_has_retention_rule():
     src = (REPO / "scripts" / "backup.sh").read_text(encoding="utf-8")
     assert "-mtime +60" in src                      # tarballs, spec §12a row 4
     assert "--min-age 60d" in src                   # the off-site prune
-    # Recordings: 90 d, NOT 30 — P0 records them (weeks 0-1) and P3 freezes them
-    # (weeks 6-8). A 30-day sweep eats the P0 deliverable before P3 exists, and
-    # SDK_RECORD is unset by then so it cannot be re-recorded.
-    assert "-mtime +90" in src and "volumes/sdk_recordings" in src
-    assert "-mtime +30" not in src
-    assert "tests/replay" in src                    # freeze short-circuits the wait
 ```
 
 - [ ] **Step 4: Create `scripts/restore-drill.sh`**
@@ -7742,17 +7693,17 @@ send_dm() {
 ```markdown
 # P0 ops hygiene — owner runbook (2026-09-25)
 
-Spec: `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md` §9 (P0 row), §12 D3/D12.
+Spec: `docs/superpowers/specs/2026-10-05-observability-and-trading-unblock-design.md` §9 (Phase-1 row), §12 **D4** (account confirmations) and **D5** (ops debt). Origin: the superseded `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md` §9 P0 row, §12 D3/D12.
 These steps need `sudo`, account credentials or a human judgement call, so no
-job runs them. Do them in order; each has a verification line. Total ≈ 1.5 h
-(§1–§6 ≈ 45 min; §7 auth rows ≈ 25 min; §9–§11 ≈ 20 min).
+job runs them. Do them in order; each has a verification line. Total ≈ 1.8 h
+(§1–§6 ≈ 45 min; §7 auth rows ≈ 25 min; §9–§12 ≈ 35 min).
 
 ## 1. Auto-restart after power loss (sudo)
 
     sudo pmset -a autorestart 1
     pmset -g | grep autorestart          # → autorestart 1   (was 0 on 2026-09-24)
 
-## 2. Ollama: drop the 14 GB of stale weights, pull the two P3 models
+## 2. Ollama: drop the 14 GB of stale weights, pull the two local utility models
 
 Nothing in `src/` references Ollama today (state map §2.8); the three models
 below are six months old and were never called.
@@ -7815,7 +7766,7 @@ Run in the PRODUCTION checkout after the P0 deploy (`server-deploy`):
     launchctl list | grep credential-canary
     bash scripts/credential-canary.sh && cat volumes/telemetry/credential_canary.json   # "ok": true
 
-## 7. Auth config by hand (spec D3 + §12a rows 1, 2, 2b — protected path #2, never by a job)
+## 7. Auth config by hand (new spec D4; old spec D3 + §12a rows 1, 2, 2b — protected path #2, never by a job)
 
 The Keychain `claude login` on the Mini is the live credential and the only
 one the fleet uses (spec §3, §0a last rows, review #31). Nothing in P0 reads a
@@ -7825,31 +7776,37 @@ token from the environment; the canary (§6) proves the Keychain login daily.
   claude.ai → Billing, that usage credits are $0, auto-reload is OFF and the
   monthly spend limit is $0 (`overflow_credits: disabled` — the only metered
   Anthropic path is usage credits, spec §2.8). Write both facts with the date
-  in `.context/modules/runner/skills/GOTCHAS.md` (P3's `providers.yml` copies
-  them from there; the P2 window forecast needs the tier).
+  in `.context/modules/runner/skills/GOTCHAS.md`. Nothing consumes that note
+  automatically — the provider registry is deferred (new spec §14 items 1/10);
+  the runtime tripwires key on `billing_error`, then `overage_status`, then the
+  5-m cache-write signature (new spec §2.5), and the later window forecast
+  needs the tier.
 - **§12a row 2 (P0 exit, 2 min)**: claude.ai → Settings → Privacy → "Help
-  improve Claude" OFF (30-day retention instead of 5 years, spec D4). Note the
-  date in the same GOTCHAS entry; P1's `approvals(kind=attestation)` row
-  replaces the note.
+  improve Claude" OFF (30-day retention instead of 5 years; old spec D4 → new
+  spec D4). Note the date in the same GOTCHAS entry — that note **is** the
+  record: the new spec drops `attestation` from `approvals.kind` because
+  nothing in its scope writes one (new spec §2.3).
 - **§12a row 2b (P0 exit, 2 min)**: confirm Devin's bundled `claude` is the
   **unmodified binary signed in on the owner's own `/login`** — `claude /status`
   in a Devin session should read "Login method: Claude account" and Devin must
   not intermediate the token. If it does anything else, sign Devin out of the
   Max credential: the standing rule is "no third-party harness signs in with
   the Max credential" (`crosscut-tos §3.7`, spec §2.8 Claude row). Record the
-  answer with the date in the same GOTCHAS entry; it joins the quarterly
-  attestation card (§12a row 22).
-- **§12a row 3 — `claude setup-token` — is NOT a P0 step.** Round 2 re-scoped
-  it to "**needed before P3** (the Keychain login is the only credential until
-  the executor seam exists; the sealed token is unused before P3)". No P0 code
+  answer with the date in the same GOTCHAS entry. There is no quarterly
+  attestation card any more — the old §12a row 22 went with the deleted vendor
+  scope; the GOTCHAS entry is the record.
+- **`claude setup-token` — not a P0 step, but no longer unphased.** No P0 code
   reads a token (Global Constraints "Auth posture"), so minting a one-year
-  credential that outranks `/login` three phases early only widens exposure.
-  **Do not run `claude setup-token` during P0.** When P3 arrives the rules
-  are: seal it 0600 at `~/.config/ai-server/claude-setup-token`, OUTSIDE every
+  credential that outranks `/login` during P0 only widens exposure.
+  **Do not run `claude setup-token` during P0.** The new spec schedules it at
+  **Phase 2, runbook row 7a** (~10 min) — with no executor-seam condition,
+  because the seam is deferred and the T−30 d alarm needs a recorded mint date
+  to fire at all (new spec §5, §11). The rules then are: seal it 0600 at
+  `~/.config/ai-server/claude-setup-token`, OUTSIDE every
   workspace and every backup's plain tree (`backup.sh` never copies
   `~/.config/ai-server/`); **never** paste it into `.env`, a launchd plist, a
   shell profile or `scripts/install-launchd.sh`; record the mint date in
-  GOTCHAS (a T−30 d expiry alarm is a P2 schedule). The exit test below is
+  GOTCHAS — the T−30 d expiry alarm keys off that date (new spec §5). The exit test below is
   independent of whether a token exists and **is** a P0 step.
 - **P0 exit test (spec §0a)** — run after the deploy and after any installer run:
 
@@ -7881,34 +7838,7 @@ full installer run, which restarts runner/web/bot — pick a quiet moment:
     plutil -p ~/Library/LaunchAgents/com.assistant.runner.plist | grep -c DISABLE_TELEMETRY   # → 1
     plutil -p ~/Library/LaunchAgents/com.assistant.*.plist | grep -c CLAUDE_CODE_OAUTH_TOKEN  # → 0
 
-## 10. Raw SDK recorder: collect the P3 replay fixtures (spec §2.4, review #27)
-
-`SDK_RECORD=1` is read by `Settings` (`.env` is a protected file — owner edit):
-
-    cd ~/Library/Application\ Support/ai-server
-    echo 'SDK_RECORD=1' >> .env && launchctl kickstart -k gui/$(id -u)/com.assistant.runner
-    # … a few days later (the 41 schedules cover the skill classes on their own):
-    .venv/bin/python -m src.runner.sdk_record coverage      # prints jobs per skill
-    # While the flag is still set this EXITS 1 even at full coverage, printing
-    # "coverage OK — now remove SDK_RECORD=1 …". That is the P0 exit criterion
-    # (spec §9: the flag is unset after the >=20 jobs), not a bug:
-    sed -i '' '/^SDK_RECORD=1$/d' .env && launchctl kickstart -k gui/$(id -u)/com.assistant.runner
-    .venv/bin/python -m src.runner.sdk_record coverage      # now exit 0 — paste both runs in the PR
-
-Recordings are `volumes/sdk_recordings/<id>.json` (secrets redacted; ~1–5 MB
-per agentic job) — **outside `volumes/audit_log/`**, so nothing that globs the
-audit directory with `*.jsonl` indexes them (spec §2.4, round-3 M8). They are
-therefore **not** touched by `retention.rotate_audit_logs`: P3 copies its 20
-fixtures into `tests/replay/` and then they are deleted, and `backup.sh` bounds
-the directory in the meantime at **90 days** (Task 13 Step 3) — deliberately
-past spec §9's P3 window (weeks 6-8) so the sweep cannot eat the P0 deliverable
-before P3 can freeze it; a 30-day rule would have, and `SDK_RECORD` is unset at
-P0 exit, so nothing could be re-recorded. Once `tests/replay/` is non-empty the
-sweep deletes the directory at any age, because the fixtures then exist. The
-directory is excluded from the off-site tarball — up to ~100 MB of reproducible
-fixtures that the R2 60-day retention rule would pay for twice.
-
-## 11. Alembic history — a DIAGNOSTIC, not a deploy step
+## 10. Alembic history — a DIAGNOSTIC, not a deploy step
 
 `scripts/alembic-current-check.sh` (Task 18) reports when prod's
 `alembic_version` names a revision with no script on disk — the state a bad
@@ -7924,11 +7854,59 @@ on disk, so a `git revert` of a migration file goes red in the gate rather
 than mid-deploy.
 
     bash scripts/alembic-current-check.sh    # exit 0 ok · 1 mismatch · 2 cannot determine
+
+## 11. Install the dev protected-path guard (dev checkout, after Task 13)
+
+`scripts/install-dev-hooks.sh` (Step 6c) writes `.git/hooks/commit-msg` in the
+**dev** repo — the birthplace of every INV-4 patch. Production has its own
+guard from `install-prod-hooks.sh`; this is the dev-side half MISSION §M never
+had. Run it once per dev checkout, and again after any `.git/hooks` reset:
+
+    bash scripts/install-dev-hooks.sh install
+    bash scripts/install-dev-hooks.sh install        # idempotent: marker-delimited, no duplicate block
+
+Verify both hooks are live and independent:
+
+    ls .git/hooks/commit-msg .git/hooks/pre-commit   # both exist
+    # stage a src/ change with no CHANGELOG entry  -> the EXISTING pre-commit hook still refuses
+    # stage a MISSION §M path with no trailer      -> commit-msg refuses and prints that it
+    #                                                 cannot resolve the id yet (approvals is
+    #                                                 migration 008 — P1, new spec Phase 2)
+
+`--no-verify` bypasses every hook and is what the god break-glass documents
+(`skills/god/SKILL.md`, push-in-same-session mandatory). The guard script and
+its path list are unprotected files today; the owner PR that adds them to
+MISSION §M is the new spec's **D6 first half, at Phase-1 entry**.
+
+## 12. Retire bingo's PostToolUse hook — through the bingo repo
+
+`projects/baseball-bingo/.claude/settings.json` carries a `hooks` block (a
+PostToolUse `check-context-writeback.sh`) and is tracked in the **bingo** repo.
+Task 19's settings-override refusal therefore observes it instead of refusing
+it: bingo jobs keep running with an audited `provider_refused{observed_only:
+true}` event and one ops DM a day. That is a stated, bounded exception with an
+owner exit, and this is the exit.
+
+It is a **project** change and never an INV-4 server patch: do it in the bingo
+repo's own delivery path.
+
+1. Move the hook out of `.claude/settings.json` — either into the project's own
+   tooling (a Makefile/script target the skill calls) or delete it if the
+   writeback check is obsolete.
+2. Commit and deploy through bingo's own path; the server pulls nothing here.
+3. Confirm the exception is gone:
+
+       grep -c hooks projects/baseball-bingo/.claude/settings.json            # -> 0
+       pipenv run pytest tests/test_settings_auth_override.py -q             # inventory empty
+
+Until it is gone, do not expect `provider_refused{observed_only: false}` for
+bingo — and `test_project_settings_inventory` goes red the moment any *other*
+project settings file appears, so the observe arm cannot silently grow.
 ```
 
 - [ ] **Step 6b (UNCONDITIONAL): remove `_check_idle_queue_review` + `_should_trigger_idle_review` + the `main` wiring**
 
-**Round 3 made this unconditional and took it out of D1's hands** (spec §9 P0 row: "`_check_idle_queue_review` + `_should_trigger_idle_review` + the `main` wiring removed **unconditionally** (§2.6 (c), §5.5 — the autonomous `server-patch` dispatcher, a containment item, **not D1's displacement lever**)"; §10's `review-and-improve` row says the same). The reason is containment, not budget: that trigger dispatches an autonomous `server-patch` job at opus/max on idle, and §2.6 (c)'s cross-vendor rule — re-keyed in round 3 on the *author* of a proposal — has to close it **before** P3 introduces a local-model proposal author. A budget lever can be traded away in a decision; a containment item cannot.
+**Round 3 made this unconditional and took it out of D1's hands** (spec §9 P0 row: "`_check_idle_queue_review` + `_should_trigger_idle_review` + the `main` wiring removed **unconditionally** (§2.6 (c), §5.5 — the autonomous `server-patch` dispatcher, a containment item, **not D1's displacement lever**)"; §10's `review-and-improve` row says the same). **Re-grounded on the cut spec (2026-10-05).** The old justification — §2.6 (c)'s cross-vendor authorship rule having to close before P3 introduced a local-model proposal author — names scope that no longer exists (the free utility lanes are new spec §14 items 1–2, and the authorship rule went with them), and an unconditional, irreversible removal cannot rest on a reason that has evaporated. The removal is still correct, on the new spec's own grounds: **new spec §4.3** removes `_check_idle_queue_review`, `_should_trigger_idle_review` and the wiring in **Phase 1, unconditionally, because that trigger is the autonomous `server-patch` dispatcher** — a containment item, not D2's displacement lever — and **new spec §8** counts the ≈ −30 M tokens ≈ −$15/month it stops as a Phase-1 spend cut. §4.3 also requires that `_check_idle_queue_alpha` keep enqueuing `alpha-governor` under the same predicate and 4 h cooldown (test). A budget lever can be traded away in a decision; a containment item cannot.
 
 **Everything lives in `events.py` — `main.py` has nothing to remove.** Verified in this tree before writing this step: `grep -rn '_check_idle_queue\|_should_trigger_idle_review' src/` matches **only** `src/runner/events.py` (`_should_trigger_idle_review:345`, `_check_idle_queue_alpha:392`, `_check_idle_queue_review:432`, the calls at `:497` and `:504` inside `events.event_loop`). `src/runner/main.py` does `from src.runner.events import event_loop` (`main.py:51`) and mentions the dispatcher nowhere. An earlier cut of this step sent the executor to `main.py` and pointed its tests at `main`, where `hasattr(main, "_check_idle_queue_alpha")` is False and `"_check_idle_queue_review" not in getsource(main)` passes vacuously — pinning nothing. Both are corrected below.
 
@@ -7973,7 +7951,7 @@ def test_the_autonomous_server_patch_dispatcher_is_gone():
 
 - [ ] **Step 6c: `scripts/install-dev-hooks.sh` — the dev protected-path **commit-msg** guard + `test_protected_paths_hook`**
 
-**Why this is P0 (round-3 #3, critical).** Every containment claim in the spec rests on the words "protected path", and in the **dev repo that has no mechanical enforcement at all**: MISSION §M is prose, and `.git/hooks/pre-commit` only enforces a CHANGELOG on `^src/` (verified in this checkout). The spec's sentence "an autonomous patch cannot edit a protected path *and* the runner will not boot" was true only for a yml-only patch, and `approvals(kind=protected_path)` existed in migration 008 with nothing producing or consuming it. Spec §9's P0 row now names **`scripts/install-dev-hooks.sh` + `test_protected_paths_hook`** as P0 scope, explicitly because the guard script and its test are *unprotected* files and can therefore ship here; PR #1a at P3 entry adds them to the MISSION §M list and to the deploy re-arm.
+**Why this is P0 (round-3 #3, critical).** Every containment claim in the spec rests on the words "protected path", and in the **dev repo that has no mechanical enforcement at all**: MISSION §M is prose, and `.git/hooks/pre-commit` only enforces a CHANGELOG on `^src/` (verified in this checkout). The spec's sentence "an autonomous patch cannot edit a protected path *and* the runner will not boot" was true only for a yml-only patch, and `approvals(kind=protected_path)` existed in migration 008 with nothing producing or consuming it. Spec §9's P0 row now names **`scripts/install-dev-hooks.sh` + `test_protected_paths_hook`** as P0 scope, explicitly because the guard script and its test are *unprotected* files and can therefore ship here; the owner PR that adds them to the MISSION §M list and to the deploy re-arm is **new spec D6's first half, at Phase-1 entry** (the old PR #1a at P3 is gone with the cut).
 
 **Two modes, and the split is what makes it testable.** `install` writes/updates `.git/hooks/commit-msg`; `check <paths-file> <message-file>` is the pure decision and takes its two inputs as files, so `test_protected_paths_hook` drives it with fixtures and needs no git, no DB and no network.
 
@@ -8002,7 +7980,8 @@ def test_the_autonomous_server_patch_dispatcher_is_gone():
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
-# MISSION §M, verbatim — ALL of it. Extend ONLY with the owner (PR #1a puts this
+# MISSION §M, verbatim — ALL of it. Extend ONLY with the owner (new spec D6's
+# first half, at Phase-1 entry, puts this
 # list under the protected set itself, so after P3 entry a change here needs
 # approval too).
 #
@@ -8192,7 +8171,7 @@ def test_the_list_is_missions_list():
     # named by DESCRIPTION rather than by path — §M item 2's "the chat-ID/web-auth
     # checks" is `_check_auth` in src/gateway/web.py:49-63 (this plan's own Global
     # Constraints already spell that out). Spelling the path into MISSION.md is an
-    # owner edit of a protected file, listed in Owner actions for PR #1a.
+    # owner edit of a protected file, listed in Owner actions (new spec D6, first half).
     by_description = {"src/gateway/web.py": "chat-ID/web-auth checks"}
     for pat in patterns:
         if pat in by_description:
@@ -8255,9 +8234,9 @@ def test_p0_limitation_is_stated_not_hidden(tmp_path):
 
 Run: `pipenv run pytest tests/test_protected_paths_hook.py -v` → all PASS. Then arm it in **this dev checkout** (never on prod — prod has its own guard from `scripts/install-prod-hooks.sh`): `bash scripts/install-dev-hooks.sh install`, and verify the existing CHANGELOG check still fires by staging a `src/` change without a CHANGELOG.
 
-Add to the runbook (Step 6) a short section **"12. Dev protected-path guard"**: what the trailer is, that the hook is `.git/hooks/**commit-msg**` (git gives only that hook the message file, and the CHANGELOG `pre-commit` hook is untouched), that `install` is idempotent and re-armable, that the god break-glass in `skills/god/SKILL.md` is the documented bypass (`--no-verify`, push in the same session), and that PR #1a at P3 entry adds the script and its path list to MISSION §M plus the deploy re-arm.
+Add to the runbook (Step 6) the section **"11. Install the dev protected-path guard"** — written out in Step 6's heredoc above, beside **"12. Retire bingo's PostToolUse hook"** (Task 19's third belt): what the trailer is, that the hook is `.git/hooks/**commit-msg**` (git gives only that hook the message file, and the CHANGELOG `pre-commit` hook is untouched), that `install` is idempotent and re-armable, that the P0 guard prints that it cannot resolve the trailer's id yet (`approvals` is migration 008), that the god break-glass in `skills/god/SKILL.md` is the documented bypass (`--no-verify`, push in the same session), and that the owner PR adding the script and its path list to MISSION §M plus the deploy re-arm is the **new spec's D6 first half, at Phase-1 entry** (not the old PR #1a at P3).
 
-Add a second runbook section **"13. Retire the baseball-bingo project hook"** (Task 19's third belt): `projects/baseball-bingo/.claude/settings.json` carries a `hooks` block, so bingo jobs run with an audited `provider_refused{observed_only: true}` and one DM a day. Retiring or relocating it is a **bingo-repo** change (its own delivery path — never an INV-4 server patch); once `test_project_settings_inventory` has nothing to list, the P1 follow-up flips that arm from observe to refuse. The section names the file, the one key, and the two places the exception is written down (Task 19 "the third belt" and the deferred list).
+Add a second runbook section **"12. Retire the baseball-bingo project hook"** (Task 19's third belt): `projects/baseball-bingo/.claude/settings.json` carries a `hooks` block, so bingo jobs run with an audited `provider_refused{observed_only: true}` and one DM a day. Retiring or relocating it is a **bingo-repo** change (its own delivery path — never an INV-4 server patch); once `test_project_settings_inventory` has nothing to list, the P1 follow-up flips that arm from observe to refuse. The section names the file, the one key, and the two places the exception is written down (Task 19 "the third belt" and the deferred list).
 
 - [ ] **Step 7: Run the tests, then a local backup + drill**
 
@@ -8274,7 +8253,7 @@ Prepend to `.context/modules/hosting/CHANGELOG.md`:
 ```markdown
 ## 2026-09-25 — backup.sh dumps atlas + seals secrets; restore-drill.sh; alerters via notify send; P0 ops runbook
 
-- `scripts/backup.sh`: `pg_dump atlas` when the DB exists; `secrets.tar.enc` (AES-256-CBC/PBKDF2, key `~/.config/ai-server/backup-seal.key`, SKIP when absent); recordings swept at **90 days** (or immediately once `tests/replay/` is non-empty) and kept out of the tarball. `scripts/restore-drill.sh` (new): throwaway restore of both dumps + unseal names-only + off-site presence → PASS/FAIL. `scripts/install-dev-hooks.sh` (new): the protected-path **commit-msg** guard, `install` + `check` modes. `healthcheck-all.sh` (gains the `VENV_PY` block) / `schedule-monitor.sh` (`send_dm`): `"$VENV_PY" -m src.notify send` first, curl fallback kept — never `pipenv run` (Task 12 gotcha). Runbook `docs/runbooks/2026-09-25-p0-ops-hygiene.md` holds the owner-only steps (pmset, Ollama, R2, seal key, drill, timer install, D3 auth, kill switch = bot-only restart, §12 the dev guard, §13 the bingo project hook).
+- `scripts/backup.sh`: `pg_dump atlas` when the DB exists; `secrets.tar.enc` (AES-256-CBC/PBKDF2, key `~/.config/ai-server/backup-seal.key`, SKIP when absent); `scripts/restore-drill.sh` (new): throwaway restore of both dumps + unseal names-only + off-site presence → PASS/FAIL. `scripts/install-dev-hooks.sh` (new): the protected-path **commit-msg** guard, `install` + `check` modes. `healthcheck-all.sh` (gains the `VENV_PY` block) / `schedule-monitor.sh` (`send_dm`): `"$VENV_PY" -m src.notify send` first, curl fallback kept — never `pipenv run` (Task 12 gotcha). Runbook `docs/runbooks/2026-09-25-p0-ops-hygiene.md` holds the owner-only steps (pmset, Ollama, R2, seal key, drill, timer install, D3 auth, kill switch = bot-only restart, §12 the dev guard, §13 the bingo project hook).
 ```
 
 `src/runner/events.py` is `src/`, so the pre-commit CHANGELOG hook requires a runner entry in the same commit. Prepend to `.context/modules/runner/CHANGELOG.md`:
@@ -8284,7 +8263,7 @@ Prepend to `.context/modules/hosting/CHANGELOG.md`:
 
 - **Agent task**: multi-model P0, Task 13 Step 6b (spec §9 P0 row, §2.6 (c), §5.5, §10; round-3 #4).
 - **Files changed**: `src/runner/events.py` (`_check_idle_queue_review` and `_should_trigger_idle_review` deleted; the `event_loop` try/except that called it deleted; `_check_idle_queue_alpha` and its call untouched), `tests/test_events.py` (the `_should_trigger_idle_review` import and `TestIdleQueueReview` deleted, the breaker-gating monkeypatch and its three call-lists re-pointed at the alpha drainer, two new cases).
-- **Why**: containment, not budget. That trigger dispatched an autonomous `server-patch` at opus/max on an idle queue, and §2.6 (c)'s cross-vendor rule — re-keyed in round 3 on the *author* of a proposal — has to close it before P3 introduces a local-model proposal author. Round 3 took it out of D1's hands for exactly that reason: a budget lever can be traded away in a decision, a containment item cannot.
+- **Why**: containment, not budget. That trigger dispatched an autonomous `server-patch` at opus/max on an idle queue — new spec §4.3 removes it in Phase 1 unconditionally for exactly that reason, and new spec §8 books the ≈ −30 M tokens ≈ −$15/month as a side effect. (The old reason, §2.6 (c)'s cross-vendor authorship rule closing before a local-model proposal author arrived, names deleted scope: new spec §14 items 1–2.) A budget lever can be traded away in a decision; a containment item cannot.
 - **Side effects**: **no retrospective loop between P0 and P4.** The stated interim is the weekly CostCard plus an owner-run `/task review-and-improve`; `retro` replaces it in P2b/P4 per §9. ≈ −30 M tokens/month as a side effect, recorded as containment, **not** as D1's displacement. `skills/review-and-improve/SKILL.md` is untouched — the skill stays, only its idle trigger goes.
 - **Gotchas discovered**: all of it lived in `events.py`. `grep -rn '_check_idle_queue' src/` matches that file only; `main.py` merely does `from src.runner.events import event_loop`, so a removal step pointed at `main.py` finds nothing and a test asserting `"_check_idle_queue_review" not in getsource(main)` passes vacuously. The test sweep is not optional either: `tests/test_events.py` imports the predicate at **module level**, so deleting it without touching the test file fails the whole file at collection and blocks `server-deploy`.
 ```
@@ -8302,638 +8281,9 @@ git commit -m "feat(ops): backup dumps atlas + sealed secrets, restore drill, al
 
 ---
 
-### Task 15: `SDK_RECORD=1` — opt-in raw SDK message recorder (the P3 replay-gate fixtures)
-
-**Execution position:** 9 of 21 — previous: Task 20, next: Task 17 (see Global Constraints "Execution order").
-
-- [ ] **Step 0: Prerequisite check** — `pipenv run python -c "from src.runner.secret_redact import REDACTED, redact, redact_tree; print('ok')"` must print `ok` (Task 20 owns the single pattern set this module re-exports; **this module compiles no regex of its own**). If it fails: **execute Task 20 first.** Also confirm Task 3's 3-tuple `_run_in_process`: `pipenv run python -c "import inspect; from src.runner import session; print(inspect.signature(session._run_in_process).return_annotation)"`.
-
-Spec §2.4 ("An opt-in raw recorder (`SDK_RECORD=1`, P0) dumps every SDK message (dataclass → JSON, secrets redacted) to **`volumes/sdk_recordings/<id>.json`** — deliberately *outside* `volumes/audit_log/` — so the P3 replay gate has real fixtures … recordings are deleted once P3's replay fixtures are frozen, and `SDK_RECORD` is off in prod outside a recording window"), §9 P0 row, review #27, **round-3 M8**. Executed after Task 3 (it hooks the `_run_in_process` Task 3 leaves behind) and before Task 17.
-
-**Why the directory matters (round-3 M8, verified in the tree).** Three consumers glob the audit directory with `*.jsonl`: `audit_index.py:167`, `retrospective.py:214` and `:364`. A recording is not an audit file — it is full-fidelity, untruncated `tool_use.input` / `tool_result` / `SystemMessage` — so indexing one means wrong-shaped entries, double-counted events, and untruncated proprietary text flowing into an Anthropic retro prompt. Writing them to a sibling directory is the whole fix; the file keeps its JSON-Lines content under the `.json` name spec §9's P0 row gives it, and P3's replay loader globs `volumes/sdk_recordings/*.json` (the spec's P3 cell calls the same file "the raw `.sdk.jsonl`" — one file, two names, and the P0 row's is the one that ships).
-
-**Files:**
-- Create: `src/runner/sdk_record.py`
-- Modify: `src/config.py` (add `sdk_record`), `src/runner/session.py` (`_run_in_process`: the `client = ClaudeSDKClient(options=options)` line and the head of the `async for message in client.receive_response():` body)
-- **Not created here**: any redaction pattern. `secret_redact` (Task 20, position 8) is imported and re-exported; Task 20 deliberately left this delegation to this task because its own commit predates the module.
-- Modify: `.context/modules/runner/CHANGELOG.md`, `.context/modules/db/CHANGELOG.md`, `.context/modules/runner/CONTEXT.md` (Paths line — `check_runner_context` goes red the moment the file exists), `.context/SYSTEM.md` (module-graph row; `session.py` Depends-on += `runner.sdk_record`)
-- Test: `tests/test_sdk_record.py`
-
-**Interfaces:**
-- Consumes: `settings.audit_log_dir`; **`secret_redact.REDACTED`/`redact`/`redact_tree` (Task 20 — this module defines no pattern of its own)**; Task 3's `_run_in_process` (3-tuple return, `cli_version()`).
-- Produces:
-  - `settings.sdk_record: bool = False` (env `SDK_RECORD`; opt-in per spec).
-  - `sdk_record.SUFFIX = ".json"`, `sdk_record.DIRNAME = "sdk_recordings"`.
-  - `sdk_record.REDACTED`, `sdk_record.redact`, `sdk_record.redact_tree` — **re-exports of `src.runner.secret_redact`'s, never a second copy** (Task 20 owns the single pattern set; Global Constraints and the File-structure row say the same). That set is strictly larger than a recorder-local one would be: besides `sk-ant-…`, `Authorization: Bearer …`, the `NAME=value` families and the `api_key|token|secret|password` pairs, it carries the **PEM / un-armoured OpenSSH private-key shapes and the `~/.config/ai-server/publish-key` path** (round-3 M9) — key material is newlines and base64, so every `NAME=value` pattern walks straight past it, and a `cat` of the P4 deploy key in any of the 48 unhooked skills would otherwise land verbatim in a durable `volumes/sdk_recordings/<id>.json`. Pinned by `test_sdk_record_uses_the_shared_redactor`.
-  - `sdk_record.message_to_record(message, *, seq: int, ts: str) -> dict` (pure): `{"seq", "ts", "type": <class name>, "data": <dataclasses.asdict, every str redacted>}`; a non-dataclass or unserialisable message → `{"type", "repr": redact(repr(message))[:2000]}`. **`RateLimitEvent` — including `rate_limit_info.overage_status` / `overage_resets_at` / `overage_disabled_reason` — is recorded**, because the recorder's `record()` is the *first* statement in the loop body, ahead of the `RateLimitEvent` branch that can `continue` or raise, and `dataclasses.asdict` walks the nested `rate_limit_info`. The P0 scope cell asks for the recorder "(§2.4, **`overage_*` fields included**)" and §2.8 makes `overage_status == "allowed"` while `status == "rejected"` the **primary** `possible_credit_overflow` trigger that P2 reads (round-2 #58) — so `test_rate_limit_event_overage_fields_are_recorded` pins it and a future field allowlist cannot drop it silently.
-  - `sdk_record.header_record(job_id, *, model, cli_version, sdk_version, prompt) -> dict` — `type="_recorder_start"`, `seq=0`, carries `prompt_sha256` + `prompt_chars`, never the prompt text.
-  - `sdk_record.sdk_version() -> str` (`importlib.metadata`, `"unknown"` on failure).
-  - `sdk_record.recordings_dir() -> Path` — `settings.server_root / "volumes" / DIRNAME`, created on first write (`mkdir(parents=True, exist_ok=True)`). **Never `settings.audit_log_dir`**, and `tests/test_sdk_record.py` asserts the resolved path is not inside it.
-  - `class SdkRecorder` — `SdkRecorder.for_job(job_id, *, enabled: bool | None = None, out_dir: Path | None = None)` (defaults: `settings.sdk_record`, `recordings_dir()`); `.enabled`, `.path`; `.start(**header_kwargs)`; `.record(message)`. Never raises: the first write failure logs one `warning` ("sdk recorder disabled …") and sets `enabled = False` for the rest of the job.
-  - `sdk_record.scan_recordings(out_dir: Path | None = None, audit_dir: Path | None = None) -> list[tuple[str, str | None]]` — (job_id, skill) for every `*.json` in the recordings dir, the skill read from the **audit** dir's `<id>.jsonl` `job_started` (the two directories are now separate, so the function takes both and defaults to the settings pair).
-  - `sdk_record.coverage_report(pairs, *, min_jobs=20, min_classes=3, flag_on: bool | None = None) -> dict` (pure: `jobs, by_skill, classes, ok, flag_on, should_turn_off`) — `should_turn_off` is `ok and flag_on`, i.e. coverage is met **and** `SDK_RECORD` is still set.
-  - CLI `python -m src.runner.sdk_record coverage [--recordings-dir P] [--audit-dir P] [--min-jobs 20] [--min-classes 3]` → prints the table and **exit 0 only when coverage is met and the flag is off**; exit 1 while coverage is short, and exit 1 with `coverage OK — now remove SDK_RECORD=1 from .env (spec §9 P0 exit: the flag is unset after the ≥20 jobs)` while the flag is still on. That non-zero exit *is* the P0 exit assertion round-3 M8 asks for — an owner who forgets to turn it back off cannot get a green run.
-  - Hook contract (pinned by test): in `_run_in_process`, `recorder = SdkRecorder.for_job(job_id)` is created before the client; `recorder.start(model=…, cli_version=…, sdk_version=…, prompt=…)` runs right after `async with client:`; `recorder.record(message)` is the **first statement** of the `async for message …` body — before the `RateLimitEvent` branch can `continue`/raise — so every message the loop sees (`SystemMessage`, `RateLimitEvent`, `AssistantMessage`, `UserMessage`, `ResultMessage`; `StreamEvent` only if `include_partial_messages` is ever enabled) is recorded in arrival order. What is recorded is exactly what the isinstance dispatch received, which is what P3's replay feeds back.
-
-- [ ] **Step 1: Write the failing tests**
-
-Create `tests/test_sdk_record.py`:
-
-```python
-"""
-Raw SDK recorder (P0; spec §2.4, review #27, round-3 M8): opt-in, best-effort,
-redacted, and written to volumes/sdk_recordings/ — never the audit dir.
-Pure — small dataclasses stand in for the SDK's message types; the write
-path uses tmp_path; the session hook is pinned at the AST level.
-
-Run: pipenv run pytest tests/test_sdk_record.py -v
-"""
-
-from __future__ import annotations
-
-import ast
-import inspect
-import json
-from dataclasses import dataclass, field
-from pathlib import Path
-
-import pytest
-
-from src.runner import sdk_record
-from src.runner.sdk_record import (
-    REDACTED,
-    SUFFIX,
-    SdkRecorder,
-    coverage_report,
-    header_record,
-    message_to_record,
-    redact,
-)
-
-REPO = Path(__file__).resolve().parent.parent
-
-
-@dataclass
-class _Text:
-    text: str
-
-
-@dataclass
-class _ToolUse:
-    id: str
-    name: str
-    input: dict
-
-
-@dataclass
-class _Assistant:
-    content: list
-    model: str
-    parent_tool_use_id: str | None = None
-
-
-@dataclass
-class _Result:
-    subtype: str
-    is_error: bool
-    usage: dict = field(default_factory=dict)
-    result: str | None = None
-
-
-class _Opaque:
-    def __repr__(self) -> str:
-        return "<Opaque token=sk-ant-api03-abcdefgh>"
-
-
-class TestRedact:
-    @pytest.mark.parametrize("raw,leak", [
-        ("key sk-ant-api03-AAAAbbbbCCCC123 end", "sk-ant-api03"),
-        ("curl -H 'Authorization: Bearer eyJhbGciOi.xyz' https://x", "eyJhbGciOi"),
-        ("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-zzzzzzzz\nFOO=bar", "sk-ant-oat01"),
-        ("TELEGRAM_BOT_TOKEN=123456:ABC-def", "123456:ABC"),
-        ('{"api_key": "gsk_live_0123456789"}', "gsk_live"),
-        ("password = 'hunter2hunter2'", "hunter2"),
-    ])
-    def test_redaction_covers_bearer_env_and_anthropic_keys(self, raw, leak):
-        out = redact(raw)
-        assert leak not in out and REDACTED in out
-
-    def test_plain_text_untouched(self):
-        assert redact("FOO=bar and no secrets here") == "FOO=bar and no secrets here"
-        assert redact("PATH=/usr/bin") == "PATH=/usr/bin"
-        assert redact('"output_tokens": 9363, "max_tokens": 20000') == '"output_tokens": 9363, "max_tokens": 20000'
-
-    def test_sdk_record_uses_the_shared_redactor(self):
-        """ONE pattern set (Global Constraints; spec §2.4; round-3 M9). Identity,
-        not equality: a second copy in this module would have shipped without the
-        PEM / un-armoured OpenSSH shapes and the publish-key path Task 20 added,
-        so a `cat ~/.config/ai-server/publish-key` in any of the 48 unhooked
-        skills would land verbatim in a durable recording."""
-        import re as _re
-        from src.runner import secret_redact
-        assert sdk_record.redact is secret_redact.redact
-        assert sdk_record.redact_tree is secret_redact.redact_tree
-        assert sdk_record.REDACTED == secret_redact.REDACTED
-        # No pattern is compiled in this module at all.
-        src = (REPO / "src" / "runner" / "sdk_record.py").read_text(encoding="utf-8")
-        assert "re.compile" not in src
-        assert _re.search(r"^def redact\(", src, _re.M) is None
-
-    def test_the_private_key_shape_reaches_the_recorder(self):
-        # The concrete round-3 M9 case, asserted through sdk_record's own name so
-        # the re-export cannot be quietly narrowed later.
-        dump = ("$ cat ~/.config/ai-server/publish-key\n"
-                "-----BEGIN OPENSSH PRIVATE KEY-----\n"
-                "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB\n"
-                "-----END OPENSSH PRIVATE KEY-----\n")
-        out = sdk_record.redact(dump)
-        assert "BEGIN OPENSSH PRIVATE KEY" not in out and REDACTED in out
-        assert "~/.config/ai-server/publish-key" in out   # which key was read IS the finding
-
-
-class TestMessageToRecord:
-    def test_dataclass_round_trip_in_order(self):
-        msg = _Assistant(content=[_Text("hi"), _ToolUse("t1", "Bash", {"command": "ls"})],
-                         model="claude-sonnet-4-6")
-        rec = message_to_record(msg, seq=3, ts="2026-09-25T00:00:00+00:00")
-        assert rec["seq"] == 3 and rec["type"] == "_Assistant"
-        assert rec["data"]["content"][1]["input"]["command"] == "ls"
-        json.dumps(rec)                                   # serialisable as-is
-
-    def test_nested_content_is_redacted(self):
-        msg = _Assistant(content=[_ToolUse("t1", "Bash",
-                                           {"command": "curl -H 'Authorization: Bearer abcdef123456' x"})],
-                         model="m")
-        assert "abcdef123456" not in json.dumps(message_to_record(msg, seq=1, ts="t"))
-
-    def test_unserialisable_message_is_recorded_as_repr(self):
-        rec = message_to_record(_Opaque(), seq=1, ts="t")
-        assert rec["type"] == "_Opaque" and "data" not in rec
-        assert "sk-ant-api03" not in rec["repr"] and REDACTED in rec["repr"]
-
-    def test_rate_limit_event_overage_fields_are_recorded(self):
-        # The P0 scope cell says "SDK_RECORD=1 raw recorder (§2.4, `overage_*`
-        # fields included)" because §2.8 makes RateLimitInfo.overage_status the
-        # PRIMARY possible_credit_overflow trigger (round-2 #58): overage_status
-        # == "allowed" while status == "rejected" means usage credits are
-        # carrying the lane past the window with no `rejected` to key on.
-        # dataclasses.asdict already walks the nested rate_limit_info, but
-        # NOTHING named these fields — so a future field allowlist in the
-        # recorder would silently drop the one signal P2 depends on. This test
-        # is the pin.
-        from dataclasses import dataclass
-
-        @dataclass
-        class _Info:
-            status: str = "rejected"
-            resets_at: str = "2026-10-02T00:00:00Z"
-            utilization: float = 0.98
-            overage_status: str = "allowed"
-            overage_resets_at: str = "2026-10-02T00:00:00Z"
-            overage_disabled_reason: str | None = None
-
-        @dataclass
-        class _RateLimitEvent:
-            rate_limit_type: str = "five_hour"
-            rate_limit_info: _Info = None            # type: ignore[assignment]
-
-        rec = message_to_record(_RateLimitEvent(rate_limit_info=_Info()), seq=4, ts="t")
-        blob = json.dumps(rec)
-        for field_name in ("overage_status", "overage_resets_at", "status",
-                           "resets_at", "utilization"):
-            assert field_name in blob, field_name
-        assert rec["data"]["rate_limit_info"]["overage_status"] == "allowed"
-
-    def test_header_never_carries_the_prompt(self):
-        h = header_record("job1", model="claude-sonnet-4-6", cli_version="2.1.139",
-                          sdk_version="0.1.81", prompt="secret prompt text")
-        assert h["type"] == "_recorder_start" and h["seq"] == 0
-        assert "secret prompt" not in json.dumps(h)
-        assert h["prompt_chars"] == 18 and len(h["prompt_sha256"]) == 64
-
-
-class TestRecorder:
-    HEADER = dict(model="m", cli_version="v", sdk_version="s", prompt="p")
-
-    def test_disabled_writes_nothing(self, tmp_path):
-        r = SdkRecorder.for_job("job1", enabled=False, out_dir=tmp_path)
-        r.start(**self.HEADER)
-        r.record(_Text("x"))
-        assert not (tmp_path / f"job1{SUFFIX}").exists()
-
-    def test_enabled_appends_in_order_with_header(self, tmp_path):
-        r = SdkRecorder.for_job("job1", enabled=True, out_dir=tmp_path)
-        r.start(**self.HEADER)
-        r.record(_Text("a"))
-        r.record(_Result("success", False))
-        lines = [json.loads(l) for l in (tmp_path / f"job1{SUFFIX}").read_text().splitlines()]
-        assert [l["type"] for l in lines] == ["_recorder_start", "_Text", "_Result"]
-        assert [l["seq"] for l in lines] == [0, 1, 2]
-
-    def test_write_error_never_raises(self, tmp_path, caplog):
-        # Review Focus 6: point the recording path at a DIRECTORY so open("a")
-        # fails; the recorder must swallow it, log once, and disable itself.
-        (tmp_path / f"job2{SUFFIX}").mkdir()
-        r = SdkRecorder.for_job("job2", enabled=True, out_dir=tmp_path)
-        r.record(_Text("x"))
-        r.record(_Text("y"))
-        assert r.enabled is False
-        assert sum("sdk recorder disabled" in m for m in caplog.messages) == 1
-
-    def test_default_enabled_follows_settings(self, monkeypatch, tmp_path):
-        from src.config import settings
-        monkeypatch.setattr(settings, "sdk_record", True)
-        assert SdkRecorder.for_job("j", out_dir=tmp_path).enabled is True
-        monkeypatch.setattr(settings, "sdk_record", False)
-        assert SdkRecorder.for_job("j", out_dir=tmp_path).enabled is False
-
-
-class TestCoverage:
-    def test_report_math(self):
-        pairs = ([("a", "chat")] * 8 + [("b", "atlas-report")] * 7
-                 + [("c", "code-review")] * 5 + [("d", None)] * 2)
-        rep = coverage_report(pairs, min_jobs=20, min_classes=3)
-        assert rep["jobs"] == 22 and rep["classes"] == 3 and rep["ok"] is True
-        assert rep["by_skill"]["(none)"] == 2
-
-    def test_report_not_ok_below_threshold(self):
-        assert coverage_report([("a", "chat")] * 19)["ok"] is False
-        assert coverage_report([("a", "chat")] * 25, min_classes=2)["ok"] is False
-
-    def test_scan_pairs_recordings_with_job_started(self, tmp_path):
-        # Two directories now (round-3 M8): recordings live outside the audit dir,
-        # so the skill label is read from the audit dir's JSONL by job id.
-        rec, audit = tmp_path / "sdk_recordings", tmp_path / "audit_log"
-        rec.mkdir(); audit.mkdir()
-        (rec / f"j1{SUFFIX}").write_text("{}\n")
-        (audit / "j1.jsonl").write_text(json.dumps({"kind": "job_started", "skill": "chat"}) + "\n")
-        (rec / f"j2{SUFFIX}").write_text("{}\n")               # no audit JSONL
-        assert sorted(sdk_record.scan_recordings(rec, audit)) == [("j1", "chat"), ("j2", None)]
-
-    def test_recordings_never_land_in_the_audit_dir(self, monkeypatch, tmp_path):
-        # The load-bearing assertion of round-3 M8: audit_index.py:167 and
-        # retrospective.py:214,:364 glob the audit dir with *.jsonl.
-        from src.config import settings
-        monkeypatch.setattr(type(settings), "server_root",
-                            property(lambda self: tmp_path), raising=False)
-        out = sdk_record.recordings_dir()
-        assert out.name == sdk_record.DIRNAME
-        assert settings.audit_log_dir not in out.parents and out != settings.audit_log_dir
-        assert not out.match("*/audit_log/*")
-
-    def test_coverage_exit_is_not_ok_while_the_flag_is_still_on(self):
-        # spec §9 P0 exit: "SDK_RECORD unset after the ≥20 recording jobs".
-        pairs = [("a", "chat")] * 8 + [("b", "atlas-report")] * 7 + [("c", "code-review")] * 5
-        assert coverage_report(pairs, flag_on=True)["should_turn_off"] is True
-        assert coverage_report(pairs, flag_on=False)["should_turn_off"] is False
-
-    def test_audit_index_sees_no_recording_at_all(self, tmp_path):
-        # Round-3 M8's fix in one assertion: because the recording is written to
-        # a sibling directory, audit_index.rebuild_index (which globs *.jsonl)
-        # cannot even see it. The old belt — "it has no job_started, so it is
-        # skipped" — relied on the indexer's tolerance instead of the layout.
-        from src.runner.audit_index import rebuild_index
-        (tmp_path / f"j1{SUFFIX}").write_text(json.dumps({"seq": 0, "type": "_recorder_start"}) + "\n")
-        (tmp_path / "j1.jsonl").write_text(
-            json.dumps({"ts": "2026-09-25T00:00:00+00:00", "job_id": "j1", "kind": "job_started",
-                        "description": "d", "skill": "chat", "model": "m"}) + "\n"
-            + json.dumps({"ts": "2026-09-25T00:01:00+00:00", "job_id": "j1", "kind": "job_completed",
-                          "duration_seconds": 1, "usage": {}}) + "\n")
-        assert rebuild_index(tmp_path) == 1
-
-
-class TestSessionHook:
-    def test_record_is_the_first_statement_of_the_message_loop(self):
-        # Every message — RateLimitEvent, SystemMessage, … — in arrival order,
-        # before any isinstance branch can `continue` or raise.
-        from src.runner import session
-        src = inspect.getsource(session._run_in_process)
-        loops = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.AsyncFor)]
-        assert loops, "no `async for` in _run_in_process"
-        first = ast.unparse(loops[0].body[0])
-        assert first.startswith("recorder.record(message)"), first
-        assert "SdkRecorder.for_job(job_id" in src and "recorder.start(" in src
-```
-
-- [ ] **Step 2: Run the tests to verify they fail**
-
-Run: `pipenv run pytest tests/test_sdk_record.py -v`
-Expected: collection error `ModuleNotFoundError: No module named 'src.runner.sdk_record'`.
-
-- [ ] **Step 3: Implement `src/runner/sdk_record.py` + the setting**
-
-`src/config.py` — after `utility_model` (Task 0):
-
-```python
-    # Opt-in raw recorder for SDK messages (spec §2.4, P0): every message
-    # _run_in_process receives → volumes/sdk_recordings/<id>.json (redacted).
-    # The P3 replay gate needs ≥ 20 recorded jobs across skill classes; the
-    # owner sets SDK_RECORD=1 in prod .env for a few days, then removes it.
-    sdk_record: bool = False
-```
-
-`src/runner/sdk_record.py`:
-
-```python
-"""
-Opt-in raw recorder for Claude Agent SDK messages (P0; spec §2.4, review #27).
-
-SDK_RECORD=1 → every message `_run_in_process` receives is appended, in
-arrival order, to volumes/sdk_recordings/<job_id>.json as JSON lines (dataclass →
-dict, every string redacted). The per-job JSONL is a lossy derived view
-(tool inputs truncated at 2000 chars, tool results previewed at 500, no
-SystemMessage/RateLimitEvent); the P3 replay gate feeds THESE files through
-ClaudeSdkExecutor and asserts a byte-identical derived JSONL, so what is
-recorded must be exactly what the loop's isinstance dispatch saw.
-
-Best-effort by contract: a recorder failure is logged once, the recorder
-disables itself for the rest of the job, and the job never notices.
-Recordings live OUTSIDE the audit dir (volumes/sdk_recordings/<id>.json,
-round-3 M8), so retention.rotate_audit_logs and the three *.jsonl globbers
-(audit_index.py:167, retrospective.py:214/:364) never see them. backup.sh is
-the only thing that bounds the directory: 90 days, or immediately once
-tests/replay/ is non-empty (Task 13 Step 3).
-"""
-
-from __future__ import annotations
-
-import argparse
-import dataclasses
-import hashlib
-import json
-import logging
-import sys
-from collections import Counter
-from collections.abc import Iterable
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-from src.config import settings
-# ONE pattern set on this box, and it is Task 20's (spec §2.4, round-3 M9).
-# `secret_redact` is the ALWAYS-ON redactor on the audit JSONL and jobs:stream;
-# this recorder is opt-in. A second copy here would have drifted immediately:
-# Task 20's set carries the PEM / un-armoured OpenSSH shapes and the
-# ~/.config/ai-server/publish-key path that no NAME=value pattern ever matched,
-# so a `cat` of the P4 deploy key in any of the 48 unhooked skills would have
-# landed verbatim in a durable volumes/sdk_recordings/<id>.json. Re-exported so
-# `sdk_record.redact`/`.REDACTED` stay importable for existing callers and tests.
-from src.runner.secret_redact import REDACTED, redact, redact_tree   # noqa: F401 — re-export
-
-logger = logging.getLogger(__name__)
-
-SUFFIX = ".json"
-DIRNAME = "sdk_recordings"     # volumes/sdk_recordings/, NEVER volumes/audit_log/
-# `REDACTED` is NOT defined here — it is re-exported from secret_redact below,
-# together with `redact`/`redact_tree`. One pattern set, two callers. (`re` is
-# likewise not imported: no pattern is compiled in this module.)
-
-
-def recordings_dir() -> Path:
-    """volumes/sdk_recordings/ — deliberately NOT settings.audit_log_dir.
-
-    Three consumers glob the audit dir with *.jsonl (audit_index.py:167,
-    retrospective.py:214 and :364). A recording is full-fidelity, untruncated
-    tool_use.input / tool_result / SystemMessage, so being indexed there means
-    wrong-shaped entries, double-counted events and untruncated proprietary text
-    reaching an Anthropic retro prompt (spec §2.4, round-3 M8).
-    """
-    return settings.server_root / "volumes" / DIRNAME
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-
-
-def message_to_record(message: Any, *, seq: int, ts: str) -> dict[str, Any]:
-    """Pure. One JSON-able line per SDK message; dataclass → dict, redacted."""
-    rec: dict[str, Any] = {"seq": seq, "ts": ts, "type": type(message).__name__}
-    if dataclasses.is_dataclass(message) and not isinstance(message, type):
-        try:
-            data = json.loads(json.dumps(dataclasses.asdict(message), default=str))
-            rec["data"] = redact_tree(data)
-            return rec
-        except Exception:  # noqa: BLE001 — fall through to repr
-            pass
-    rec["repr"] = redact(repr(message))[:2000]
-    return rec
-
-
-def header_record(job_id: str, *, model: str, cli_version: str, sdk_version: str,
-                  prompt: str) -> dict[str, Any]:
-    """The first line of a recording. Never the prompt text — only its hash/size."""
-    return {
-        "seq": 0, "ts": _now(), "type": "_recorder_start", "job_id": str(job_id),
-        "model": model, "cli_version": cli_version, "sdk_version": sdk_version,
-        "prompt_sha256": hashlib.sha256((prompt or "").encode("utf-8")).hexdigest(),
-        "prompt_chars": len(prompt or ""),
-    }
-
-
-def sdk_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("claude-agent-sdk")
-    except Exception:  # noqa: BLE001
-        return "unknown"
-
-
-class SdkRecorder:
-    """Best-effort append-only recorder for one job."""
-
-    def __init__(self, path: Path, enabled: bool) -> None:
-        self.path = path
-        self.enabled = enabled
-        self._seq = 0
-
-    @classmethod
-    def for_job(cls, job_id: str, *, enabled: bool | None = None,
-                out_dir: Path | None = None) -> "SdkRecorder":
-        on = settings.sdk_record if enabled is None else enabled
-        base = Path(out_dir) if out_dir is not None else recordings_dir()
-        return cls(base / f"{job_id}{SUFFIX}", bool(on))
-
-    @property
-    def job_id(self) -> str:
-        return self.path.name[: -len(SUFFIX)]
-
-    def start(self, **header: Any) -> None:
-        self._write(header_record(self.job_id, **header))
-
-    def record(self, message: Any) -> None:
-        if not self.enabled:
-            return
-        self._seq += 1
-        self._write(message_to_record(message, seq=self._seq, ts=_now()))
-
-    def _write(self, rec: dict[str, Any]) -> None:
-        if not self.enabled:
-            return
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(rec, default=str) + "\n")
-        except Exception as exc:  # noqa: BLE001 — never fail a job for a recording
-            self.enabled = False
-            logger.warning("sdk recorder disabled for %s: %s", self.path.name, exc)
-
-
-# ── Coverage (the "≥ 20 jobs across skill classes" deliverable) ────────────
-
-
-def scan_recordings(out_dir: Path | None = None,
-                   audit_dir: Path | None = None) -> list[tuple[str, str | None]]:
-    """(job_id, skill) per recording. Recordings live in volumes/sdk_recordings/
-    and the skill label lives in the AUDIT dir's <id>.jsonl job_started — two
-    directories since round-3 M8, so both are parameters."""
-    out: list[tuple[str, str | None]] = []
-    rec_dir = Path(out_dir) if out_dir is not None else recordings_dir()
-    aud_dir = Path(audit_dir) if audit_dir is not None else settings.audit_log_dir
-    if not rec_dir.is_dir():
-        return out
-    for rec in sorted(rec_dir.glob(f"*{SUFFIX}")):
-        job_id = rec.name[: -len(SUFFIX)]
-        skill: str | None = None
-        sibling = aud_dir / f"{job_id}.jsonl"
-        if sibling.exists():
-            for line in sibling.read_text(encoding="utf-8", errors="replace").splitlines():
-                try:
-                    evt = json.loads(line)
-                except ValueError:
-                    continue
-                if evt.get("kind") == "job_started":
-                    skill = evt.get("skill") or None
-                    break
-        out.append((job_id, skill))
-    return out
-
-
-def coverage_report(pairs: Iterable[tuple[str, str | None]], *, min_jobs: int = 20,
-                    min_classes: int = 3,
-                    flag_on: bool | None = None) -> dict[str, Any]:
-    by_skill: Counter[str] = Counter((skill or "(none)") for _, skill in pairs)
-    jobs = sum(by_skill.values())
-    classes = len([k for k in by_skill if k != "(none)"])
-    ok = jobs >= min_jobs and classes >= min_classes
-    on = settings.sdk_record if flag_on is None else bool(flag_on)
-    # spec §9 P0 exit: the flag is UNSET once the >=20 jobs are captured. The
-    # recorder keeps full-fidelity transcripts, so leaving it on in prod is the
-    # thing the exit criterion is about (round-3 M8).
-    return {"jobs": jobs, "by_skill": dict(by_skill), "classes": classes,
-            "ok": ok, "flag_on": on, "should_turn_off": ok and on}
-
-
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="python -m src.runner.sdk_record")
-    sub = p.add_subparsers(dest="cmd", required=True)
-    cov = sub.add_parser("coverage", help="how many jobs / skill classes are recorded")
-    cov.add_argument("--recordings-dir", default=None)
-    cov.add_argument("--audit-dir", default=None)
-    cov.add_argument("--min-jobs", type=int, default=20)
-    cov.add_argument("--min-classes", type=int, default=3)
-    args = p.parse_args(argv)
-    rec_dir = Path(args.recordings_dir) if args.recordings_dir else None
-    aud_dir = Path(args.audit_dir) if args.audit_dir else None
-    rep = coverage_report(scan_recordings(rec_dir, aud_dir), min_jobs=args.min_jobs,
-                          min_classes=args.min_classes)
-    for skill, n in sorted(rep["by_skill"].items(), key=lambda kv: -kv[1]):
-        print(f"{n:5d}  {skill}")
-    print(f"total {rep['jobs']} recorded job(s) across {rep['classes']} skill class(es) — "
-          f"{'coverage OK' if rep['ok'] else 'NOT enough yet'} "
-          f"(need ≥ {args.min_jobs} jobs, ≥ {args.min_classes} classes; spec §2.4)")
-    if rep["should_turn_off"]:
-        # Non-zero on purpose: this IS the P0 exit assertion "SDK_RECORD unset
-        # after the >=20 recording jobs" (spec §9 P0 exit, round-3 M8). An owner
-        # who forgets cannot get a green run.
-        print("coverage OK — now remove SDK_RECORD=1 from .env and kickstart the "
-              "runner (spec §9 P0 exit: the flag is unset after the ≥20 jobs)")
-        return 1
-    return 0 if rep["ok"] else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
-- [ ] **Step 4: Hook the recorder into `session._run_in_process`**
-
-Add `from src.runner.sdk_record import SdkRecorder, sdk_version` to the imports. In `_run_in_process` (as left by Task 3):
-
-```python
-    capture = ResultCapture()
-    recorder = SdkRecorder.for_job(job_id)   # SDK_RECORD=1 → sdk_recordings/<id>.json; else no-op
-
-    client = ClaudeSDKClient(options=options)
-    _running_sessions[job_id] = client
-
-    try:
-        async with client:
-            recorder.start(model=options.model or "", cli_version=cli_version(),
-                           sdk_version=sdk_version(), prompt=prompt)
-            await client.query(prompt)
-
-            async for message in client.receive_response():
-                recorder.record(message)   # FIRST: every message, in order, before any branch continues/raises
-                # Typed rate-limit signal — the CLI emits these on status
-                # transitions; "rejected" means the current window is spent.
-                if isinstance(message, RateLimitEvent):
-```
-
-Everything after that line is byte-identical.
-
-- [ ] **Step 5: Run the tests to verify they pass**
-
-Run: `pipenv run pytest tests/test_sdk_record.py tests/test_result_capture.py tests/test_api_terminal.py -v`
-Expected: all PASS.
-
-Live check (one real chat job, recorder on for this process only): `SDK_RECORD=1 pipenv run python -m src.runner.main` in a terminal with the launchd runner stopped (`launchctl bootout gui/$(id -u)/com.assistant.runner` … `launchctl kickstart -k gui/$(id -u)/com.assistant.runner` afterwards), enqueue `reply with the single word pong` (`kind='chat'`, `created_by='owner-terminal'`), then:
-- `ls volumes/sdk_recordings/<job>.json` exists **and `ls volumes/audit_log/*.sdk.jsonl` finds nothing** (the whole point of the move); `head -c 300 volumes/sdk_recordings/<job>.json` shows `"type": "_recorder_start"` with `prompt_sha256` and no prompt text;
-- `python - <<'EOF'` … `[json.loads(l)["type"] for l in open(path)]` → starts `["_recorder_start", "SystemMessage", …]` and ends with `"ResultMessage"`;
-- `grep -c 'sk-ant-\|Authorization: Bearer' volumes/sdk_recordings/<job>.json` → `0`;
-- the job row is `completed` with the same columns Task 3 produced (the recorder changed nothing else);
-- `pipenv run python -m src.runner.sdk_record coverage` prints `1  chat` and `NOT enough yet` (exit 1);
-- and, once the owner's recording window is done (runbook §10, ≥ 20 jobs / ≥ 3 classes): the same command **still exits 1** while `SDK_RECORD=1` is in prod `.env`, printing "coverage OK — now remove SDK_RECORD=1 …", and exits 0 only after the line is removed and the runner kickstarted. That pair of runs is the P0 exit evidence for "`SDK_RECORD` unset after the ≥ 20 recording jobs" — paste both into the PR.
-
-- [ ] **Step 6: Docs the lint gate needs, CHANGELOGs, commit**
-
-- `.context/modules/runner/CONTEXT.md`: append `` , `src/runner/sdk_record.py` `` to the `**Paths:**` line.
-- `.context/SYSTEM.md` module graph, insert after the `src/runner/result_capture.py` row, append `, runner.sdk_record` to the `src/runner/session.py` row's Depends-on cell, and append `, runner.sdk_record` to the `src/runner/secret_redact.py` row's **Used by** cell (Task 20 created that row naming only `runner.session`, because this module did not exist yet):
-
-```markdown
-| `src/runner/sdk_record.py` | Opt-in raw SDK message recorder (`SDK_RECORD=1` → `volumes/sdk_recordings/<id>.json`, redacted) + `coverage` CLI — P3 replay fixtures | config, runner.secret_redact | runner.session |
-```
-
-Run: `pipenv run pytest tests/test_doc_lint.py -q && pipenv run python scripts/lint_docs.py` → Expected: PASS and `All clean!`.
-
-Prepend to `.context/modules/runner/CHANGELOG.md`:
-
-```markdown
-## 2026-09-25 — SDK_RECORD=1 raw SDK message recorder (P3 replay fixtures)
-
-- **Agent task**: multi-model P0, Task 15 (spec §2.4, review #27).
-- **Files changed**: `src/runner/sdk_record.py` (new: `recordings_dir`, `message_to_record`, `header_record`, `SdkRecorder`, `scan_recordings`, `coverage_report`, `python -m src.runner.sdk_record coverage`; `REDACTED`/`redact`/`redact_tree` are **re-exports of `secret_redact`'s**, never a second pattern set — Task 20 owns it, and its set is the one that carries the PEM / OpenSSH shapes and the `publish-key` path), `src/runner/session.py` (`_run_in_process`: recorder created before the client, `start()` after `async with client:`, `record(message)` first in the loop body), `src/config.py` (`sdk_record`), tests, runner CONTEXT Paths, SYSTEM.md row.
-- **Why**: the per-job JSONL truncates tool inputs/results and drops SystemMessage/RateLimitEvent, so P3's replay gate had no fixtures; ≥ 20 recorded jobs across skill classes are required before P3.
-- **Side effects**: none unless `SDK_RECORD=1` (default off). On: one `<id>.json` per job in `volumes/sdk_recordings/`, ~1–5 MB per agentic job. Nothing in `volumes/audit_log/` changes, so `audit_index.py:167` and `retrospective.py:214,:364` — which glob that directory with `*.jsonl` — never see a recording; `retention.rotate_audit_logs` does not touch the new directory either, which is what closes this plan's old open question 9 (the 30-day gzip could have eaten the P3 fixtures). `backup.sh` excludes the directory from the off-site tarball and enforces the deletion rule (Task 13).
-- **Gotchas discovered**: one pattern set only — this module compiles no regex and defines no `redact`; it imports Task 20's, pinned by `test_sdk_record_uses_the_shared_redactor` (identity, plus a source assertion that `re.compile` never appears here). A local copy would have lacked the private-key shapes, and key material is newlines and base64 that every `NAME=value` pattern walks past. `dataclasses.asdict` on SDK messages holds non-JSON leaves for some block types — the recorder round-trips through `json.dumps(default=str)` first. The recorder must be the first statement in the loop body: the `RateLimitEvent` branch `continue`s and the error branches raise before `_handle_message`.
-```
-
-Prepend to `.context/modules/db/CHANGELOG.md`:
-
-```markdown
-## 2026-09-25 — settings.sdk_record
-
-- `src/config.py`: `sdk_record: bool = False` (env `SDK_RECORD`); opt-in raw SDK recorder (runner Task 15).
-```
-
-```bash
-git add src/runner/sdk_record.py src/runner/session.py src/config.py tests/test_sdk_record.py .context/modules/runner/CHANGELOG.md .context/modules/db/CHANGELOG.md .context/modules/runner/CONTEXT.md .context/SYSTEM.md
-git commit -m "feat(runner): SDK_RECORD=1 opt-in raw SDK message recorder (redacted volumes/sdk_recordings/<id>.json, outside the audit dir) + coverage CLI — P3 replay-gate fixtures"
-```
-
----
-
 ### Task 16: `pricing.py` — the single definition of `cost_usd_list` — plus the two-window cost-reconcile script, the per-kind step, the weekly-allowance calibration and the lane-budget seed
 
-**Execution position:** 5 of 21 — previous: Task 2, next: Task 3 (see Global Constraints "Execution order"). **The round-3 delta moved this task ahead of Task 3**: `cost_usd_list` has exactly one definition and it lives here (spec §2.8, round-3 #10), so `session.run_session` imports `pricing.price_usage` to stamp the column and the module must exist first. Nothing here needs Task 3 — the module is pure and the JSONL leg reads the existing ledger; only the `--db` verification waits for Task 3's deploy (Step 5, at P0 exit).
+**Execution position:** 5 of 20 — previous: Task 2, next: Task 3 (see Global Constraints "Execution order"). **The round-3 delta moved this task ahead of Task 3**: `cost_usd_list` has exactly one definition and it lives here (spec §2.8, round-3 #10), so `session.run_session` imports `pricing.price_usage` to stamp the column and the module must exist first. Nothing here needs Task 3 — the module is pure and the JSONL leg reads the existing ledger; only the `--db` verification waits for Task 3's deploy (Step 5, at P0 exit).
 
 - [ ] **Step 0: Prerequisite check** — `pipenv run python -c "from src.runner.result_capture import ResultCapture; print('ok')"` must print `ok` (Task 2's capture defines the token properties this module prices). If it fails: **execute Task 2 first.** Task 3 is *not* a prerequisite; it is the consumer.
 
@@ -8956,8 +8306,8 @@ Executed **before** Task 3 (which imports `price_usage`); the JSONL leg works on
   - `pricing.LIST_PRICES: dict[str, Price]` keyed by family prefix: `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5` (values from the §4 table; `PRICES_AS_OF = "2026-09-24"`).
   - `pricing.family_for(model: str) -> str | None` — longest matching family prefix, case-insensitive, boundary at end-of-string or `-` (so `claude-opus-5-5` beats `claude-opus-5`, a date suffix maps to its family); `None` for bare aliases (`sonnet`) and unknown ids.
   - `pricing.price_usage(model, usage: dict) -> Decimal | None` — prices each cache-write bucket at **its own** rate: `usage["cache_creation"]["ephemeral_1h_input_tokens"] × cache_write_1h + …["ephemeral_5m_input_tokens"] × cache_write_5m`, falling back to the flat `cache_creation_input_tokens` **into the 1-h arm** when the nested object is absent (spec §2.3 row 007 / §2.8: the subscription's TTL is 1 h and prod records 100 % of writes there). **No `cache_write_ttl` parameter and no `--cache-write-ttl` flag** — the TTL is data, not an operator choice; round 1's single global rate was the ≈ 19 % error.
-  - `pricing.lane_for(skill: str | None, job_kind: str | None, origin_channel: str | None) -> str` (pure) — the **P0 approximation** of the §2.5 lane set used only to shape the seed: `owner` for `telegram`/`web`/`pwa`/`cli` launches, `atlas` for a skill starting `atlas-`/`alpha-`/`momentum-`/`swing-`/`firm-`, `kernel` for `server-patch`/`server-deploy`/`deploy-director`/`review-and-improve`/`self-diagnose`, `utility` for `_`-prefixed and `chat` kinds, else `background`. `jobs.lane` is NULL in P0 (P2 fills it), so the seed is explicitly labelled an approximation in the output, and **`routing-policy.yml` consumption of the seed is P3** — P0 only writes the artefact.
-  - `pricing.lane_seed(report: LedgerReport, *, multiplier: Decimal = Decimal("1.2")) -> dict[str, str]` — trailing-7-d `cost_usd_list` per lane × 1.2, the seed spec §2.8/§2.5 and round-2 #18 name. Written to `volumes/telemetry/lane_budget_seed.json` as `{"as_of", "window_days", "multiplier", "approximated_lanes": true, "weekly_budget_usd": {lane: str(Decimal)}}` **and printed as a table** — spec §9's P2 cell says P2 reads `LANE_WEEKLY_BUDGET_JSON` from `Settings`, **seeded by hand from that printed table** (round-3 M27), so the JSON file is the owner's source to paste from, not a path P2 code reads; P3 moves the values into `routing-policy.yml`.
+  - `pricing.lane_for(skill: str | None, job_kind: str | None, origin_channel: str | None) -> str` (pure) — the **P0 approximation** of the §2.5 lane set used only to shape the seed: `owner` for `telegram`/`web`/`pwa`/`cli` launches, `atlas` for a skill starting `atlas-`/`alpha-`/`momentum-`/`swing-`/`firm-`, `kernel` for `server-patch`/`server-deploy`/`deploy-director`/`review-and-improve`/`self-diagnose`, `utility` for `_`-prefixed and `chat` kinds, else `background`. `jobs.lane` is NULL in P0 (P2 fills it), so the seed is explicitly labelled an approximation in the output. Phase 3 fills `jobs.lane`; the weekly budgets live in `Settings` as `LANE_WEEKLY_BUDGET_JSON`, and **`routing-policy.yml` is deferred** (new spec §14 item 10) — P0 only writes the artefact.
+  - `pricing.lane_seed(report: LedgerReport, *, multiplier: Decimal = Decimal("1.2")) -> dict[str, str]` — trailing-7-d `cost_usd_list` per lane × 1.2, the seed spec §2.8/§2.5 and round-2 #18 name. Written to `volumes/telemetry/lane_budget_seed.json` as `{"as_of", "window_days", "multiplier", "approximated_lanes": true, "weekly_budget_usd": {lane: str(Decimal)}}` **and printed as a table** — spec §9's P2 cell says P2 reads `LANE_WEEKLY_BUDGET_JSON` from `Settings`, **seeded by hand from that printed table** (round-3 M27), so the JSON file is the owner's source to paste from, not a path Phase-2 code reads. The seed's only consumer is `LANE_WEEKLY_BUDGET_JSON` in `Settings` (Phase 3); **`routing-policy.yml` is deferred** (new spec §14 item 10).
   - `pricing.JobCost` frozen dataclass `(job_id, model, family, skill, lane, completed_at: datetime | None, input, cache_read, cache_write_1h, cache_write_5m, output, usd_sdk: Decimal | None)` — `skill` = `job_started.skill` or `job_started.job_kind` (verified field names on a real prod event), which is the row label §2.8's "Where the tokens go" uses; `pricing.read_events(path) -> list[dict]`; `pricing.job_cost_from_events(job_id, events) -> JobCost | None` (needs `job_started` and `job_completed`; `completed_at` = the `job_completed` event's `ts`).
   - `pricing.ModelRow(model, jobs, input, cache_read, cache_write_1h, cache_write_5m, output, usd, usd_sdk, sdk_jobs)` — **one** `usd` column, each bucket at its own rate; `pricing.KindRow(kind, jobs, tokens, usd)` for the per-kind step table.
   - `pricing.LedgerReport` (`days: int`, `since`, `until`, `per_model: list[ModelRow]`, `per_kind: list[KindRow]`, `unpriced: list[ModelRow]`, `per_lane: dict[str, Decimal]`, `totals: ModelRow`, `median_job: dict`, `median_usd_by_family: dict[str, Decimal]`, `credit_signature: bool` = `totals.cache_write_5m > 0`); `pricing.summarize(jobs, *, since, until, days) -> LedgerReport`; `pricing.summarize_windows(jobs, *, until, windows: Sequence[int]) -> list[LedgerReport]`; `pricing.render_table(report) -> str` (per-model block, the **per-kind step** block, the unpriced block, medians, and a `⚠ 5-minute cache writes present — possible usage-credit overflow (spec §2.8)` line when `credit_signature`); `pricing.render_db_delta(report, rows) -> str`; `LedgerReport.to_dict()`.
@@ -9257,7 +8607,7 @@ the Max subscription). Two consumers:
     ledger (`job_started.model` × `job_completed.usage` × list price) and the
     P0 exit criterion "cost view reconciles with JSONL sums for 30 d"
     (JSONL sums vs SUM(jobs.cost_usd_list) — the SDK's total_cost_usd).
-  * P2's provider_ledger / CostCard (same table, per purpose).
+  * Phase 3's call_ledger / CostCard (same table, per purpose).
 
 Prices: docs/research/llm-landscape-2026-09/claude-anthropic.md §4 (fetched
 2026-09-24). EACH cache-write bucket is priced at ITS OWN rate — 1-h writes at
@@ -9281,7 +8631,6 @@ from pathlib import Path
 from typing import Any
 
 PRICES_AS_OF = "2026-09-24"
-SDK_RECORD_SUFFIX = ".sdk.jsonl"   # legacy: recordings now live in volumes/sdk_recordings/
 _M = Decimal(1_000_000)
 
 
@@ -9327,7 +8676,8 @@ _OWNER_CHANNELS = frozenset({"telegram", "web", "pwa", "cli"})
 
 def lane_for(skill: str | None, job_kind: str | None, origin_channel: str | None) -> str:
     """The §2.5 lane a job would land in — the P0 APPROXIMATION (jobs.lane is
-    NULL in P0; P2 fills it and P3 moves the seed into routing-policy.yml)."""
+    NULL in P0; Phase 3 fills jobs.lane; the weekly budgets live in Settings
+    as LANE_WEEKLY_BUDGET_JSON)."""
     s = (skill or "").strip().lower()
     k = (job_kind or "").strip().lower()
     if (origin_channel or "").strip().lower() in _OWNER_CHANNELS:
@@ -9599,8 +8949,9 @@ def lane_seed(rep: LedgerReport, *,
     """Per-lane weekly budget seed = this report's per-lane cost × 1.2 (spec
     §2.5 `lanes.<lane>.weekly_budget`, §2.8, round-2 #18: re-seeded WEEKLY from
     the trailing 7 d, never from the 30-d mean). Lanes are the P0 approximation
-    of lane_for(); P2 recomputes them from jobs.lane and P3 takes the file over
-    into routing-policy.yml."""
+    of lane_for(); Phase 3 recomputes them from jobs.lane. The seed's only
+    consumer is LANE_WEEKLY_BUDGET_JSON in Settings; routing-policy.yml is
+    deferred (new spec §14 item 10)."""
     return {lane: str((usd * multiplier).quantize(Decimal("0.01")))
             for lane, usd in rep.per_lane.items()}
 
@@ -9808,7 +9159,7 @@ def render_table(rep: LedgerReport) -> str:
     if rep.credit_signature:
         lines.append("⚠ 5-minute cache writes present — possible usage-credit overflow "
                      "(spec §2.8 metered-spend tripwires): the TTL drop to 5 m is the "
-                     "credits signature. Check claude.ai billing (D3) before anything else.")
+                     "credits signature. Check claude.ai billing (new spec D4) before anything else.")
     return "\n".join(lines)
 
 
@@ -9930,9 +9281,8 @@ def main(argv: list[str] | None = None) -> int:
     jobs = []
     readings: list[pricing.QuotaReading] = []
     for f in sorted(audit_dir.glob("*.jsonl")):
-        # INDEX.jsonl is the index; the SDK-recording skip is a BELT for any
-        # recording made before round-3 M8 moved them to volumes/sdk_recordings/.
-        if f.name == "INDEX.jsonl" or f.name.endswith(pricing.SDK_RECORD_SUFFIX):
+        # INDEX.jsonl is the index, not a job trace.
+        if f.name == "INDEX.jsonl":
             continue
         events = pricing.read_events(f)
         readings.extend(pricing.quota_readings(events))
@@ -10014,7 +9364,7 @@ After Task 3 has been deployed for ≥ 1 day: `pipenv run python scripts/cost-re
 
 Record the **30-d and 7-d** deltas, the `computed vs SDK` block and the weekly-allowance block at P0 exit in the P0 PR.
 
-Seed check: `pipenv run python scripts/cost-reconcile.py --seed-lane-budgets` → `volumes/telemetry/lane_budget_seed.json` with `window_days: 7`, `multiplier: "1.2"`, `approximated_lanes: true` and one entry per lane, **and the same values printed as a table**. Per spec §9's P2 cell (round-3 M27) the owner pastes that table into **`LANE_WEEKLY_BUDGET_JSON` in `Settings`**, which is what P2 reads for `lanes.<lane>.weekly_budget`; **`routing-policy.yml` consumption is P3** (spec §2.5 is a P3 deliverable) — P0 only writes and prints the artefact.
+Seed check: `pipenv run python scripts/cost-reconcile.py --seed-lane-budgets` → `volumes/telemetry/lane_budget_seed.json` with `window_days: 7`, `multiplier: "1.2"`, `approximated_lanes: true` and one entry per lane, **and the same values printed as a table**. Per spec §9's P2 cell (round-3 M27) the owner pastes that table into **`LANE_WEEKLY_BUDGET_JSON` in `Settings`**, which is what Phase 3 reads for `lanes.<lane>.weekly_budget` — P0 only writes and prints the artefact. (**`routing-policy.yml` is deferred**, not phased: new spec §14 item 10.)
 
 - [ ] **Step 5b: Install the weekly timer — EXECUTE THIS STEP AFTER TASK 12**
 
@@ -10043,7 +9393,7 @@ Append to `tests/test_scripts_syntax.py`: `"cost-reconcile" in install_src`, `"-
 - [ ] **Step 6: Docs the lint gate needs, CHANGELOG, commit**
 
 - `.context/modules/runner/CONTEXT.md`: append `` , `src/runner/pricing.py` `` to the `**Paths:**` line.
-- `.context/SYSTEM.md` module graph — **append** both rows; position in the table is not lint-checked (`check_module_graph_imports` matches on the path cell, not on order). Do **not** anchor on `src/runner/sdk_record.py` or `scripts/restore-drill.sh`: Task 16 runs at execution position **5**, and those rows are added by Task 15 (position 9) and Task 13 (position 20) respectively — `.context/SYSTEM.md` contains neither today. Put the module row after the last existing `src/runner/*` row (`src/runner/result_capture.py`, added by Task 2 at position 4) and the script row after the last existing `scripts/` row (`scripts/sync-learnings.sh`):
+- `.context/SYSTEM.md` module graph — **append** both rows; position in the table is not lint-checked (`check_module_graph_imports` matches on the path cell, not on order). Do **not** anchor on `scripts/restore-drill.sh`: Task 16 runs at execution position **5** and that row is added by Task 13 (position 19) — `.context/SYSTEM.md` does not contain it today. Put the module row after the last existing `src/runner/*` row (`src/runner/result_capture.py`, added by Task 2 at position 4) and the script row after the last existing `scripts/` row (`scripts/sync-learnings.sh`):
 
 ```markdown
 | `src/runner/pricing.py` | Claude list-price table (`claude-anthropic.md §4`), family matching, **`price_usage` = the single definition of `cost_usd_list`**, JSONL ledger summary, computed-vs-SDK reconcile, weekly-allowance calibration, lane seed (pure) | — | runner.session, scripts/cost-reconcile.py |
@@ -10061,7 +9411,7 @@ Prepend to `.context/modules/runner/CHANGELOG.md`:
 - **Files changed**: `src/runner/pricing.py` (new, pure: `LIST_PRICES` from `claude-anthropic.md §4`, `family_for`, `cache_write_buckets`, `price_usage` — **the single definition of `cost_usd_list`, called by `session.run_session` from Task 3 on** —, `lane_for`, `job_cost_from_events`, `summarize`, `summarize_windows`, `render_table`, `render_db_delta`, `implied_cache_write_rate`, `render_sdk_reconcile`, `quota_readings`, `weekly_allowance`, `render_weekly_allowance`, `lane_seed`, `write_lane_seed`), `scripts/cost-reconcile.py` + `scripts/cost-reconcile-run.sh` (new), tests, runner CONTEXT Paths, SYSTEM.md rows. **Not in this commit**: `scripts/install-launchd.sh` and `tests/test_scripts_syntax.py` — Step 5b (the weekly `com.assistant.cost-reconcile` timer, Mon 07:10) is deferred to **Task 12**, which owns the `install_timer` env block and creates that test file, and which writes the timer's hosting CHANGELOG entry.
 - **Why**: `cost_usd_list` has exactly one definition and it is this module (spec §2.8, round-3 #10 — populating the column from the SDK's `total_cost_usd` made the P0 exit compare that figure to itself, so nothing ever checked it against the 1-h computation). On top of that, the spec's **≈ $963/month** anchor at the **1-h cache-write rate** must be reproducible from the ledger *at both windows* — the 30-d mean predates the alpha flywheel (2026-09-23), which tripled daily load, so a 30-d-only report reproduces exactly the number round 2 rejected (round 1's $809 used the 5-m rate and was ≈ 19 % low). The per-kind step makes the flywheel line item visible instead of averaged away, the weekly run re-seeds the lane budgets from trailing-7-d × 1.2 (never the stale mean), and the P0 column `cost_usd_list` must agree with what the JSONL recorded at both windows.
 - **Side effects**: one new log (`volumes/logs/cost-reconcile.log`) + `volumes/telemetry/lane_budget_seed.json`. Otherwise a report. **The weekly launchd timer that runs it is installed with Task 12** (Step 5b), 14 tasks later — until then the script is hand-run; do not describe a timer this commit does not create.
-- **Gotchas discovered**: cache-write has two list rates and **both are used, each against its own token count** (`usage.cache_creation.ephemeral_{1h,5m}_input_tokens`); prod records 100 % as 1-h and the flat `cache_creation_input_tokens` equals the 1-h figure, so a legacy row's flat value is attributed to the 1-h arm — pricing it at 5-m is the ≈ 19 % error. A non-zero 5-m total is the usage-credits signature (§2.8) and exits 1. `jobs.lane` is NULL until P2, so `lane_for()` is an explicitly-labelled approximation and the seed file says `approximated_lanes: true`; `routing-policy.yml` consumption is P3. §2.8's "fleet ≈ $0.59" is the median of per-job **costs**, not the cost of the median **shape** ($0.5298 at Sonnet 1-h rates) — the report prints both and the test asserts each against the statistic it actually is. Bare-alias launches (`sonnet` from web/dispatch) cannot be priced from `job_started.model`; they are listed under `unpriced`, never dropped. Every `-p`/SDK run also bills a Haiku side request (`claude-anthropic.md` line 157): `usage` is the aggregate, so per-model splits are by the REQUESTED model until P2's `provider_ledger` reads `model_usage` (Task 17's `utility_model_usage` check is the P0 detector).
+- **Gotchas discovered**: cache-write has two list rates and **both are used, each against its own token count** (`usage.cache_creation.ephemeral_{1h,5m}_input_tokens`); prod records 100 % as 1-h and the flat `cache_creation_input_tokens` equals the 1-h figure, so a legacy row's flat value is attributed to the 1-h arm — pricing it at 5-m is the ≈ 19 % error. A non-zero 5-m total is the usage-credits signature (§2.8) and exits 1. `jobs.lane` is NULL until P2, so `lane_for()` is an explicitly-labelled approximation and the seed file says `approximated_lanes: true`; `routing-policy.yml` is **deferred** (new spec §14 item 10) and the seed's only consumer is `LANE_WEEKLY_BUDGET_JSON` in `Settings`. §2.8's "fleet ≈ $0.59" is the median of per-job **costs**, not the cost of the median **shape** ($0.5298 at Sonnet 1-h rates) — the report prints both and the test asserts each against the statistic it actually is. Bare-alias launches (`sonnet` from web/dispatch) cannot be priced from `job_started.model`; they are listed under `unpriced`, never dropped. Every `-p`/SDK run also bills a Haiku side request (`claude-anthropic.md` line 157): `usage` is the aggregate, so per-model splits are by the REQUESTED model until the per-call `call_ledger` (the old `provider_ledger`; migration 009, new spec §2.3) reads `model_usage` (Task 17's `utility_model_usage` check is the P0 detector).
 ```
 
 ```bash
@@ -10076,11 +9426,11 @@ git commit -m "feat(runner): pricing.py as the single definition of cost_usd_lis
 
 ### Task 17: Every Claude subprocess runs with error reporting + telemetry off; the runner refuses to start with ANY vendor/auth key in its env; utility calls prove they were served by the requested model
 
-**Execution position:** 10 of 21 — previous: Task 15, next: Task 4 (see Global Constraints "Execution order"). **Task 12 consumes `claude_env`**, so this task runs well before it even though it appears later in the file. (Task 16 no longer waits on this one: the round-3 delta moved it to position 5 and it imports nothing from `claude_env` — its timer wrapper resolves its own interpreter the way Task 12's does.)
+**Execution position:** 9 of 20 — previous: Task 20, next: Task 4 (see Global Constraints "Execution order"). **Task 12 consumes `claude_env`**, so this task runs well before it even though it appears later in the file. (Task 16 no longer waits on this one: the round-3 delta moved it to position 5 and it imports nothing from `claude_env` — its timer wrapper resolves its own interpreter the way Task 12's does.)
 
 - [ ] **Step 0: Prerequisite check** — `pipenv run python -c "from src.runner.llm_router import router_options; from src.runner.learning import classifier_options; print('ok')"` must print `ok` (Task 0 extracted both builders). If it fails: **Task 0 has not been merged — stop.**
 
-Spec §2.4 ("`DISABLE_ERROR_REPORTING=1` and `DISABLE_TELEMETRY=1` … error reports and operational metrics are on by default for Pro/Max sign-ins"), §3 Anthropic row ("runner env sets `DISABLE_ERROR_REPORTING=1` + `DISABLE_TELEMETRY=1`"), §9 P0 row, review #61; the "keep the runner's `os.environ` free of secrets (fail-closed startup assertion beside `_check_subscription_auth`)" sentence of §0a's last row and review #31. In SDK 0.1.81 `ClaudeAgentOptions.env` is an **overlay** on the inherited environment (`subprocess_cli.py:430-436`), so passing the two keys through `env=` reaches every subprocess from the next runner restart with no launchd change; the plist keys are the belt for anything else that spawns `claude` under the service env. Executed after Task 15 and before Task 12 (the canary consumes the helper).
+Spec §2.4 ("`DISABLE_ERROR_REPORTING=1` and `DISABLE_TELEMETRY=1` … error reports and operational metrics are on by default for Pro/Max sign-ins"), §3 Anthropic row ("runner env sets `DISABLE_ERROR_REPORTING=1` + `DISABLE_TELEMETRY=1`"), §9 P0 row, review #61; the "keep the runner's `os.environ` free of secrets (fail-closed startup assertion beside `_check_subscription_auth`)" sentence of §0a's last row and review #31. In SDK 0.1.81 `ClaudeAgentOptions.env` is an **overlay** on the inherited environment (`subprocess_cli.py:430-436`), so passing the two keys through `env=` reaches every subprocess from the next runner restart with no launchd change; the plist keys are the belt for anything else that spawns `claude` under the service env. Executed after Task 20 and before Task 12 (the canary consumes the helper).
 
 **Files:**
 - Create: `src/runner/claude_env.py` (import-free, so `session.py`, `llm_router.py`, `learning.py`, `review.py`, `canary.py` and `evals/run.py` can all import it without a cycle — `session.py` imports `llm_router`, so the helper cannot live in `session.py`)
@@ -10480,7 +9830,7 @@ Then one routed job (the P0 exit criterion "`model_usage` on utility calls lists
 - [ ] **Step 5: Docs the lint gate needs, CHANGELOGs, commit**
 
 - `.context/modules/runner/CONTEXT.md`: append `` , `src/runner/claude_env.py` `` to the `**Paths:**` line.
-- `.context/SYSTEM.md` module graph — insert after the `src/runner/sdk_record.py` row; append `, runner.claude_env` to the Depends-on cells of `src/runner/session.py`, `src/runner/main.py`, `src/runner/llm_router.py`, `src/runner/learning.py`, `src/runner/review.py`:
+- `.context/SYSTEM.md` module graph — insert after the `src/runner/secret_redact.py` row; append `, runner.claude_env` to the Depends-on cells of `src/runner/session.py`, `src/runner/main.py`, `src/runner/llm_router.py`, `src/runner/learning.py`, `src/runner/review.py`:
 
 ```markdown
 | `src/runner/claude_env.py` | Env posture for every Claude subprocess: telemetry-off overlay + the §2.4 forbidden-key detector + utility `model_usage` check (import-free) | — | runner.session, runner.main, runner.llm_router, runner.learning, runner.review, runner.canary, evals.run |
@@ -10517,13 +9867,13 @@ git commit -m "feat(runner): telemetry-off env overlay on every Claude subproces
 
 ### Task 18: Alembic applied-history manifest + the rollback rule as a pytest gate (the `alembic current` script is an owner diagnostic)
 
-**Execution position:** 3 of 21 — previous: Task 1, next: Task 2 (see Global Constraints "Execution order"). It appears near the end of this file but runs immediately after the migration it manifests.
+**Execution position:** 3 of 20 — previous: Task 1, next: Task 2 (see Global Constraints "Execution order"). It appears near the end of this file but runs immediately after the migration it manifests.
 
 - [ ] **Step 0: Prerequisite check** — `ls alembic/versions/007_p0_observability.py` must exist. If it does not: **execute Task 1 first.**
 
 Spec §9 rollback paragraph ("`tests/test_migrations.py` only asserts one head + a walkable chain today, so the P0 test 'every revision in history exists on disk' is added and `server-deploy` checks `alembic current` ∈ scripts"; "if a migration itself must go, run `alembic downgrade -1` on prod before reverting the file"), §9 P0 row, review #29. Executed right after Task 1 (so 007 is on the manifest from its first deploy).
 
-Why a manifest: `alembic_version` on prod is one row, unreachable from a pure test; a deleted HEAD migration file leaves the on-disk chain perfectly walkable (head silently becomes 006) — exactly the state that breaks the next `alembic upgrade head`. `alembic/applied_history.txt` is the append-only list of revisions that have been applied; the pure test asserts every listed id has a script and that the on-disk chain equals the list, so a revert that deletes a migration file fails the pytest gate in `server-deploy` instead of failing mid-incident. Removing a line is a deliberate, reviewed act that is legal only after `alembic downgrade -1` ran on prod. `scripts/alembic-current-check.sh` is the DB-side **diagnostic** the owner runs by hand after a revert (runbook §11); it is **not** wired into `skills/server-deploy/SKILL.md` — round-2 #8 resolved this as "P0 alembic check kept as a test only (no SKILL.md edit)", and §9's rollback paragraph says alembic already fails loudly on a missing revision. The pytest gate is the belt.
+Why a manifest: `alembic_version` on prod is one row, unreachable from a pure test; a deleted HEAD migration file leaves the on-disk chain perfectly walkable (head silently becomes 006) — exactly the state that breaks the next `alembic upgrade head`. `alembic/applied_history.txt` is the append-only list of revisions that have been applied; the pure test asserts every listed id has a script and that the on-disk chain equals the list, so a revert that deletes a migration file fails the pytest gate in `server-deploy` instead of failing mid-incident. Removing a line is a deliberate, reviewed act that is legal only after `alembic downgrade -1` ran on prod. `scripts/alembic-current-check.sh` is the DB-side **diagnostic** the owner runs by hand after a revert (runbook §10); it is **not** wired into `skills/server-deploy/SKILL.md` — round-2 #8 resolved this as "P0 alembic check kept as a test only (no SKILL.md edit)", and §9's rollback paragraph says alembic already fails loudly on a missing revision. The pytest gate is the belt.
 
 **Files:**
 - Create: `alembic/applied_history.txt`, `scripts/alembic-current-check.sh`
@@ -10686,7 +10036,7 @@ Expected: `FileNotFoundError: … alembic/applied_history.txt` ×3, the script t
 # rule (review #29): the DB's alembic_version must name a revision that has a
 # script on disk, or the next `alembic upgrade head` fails "Can't locate
 # revision" mid-deploy. Exit 0 ok · 1 mismatch · 2 cannot determine.
-# RUN BY HAND after any migration revert (runbook §11). NOT wired into
+# RUN BY HAND after any migration revert (runbook §10). NOT wired into
 # skills/server-deploy/SKILL.md — that file is a protected path and spec §9's
 # rollback paragraph says no edit is needed: what protects the deploy is
 # tests/test_migrations.py layer 1c, inside the pytest gate server-deploy
@@ -10802,7 +10152,7 @@ Prepend to `.context/modules/hosting/CHANGELOG.md`:
 ```markdown
 ## 2026-09-25 — scripts/alembic-current-check.sh (owner-run diagnostic: alembic_version ∈ scripts)
 
-- New script: exit 0/1/2; `VENV_PY` contract (`cd "$PROJECT_DIR"` before the guard), never `pipenv run`. **Owner-run by hand after a migration revert (runbook §11) — deliberately NOT wired into `skills/server-deploy/SKILL.md`**: round-2 #8 of the spec review cancelled that edit ("P0 alembic check kept as a test only"), §9's rollback paragraph says alembic already fails loudly on a missing revision, and the §9 P0 "Protected touches" cell is `none`. The belt is `tests/test_migrations.py` layer 1c, inside the `pytest -q` gate `server-deploy` already runs.
+- New script: exit 0/1/2; `VENV_PY` contract (`cd "$PROJECT_DIR"` before the guard), never `pipenv run`. **Owner-run by hand after a migration revert (runbook §10) — deliberately NOT wired into `skills/server-deploy/SKILL.md`**: round-2 #8 of the spec review cancelled that edit ("P0 alembic check kept as a test only"), §9's rollback paragraph says alembic already fails loudly on a missing revision, and the §9 P0 "Protected touches" cell is `none`. The belt is `tests/test_migrations.py` layer 1c, inside the `pytest -q` gate `server-deploy` already runs.
 ```
 
 Prepend to `.context/modules/runner/CHANGELOG.md`:
@@ -10822,7 +10172,7 @@ git commit -m "feat(db+ops): alembic applied-history manifest + tests, runner-st
 
 ### Task 14: Docs to update — CONTEXT.md interfaces, SYSTEM.md module graph, INDEX/README rows, TROUBLESHOOTING, lint
 
-**Execution position:** 21 of 21 — previous: Task 13, next: none (see Global Constraints "Execution order"). Last by design: it carries the whole-suite gate, the PR note and the deploy request.
+**Execution position:** 20 of 20 — previous: Task 13, next: none (see Global Constraints "Execution order"). Last by design: it carries the whole-suite gate, the PR note and the deploy request.
 
 **Files:**
 - Modify: `.context/modules/runner/CONTEXT.md` (Paths line + public interface), `.context/modules/gateway/CONTEXT.md` (paths, commands, "Notifications back to user"), `.context/modules/db/CONTEXT.md` (schema, migrations, channels), `.context/modules/hosting/CONTEXT.md` (Paths + scripts), `.context/modules/notify/CONTEXT.md` (already created in Task 5 — verify), `.context/modules/gateway/skills/GOTCHAS.md`
@@ -10835,16 +10185,15 @@ git commit -m "feat(db+ops): alembic applied-history manifest + tests, runner-st
 - [ ] **Step 1: Module CONTEXT.md updates**
 
 `.context/modules/runner/CONTEXT.md`:
-- Paths line: already names `src/runner/result_capture.py` (Task 2), `src/runner/sdk_record.py` (Task 15), `src/runner/claude_env.py` (Task 17), `src/runner/pricing.py` (Task 16) and `src/runner/canary.py` (Task 12) — verify, do not re-append.
+- Paths line: already names `src/runner/result_capture.py` (Task 2), `src/runner/claude_env.py` (Task 17), `src/runner/pricing.py` (Task 16) and `src/runner/canary.py` (Task 12) — verify, do not re-append.
 - Public interface — add bullets:
 
 ```markdown
-- `result_capture.capture_result_message(msg) -> ResultCapture` / `derive_terminal_reason(cap, banner_terminal=)` / `served_model_violation(cap, requested_model, final_text)` / `result_columns(cap, terminal_reason=, cli_version=)` / `terminal_reason_for_exception(exc)` / `same_model(a, b)` — pure (P0). `_run_in_process` returns `(text, usage, capture)`; `run_session` stamps `resolved_provider/executor/cli_version` at start and `model_served/tokens/num_turns/duration_api_ms/cost_usd_list/terminal_reason` at the end; a silent empty success (`unrecognized_model`) raises and engages escalation. `job_completed` carries `terminal_reason, num_turns, duration_api_ms, model_served, cost_usd_list, stop_reason` in addition to `duration_seconds, usage`; `job_failed` carries `terminal_reason` on the timeout/generic branches; new kind `job_result_rejected`.
+- `result_capture.capture_result_message(msg) -> ResultCapture` / `derive_terminal_reason(cap, banner_terminal=)` / `served_model_violation(cap, requested_model, final_text)` / `result_columns(cap, terminal_reason=, cli_version=)` / `terminal_reason_for_exception(exc)` / `same_model(a, b)` — pure (P0). `_run_in_process` returns `(text, usage, capture)`; `run_session` stamps `cli_version` at start and `model_served/tokens/num_turns/duration_api_ms/cost_usd_list/terminal_reason` at the end; a silent empty success (`unrecognized_model`) raises and engages escalation. `job_completed` carries `terminal_reason, num_turns, duration_api_ms, model_served, cost_usd_list, stop_reason` in addition to `duration_seconds, usage`; `job_failed` carries `terminal_reason` on the timeout/generic branches; new kind `job_result_rejected`.
 - `session.cli_version() -> str` — cached bundled-CLI version (`jobs.cli_version`).
 - `main.queue_wait_ms(created_at, started_at)`, `main.awaiting_since_for(status, now)`, `main.job_notice_kwargs(job)` — pure. `main._finish_job(..., terminal_reason=)` publishes `jobs:done:<id>` as before and, when `settings.notify_outbox`, also enqueues a `job_completed`/`job_failed` outbox notice; `main._notify_task(task_id, type, **fields)` is the single task-card chokepoint and dual-writes (always the legacy `tasks:notify` publish; plus an outbox row when `settings.notify_outbox`). The switch selects the bot's renderer, never the runner's output.
 - `canary.canary_options(model)` / `async canary.run_ping(model, *, timeout_s, query_fn)` / `canary.evaluate_ping(capture, final_text, requested_model) -> (ok, detail)`; `python -m src.runner.canary [--model …] [--telemetry …] [--timeout …]` (used by `scripts/credential-canary.sh`) — the daily credential canary through the SDK in the runner venv with the runner's option conventions, `claude_env.claude_subprocess_env()` and the `result_capture` rule (P3 swaps `query()` for `ClaudeSdkExecutor`); never the brew CLI, never `--bare`, never `CLAUDE_CODE_OAUTH_TOKEN`.
 - `claude_env.claude_subprocess_env()` — the `ClaudeAgentOptions.env` overlay (`DISABLE_ERROR_REPORTING=1`, `DISABLE_TELEMETRY=1`) on every options site (`_build_options`, router, learning classifier, reviewer, canary, eval judge); `claude_env.vendor_keys_in(env)` — `_check_subscription_auth` exits 1 when a `GEMINI_*|CEREBRAS_*|GROQ_*|CODEX_*|OPENROUTER_*|ANTHROPIC_API_KEY` name is in the runner env, warns on `CLAUDE_CODE_OAUTH_TOKEN`.
-- `sdk_record.SdkRecorder` — `SDK_RECORD=1` → every SDK message `_run_in_process` receives is appended (redacted) to `volumes/sdk_recordings/<id>.json` (JSON lines, outside the audit dir), first statement of the message loop; best-effort (never fails a job); `python -m src.runner.sdk_record coverage` reports recorded jobs per skill (≥ 20 / ≥ 3 classes before P3).
 - `pricing.LIST_PRICES` / `family_for` / `price_usage` / `job_cost_from_events` / `summarize` / `render_table` / `render_db_delta` (pure) behind `scripts/cost-reconcile.py [--days N] [--db]` — the spec §2.8 list-price ledger; `cost_usd_list` is list-equivalent, never a bill.
 - `quota.pause_queue(reset_at, reason, *, source)` / `quota.last_source()` / `QuotaExhausted.source` — `vendor` only when a `RateLimitEvent` carried the reset time; the bot's `quota_paused` DM labels it.
 - `llm_router.router_options()` / `learning.classifier_options()` — the two utility-call option builders on `settings.utility_model` (`claude-sonnet-4-6`, effort low; Haiku 4.5 retired — shipped ahead of P0 as a standalone patch, Task 0) with the `claude_env` overlay.
@@ -10872,7 +10221,7 @@ modes (P0 dual-write), and with the switch off the legacy `_done_listener`
 — a bot-only restart flips delivery.
 ```
 
-`.context/modules/db/CONTEXT.md`: "Schema (7 tables)" — add `notifications` (outbox: `notice_kind, subject_type/id, severity, body, actions, channel, target, thread, external_ref, status, attempts, last_error, next_attempt_at, sent_at, created_at`); `jobs` gains the 22 P0 columns (list the observability ones + `origin_*`; note the two TTL-split `cache_write_{1h,5m}_tokens` columns, the **two** cost columns `cost_usd_list` (runner-computed via `pricing.py`) and `sdk_cost_usd` (the SDK's own figure), and that `lane/task_class/sensitivity/first_event_at` are reserved — **no `priority` column**, spec §2.3 row 007); `tasks` gains `origin_*`, `awaiting_since`. Migrations: seven files (`007_p0_observability`) + `alembic/applied_history.txt` (append-only manifest; the rollback rule: revert application code only, `alembic downgrade -1` on prod before removing a migration file, then drop its manifest line). Redis: `CHANNEL_NOTIFY_OUTBOX = "notify:outbox"`, `quota:last_source`. Settings: `notify_outbox`, `utility_model`, `sdk_record`.
+`.context/modules/db/CONTEXT.md`: "Schema (7 tables)" — add `notifications` (outbox: `notice_kind, subject_type/id, severity, body, actions, channel, target, thread, external_ref, status, attempts, last_error, next_attempt_at, sent_at, created_at`); `jobs` gains the 19 P0 columns (list the observability ones + `origin_*`; note the two TTL-split `cache_write_{1h,5m}_tokens` columns, the **two** cost columns `cost_usd_list` (runner-computed via `pricing.py`) and `sdk_cost_usd` (the SDK's own figure), and that `lane/task_class/first_event_at` are reserved — **no `priority` column and no `resolved_provider`/`executor`/`sensitivity`**, 2026-10-05 cut spec §2.3 row 007); `tasks` gains `origin_*`, `awaiting_since`. Migrations: seven files (`007_p0_observability`) + `alembic/applied_history.txt` (append-only manifest; the rollback rule: revert application code only, `alembic downgrade -1` on prod before removing a migration file, then drop its manifest line). Redis: `CHANNEL_NOTIFY_OUTBOX = "notify:outbox"`, `quota:last_source`. Settings: `notify_outbox`, `utility_model`.
 
 `.context/modules/hosting/CONTEXT.md`: Paths line add `` `scripts/credential-canary.sh`, `scripts/restore-drill.sh`, `scripts/alembic-current-check.sh`, `scripts/cost-reconcile.py` ``; public interface bullets for `credential-canary.sh` (daily 06:50 timer `com.assistant.credential-canary`; the ping runs inside `python -m src.runner.canary` through the SDK), `restore-drill.sh`, `backup.sh` (atlas dump + sealed secrets; key file), `install-launchd.sh timers-only` (+ every plist exports `DISABLE_ERROR_REPORTING`/`DISABLE_TELEMETRY`, never a credential), `alembic-current-check.sh` (owner-run diagnostic after a migration revert; **not** wired into `server-deploy` — round-2 #8), `cost-reconcile.py` (report); alerters DM via `python -m src.notify send` with curl fallback.
 
@@ -10885,11 +10234,10 @@ Append to `.context/modules/gateway/skills/GOTCHAS.md` (below its APPEND marker)
 
 - [ ] **Step 2: `.context/SYSTEM.md`**
 
-Module graph — the `src/` rows already exist (added with their files so the lint gate stayed green: `result_capture.py` in Task 2, the three `src/notify/*` rows in Task 5, `sdk_record.py` in Task 15, `pricing.py` in Task 16, `claude_env.py` in Task 17, `canary.py` in Task 12) and the Depends-on cells were updated in the commits that added the imports (`session.py`/`main.py` += `runner.result_capture` in Task 3; `session.py` += `runner.sdk_record` in Task 15; `session.py`/`main.py`/`llm_router.py`/`learning.py`/`review.py` += `runner.claude_env` in Task 17; `main.py` += `notify.outbox` in Task 6; `telegram_bot.py` += `notify.outbox, notify.telegram` in Task 7; `jobs.py` += `audit_log` and `telegram_bot.py` += `runner.proposals` in Task 8). Verify they read as follows (four columns; `src/notify/telegram.py` imports nothing from `src`, so its Depends-on is `—`, not `notify.outbox`):
+Module graph — the `src/` rows already exist (added with their files so the lint gate stayed green: `result_capture.py` in Task 2, the three `src/notify/*` rows in Task 5, `pricing.py` in Task 16, `claude_env.py` in Task 17, `canary.py` in Task 12) and the Depends-on cells were updated in the commits that added the imports (`session.py`/`main.py` += `runner.result_capture` in Task 3; `session.py`/`main.py`/`llm_router.py`/`learning.py`/`review.py` += `runner.claude_env` in Task 17; `main.py` += `notify.outbox` in Task 6; `telegram_bot.py` += `notify.outbox, notify.telegram` in Task 7; `jobs.py` += `audit_log` and `telegram_bot.py` += `runner.proposals` in Task 8). Verify they read as follows (four columns; `src/notify/telegram.py` imports nothing from `src`, so its Depends-on is `—`, not `notify.outbox`):
 
 ```markdown
 | `src/runner/result_capture.py` | Typed ResultMessage capture, terminal_reason, silent-empty-success check (pure) | — | runner.session, runner.main, runner.canary |
-| `src/runner/sdk_record.py` | Opt-in raw SDK message recorder (`SDK_RECORD=1` → `volumes/sdk_recordings/<id>.json` — JSON Lines, deliberately outside `volumes/audit_log/` — redacted) + `coverage` CLI — P3 replay fixtures | config, runner.secret_redact | runner.session |
 | `src/runner/claude_env.py` | Env posture for every Claude subprocess: telemetry-off overlay + vendor-key detector (import-free) | — | runner.session, runner.main, runner.llm_router, runner.learning, runner.review, runner.canary, evals.run |
 | `src/runner/pricing.py` | Claude list-price table (`claude-anthropic.md §4`), family matching, **`price_usage` = the single definition of `cost_usd_list`**, JSONL ledger summary, computed-vs-SDK reconcile, weekly-allowance calibration, lane seed (pure) | — | runner.session, scripts/cost-reconcile.py |
 | `src/runner/canary.py` | Credential canary through the runner's SDK path (`python -m src.runner.canary`): runner option conventions + env overlay + served-model rule + the settings-scope precheck (own cwd and `~/.claude`) | config, runner.result_capture, runner.claude_env, runner.session, claude_agent_sdk | scripts/credential-canary.sh |
@@ -10898,7 +10246,7 @@ Module graph — the `src/` rows already exist (added with their files so the li
 | `src/notify/__main__.py` | `python -m src.notify send` / `drain` for launchd alerters and ops | config, notify.outbox, notify.telegram | scripts/credential-canary.sh, healthcheck-all.sh, schedule-monitor.sh |
 ```
 
-and that the `src/gateway/telegram_bot.py` row's Depends-on is exactly `config, db, models, gateway.jobs, audit_log, runner.router, runner.plans, notify.outbox, notify.telegram, runner.proposals`, `src/gateway/jobs.py`'s is `db, models, audit_log`, `src/runner/main.py`'s ends `…, audit_log, runner.result_capture, notify.outbox, runner.claude_env`, and `src/runner/session.py`'s ends `…, context.module_graph, runner.result_capture, runner.sdk_record, runner.claude_env`.
+and that the `src/gateway/telegram_bot.py` row's Depends-on is exactly `config, db, models, gateway.jobs, audit_log, runner.router, runner.plans, notify.outbox, notify.telegram, runner.proposals`, `src/gateway/jobs.py`'s is `db, models, audit_log`, `src/runner/main.py`'s ends `…, audit_log, runner.result_capture, notify.outbox, runner.claude_env`, and `src/runner/session.py`'s ends `…, context.module_graph, runner.result_capture, runner.claude_env`.
 
 Verify the four script rows (added in Tasks 12/13/16/18 — scripts are not lint-checked):
 
@@ -10923,19 +10271,18 @@ The working tree already carries (uncommitted, from the spec session) the rows f
 
 ```markdown
 | I need to understand or extend owner notifications (outbox rows, the Telegram renderer's limits, the `send`/`drain` CLI, which job and task events DM) | `.context/modules/notify/CONTEXT.md` |
-| Do the owner-only P0 hygiene (pmset, Ollama weights, R2 + its 60-day retention rule, seal key, restore drill, canary timer, §12a P0 rows 1/2/2b auth posture, full installer run, `SDK_RECORD` fixtures) | `docs/runbooks/2026-09-25-p0-ops-hygiene.md` |
+| Do the owner-only P0 hygiene (pmset, Ollama weights, R2 + its 60-day retention rule, seal key, restore drill, canary timer, §12a P0 rows 1/2/2b auth posture, full installer run) | `docs/runbooks/2026-09-25-p0-ops-hygiene.md` |
 | Reproduce the spec §2.8 cost anchor at both windows / check `jobs.cost_usd_list` against the JSONL ledger / re-seed the lane budgets | `scripts/cost-reconcile.py --windows 30,7 [--db] [--seed-lane-budgets]` (pure core `src/runner/pricing.py`; weekly `com.assistant.cost-reconcile` timer) |
-| Collect raw SDK recordings for the P3 replay gate / see how many are recorded | `SDK_RECORD=1` (runbook §10); `python -m src.runner.sdk_record coverage`; `src/runner/sdk_record.py` docstring |
 | Know why a credential value never appears in an audit JSONL / extend the redaction pattern set | `src/runner/secret_redact.py` docstring (always-on, spec §2.4) |
 | Know why a schedule deferred instead of running | `docs/TROUBLESHOOTING.md` "a schedule stops running and DMs `⏸ … deferred`"; `src/runner/main.py` `provisioning_gap` |
 ```
 
-Also update the existing "Execute the first slice (…)" row's parenthetical to `(Task 0 Haiku standalone patch, migration 007, ResultMessage capture, notify outbox + origin (dual-write), project-scope auth-override refusal, always-on audit redactor, scheduler provisioning pre-check, ghost commands, credential canary via the SDK path, SDK_RECORD recorder, telemetry-off env, two-window cost reconcile, alembic history, ops hygiene)`.
+Also update the existing "Execute the first slice (…)" row's parenthetical to `(Task 0 Haiku standalone patch, migration 007, ResultMessage capture, notify outbox + origin (dual-write), project-scope auth-override refusal, always-on audit redactor, scheduler provisioning pre-check, ghost commands, credential canary via the SDK path, telemetry-off env, two-window cost reconcile, alembic history, ops hygiene)`.
 
 `docs/README.md` table, after the P0 plan row (and amend the plan row's description the same way):
 
 ```markdown
-| [`runbooks/2026-09-25-p0-ops-hygiene.md`](runbooks/2026-09-25-p0-ops-hygiene.md) | Owner runbook for the P0 ops debt and the §12a P0 rows: `pmset autorestart`, stale Ollama weights → `qwen3.5:4b`/`embeddinggemma`, R2 off-site via rclone **with the 60-day retention rule and its payment-method caveat**, backup seal key, restore drill, credential-canary timer, Keychain-primary auth (the setup-token is a **P3** row) + `plutil` check, Devin login-method check, full installer run (telemetry off), `SDK_RECORD` fixtures, the alembic history diagnostic | Once, after the P0 deploy; again on a bare-metal rebuild |
+| [`runbooks/2026-09-25-p0-ops-hygiene.md`](runbooks/2026-09-25-p0-ops-hygiene.md) | Owner runbook for the P0 ops debt and the §12a P0 rows: `pmset autorestart`, stale Ollama weights → `qwen3.5:4b`/`embeddinggemma`, R2 off-site via rclone **with the 60-day retention rule and its payment-method caveat**, backup seal key, restore drill, credential-canary timer, Keychain-primary auth (the setup-token is **not a P0 row**) + `plutil` check, Devin login-method check, full installer run (telemetry off), the alembic history diagnostic | Once, after the P0 deploy; again on a bare-metal rebuild |
 ```
 
 - [ ] **Step 4: `docs/TROUBLESHOOTING.md`**
@@ -10959,7 +10306,7 @@ Append two symptom sections at the end of the file:
 **Diagnostic**: `jobs.terminal_reason='unrecognized_model'`, audit event `job_result_rejected{requested_model, detail}`; the session produced no text, zero usage and `duration_api_ms=0`, or `model_usage` named a different model than requested.
 
 ### Root cause
-The pinned bundled CLI (2.1.139) answers an id it does not know (e.g. Opus 5.5 / Sonnet 5 before the D13 bump) with a 'success' that did no work (`docs/research/llm-landscape-2026-09/claude-anthropic.md` §7). The runner now fails the job so `escalation.on_failure` retries on a known id. **Fix**: use an id from `_MODEL_ALIASES` (`telegram_bot.py`) / a `VALID_MODELS` member; new ids enter only after the SDK bump passes the replay gate (spec D13).
+The pinned bundled CLI (2.1.139) answers an id it does not know (e.g. Opus 5.5 / Sonnet 5 before the D13 bump) with a 'success' that did no work (`docs/research/llm-landscape-2026-09/claude-anthropic.md` §7). The runner now fails the job so `escalation.on_failure` retries on a known id. **Fix**: use an id from `_MODEL_ALIASES` (`telegram_bot.py`) / a `VALID_MODELS` member (the models registry once it ships); a new id enters only after the pinned-SDK bump is verified against `model_usage` + `duration_api_ms` (new spec §2.4). The audit-replay gate that used to guard this is deferred (new spec §14 item 9).
 
 ## Symptom: no completion/failure DM, or the daily 🔑 credential-canary alert fired
 
@@ -10982,16 +10329,7 @@ The pinned bundled CLI (2.1.139) answers an id it does not know (e.g. Opus 5.5 /
 **Diagnostic**: `bash scripts/alembic-current-check.sh` → `FAIL alembic_version=00N has NO script under alembic/versions/`; `git log --oneline -5 -- alembic/versions/` shows a revert or a deleted file.
 
 ### Root cause
-A phase rollback reverted a migration FILE while prod's `alembic_version` still names it (spec §9 rollback rule: revert application code only — columns are nullable and ignored by older ORM models). **Fix**: restore the file (`git revert` of the revert, or `git checkout <sha> -- alembic/versions/00N_*.py`) and redeploy; only if the migration itself must go: `pipenv run alembic downgrade -1` on prod FIRST, then remove the file and its line in `alembic/applied_history.txt` in one commit. `tests/test_migrations.py::test_applied_history_matches_disk_chain` blocks the bad revert at the pytest gate `server-deploy` already runs — that is the whole belt. `scripts/alembic-current-check.sh` (runbook §11) is the owner-run diagnostic for confirming the live DB's state; it is not a deploy step (round-2 #8: "P0 alembic check kept as a test only, no SKILL.md edit").
-
-## Symptom: `SDK_RECORD=1` is set but no files appear under `volumes/sdk_recordings/` (or a job's recording stops mid-way)
-
-**Diagnostic**: `grep -c 'sdk recorder disabled' volumes/logs/runner.err.log`; `ls -la volumes/sdk_recordings/ | tail`; `pipenv run python -c "from src.config import settings; print(settings.sdk_record)"` (run from the checkout whose `.env` the runner uses).
-
-### Root causes
-1. The setting is read at runner start — `launchctl kickstart -k gui/$(id -u)/com.assistant.runner` after editing `.env` (runbook §10).
-2. A write error (disk full, `volumes/sdk_recordings/` unwritable — the runner creates it on first use) disables the recorder for that job only and logs `sdk recorder disabled for <id>.json: …` once; the job itself is unaffected by design (Review Focus 6). Fix the disk, the next job records again.
-3. Recordings older than **90 days** were swept by `backup.sh`'s `find volumes/sdk_recordings -name '*.json' -mtime +90 -delete` (Task 13 Step 3). The window is 90 d, not 30, precisely so the sweep cannot outrun P3: P0 records in weeks 0-1, P3 freezes into `tests/replay/` in weeks 6-8, and `SDK_RECORD` is unset at P0 exit so nothing can be re-recorded. Once `tests/replay/` is non-empty the sweep deletes the directory at any age. `retention.rotate_audit_logs` is **not** involved: it globs `volumes/audit_log/`, which is exactly why recordings live elsewhere (round-3 M8; this closed the plan's old open question 9).
+A phase rollback reverted a migration FILE while prod's `alembic_version` still names it (spec §9 rollback rule: revert application code only — columns are nullable and ignored by older ORM models). **Fix**: restore the file (`git revert` of the revert, or `git checkout <sha> -- alembic/versions/00N_*.py`) and redeploy; only if the migration itself must go: `pipenv run alembic downgrade -1` on prod FIRST, then remove the file and its line in `alembic/applied_history.txt` in one commit. `tests/test_migrations.py::test_applied_history_matches_disk_chain` blocks the bad revert at the pytest gate `server-deploy` already runs — that is the whole belt. `scripts/alembic-current-check.sh` (runbook §10) is the owner-run diagnostic for confirming the live DB's state; it is not a deploy step (round-2 #8: "P0 alembic check kept as a test only, no SKILL.md edit").
 ```
 
 Also update the "Root cause #5" paragraph (lines 383-387): append `Since 2026-09-25 `AskUserQuestion` is also OFF the default tool list (`registry.skills.DEFAULT_REQUIRED_TOOLS`); seven skills still declare it explicitly in `required_tools` — an owner decision (P0 plan, open question 2).`
@@ -11004,7 +10342,7 @@ Run: `git diff | grep -iE 'api[_-]?key|token|secret|password' | grep -v 'TELEGRA
 
 ```bash
 git add .context/modules/runner/CONTEXT.md .context/modules/gateway/CONTEXT.md .context/modules/db/CONTEXT.md .context/modules/hosting/CONTEXT.md .context/modules/notify/CONTEXT.md .context/modules/gateway/skills/GOTCHAS.md .context/SYSTEM.md .context/INDEX.md docs/README.md docs/TROUBLESHOOTING.md docs/superpowers/specs/2026-09-25-multi-model-platform-design.md docs/superpowers/plans/2026-09-25-multi-model-platform-p0.md docs/research
-git commit -m "docs: P0 multi-model — CONTEXT/SYSTEM/INDEX/README/TROUBLESHOOTING for result capture, notify outbox (dual-write), ghost commands, SDK-path canary, SDK_RECORD recorder, telemetry-off env, cost reconcile, alembic history, ops runbook; spec + plan + research set"
+git commit -m "docs: P0 multi-model — CONTEXT/SYSTEM/INDEX/README/TROUBLESHOOTING for result capture, notify outbox (dual-write), ghost commands, SDK-path canary, telemetry-off env, cost reconcile, alembic history, ops runbook; spec + plan + research set"
 git fetch origin && git merge origin/main          # CLAUDE.md push gate 2
 pipenv run pytest -q && pipenv run python scripts/lint_docs.py
 git push origin main
@@ -11036,7 +10374,7 @@ The P0 merge/PR description (INV-4 lane) carries, per spec §9 ("Each phase's PR
 - **one internally consistent per-model job-count set**, pasted from a single `--days 30` run with its `unpriced` rows — never the spec's superseded 109/168/337/31 split, which summed to 645 against its own 634 (Task 16 Step 5)
 - **a project-scope settings override is refused**: `tests/test_settings_auth_override.py` green (both named gates); one `provider_refused{reason=settings_override, auth_key=true, observed_only=false}` for the `ANTHROPIC_BASE_URL` fixture and one with `auth_key=false` for the `hooks` fixture (Task 19)
 - **and it did NOT refuse the fleet**: one real workspace-tier job (`server-patch` or `new-skill`) completed after the Task 19 deploy — the provenance allowance is what makes that possible, since the clone carries this repo's two tracked settings files (Task 19 "the second belt")
-- **the one observed project is observed, not silenced**: `grep -h 'provider_refused' volumes/audit_log/*.jsonl | grep -c 'observed_only": true'` ≥ 1 after a bingo job, the bingo job itself `completed`, one ops DM that day and not one per job, and `tests/test_settings_auth_override.py::test_project_settings_inventory` green (no project settings file this plan did not size) (Task 19 "the third belt"; runbook §13 is the owner's exit)
+- **the one observed project is observed, not silenced**: `grep -h 'provider_refused' volumes/audit_log/*.jsonl | grep -c 'observed_only": true'` ≥ 1 after a bingo job, the bingo job itself `completed`, one ops DM that day and not one per job, and `tests/test_settings_auth_override.py::test_project_settings_inventory` green (no project settings file this plan did not size) (Task 19 "the third belt"; runbook §12 is the owner's exit)
 - **both tracked `.claude/settings*.json` carry only `enabledPlugins`/`permissions` and no `hooks`**: `tests/test_settings_auth_override.py::test_settings_no_hooks` green inside the deploy gate (Task 19)
 - **the §14 Q2 answers are recorded**: `bash scripts/q2-settings-sandbox-probe.sh` run once on the pinned CLI (2.1.139), both lines pasted here and appended to runner GOTCHAS — Q2a sandbox `failIfUnavailable`/`strictAllowlist` honoured|ignored|rejected, Q2b project-scope `ANTHROPIC_BASE_URL` honoured|ignored (Task 19 Step 4b)
 - **a protected path cannot be committed without an approval trailer**: `tests/test_protected_paths_hook.py` green and `bash scripts/install-dev-hooks.sh install` run in the dev checkout, with the existing CHANGELOG hook still firing (Task 13 Step 6c)
@@ -11045,11 +10383,9 @@ The P0 merge/PR description (INV-4 lane) carries, per spec §9 ("Each phase's PR
 - **the durable trace is redacted**: `tests/test_audit_redactor.py` green; `grep -rc 'sk-ant-' volumes/audit_log/*.jsonl` → 0 (Task 20)
 - **the provisioning-gap pre-check no longer defers the atlas rows** (after §12a row 6b is done): `grep -c 'provisioning_gap' volumes/audit_log/*.jsonl` over the last 24 h → 0, and the two previously-deferred atlas schedules ran (Task 21)
 - `scripts/restore-drill.sh` → PASS (runbook §5); `plutil -p … | grep -c CLAUDE_CODE_OAUTH_TOKEN` → 0 (runbook §7)
-- `python -m src.runner.sdk_record coverage` → OK (runbook §10) — may complete after sign-off; blocks P3, not P0 exit
-- **`SDK_RECORD` is unset after the ≥ 20 recording jobs** (spec §9 P0 exit, round-3 M8): paste the two `coverage` runs — the first exiting 1 with "coverage OK — now remove SDK_RECORD=1 …", the second exiting 0 after the line is removed and the runner kickstarted — and `ls volumes/audit_log/*.sdk.jsonl` → nothing (recordings live in `volumes/sdk_recordings/`)
 ```
 
-Then request the deploy (INV-4 lane): `/task deploy server` — `server-deploy` runs `alembic upgrade head` (007), the pytest gate, seeds schedules and restarts; afterwards the owner runs runbook §6 (`install-launchd.sh timers-only`), §9 (full installer run at a quiet moment) and §10 (`SDK_RECORD=1` for a few days) on prod. **There is no runbook §11**: round 2 cancelled the `server-deploy/SKILL.md` edit round 1 had hidden inside P0 (spec §9 rollback paragraph: "alembic already fails loudly on a missing revision, so **no `server-deploy/SKILL.md` edit** is needed for this"; the §9 P0 row's "Protected touches" cell is **none**). Task 18's pytest assertions are the whole deliverable.
+Then request the deploy (INV-4 lane): `/task deploy server` — `server-deploy` runs `alembic upgrade head` (007), the pytest gate, seeds schedules and restarts; afterwards the owner runs runbook §6 (`install-launchd.sh timers-only`) and §9 (full installer run at a quiet moment) on prod. **Runbook §10 is a diagnostic, not a deploy step**: round 2 cancelled the `server-deploy/SKILL.md` edit round 1 had hidden inside P0 (spec §9 rollback paragraph: "alembic already fails loudly on a missing revision, so **no `server-deploy/SKILL.md` edit** is needed for this"; the §9 P0 row's "Protected touches" cell is **none**). Task 18's pytest assertions are the whole deliverable.
 
 ---
 
@@ -11059,45 +10395,46 @@ Re-derived on 2026-09-27 from §12a **as round 2 left it** (round-2 #29 rewrote 
 
 | When | Action | Spec row | Why it is owner-only |
 |---|---|---|---|
-| **P0 entry** (45 min) | Decide the **sign-off set**: **D1** (design sign-off for P0–P1, *including what build weeks displace* — a LOOP.md §7 proposal against alpha-lab `budget.yaml`, or N accepted `rejected` windows/week; see the PR-note block), the **D25 posture** on the ≈ $963/month list-equivalent exposure, and **D21** (it sizes P4; cheap to settle now). **D0 is no longer a decision** — round 3 reduced it to "reserved, resolved 2026-08-17; branch B is a trigger inside D5" | **§12a row 0**; §9 P0 entry cell | phase + posture decisions. **D1 no longer gates Task 13 Step 6b**: round 3 made the idle-dispatcher removal unconditional (a containment item), so D1 only names the displacement |
+| **P0 entry** (45 min) | Decide the **new spec's entry set**: **D1** (scope and gates — approve Phases 1–2, re-approving at the Phase-2 retro), **D2** (what build weeks displace — a LOOP.md §7 proposal against alpha-lab `budget.yaml`, or N accepted `rejected` windows/week; see the PR-note block) and **D3** (the spend posture on the ≈ $960/month list-equivalent exposure; old D25). **Old D21 (cross-vendor graders/critics) is no longer a decision at all** — the 2026-10-05 cut deletes it (new spec §14 items 6 and 14) and there is no Codex P4 for it to size. **D0 is no longer a decision** — round 3 reduced it to "reserved, resolved 2026-08-17; branch B is a trigger inside D5" | **§12a row 0**; §9 P0 entry cell | phase + posture decisions. **D1 no longer gates Task 13 Step 6b**: round 3 made the idle-dispatcher removal unconditional (a containment item), so D1 only names the displacement |
 | **P0 entry** (5 min) | Set `WEB_AUTH_TOKEN` in prod `.env` — **every §4.6 route is open while it is unset** (§12 D10) — and create the laptop Keychain item `ai login` will read | **§12a row 6**; §9 P0 entry cell | `.env` is a protected path; this is the only thing standing in front of the web surface until D10 lands at P1 |
 | Before P0 sign-off (D1) | Read this plan and the spec; **approve P0–P1 only** (P2 waits for the P1 retro) | §12 D1; §12a row 23 | phase gate (round-1 #51) |
 | Before Task 1 is merged | Confirm Task 0 (the Haiku standalone patch) is merged and deployed | §9 "Shipped ahead of P0" | the pre-P0 patch ships on its own INV-4 PR; the owner is notified per lane rules |
-| P0 exit (~10 min) | Runbook §7 row 1: confirm Max tier (5x/20x); on claude.ai billing confirm usage credits $0, auto-reload OFF, spend limit $0; record both in runner GOTCHAS with the date | **§12a row 1**; D3 | account settings (`overflow_credits: disabled` lands in `providers.yml` in P3) |
+| P0 exit (~10 min) | Runbook §7 row 1: confirm Max tier (5x/20x); on claude.ai billing confirm usage credits $0, auto-reload OFF, spend limit $0; record both in runner GOTCHAS with the date | **§12a row 1**; D3 | account settings — recorded in runner GOTCHAS with the date (new spec D4); the runtime tripwires key on `billing_error`, then `overage_status`, then the 5-m cache-write signature (new spec §2.5) |
 | P0 exit (2 min) | Runbook §7 row 2: "Help improve Claude" OFF; record the date | **§12a row 2**; D4 | consumer privacy toggle |
 | P0 exit (2 min) | Runbook §7 row 2b: confirm Devin's bundled `claude` is the **unmodified binary on the owner's own `/login`** (`claude /status` → "Login method: Claude account") and that Devin does not intermediate the token; otherwise sign Devin out of the Max credential. Record on the quarterly attestation card | **§12a row 2b**; §2.8 Claude row; round-2 #48 | the standing rule is "no third-party harness signs in with the Max credential"; only the owner can read that status |
-| **P3, NOT P0** (~10 min — listed here only so it is not done early) | `claude setup-token` → sealed 0600 at `~/.config/ai-server/claude-setup-token`; mint date in GOTCHAS; NEVER in `.env`/plist/profile. §12a row 3 now reads "**needed before P3** (the Keychain login is the only credential until the executor seam exists; the sealed token is unused before P3)" | **§12a row 3** as round 2 re-scoped it; §12 D3; round-2 #28 | minting a one-year credential that outranks `/login` three phases before anything can consume it widens exposure for no gain. **The P0 half of this row survives on its own**: `plutil -p ~/Library/LaunchAgents/com.assistant.*.plist \| grep -c CLAUDE_CODE_OAUTH_TOKEN` → `0` is a P0 exit test and does not depend on a token existing (runbook §7) |
+| **Phase 2, NOT P0** (~10 min — listed here only so it is not done early) | `claude setup-token` → sealed 0600 at `~/.config/ai-server/claude-setup-token`; **mint date recorded in runner GOTCHAS** (the T−30 d alarm keys off it); NEVER in `.env`/plist/profile, never copied by `backup.sh`'s plain tree | **new spec §12 runbook row 7a**; new spec §5 (alarm) and §11 (owner-resumed fallback); old §12a row 3 / round-2 #28 | minting a one-year credential that outranks `/login` during P0 widens exposure for no gain — but it is now phased rather than conditioned on an executor seam that no longer exists, because the alarm cannot fire without a recorded mint date. **The P0 half of this row survives on its own**: `plutil -p ~/Library/LaunchAgents/com.assistant.*.plist \| grep -c CLAUDE_CODE_OAUTH_TOKEN` → `0` is a P0 exit test and does not depend on a token existing (runbook §7) |
 | P0 exit (10 min) | Set **`TRADIER_SANDBOX_TOKEN`** + **`FINNHUB_TOKEN`** in `projects/atlas/.env` — the P0 trading blockers. Until they are in, Task 21's pre-check defers the atlas rows that need them (`schedule_deferred{provisioning_gap}` + one DM) **once they are declared in atlas's manifest through LOOP.md §7** — today neither key is in any manifest, so the check finds nothing to defer (round-3 #12: the ≈ −20 M/month is marked **unmeasured** in §2.8/§13, and the honest second half is that the interim check protects nothing the blocker names until the declaration lands) | **§12a row 6b**; §8.3 "Blockers"; §9 P0 scope; round-2 #43, round-3 #12 | atlas `.env` is provisioning the owner holds |
 | P0 exit (~20 min) | Runbook §3: create R2 bucket `ai-server-backups` + API token, `rclone config` remote `r2`, verify `rclone lsd r2:`; **confirm a payment method is on the Cloudflare account** (the R2 free tier requires one) and that `rclone size r2:ai-server-backups` stays under 10 GB — the 60-day retention rule is enforced by `backup.sh` (Task 13) | **§12a row 4** ("free ≤ 10 GB-month, payment method required, retention rule 60 d"); D12; round-2 #50 | account credentials (spec D3 "R2 credentials for backup") |
 | P0 (2 min) | Runbook §1: `sudo pmset -a autorestart 1` | **§12a row 5**; D12 | sudo |
-| **Before Task 19 is merged** (bingo repo, ~10 min) | Runbook §13: retire or relocate `projects/baseball-bingo/.claude/settings.json`'s `hooks` block (a PostToolUse `check-context-writeback.sh`), **through the bingo repo's own delivery path** — it is a project change, never an INV-4 server patch. Until it is gone, bingo's jobs run with an audited `provider_refused{settings_override, observed_only: true}` and one DM a day (Task 19 "the third belt"); flipping that arm from observe to refuse is the **P1** follow-up, listed in the deferred list. **Nothing here blocks the P0 deploy** — the observe arm exists precisely so a live public service does not lose its jobs on merge day | §2.4 as round-3 #1 widened it; §9 P0 row (the settings refusal) | the file is tracked in another repo with its own delivery path, and whether that hook is still wanted is an owner call |
-| Dev checkout, after Task 13 (2 min) | Runbook §12: `bash scripts/install-dev-hooks.sh install` in the **dev** repo (prod has its own guard from `install-prod-hooks.sh`), then stage a `src/` change without a CHANGELOG to confirm the existing hook still fires | §9 P0 row ("`scripts/install-dev-hooks.sh` protected-path guard"); round-3 #3 | it writes `.git/hooks/`, which is per-checkout and not tracked; and the owner is who issues the `Approved-Protected-Path: ap-<id>` approvals it checks for |
+| **Before Task 19 is merged** (bingo repo, ~10 min) | Runbook §12: retire or relocate `projects/baseball-bingo/.claude/settings.json`'s `hooks` block (a PostToolUse `check-context-writeback.sh`), **through the bingo repo's own delivery path** — it is a project change, never an INV-4 server patch. Until it is gone, bingo's jobs run with an audited `provider_refused{settings_override, observed_only: true}` and one DM a day (Task 19 "the third belt"); flipping that arm from observe to refuse is the **P1** follow-up, listed in the deferred list. **Nothing here blocks the P0 deploy** — the observe arm exists precisely so a live public service does not lose its jobs on merge day | §2.4 as round-3 #1 widened it; §9 P0 row (the settings refusal) | the file is tracked in another repo with its own delivery path, and whether that hook is still wanted is an owner call |
+| Dev checkout, after Task 13 (2 min) | Runbook §11: `bash scripts/install-dev-hooks.sh install` in the **dev** repo (prod has its own guard from `install-prod-hooks.sh`), then stage a `src/` change without a CHANGELOG to confirm the existing hook still fires | §9 P0 row ("`scripts/install-dev-hooks.sh` protected-path guard"); round-3 #3 | it writes `.git/hooks/`, which is per-checkout and not tracked; and the owner is who issues the `Approved-Protected-Path: ap-<id>` approvals it checks for |
 | Once per CLI pin, before P0 sign-off (5 min) | Run `bash scripts/q2-settings-sandbox-probe.sh` and record both answers in runner GOTCHAS + the P0 PR (spec **§14 Q2**, moved into the P0 gate list by round 3). It spawns the pinned CLI, so it is never in the pytest gate; it points at a closed localhost port and a temp dir, so it cannot bill or leak anything | §9 P0 row; §14 Q2 | it burns one real `claude -p` call on the owner's window and its answer is a standing fact about the fleet's primary lane |
 | Before Task 13's drill can fully PASS (5 min) | Runbook §4: `openssl rand -base64 48 > ~/.config/ai-server/backup-seal.key`, `chmod 600`, copy to the password manager | **§12a row 4b**; D12 (sealed `.env`/cloudflared copies) | a secret that must never be produced or stored by a job |
-| Any time after Task 13 (≈10 min, network) | Runbook §2: `ollama rm phi3:mini deepseek-coder-v2:16b mistral:latest && ollama pull qwen3.5:4b && ollama pull embeddinggemma` | D12 (P0 row: "stale Ollama weights removed + `qwen3.5:4b`/`embeddinggemma` pulled"); §12a row 12 is the P3 bench | deletes host artefacts; RAM/disk judgement |
+| Any time after Task 13 (≈10 min, network) | Runbook §2: `ollama rm phi3:mini deepseek-coder-v2:16b mistral:latest && ollama pull qwen3.5:4b && ollama pull embeddinggemma` | D12 (P0 row: "stale Ollama weights removed + `qwen3.5:4b`/`embeddinggemma` pulled"); §12a row 12's local-model bench is deferred | deletes host artefacts; RAM/disk judgement |
 | After the P0 `server-deploy` | Runbook §6: on prod `bash scripts/install-launchd.sh timers-only`; then `bash scripts/credential-canary.sh` once | §9 P0 row (canary schedule) | launchd changes on the production host |
 | After the P0 deploy, quiet moment | Runbook §9: full `bash scripts/install-launchd.sh` on prod (restarts runner/web/bot) so the service plists carry `DISABLE_ERROR_REPORTING`/`DISABLE_TELEMETRY`; verify with `plutil -p` | §2.4/§3; review #61 | service restart on prod |
 | After the P0 deploy | Runbook §5: `bash scripts/restore-drill.sh` → PASS (the P0 exit criterion) | §9 P0 exit criteria | restore is a human-verified DR step |
-| After the P0 deploy, for a few days | Runbook §10: `SDK_RECORD=1` in prod `.env` + runner kickstart; run `python -m src.runner.sdk_record coverage` until it says OK (≥ 20 jobs, ≥ 3 classes); remove the line | §2.4; §9 P0 row; review #27 | `.env` is a protected path |
 | Only if DMs misbehave post-deploy | add `NOTIFY_OUTBOX=0` to prod `.env`, kickstart the **bot only** (renderer-side switch; runbook §8 covers parking the rows the runner keeps writing until its next restart) | §9 kill switch; review #28 | `.env` is a protected path |
-| P0 exit (30 d after Task 3's deploy) | Read the `scripts/cost-reconcile.py --windows 30,7 --db` output in the P0 PR: **both windows** within 1 %, the per-kind step table, and the lane-budget seed. If the run disagrees with spec §2.8's ≈ $963/month anchor by > 10 %, Task 16 Step 5 stops and reports the delta — **the spec is the authority; the plan never rewrites §2.8 to match a run** | §2.8; §9 P0 exit criterion; round-1 #17, round-2 #18/#19 | sign-off evidence |
+| P0 exit (30 d after Task 3's deploy) | Read the `scripts/cost-reconcile.py --windows 30,7 --db` output in the P0 PR: **both windows** within 1 %, the per-kind step table, and the lane-budget seed. If the run disagrees with the document of record's ≈ **$960/month** anchor (new spec §2.5; its per-model rows sum to $963) by > 10 %, Task 16 Step 5 stops and reports the delta — **the spec is the authority; the plan never rewrites §2.8 to match a run** | §2.8; §9 P0 exit criterion; round-1 #17, round-2 #18/#19 | sign-off evidence |
 | Deploy approval | `server-deploy` on the INV-4 lane needs the in-session `code-review` LGTM + owner notification; no protected path is touched by any task, so no explicit approval beyond the lane's gates | INV-4 / C6 | — |
 
 ## Open questions (not blocking P0; carried to the owner)
 
 1. **Seven skills still declare `AskUserQuestion` explicitly** (`new-project`, `project-evaluate`, `new-skill`, `research-report`, `restore`, `research-deep`, `self-diagnose`; `research-report/SKILL.md:32` even instructs its use) while `TROUBLESHOOTING.md` "Root cause #5" claims it was removed everywhere. Task 10 fixes only the default list. Strip it from those seven (a `SKILL.md` edit per skill, atlas two-repo rule does not apply) or leave until P1's `approvals(kind=question)` consumes it?
-2. ~~Haiku residue outside P0 scope~~ — **resolved by the re-cut**: Task 0 (the pre-P0 standalone patch) covers all four spec-named sites plus the dashboard option; only `session._MODEL_BUDGETS`'s dead haiku key waits for P3's `registry/models.py`.
+2. ~~Haiku residue outside P0 scope~~ — **resolved by the re-cut**: Task 0 (the pre-P0 standalone patch) covers all four spec-named sites plus the dashboard option; only `session._MODEL_BUDGETS`'s dead haiku key waits for `registry/models.py` (new spec §9 Phase 4).
 3. ~~Completion DM policy~~ — **closed 2026-09-27: it was never an open question.** Spec §4.2 has a "Card eligibility" paragraph (added by round-2 #32 precisely to stop ~20 machine jobs/day flooding the chat) and the §9 P0 scope cell names "card eligibility per §4.2" as part of the `src/notify/` deliverable. Task 5 now encodes it as the contract of `should_notify_job`: eligible completion channels `{telegram, pwa, cli}` (+ `web`, the current dashboard's spelling of the pre-P2 surface), failures always eligible, children inherit the parent's eligibility (`main.effective_origin_channel`, Task 6), and `schedules.notify ∈ {never, failures, always}` is a migration-008 column (P1) so every P0 schedule row behaves as `failures`.
 4. **Escalation children**: a scheduled job that fails at L0 now DMs `❌ failed`, then its L1 retry may succeed silently (task-less completion DMs — so it will DM `✅ done`). Two DMs per incident; acceptable, or suppress the L0 failure DM when `escalation.on_failure` is declared (P2 FailedCard shows "escalation L1 queued" instead)?
 5. **Where `queue_wait_ms` should stop** once P2 lanes add holds (`held_ms` separately) — spec §14 Q8; P0 measures enqueue→running only.
 6. ~~`cli_version` via a `claude --version` subprocess~~ — **closed 2026-09-27: the spec already answers it.** §2.3 row 007 defines the column as "= `claude_agent_sdk._cli_version.__cli_version__`, \"2.1.139\" … **no subprocess or `SystemMessage` parse**" (round-2 #58). Verified in the pinned 0.1.81 wheel: the attribute exists and reads `2.1.139`. Task 3 reads it; the subprocess, the startup warm-up and their three tests are gone.
 7. ~~Which cache-write rate is canonical~~ — **closed 2026-09-27: round-2 #19 decided it, and the question misquoted the current spec.** §2.8 now reads: cache writes priced from `usage.cache_creation.ephemeral_{1h,5m}_input_tokens` at the matching rate; **the subscription's TTL is 1 h and prod records 100 % of writes there** (45.3 M 1-h, **0** 5-m over 634 jobs); anchor **≈ $963/month** list-equivalent (opus-5 $414 / opus-4-7 $255 / sonnet-4-6 $151 / opus-4-8 $143), medians **opus-5 ≈ $3.43 / fleet ≈ $0.59**, DoneCard example **$3.49**; "round 1's $809 used the 5-m rate and was ≈ 19 % low", and "median Opus 5 job ≈ $0.71" is the figure §2.8 calls mislabelled. The 5-m column survives only as the **credit-overflow signature** (a non-zero reading means the TTL dropped, i.e. usage credits are being consumed — §2.8 tripwires). Task 16 prices each bucket at its own rate; `--cache-write-ttl` is deleted.
 8. ~~`CLAUDE_CODE_OAUTH_TOKEN` warn-and-continue~~ — **closed 2026-09-27 in favour of fail-closed.** Spec §2.4 item (2) names the refusal set as `GEMINI_*|CEREBRAS_*|GROQ_*|CODEX_*|OPENROUTER_*|OPENAI_*|XAI_*|*_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_*` with no warn-only members (round-2 #2), and every one of those names reaches every Bash child of every job through the SDK's env overlay. `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` in particular are exactly the keys that redirect Max work to API billing. Task 17 refuses on all of them. The "could take the fleet down on a deploy" worry is answered by the same task's P0 exit evidence: the `plutil -p` scan proves no plist exports any of them, and `scripts/run.sh` gets `PIPENV_DONT_LOAD_ENV=1` so a P3 `.env` vendor key cannot trip a `pipenv`-launched runner.
-9. ~~Raw recordings and the 30-day archive~~ — **closed 2026-09-27 by the round-3 delta.** Recordings move out of `volumes/audit_log/` to `volumes/sdk_recordings/<id>.json` (spec §9 P0 row, round-3 M8), so `retention.rotate_audit_logs` — which globs the audit dir — never touches them and cannot eat the P3 fixtures. What bounds the directory instead is an explicit `find volumes/sdk_recordings -name '*.json' -mtime +90 -delete` in `backup.sh` (Task 13 Step 3), pinned by `test_backup_has_retention_rule`; **90 days, not 30**, because P0 records in weeks 0–1 and P3 freezes in weeks 6–8 (spec §9), so a 30-day sweep would have deleted the P0 deliverable weeks before anything could copy it — and with `SDK_RECORD` unset at P0 exit there is no re-recording. Once `tests/replay/` is non-empty the sweep drops the age condition: P3 copies its 20 fixtures there and the rest are deleted, which is what spec §2.4 asks for ("recordings are deleted once P3's replay fixtures are frozen").
+9. ~~Raw recordings and the 30-day archive~~ — **moot as of 2026-10-05**: the raw recorder and the replay gate it fed are both gone with the cut (new spec §10 last row, §14 item 9), so nothing writes `volumes/sdk_recordings/`, `backup.sh` sweeps nothing and `retention.rotate_audit_logs` has nothing new to miss. (It had been closed on 2026-09-27 by the round-3 delta, which moved the recordings out of `volumes/audit_log/`; the cut removed the subject.)
 
-## Alignment with the reviewed spec (2026-09-25 round 1; round-2 and round-3 deltas 2026-09-27 — the spec is frozen after round 3)
+## Alignment with the superseded spec's P0 row (traceability for the three applied review rounds)
 
-**Which round this reflects.** The 2026-09-25 re-cut was made against the spec's **round 1** only. The spec's **round 2** restarts its own numbering at #1 and has 58 rows (so a "#61"/"#64" exists only in round 1), and it changed P0 in ways the 09-25 cut did not carry; the round-2 delta was applied on **2026-09-27**. The spec's **round 3** (2026-09-27) numbers its verified findings #1–#14, its majors M1–M50 and its minors m1–m19, and it is **terminal — the spec is frozen after it**; its delta was applied to this plan on **2026-09-27** as well. Both deltas have Verification log entries of that date saying exactly what changed, what was already satisfied and what was skipped. Below: the authoritative P0 scope (spec §9 row "P0" — scope cell, entry, exit criteria, kill switch, "Protected touches" — plus the §9 test-gate and rollback paragraphs, the §14 questions it names and the §12/§12a rows that name P0) mapped to tasks, then **three** review-log tables, one per round, then an honest list of what is still deferred.
+> The authoritative scope is now the **2026-10-05 spec's §9 Phase-1 row** (see the Spec line and the header note). The table below is kept as traceability for rounds 1–3 against the row this plan was cut from; a second, short table at its end maps the **new** Phase-1 scope cell to tasks, which is the one that can surface items the old row did not contain.
+
+**Which round this reflects.** The 2026-09-25 re-cut was made against the spec's **round 1** only. The spec's **round 2** restarts its own numbering at #1 and has 58 rows (so a "#61"/"#64" exists only in round 1), and it changed P0 in ways the 09-25 cut did not carry; the round-2 delta was applied on **2026-09-27**. The spec's **round 3** (2026-09-27) numbers its verified findings #1–#14, its majors M1–M50 and its minors m1–m19, and it is **terminal — the spec is frozen after it**; its delta was applied to this plan on **2026-09-27** as well. Both deltas have Verification log entries of that date saying exactly what changed, what was already satisfied and what was skipped. Below: the P0 scope **this plan was cut from** — authoritative scope is now the 2026-10-05 spec's §9 Phase-1 row — i.e. the superseded spec's §9 row "P0" (scope cell, entry, exit criteria, kill switch, "Protected touches") plus its §9 test-gate and rollback paragraphs, the §14 questions it names and the §12/§12a rows that name P0, mapped to tasks; then the **new** Phase-1 scope cell mapped to tasks; then **three** review-log tables, one per round; then an honest list of what is still deferred.
 
 ### Spec P0 requirement → task
 
@@ -11110,10 +10447,9 @@ Re-derived on 2026-09-27 from §12a **as round 2 left it** (round-2 #29 rewrote 
 | `<cwd>/.claude/settings*.json` **settings**-override refusal → `provider_refused{settings_override}` in `run_session`, over `hooks`/`permissions`/`mcpServers`/`enableAllProjectMcpServers`/`apiKeyHelper`/`env`/`ANTHROPIC_BASE_URL` — §9 P0 row, §2.4 "INV-3 from project scope (P0)", round-3 #1 critical | **19** | `test_settings_auth_override.py` (fixture clone per key incl. the four code-channel keys, the server-root allowance **per key and keyed on provenance** — a workspace clone of the server root passes, the same clone with `hooks` added does not — the project-canonical observe arm and its inventory gate, a clean-clone pass, and the source pin that the check precedes `_build_options`) |
 | **`test_settings_no_hooks`**: this repo's two **tracked** `.claude/settings*.json` carry only `enabledPlugins`/`permissions` — §9 test-gate paragraph, round-3 #1 | **19** | `test_settings_auth_override.py::test_settings_no_hooks`, inside the deploy gate. (Spec §2.4's content-**hash** pin lives in the protected `restraints.py`, a **P3** deliverable — stated in Task 19, not faked in P0) |
 | **§14 Q2 probe** on the pinned CLI: `sandbox.failIfUnavailable`/`strictAllowlist`, and whether project-scope auth keys are honoured at all — "moved into the P0 gate list (round 3)" | **19** Step 4b + Owner actions | `scripts/q2-settings-sandbox-probe.sh` run once, both answers in runner GOTCHAS + the P0 PR; `test_q2_probe_script_invariants` |
-| **`scripts/install-dev-hooks.sh` protected-path commit-msg guard + `test_protected_paths_hook`** — §9 P0 row, §2.5, round-3 #3 critical ("protected path" had no mechanical enforcement in the dev repo) | **13** Step 6c + Owner actions (runbook §12) | `tests/test_protected_paths_hook.py` (all **ten** §M paths refused without a trailer — `.context/org/ORG.md` and `src/gateway/web.py` included; malformed trailers rejected; the list matches MISSION §M **both ways**, with the non-path §M items as commented exceptions; the generated hook is `.git/hooks/commit-msg` and reads `"$1"`, never `COMMIT_EDITMSG`; install appends and leaves the CHANGELOG `pre-commit` hook alone; the P0 "row not resolved" limitation is printed, not hidden) |
-| audit/stream redactor over `tool_result` previews and `text` before the JSONL / `jobs:stream` write — §9 P0 row, §2.4 "Audit/stream redaction (P0)" | **20** | `test_audit_redactor.py` (a `printenv`-shaped `tool_result` reaches neither sink raw; `sdk_record` delegates to the same pattern set) |
+| **`scripts/install-dev-hooks.sh` protected-path commit-msg guard + `test_protected_paths_hook`** — §9 P0 row, §2.5, round-3 #3 critical ("protected path" had no mechanical enforcement in the dev repo) | **13** Step 6c + Owner actions (runbook §11) | `tests/test_protected_paths_hook.py` (all **ten** §M paths refused without a trailer — `.context/org/ORG.md` and `src/gateway/web.py` included; malformed trailers rejected; the list matches MISSION §M **both ways**, with the non-path §M items as commented exceptions; the generated hook is `.git/hooks/commit-msg` and reads `"$1"`, never `COMMIT_EDITMSG`; install appends and leaves the CHANGELOG `pre-commit` hook alone; the P0 "row not resolved" limitation is printed, not hidden) |
+| audit/stream redactor over `tool_result` previews and `text` before the JSONL / `jobs:stream` write — §9 P0 row, §2.4 "Audit/stream redaction (P0)" | **20** | `test_audit_redactor.py` (a `printenv`-shaped `tool_result` reaches neither sink raw) |
 | **trading blockers**: `TRADIER_SANDBOX_TOKEN` + `FINNHUB_TOKEN` (§12a row 6b) **and the interim scheduler `provisioning_gap` pre-check, ignoring INV-3-banned names** — §9 P0 row, §8.3 "Blockers", round-3 #12 (which also marks the ≈ −20 M/month saving **unmeasured** in §2.8/§13 until the P3 `ScriptExecutor` version lands with a real per-kind key list) | **21** + Owner actions (§12a row 6b) | `test_provisioning_gap.py` (fixture manifest + `.env`; the `PROVISIONING_EXEMPT` case where `env_required` contains `ANTHROPIC_API_KEY` and nothing defers; fail-open cases; one DM/day; row deferred, not enqueued) |
-| `SDK_RECORD=1` recorder **with the `overage_*` fields included** — §9 P0 row, §2.8 metered-spend tripwires | 15 | `test_rate_limit_event_overage_fields_are_recorded` |
 | `model_usage` on utility calls lists only the requested model (P0 **exit** criterion) — §9 exit cell, §2.8 Claude row | 17 (+0 for the baseline) | `test_utility_model_violation_reports_extra_families_only`, `test_utility_call_model_usage_is_single_model`; `utility_model_usage` audit line after one routed job |
 | **`_check_idle_queue_review` + `_should_trigger_idle_review` + the `event_loop` wiring removed UNCONDITIONALLY** (all three live in `events.py`; `main.py` never referenced any of them) (the autonomous `server-patch` dispatcher — a containment item, **not** D1's displacement lever), with "no retrospective loop until P4" recorded and the interim named — §9 P0 row, §2.6 (c), §5.5, §10, round-3 #4 critical | 13 Step 6b (unconditional) | `tests/test_events.py::test_the_autonomous_server_patch_dispatcher_is_gone`, `…::test_alpha_drainer_survives_the_review_trigger_removal`, plus the same-commit sweep of `TestIdleQueueReview` and the breaker call-lists (without it `pytest` is red at collection); the interim sentence in the runner CHANGELOG + the P0 PR |
 | **dual-write**: runner keeps publishing `tasks:notify`/`jobs:done:<id>`; legacy consumer (`_done_listener`, `_job_to_chat`, `_task_notifier`) kept through P5; `NOTIFY_OUTBOX=0` is a real renderer-side switch — §9 kill-switch paragraph, §10 "Delete (P5 …)", exit criterion "with `NOTIFY_OUTBOX=0` a Telegram-launched job still DMs via the legacy path (test)" | 5, 6, 7 | `test_legacy_channel_published_in_both_modes`, `test_done_message_sends_legacy_when_outbox_off`, `test_done_message_is_dropped_when_outbox_on`, `test_task_notifier_and_listener_start_are_gated` |
@@ -11122,20 +10458,39 @@ Re-derived on 2026-09-27 from §12a **as round 2 left it** (round-2 #29 rewrote 
 | `AskUserQuestion` off the default list — §9 P0 row, §10 | 10 | `test_default_tools.py` |
 | Haiku swap "already shipped, above" — §9 "Shipped ahead of P0" (four edit sites: `llm_router.py:148`, `learning.py:258`, `skills/project-update-poll/SKILL.md:4`, `telegram_bot.py:132-133`), §11 Haiku row; test gate "registry-less Haiku swap smoke" | **0** (pre-P0 standalone patch; 11 is a pointer) | `test_utility_model.py`, `test_pure_functions.py`, `test_skill_contracts.py`; live smoke in Task 0 Step 4 |
 | **credential canaries as `scripts/credential-canary.sh` on a launchd timer using the SDK-bundled CLI from the runner venv** — "the executor seam is P3" (§9 P0 row as round 2 rewrote it; never the brew binary; the runner's own path with the runner env) — §9 P0 row, §0a last rows, §11 | 12 (+17 for the env) | `test_canary.py` (SDK-path tests, `test_canary_never_reads_the_setup_token`), `test_scripts_syntax.py` |
-| `SDK_RECORD=1` raw recorder writing to **`volumes/sdk_recordings/<id>.json`** (outside `volumes/audit_log/`, which three consumers glob with `*.jsonl`) and ≥ 20 recorded jobs across skill classes; **exit: the flag is unset afterwards** — §9 P0 row, §2.4, round-3 M8 | 15 + Owner actions (runbook §10) | `test_sdk_record.py` (redaction, ordering, never-raises, coverage, AST hook pin, `test_recordings_never_land_in_the_audit_dir`, `test_coverage_exit_is_not_ok_while_the_flag_is_still_on`) |
 | **`src/runner/pricing.py` as the single definition of `cost_usd_list`, with `jobs.sdk_cost_usd` stored beside it**; exit criterion "the two agree within 1 %, or the divergence is recorded with the rate the CLI uses" — §9 P0 row + exit cell, §2.8, round-3 #10 | 1 (the column), 2 (`result_columns`), 3 (the call), 16 (`price_usage`, `implied_cache_write_rate`, `render_sdk_reconcile`) | `test_pricing.py::TestSdkReconcile`; `test_result_capture.py::test_cost_usd_list_is_never_the_sdk_figure_by_default`; the `computed vs SDK` block at P0 exit |
 | the cost-reconcile script printing **both** windows, **the per-kind step**, **the weekly-allowance calibration from the `seven_day` utilization series** and **the lane-budget seed table the P2 reader consumes** — §9 P0 row, §2.8, round-3 #6/M27 | 16 | `test_pricing.py` (each cache-write bucket at its own rate; the real opus-5 job = **$3.49**; the 5-m arm flags the credits signature; two windows in one pass; `TestWeeklyAllowance` brackets ≈ $207–275 with marginal ≈ $155; the trailing-7-d × 1.2 lane seed; unpriced never dropped); `--windows 30,7 --db` at P0 exit; weekly `com.assistant.cost-reconcile` timer (installed with Task 12's) |
 | **one internally consistent per-model job-count set from a single run, `unpriced` reported not dropped** (§2.8 stopped restating the counts because round 2's split summed to 645 against its own 634) | 16 Step 5 | `test_unknown_model_is_reported_not_priced`; the pasted run in the P0 PR |
 | `DISABLE_ERROR_REPORTING=1`/`DISABLE_TELEMETRY=1` in the runner env — §9 P0 row, §2.4, §3 | 17 (+12 timer plists; runbook §9) | `test_claude_env.py`, `test_installer_timer_plists_carry_venv_env` |
-| the alembic-history guard **with its home named**: a **runner-startup check** against the live `alembic_version` (`possible_bad_rollback` → refuse to start) **plus a pure fixture test of the comparison function**, and still **no `server-deploy/SKILL.md` edit** — §9 P0 row, §9 rollback paragraph, round-3 m17 | 18 (Step 3b is the startup check; the `alembic current` script stays an owner-run diagnostic, runbook §11) | `test_migrations.py` layer 1c (manifest vs disk) **and layer 1d** (`migration_gap`, the startup function's source pins), inside the `pytest -q` gate `server-deploy` already runs |
+| the alembic-history guard **with its home named**: a **runner-startup check** against the live `alembic_version` (`possible_bad_rollback` → refuse to start) **plus a pure fixture test of the comparison function**, and still **no `server-deploy/SKILL.md` edit** — §9 P0 row, §9 rollback paragraph, round-3 m17 | 18 (Step 3b is the startup check; the `alembic current` script stays an owner-run diagnostic, runbook §10) | `test_migrations.py` layer 1c (manifest vs disk) **and layer 1d** (`migration_gap`, the startup function's source pins), inside the `pytest -q` gate `server-deploy` already runs |
 | ops debt: rclone→R2 off-site backup **with a 60-d retention rule** (`rclone delete --min-age 60d`; free ≤ 10 GB-month on a card-on-file account), `pg_dump atlas`, sealed `.env`/cloudflared copies, `pmset autorestart 1`, stale Ollama weights removed + `qwen3.5:4b`/`embeddinggemma` pulled (D12); exit criterion "restore drill passes" — §9 P0 row, §12a row 4, §12 D12 | 13 + Owner actions | `test_scripts_syntax.py` (backup/drill/runbook pins incl. `test_backup_has_retention_rule`); drill PASS |
-| P0 **entry**: the sign-off set (**D1 + D25 posture + D21**, §12a row 0); **`WEB_AUTH_TOKEN` set** (§12a row 6); `pmset` (row 5); **this re-cut merged** (spec Appendix B). R2 creds (row 4), the seal key (4b), the tier/credit/toggle confirmations (1, 2, 2b) and the trading tokens (6b) are P0-**exit** rows — round 3 fixed the entry cell, which had demanded R2 credentials against a row dated P0 exit | Owner actions (rows cite §12a 0, 1, 2, 2b, 4, 4b, 5, 6, 6b, 12, 23; row 3 is **P3**, not P0) | runbook §7 verification commands |
+| P0 **entry**: the entry set (**new spec D1 + D2 displacement + D3 posture**, §12a row 0; old D21 deleted with the cut); **`WEB_AUTH_TOKEN` set** (§12a row 6); `pmset` (row 5); **this re-cut merged** (spec Appendix B). R2 creds (row 4), the seal key (4b), the tier/credit/toggle confirmations (1, 2, 2b) and the trading tokens (6b) are P0-**exit** rows — round 3 fixed the entry cell, which had demanded R2 credentials against a row dated P0 exit | Owner actions (rows cite §12a 0, 1, 2, 2b, 4, 4b, 5, 6, 6b, 12, 23; row 3 — `claude setup-token` — is **new spec runbook row 7a, Phase 2**, not P0) | runbook §7 verification commands |
 | P0 exit: every completed job has tokens/cost/provider in Postgres; a scheduled failure DMs within 60 s; bot restart loses no DM — §9 P0 row | 3 (+1 backfill), 6+7, 7 | Task 7 Step 5 live checks |
 | Window figures labelled by source (Claude row: vendor only for transitions; everything else "inferred"/"estimated") — §2.8, review #4 | 7 Step 3b | `TestQuotaNoticeLabelsTheSource`, `TestPauseSource`, `TestSessionPassesVendorOnlyForRateLimitEvent` |
 | Keychain-primary auth; sealed setup-token only as a canary-triggered fallback; never in the plist; P0 exit test `plutil -p … \| grep -c CLAUDE_CODE_OAUTH_TOKEN` → 0 — §0a last rows, §3, §12a row 3 | 12, 17, 13 (runbook §7) + Owner actions | `test_canary_never_reads_the_setup_token`, `test_installer_never_exports_credentials`, runbook needles |
 | per-phase re-approval gate; D1 approves P0–P1 only; **the build ceiling is an absolute ≈ 28 M tokens ≈ $30/week on the `build` lane** (round 3 struck round 1's "≤ 15 % of the weekly window" — a percentage of the denominator §2.5 forbids as a seed, non-binding on the exempt `owner` lane); PR states expected token cost; rollback note with switch + merge SHA — §9 "Who executes", §9 rollback, §12 D1 | Global Constraints; 14 Step 5 | PR description checklist |
 | C14 audit kinds unchanged; `jobs.status` CHECK untouched; protected paths untouched; CHANGELOG per module; pure/fixture tests; lint gate — Global Constraints | every task | `test_migrations.py`, `test_doc_lint.py`, `scripts/lint_docs.py` |
 | P0 test gates, the spec's full list **as round 3 left it**: `test_result_capture` (fake `ResultMessage` → columns; **the 1-h cache-write rate is used when `ephemeral_1h_input_tokens > 0`**; **plus the `account_on_hold`/`oauth_revoked`/`billing_error` mapping and the `cost_usd_list` ↔ `sdk_cost_usd` reconcile**), `test_notify_outbox`, every `tasks:notify` kind has an outbox equivalent, registry-less Haiku swap smoke, **`test_startup_env`**, **`test_settings_auth_override`**, **`test_settings_no_hooks`**, **`test_audit_redactor`** (incl. the publish-key path and the PEM shape), **`test_protected_paths_hook`**, **`test_pricing`** pinned on the 1-h anchor (the §2.8 opus-5 ≈ $3.43 / fleet ≈ $0.59 pair, **never the retracted $0.71**), plist scan — §9 test-gate paragraph | 2 (incl. `test_ephemeral_1h_is_the_1h_arm…`, the `api_retry` mapping, the two cost-column cases), 5, 5 (`test_every_tasks_notify_type_has_an_outbox_kind`), 0, 17, 19 (both gates), 20, **13 Step 6c**, **16**, 17 (`test_installer_never_exports_credentials`) | as named |
+
+### New spec §9 Phase-1 scope cell → task (the authoritative row, 2026-10-05)
+
+The table above is keyed to the superseded P0 row and therefore cannot see what the new Phase-1 cell added or restated. This one can.
+
+| New spec Phase-1 scope item | Task(s) | Note |
+|---|---|---|
+| migration 007 (**minus `resolved_provider`/`executor`/`sensitivity`**, new spec §2.3) | 1 | `FORBIDDEN_007_COLUMNS` now asserts all three absent beside `priority` |
+| full `ResultMessage` capture + typed `terminal_reason` (regex kept as a belt) + the silent-empty-success rejection | 2, 3 | `TERMINAL_REASONS` carries 13 values, matching new spec §2.4 |
+| `src/notify/` outbox + persisted origin + card eligibility; ghost commands; `/clear` confirm; `AskUserQuestion` off the default list | 4, 5, 6, 7, 8, 9, 10, 13 | the three ghost commands; `/rate` leaves the help text |
+| credential canary on a launchd timer; the `os.environ` assertion; the settings-override refusal; the audit redactor | 12, 17, 19, 20 | the content-hash pin is deferred (new spec §14 item 10); the compensating control is D6's **first half** at Phase-1 entry |
+| `install-dev-hooks.sh` + `test_protected_paths_hook` | 13 Step 6c | Phase 1 checks the trailer's presence and shape only and says so; row resolution is Phase 2 (new spec §6) |
+| the idle auditor removed unconditionally | 13 Step 6b | re-grounded on new spec §4.3/§8, not on the deleted cross-vendor authorship rule |
+| `pricing.py` + `jobs.sdk_cost_usd` + the two-window reconcile script, **on a weekly `cost-reconcile` schedule row** | 16 | the schedule row itself is **not yet planned** — new spec §2.5 adds it; this plan ships the script and the seed table |
+| the alembic manifest + startup check | 18 | runbook §10 is the owner-run diagnostic |
+| trading items 1–2 | 21 + Owner actions | the two tokens are an owner row at P0 exit |
+| ops hygiene (R2 + 60-d rule, seal key, `pg_dump atlas`, sealed copies, restore drill, `pmset`, Ollama weights) | 13 + runbook §1–§6 | |
+| the Haiku swap ships ahead as a standalone patch | 0 | **not yet shipped**: all four sites were still on `claude-haiku-4-5-20251001` on 2026-10-05 |
+| ~~the escalation error-class gate~~ | **none** | the 2026-10-05 verification pass moved it to **Phase 4** in the spec, beside the `{model, effort}` escalation chain that defines it, precisely because no task here implements it and `main.py:704-853` appears nowhere in this plan |
+| Phase-1 **entry**: D1 + D2 + D3; **D6 first half merged**; `WEB_AUTH_TOKEN`; `pmset` | Owner actions | D6's first half (MISSION §M += the two tracked settings files + this guard's path list) is new at Phase-1 entry |
 
 ### Round 1 rows applied (spec review log, round 1 — 66 rows; these are the P0-relevant ones)
 
@@ -11144,9 +10499,8 @@ Re-derived on 2026-09-27 from §12a **as round 2 left it** (round-2 #29 rewrote 
 | 4 | Claude window figures never labelled vendor-sourced unless a vendor event carried them (`RateLimitEvent` is a transition signal, not a gauge) | Global Constraints "Window figures are labelled by source"; Task 7 Step 3b (`quota_paused_text`, `QuotaExhausted.source`, `quota:last_source`) |
 | 16 | The P0 plan "must be re-cut against the round-1 P0 row" | this re-cut: header note, Spec line, this section; Deferred table removed (every item now has a task) |
 | 17 | Cost anchor re-based on the prod 30-d ledger; reconcile script made a P0 deliverable; §13 restated from it | Task 16 (`pricing.py`, `scripts/cost-reconcile.py`, §2.8/§13 restatement step) |
-| 27 | `SDK_RECORD=1` raw recorder in P0; two-layer replay gate in P3 | Task 15; runbook §10; Owner actions |
 | 28 | `NOTIFY_OUTBOX=0` restored nothing if the legacy path was deleted → P0 dual-writes, legacy consumer stays through P5, P0 test | Global Constraints kill-switch bullet (reworded to cite §10); Tasks 5–7 (already dual-write; tests named above) |
-| 29 | Rollback rule rewritten (revert application code only; `downgrade -1` before removing a migration); alembic-history test in P0 | Global Constraints "Rollback rule"; Task 18; runbook §11 (**diagnostic only** after round-2 #8); Task 14 Step 5 rollback note |
+| 29 | Rollback rule rewritten (revert application code only; `downgrade -1` before removing a migration); alembic-history test in P0 | Global Constraints "Rollback rule"; Task 18; runbook §10 (**diagnostic only** after round-2 #8); Task 14 Step 5 rollback note |
 | 31 | Keychain primary; sealed setup-token via `options.env` on canary-triggered fallback only; explicit executor env; vendor keys in `Settings` only; Claude-subprocess env assertion | Global Constraints "Auth posture"; Task 17 (overlay + the startup assertion, widened to the full §2.4 set by round-2 #2); Task 12 (canary never reads the token); runbook §7 rewritten (the old "into the launchd env" option removed); Owner actions (§12a row 3 moved to **P3** by round-2 #28) |
 | 50 | Haiku 4.5 swap decoupled from spec approval; `project-update-poll` added; standalone `server-patch` ahead of P0 with four edit sites | Task 0 (new, executed first); Task 11 → pointer; Global Constraints "Pre-P0 standalone patch" |
 | 51 | Programme too large → D1 approves P0–P1 only; re-approval gate; per-phase window cap; "who executes" | header note; Global Constraints "Phase economics"; Owner actions first row; Task 14 Step 5 PR checklist |
@@ -11158,10 +10512,10 @@ Re-derived on 2026-09-27 from §12a **as round 2 left it** (round-2 #29 rewrote 
 | # | What the reviewed spec changed | Applied in this plan |
 |---|---|---|
 | 2 | `env=` is an overlay, not a replacement; isolation rests on a secret-free runner environment; the fail-closed startup assertion names `GEMINI_*\|CEREBRAS_*\|GROQ_*\|CODEX_*\|OPENROUTER_*\|OPENAI_*\|XAI_*\|*_API_KEY\|CLAUDE_CODE_OAUTH_TOKEN\|ANTHROPIC_*` | Task 17: `VENDOR_KEY_PREFIXES`/`SUFFIXES`/`EXACT` cover the whole set, **all fail-closed** (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_*`, `XAI_*`, any `*_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` included); the parametrized `test_startup_env`; Open question 8 closed; `PIPENV_DONT_LOAD_ENV=1` in `run.sh` so the P3 `.env` keys cannot trip a `pipenv`-launched service |
-| 3 | Setup-token fallback narrowed to owner-resumed jobs; **audit/stream redactor in `_handle_message` for `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_*`/vendor keys (P0)** | **Task 20** (new): `src/runner/secret_redact.py` wired into `_handle_message` on `text`, `thinking`, `tool_use.input` and `tool_result`; always on with `SDK_RECORD=0`; `sdk_record` re-exports the same `redact`; `test_audit_redactor.py`; Global Constraints bullet |
+| 3 | Setup-token fallback narrowed to owner-resumed jobs; **audit/stream redactor in `_handle_message` for `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_*`/vendor keys (P0)** | **Task 20** (new): `src/runner/secret_redact.py` wired into `_handle_message` on `text`, `thinking`, `tool_use.input` and `tool_result`; always on, with no switch; `test_audit_redactor.py`; Global Constraints bullet |
 | 4 | INV-3 guarded only Bash-side assignment; `setting_sources=["project"]` loads `<cwd>/.claude/settings*.json`, which outranks `/login` → **P0 pre-session refusal `provider_refused{settings_auth_override}`** | **Task 19** (new): `session.settings_auth_override()`, `ProviderRefused`, the call before `_build_options`, `provider_refused` terminal reason + audit kind, `test_settings_auth_override.py`, the C1 row in runner CONTEXT.md |
 | 6 | D10 reframed as a security prerequisite; **`WEB_AUTH_TOKEN` → a P0 runbook row with the "unset ⇒ open" note** | Owner actions: a **P0 entry** row for `WEB_AUTH_TOKEN` + the `ai login` Keychain item (§12a row 6) |
-| 8 | "Exactly two owner PRs" was false — P0's alembic check edited `server-deploy/SKILL.md`; **kept as a test only, no SKILL.md edit**; "Protected touches" column added to the §9 table (P0 = none) | Task 18 keeps `applied_history.txt` + the pytest assertions as the whole deliverable; `scripts/alembic-current-check.sh` is an **owner-run diagnostic**; runbook §11 rewritten; the Owner-actions row and the "Alignment" claim removed; script header comment corrected |
+| 8 | "Exactly two owner PRs" was false — P0's alembic check edited `server-deploy/SKILL.md`; **kept as a test only, no SKILL.md edit**; "Protected touches" column added to the §9 table (P0 = none) | Task 18 keeps `applied_history.txt` + the pytest assertions as the whole deliverable; `scripts/alembic-current-check.sh` is an **owner-run diagnostic**; runbook §10 rewritten; the Owner-actions row and the "Alignment" claim removed; script header comment corrected |
 | 18 | The budget model was seeded from a 30-d mean predating the alpha flywheel; anchor printed at **both** windows with the per-day series; **lane seed = trailing-7-d × 1.2, re-seeded weekly by the P0 reconcile script** | Task 16: `summarize_windows` + `--windows 30,7` by default, the per-kind step table, `lane_for`/`lane_seed`/`write_lane_seed` + `--seed-lane-budgets`, the weekly `com.assistant.cost-reconcile` timer; exit evidence cites both windows |
 | 19 | Cache writes priced from `usage.cache_creation.ephemeral_{1h,5m}` at the matching rate (`cache_write_1h/5m_tokens` columns); anchor **≈ $963** with the per-model split; medians opus-5 ≈ $3.43 / fleet ≈ $0.59; DoneCard example $3.49; `test_result_capture` 1-h case | Task 1 (the two columns + the TTL-aware backfill, `priority` dropped), Task 2 (`cache_write_1h_tokens`/`_5m_tokens` + the spec's named 1-h case), Task 3 (`result_columns`), Task 16 (`price_usage` per bucket, `--cache-write-ttl` deleted, figures re-pinned to $3.49/$963, the 5-m credits flag), Open question 7 closed |
 | 22 | The build programme's own window cost stated in tokens **and** dollars, repeated in each phase's PR template; D1 must name what build displaces | Global Constraints "Phase economics" (verbatim ≈ 28 M tokens/week ≈ $115/month for ~13 weeks, `purpose=build`); Task 14 Step 5's PR block filled in; Task 13 Step 6b executes the displacement if D1 chose it |
@@ -11173,7 +10527,7 @@ Re-derived on 2026-09-27 from §12a **as round 2 left it** (round-2 #29 rewrote 
 | 49 | Haiku→Sonnet is "**+≈ $8/month list-equivalent, 0 token change**", not "+8 M tokens"; **a P0 check that `model_usage` on utility calls lists only the requested model**; the side request ledgered `purpose=harness` if it persists | Global Constraints "Phase economics" and the PR note both corrected; Task 17 adds `utility_model_violation`/`log_utility_model_usage` + the `utility_model_usage` audit kind and its two tests; Task 0 Step 4 records the pre-swap baseline; P0 exit evidence line |
 | 50 | R2 labelled "free" with unbounded growth → **60-d retention rule in `backup.sh`**; row 4 notes free ≤ 10 GB-month + payment method | Task 13 Step 3: `rclone delete --min-age 60d` in the guarded rclone block + `find -mtime +60` locally, replacing the "No retention cap locally" comment; `test_backup_has_retention_rule`; runbook §3 step 5; Owner-actions row 4 |
 | 56 | `priority` had no consumer → **dropped from 007** (lanes replace it; `--priority` is not built) | Task 1: `priority` removed from `P0_JOB_COLUMNS`, the ORM block, the `sa.Column` list, and added to a `FORBIDDEN_007_COLUMNS` assertion so it cannot come back; the db CONTEXT.md line corrected |
-| 58 | `overage_status`/`overage_resets_at` recorded on `quota_snapshots` and in `SDK_RECORD`, the **primary** `possible_credit_overflow` trigger; **`cli_version` needed no subprocess** | Task 15: `test_rate_limit_event_overage_fields_are_recorded` + the Interfaces note on why `RateLimitEvent` is recorded at all; Task 3: `cli_version()` reads `claude_agent_sdk._cli_version.__cli_version__` (verified `2.1.139` in the pinned wheel), the subprocess + startup warm-up + their three tests deleted, Open question 6 closed |
+| 58 | `overage_status`/`overage_resets_at` recorded on `quota_snapshots`, the **primary** `possible_credit_overflow` trigger; **`cli_version` needed no subprocess** | `quota_snapshots` is migration 009 (new spec §2.3, Phase 3), so the `overage_*` half is no longer a P0 artefact — the recorder that pinned it here is gone with the 2026-10-05 cut; Task 3: `cli_version()` reads `claude_agent_sdk._cli_version.__cli_version__` (verified `2.1.139` in the pinned wheel), the subprocess + startup warm-up + their three tests deleted, Open question 6 closed |
 
 ### Round 3 rows applied (spec review log, round 3 — 14 verified findings #1–#14, majors M1–M50, minors m1–m19; **terminal, the spec is frozen after it**; applied to this plan 2026-09-27)
 
@@ -11183,13 +10537,12 @@ Round 3's own summary of this plan was that it "has been re-cut against round 1 
 |---|---|---|
 | #1 | The settings-file check must cover the whole **settings** channel — `hooks`/`permissions`/`mcpServers`/`enableAllProjectMcpServers`/`apiKeyHelper`/`env`/`ANTHROPIC_BASE_URL` — refusing `provider_refused{reason: settings_override}`, plus `test_settings_no_hooks` over the two **tracked** files | **Task 19** widened: `SETTINGS_OVERRIDE_KEYS` (the spec's seven), `SETTINGS_AUTH_KEYS` kept as the label on the audit event, the server root's own files allowed to carry `enabledPlugins`/`permissions` **per key, never per path**, `test_settings_no_hooks` in the deploy gate, and the content-**hash** pin stated as a P3 item because `restraints.py` is a P3 protected path |
 | #1 (cont.) | The startup assertion names **four Anthropic credentials, not `ANTHROPIC_*`** — "the P0 plan's narrower `VENDOR_KEY_PREFIXES` is the correct shape" | **Task 17**: the `ANTHROPIC_` prefix is gone; the four names are exact matches; two new assertions pin that `ANTHROPIC_MAX_SESSIONS=2` boots (it is the P2 plist knob a blanket prefix would have killed the fleet over). The spec's `*_TOKEN` glob is **not** adopted, with the reason written down (`TELEGRAM_BOT_TOKEN` and the two trading tokens are legitimate `Settings` names, and `pipenv run` copies `.env` in) |
-| #3 | `scripts/install-dev-hooks.sh` (protected-path guard keyed on `Approved-Protected-Path: ap-<id>`) + `test_protected_paths_hook` are **P0 scope**, because "protected path" has no mechanical enforcement in the dev repo | **Task 13 Step 6c** (new): the script with `install`/`check` modes, the MISSION §M list, idempotent re-arm that keeps the existing CHANGELOG hook, `tests/test_protected_paths_hook.py` as the named gate, a runbook §12 section, and the honest P0 limitation printed at runtime (`approvals` is migration 008/P1, so the trailer is checked for presence and shape, not resolved to a row) |
+| #3 | `scripts/install-dev-hooks.sh` (protected-path guard keyed on `Approved-Protected-Path: ap-<id>`) + `test_protected_paths_hook` are **P0 scope**, because "protected path" has no mechanical enforcement in the dev repo | **Task 13 Step 6c** (new): the script with `install`/`check` modes, the MISSION §M list, idempotent re-arm that keeps the existing CHANGELOG hook, `tests/test_protected_paths_hook.py` as the named gate, a runbook §11 section, and the honest P0 limitation printed at runtime (`approvals` is migration 008/P1, so the trailer is checked for presence and shape, not resolved to a row) |
 | #4 | `_check_idle_queue_review` + `_should_trigger_idle_review` + the `main` wiring are removed **unconditionally** — a containment item (§2.6 (c)), not D1's displacement lever — and "no retrospective loop until P4" must be recorded | **Task 13 Step 6b** rewritten from conditional to unconditional, deleting the predicate and the function (not just the call), with `test_the_autonomous_server_patch_dispatcher_is_gone`, the interim (weekly CostCard + owner-run `/task review-and-improve`) written into the CHANGELOG and the PR, and Global Constraints + the Owner-actions row corrected so D1 no longer gates it |
 | #6, M26 | The weekly denominator is **≈ $200/week `cost_usd_list`**, calibrated in dollars from the `seven_day` utilization series; the build ceiling is an **absolute ≈ 28 M tokens ≈ $30/week on a `build` lane**, never "15 % of the weekly window" | Global Constraints "Phase economics" and the PR note rewritten; **Task 16** gains `quota_readings`/`weekly_allowance`/`render_weekly_allowance`, printed on every run and pinned by `TestWeeklyAllowance` against §2.8's own arithmetic (0.25 → $69, 0.58 → $120 ⇒ ≈ $207–275, marginal ≈ $155) |
 | #7 | `ALPHA_DAILY_JOB_VALVE` gates the **idle drainer's `alpha-governor` enqueue** (≈ 2.3 M/job), not per-day `alpha-research` volume, so "12 → 6 ⇒ ≈ −40 M/day" is false; the real lever is a LOOP.md §7 proposal against alpha-lab `budget.yaml` | Every mention of the valve as a savings lever removed from Global Constraints, Task 13 and the PR template; the plan **does not touch the constant**; D1's displacement is restated as the `budget.yaml` proposal sized from the measured 47–86 M/day |
 | #10 | `cost_usd_list` has **one** definition — the runner's computation in `src/runner/pricing.py` — with the SDK's figure stored separately as **`jobs.sdk_cost_usd`**; P0 exit becomes "the two agree within 1 %, or the divergence is recorded with the rate the CLI uses" | **Task 1** adds the column; **Task 2**'s `result_columns` takes `cost_usd_list` as a keyword with **no default** (so no call site can fall back to the SDK figure again) and stores `capture.total_cost_usd` in `sdk_cost_usd`; **Task 3** calls `pricing.price_usage` and audits both; **Task 16** moves to execution position 5 and adds `implied_cache_write_rate` + `render_sdk_reconcile`, which names the CLI's implied cache-write rate when the two diverge; the exit evidence and the `--db` leg carry both columns |
 | #12 | The `provisioning_gap` saving is **unmeasured** until a real per-kind key list exists, because the two blocker keys are in no manifest | **Task 21**'s "Why this is P0" and the Owner-actions row say so; the ≈ −20 M/month is no longer quoted as booked |
-| M8 | `SDK_RECORD` output moves to **`volumes/sdk_recordings/<id>.json`** (three consumers glob `volumes/audit_log/*.jsonl`), with a deletion rule, a place in `backup.sh`, and a P0 exit test that the flag is **unset** after the ≥ 20 recordings | **Task 15**: `recordings_dir()`, `DIRNAME`/`SUFFIX`, `scan_recordings(out_dir, audit_dir)`, `coverage_report(..., flag_on=)` and a CLI that **exits non-zero while coverage is met and the flag is still on**; **Task 13 Step 3** sweeps the directory at **90 days** (past spec §9's P3 window — a 30-day sweep would have eaten the P0 deliverable before P3 could freeze it) or immediately once `tests/replay/` is non-empty, and keeps it out of the tarball; the runbook, TROUBLESHOOTING and the plan's old open question 9 updated (the 30-day gzip can no longer eat the P3 fixtures) |
 | m5–m8 | §6 "Credential canaries": the canary **did not pin settings scope**. It must build its options with `setting_sources=["project"]` exactly as the runner does, and run the §2.4 refusal over its own cwd **and** over `~/.claude/settings.json`/`settings.local.json` before pinging; a settings file carrying any auth or `hooks` key is itself a canary **FAIL** with `settings_override` — because a user-scope `apiKeyHelper`/`env.ANTHROPIC_BASE_URL` would otherwise let it report a green Keychain login on API-billed or redirected traffic, and D22 (§12a row 9) asks the owner to start editing that very file | **Task 12**: `canary_options` gains `setting_sources=["project"]`; new `settings_scopes()` + `settings_precheck()` run Task 19's refusal over both scopes **before** `run_ping` (a hit returns verdict `settings_override:<key>@<file>` at exit 1 and **skips the ping** — nothing to learn from a ping whose credential source is in doubt); user scope is stricter than project scope (no tracked-file allowance, and `USER_SETTINGS_REFUSED_KEYS = ("statusLine",)` on top, because a `statusLine` command runs on every session); `USER_SETTINGS_ALLOWED_KEYS` is **empty at P0** and becomes exactly `{statusLine}` at **P2** when §12a row 9 lands D22's feed. New cases `test_canary_fails_when_user_scope_settings_carry_an_auth_key`, `…_carry_hooks`, `test_status_line_is_refused_in_user_scope_at_p0`, `test_options_pin_the_runners_setting_sources`, `test_the_precheck_skips_the_ping_entirely`, `test_the_real_user_scope_is_clean_today` (verified 2026-09-27: `~/.claude/settings.json` holds only `autoMode`/`effortLevel`/`enabledPlugins`/`inputNeededNotifEnabled`/`model`/`skipWorkflowUsageWarning`/`tui` — nothing refused). Task 12's Step 0 and Consumes now name Task 19 |
 | M9 | The redactor's pattern set gains the **PEM shape** and the `publish-key` path (key material never matched `NAME=value`) | **Task 20**: `_PEM` + the un-armoured OpenSSH blob run **before** the line-oriented patterns, `PUBLISH_KEY_PATH`, and two tests (the path survives in the output — knowing which key was read is the finding) |
 | M16 | `terminal_reason` gains `account_on_hold`/`oauth_revoked`/`billing_error`, mapped from `system/api_retry`'s **`error` category**, not an HTTP status | **Task 2**: `TERMINAL_REASONS` + `TERMINAL_REASON_FOR_API_RETRY` (with `oauth_org_not_allowed → oauth_revoked` written down as one signal in two vocabularies), the category checked **before** the status, and eight new cases; **Task 3** collects the category at the head of the message loop, carries it on the capture, puts it in the raised `RuntimeError`, and refuses to treat an enforcement signal as `unrecognized_model` (escalating to another model against a suspended account would burn the ladder) |
@@ -11208,22 +10561,22 @@ Nothing from the spec's §9 P0 **scope** cell is deferred. What remains outside 
 - **Atlas's `manifest.yml` declaring `TRADIER_SANDBOX_TOKEN`/`FINNHUB_TOKEN` in `env_required`** — an atlas-repo change (LOOP.md §7 / `atlas-build` / an owner-dispatched atlas PR), never an INV-4 server patch (spec §8.3). Task 21 ships the mechanism; until that declaration lands the pre-check correctly defers nothing.
 - **`watch <job>` / `mute <job>`** — §4.2's last sentence puts them in P1 (`test_views`), not P0.
 - **`schedules.notify ∈ {never, failures, always}`** — migration 008, P1. P0 treats every schedule row as `failures`.
-- **The P2 consumers of what P0 writes**: `quota_snapshots.overage_*` (009), `provider_ledger`, `lanes.<lane>.weekly_budget`, the CostCard's bucket-size line, and the `ordinary_usage_exceeded` alarm keyed at **+25 % of the rolling-30-d `cost_usd_list` baseline P0 records** (round-3 M20 — the number is in the P0 exit-evidence block). P0 produces the inputs; P2 consumes them. **The lane-budget hand-off, in §9's own words (round-3 M27):** P0's script writes `volumes/telemetry/lane_budget_seed.json` and **prints** the seed table; **P2 reads `LANE_WEEKLY_BUDGET_JSON` from `Settings`**, which the owner seeds **by hand** from that printed table (the JSON file is the source they paste from, not a path P2 code reads). Stated this way because §9's P2 cell says `Settings`, and an earlier cut of this list said P2 reads the file directly — two different contracts for the same hand-off.
-- **`routing-policy.yml`** consumption of the lane seed — P3 (§2.5 is a P3 deliverable).
+- **The P2 consumers of what P0 writes**: `quota_snapshots.overage_*` (009), `call_ledger` (the old `provider_ledger`, renamed by the cut), `lanes.<lane>.weekly_budget`, the CostCard's bucket-size line, and the `ordinary_usage_exceeded` alarm keyed at **+25 % of the rolling-30-d `cost_usd_list` baseline P0 records** (round-3 M20 — the number is in the P0 exit-evidence block). P0 produces the inputs; P2 consumes them. **The lane-budget hand-off, in §9's own words (round-3 M27):** P0's script writes `volumes/telemetry/lane_budget_seed.json` and **prints** the seed table; **P2 reads `LANE_WEEKLY_BUDGET_JSON` from `Settings`**, which the owner seeds **by hand** from that printed table (the JSON file is the source they paste from, not a path P2 code reads). Stated this way because §9's P2 cell says `Settings`, and an earlier cut of this list said P2 reads the file directly — two different contracts for the same hand-off.
+- **`routing-policy.yml`** consumption of the lane seed — **deferred**, not phased (new spec §14 item 10: the multi-vendor chains, per-provider quota keys, breakers and failover). The lane seed's only consumer is `LANE_WEEKLY_BUDGET_JSON` in `Settings`.
 - **`claude setup-token`** — §12a row 3 is now "needed before **P3**"; P0 asks the owner for no token and no P0 code reads one.
-- **The `ScriptExecutor` `provisioning_gap` pre-check** and the migration of the credential canary and the settings check onto `ClaudeSdkExecutor` — all P3 by §9.
+- **The `ScriptExecutor` `provisioning_gap` pre-check** — new spec §9 Phase 4, replacing the Phase-1 shim this plan ships. The migration of the credential canary and the settings check onto an executor adapter is **deferred** (new spec §14 item 9): both stay on the runner's own session path.
 - **Open questions 1, 4 and 5** (the seven skills that declare `AskUserQuestion`; double DMs on an escalation L0→L1; where `queue_wait_ms` stops once P2 adds holds) remain owner questions. Questions 2, 3, 6, 7, 8 **and 9** are closed — 9 by the round-3 move of recordings out of `volumes/audit_log/`.
-- **The content-hash pin for the two tracked `.claude/settings*.json`** — spec §2.4 puts it in the protected `src/runner/restraints.py`, a P3 deliverable added by owner PR #1a. P0 ships the refusal, the per-key **provenance-keyed** allowance (canonical == server root + byte-identical file, so a workspace clone passes and a poisoned clone does not) and `test_settings_no_hooks` in the deploy gate; the residual (a settings file edited **directly on prod**) closes at P3.
-- **Flipping the project-canonical settings arm from observe to refuse** — **P1**, and deliberately not P0. Task 19's third belt audits + DMs instead of failing when a hosted project's **own tracked** settings file carries a code-channel key, because (a) the one such file today is `projects/baseball-bingo/.claude/settings.json` (`hooks`), present in dev and prod and cloned into every workspace, so fail-closing takes a live public service's whole job set down on merge day, and (b) Claude Code writes `permissions` into `<project>/.claude/settings.local.json` whenever a session approves a tool, in any project, which would fail honest jobs at random. What P0 ships instead: the audit event with `observed_only: true`, one DM per project per day, `test_project_settings_inventory` failing the gate if any *other* such file appears, and an Owner-actions row + runbook §13 asking the owner to retire bingo's hook through the bingo repo. Auth keys are **never** observed — they fail closed in every checkout — and so does any settings file that is not its canonical's own tracked copy.
+- **The content-hash pin for the two tracked `.claude/settings*.json`** — spec §2.4 put it in the protected `src/runner/restraints.py`, which the 2026-10-05 cut **defers** (new spec §14 item 10: the hash pin does not travel with that file). P0 ships the refusal, the per-key **provenance-keyed** allowance (canonical == server root + byte-identical file, so a workspace clone passes and a poisoned clone does not) and `test_settings_no_hooks` in the deploy gate; the residual (a settings file edited **directly on prod**) is closed instead by new spec D6's first half — the Phase-1 owner PR putting both files on MISSION §M behind the `commit-msg` guard (new spec §6).
+- **Flipping the project-canonical settings arm from observe to refuse** — **P1**, and deliberately not P0. Task 19's third belt audits + DMs instead of failing when a hosted project's **own tracked** settings file carries a code-channel key, because (a) the one such file today is `projects/baseball-bingo/.claude/settings.json` (`hooks`), present in dev and prod and cloned into every workspace, so fail-closing takes a live public service's whole job set down on merge day, and (b) Claude Code writes `permissions` into `<project>/.claude/settings.local.json` whenever a session approves a tool, in any project, which would fail honest jobs at random. What P0 ships instead: the audit event with `observed_only: true`, one DM per project per day, `test_project_settings_inventory` failing the gate if any *other* such file appears, and an Owner-actions row + runbook §12 asking the owner to retire bingo's hook through the bingo repo. Auth keys are **never** observed — they fail closed in every checkout — and so does any settings file that is not its canonical's own tracked copy.
 - **`notice(kind=possible_bad_rollback)` and `notice(kind=provider_enforcement)`** — the notices layer lands in P2. P0 refuses to start (alembic) and records the terminal reason (`account_on_hold`/`oauth_revoked`/`billing_error`); the whole-scheduler back-off and the ApprovalCard spec §2.4 pairs with them are P2.
 - **Resolving `Approved-Protected-Path: ap-<id>` against an `approvals` row** — `approvals` is migration 008 (P1). The P0 guard is fail-closed on a *missing* trailer and says out loud that it cannot resolve the id yet.
 - **The §14 Q2 answer changes nothing in P0** by design: the settings refusal ships whether or not the CLI honours project-scope auth keys, because `hooks`/`permissions`/`mcpServers` are honoured regardless. What the answer feeds is P2/P3's claim about the Claude lane's containment rating and D13's re-probe list.
 
-Placeholder scan: no "TBD/TODO/implement later/similar to Task N" in this document; every code step carries the code; every referenced function is defined in a task's Interfaces block. (Task 21's `TestSchedulerIntegration` bodies are `...` with the assertions spelled out in comments and the fixture style named — the only ellipses in the document, and they are test scaffolding whose contract is stated, not a deferred decision. Task 13 Step 6b's `test_alpha_drainer_survives_the_review_trigger_removal` carries one `...` of the same kind, with the tick it drives and the assertion named in the comment beside it.) Type consistency checked across all three re-cuts: `claude_subprocess_env()` (Task 17) ← Task 12 `canary_options` and Task 0's builders; `ResultCapture`/`served_model_violation` (Task 2) ← Task 12 `evaluate_ping`; `cache_write_1h_tokens`/`_5m_tokens` (Tasks 1, 2) ← Task 3's `result_columns` ← Task 16's `price_usage`; **`pricing.price_usage` (Task 16) ← Task 3's `run_session` → `result_columns(cost_usd_list=…)` (Task 2) → `jobs.cost_usd_list` (Task 1), with `capture.total_cost_usd` → `jobs.sdk_cost_usd` beside it and `job_completed.sdk_cost_usd` ← Task 16's `usd_sdk`**; **`TERMINAL_REASON_FOR_API_RETRY` (Task 2) ← Task 3's message loop and `terminal_reason_for_exception`**; `secret_redact.redact` (Task 20) ← Task 15's `sdk_record`; **`sdk_record.recordings_dir()` (Task 15) ← Task 13's `backup.sh` sweep and the runbook**; `SdkRecorder` hook ← Task 3's `_run_in_process` shape; `ProviderRefused` (Task 19) ← Task 2's `terminal_reason_for_exception`; **`SETTINGS_OVERRIDE_KEYS`/`SETTINGS_AUTH_KEYS` (Task 19) ← the `provider_refused` audit fields**; **`session.settings_override(cwd, canonical=)` + `SETTINGS_OVERRIDE_KEYS` (Task 19) ← Task 12's `canary.settings_precheck`** and ← Task 6's observe-arm DM; **`secret_redact.REDACTED`/`redact`/`redact_tree` (Task 20) ← Task 15's `sdk_record` re-export (no second pattern set)**; `build_ops_notice`/`enqueue_notice` (Tasks 5, 6) ← Task 21's deferral DM; `Manifest.env_required` (Task 21) ← the scheduler tick; `QuotaExhausted(source=)` ← Task 7's `pause_queue`; **`main.migration_gap` (Task 18) ← `tests/test_migrations.py` layer 1d**; `applied_history.txt` ← Task 1's 007.
+Placeholder scan: no "TBD/TODO/implement later/similar to Task N" in this document; every code step carries the code; every referenced function is defined in a task's Interfaces block. (Task 21's `TestSchedulerIntegration` bodies are `...` with the assertions spelled out in comments and the fixture style named — the only ellipses in the document, and they are test scaffolding whose contract is stated, not a deferred decision. Task 13 Step 6b's `test_alpha_drainer_survives_the_review_trigger_removal` carries one `...` of the same kind, with the tick it drives and the assertion named in the comment beside it.) Type consistency checked across all three re-cuts: `claude_subprocess_env()` (Task 17) ← Task 12 `canary_options` and Task 0's builders; `ResultCapture`/`served_model_violation` (Task 2) ← Task 12 `evaluate_ping`; `cache_write_1h_tokens`/`_5m_tokens` (Tasks 1, 2) ← Task 3's `result_columns` ← Task 16's `price_usage`; **`pricing.price_usage` (Task 16) ← Task 3's `run_session` → `result_columns(cost_usd_list=…)` (Task 2) → `jobs.cost_usd_list` (Task 1), with `capture.total_cost_usd` → `jobs.sdk_cost_usd` beside it and `job_completed.sdk_cost_usd` ← Task 16's `usd_sdk`**; **`TERMINAL_REASON_FOR_API_RETRY` (Task 2) ← Task 3's message loop and `terminal_reason_for_exception`**; `ProviderRefused` (Task 19) ← Task 2's `terminal_reason_for_exception`; **`SETTINGS_OVERRIDE_KEYS`/`SETTINGS_AUTH_KEYS` (Task 19) ← the `provider_refused` audit fields**; **`session.settings_override(cwd, canonical=)` + `SETTINGS_OVERRIDE_KEYS` (Task 19) ← Task 12's `canary.settings_precheck`** and ← Task 6's observe-arm DM; `build_ops_notice`/`enqueue_notice` (Tasks 5, 6) ← Task 21's deferral DM; `Manifest.env_required` (Task 21) ← the scheduler tick; `QuotaExhausted(source=)` ← Task 7's `pause_queue`; **`main.migration_gap` (Task 18) ← `tests/test_migrations.py` layer 1d**; `applied_history.txt` ← Task 1's 007.
 
 ---
 
-**Execution handoff.** Plan complete and saved to `docs/superpowers/plans/2026-09-25-multi-model-platform-p0.md`. Recommended execution: **subagent-driven**, in the Global Constraints execution order — **0** (own PR) → 1 → 18 → 2 → **16** → 3 → 19 → 20 → 15 → 17 → 4 → 5 → 6 → 21 → 7 → 8 → 9 → 10 → 12 → 13 → 14 = **21 executable tasks; Task 11 is a retired number, do not dispatch it**. (Task 16 moved ahead of Task 3 in the round-3 delta because `pricing.py` is the single definition of `cost_usd_list`; its Step 5b — the weekly timer — is deliberately deferred to Task 12, which owns the `install_timer` env block.) File order is not execution order: every heading carries an `**Execution position:**` line and Tasks 12, 15, 16, 17, 18, 19, 20 and 21 open with a Step 0 prerequisite probe. Each task gets its own test cycle; Tasks 5–7 share the `Notice`/renderer interfaces and a fresh reviewer per task catches a drifted signature before the bot task builds on it; Tasks 12 and 17 share `claude_subprocess_env()`; Tasks 15 and 20 share `secret_redact.redact`. Steps marked **host step** need launchd, a live SDK or the prod DB and cannot run in an isolated worktree — skip them there and confirm with the owner. A shipped mistake costs the owner missed DMs, a wrongly-failed job, a mispriced ledger, or a leaked credential in the durable trace.
+**Execution handoff.** Plan complete and saved to `docs/superpowers/plans/2026-09-25-multi-model-platform-p0.md`. Recommended execution: **subagent-driven**, in the Global Constraints execution order — **0** (own PR) → 1 → 18 → 2 → **16** → 3 → 19 → 20 → 17 → 4 → 5 → 6 → 21 → 7 → 8 → 9 → 10 → 12 → 13 → 14 = **20 executable tasks; Task 11 is a retired number and Task 15 was deleted by the 2026-10-05 cut — do not dispatch either**. (Task 16 moved ahead of Task 3 in the round-3 delta because `pricing.py` is the single definition of `cost_usd_list`; its Step 5b — the weekly timer — is deliberately deferred to Task 12, which owns the `install_timer` env block.) File order is not execution order: every heading carries an `**Execution position:**` line and Tasks 12, 16, 17, 18, 19, 20 and 21 open with a Step 0 prerequisite probe. Each task gets its own test cycle; Tasks 5–7 share the `Notice`/renderer interfaces and a fresh reviewer per task catches a drifted signature before the bot task builds on it; Tasks 12 and 17 share `claude_subprocess_env()`. Steps marked **host step** need launchd, a live SDK or the prod DB and cannot run in an isolated worktree — skip them there and confirm with the owner. A shipped mistake costs the owner missed DMs, a wrongly-failed job, a mispriced ledger, or a leaked credential in the durable trace.
 
 ---
 
@@ -11264,7 +10617,7 @@ Second verification pass, against the spec **as round 2 left it**. The 09-25 re-
 3. **Task 0's gates could not go green in this checkout.** The dev `.env` points `SERVER_ROOT` at the **production** tree, so `registry.list_all()` grades prod's skills: the moment Task 0 repoints `_MODEL_ALIASES`, both `test_skill_contracts` and the new `test_no_skill_frontmatter_on_haiku` go red until the deploy propagates, and CLAUDE.md push gate 1 forbids committing red. `test_no_skill_frontmatter_on_haiku` now monkeypatches `type(settings).skills_dir` at the repo's own tree (the `tests/test_registry_failclosed.py:23-27` precedent), and Steps 4/5 run `pipenv run env SERVER_ROOT="$PWD" pytest …` — verified to be the form that works, unlike `SERVER_ROOT=$PWD pipenv run`.
 4. **Two P0 deliverables had no task at all.** Added **Task 19** (the `<cwd>/.claude/settings*.json` auth-override refusal → `provider_refused{settings_auth_override}` in `run_session`, with the fixture-clone test the spec names as `test_settings_auth_override` and the C1 row) and **Task 20** (the always-on `src/runner/secret_redact.py` wired into `_handle_message`, with `test_audit_redactor`). Both are in §9's P0 scope cell and its test-gate list; the plan had zero occurrences of either name. Task 15's recorder is opt-in, so with the shipped `SDK_RECORD=0` nothing had been redacting the durable JSONL, the stream, `ai-mcp` reads or the learning extractor's input.
 5. **A third missing P0 deliverable: the trading blockers.** Added **Task 21** (the interim scheduler `provisioning_gap` pre-check — `Manifest.env_required` is read for the first time, `provisioning_gap`/`env_keys_present`, the `_tick_schedules` skip + `schedule_deferred` + one DM per row per UTC day, fail-open on everything else) and the Owner-actions row for `TRADIER_SANDBOX_TOKEN`/`FINNHUB_TOKEN` (§12a row 6b). **The live data was a trap**: atlas's manifest already declares `ANTHROPIC_API_KEY` in `env_required` and that key is absent from its `.env` **by design** (INV-3), so a naive pre-check would have deferred every atlas row on its first tick — hence `PROVISIONING_EXEMPT` and its named test.
-6. **The plan asked the owner to edit a protected path round 2 had cancelled.** Runbook §11 and an Owner-actions row told the owner to wire `scripts/alembic-current-check.sh` into `skills/server-deploy/SKILL.md`, one line below the plan's own claim that nothing edits a protected `SKILL.md`. Round-2 #8 resolved this as "P0 alembic check kept as a test only (no SKILL.md edit)" and §9's P0 "Protected touches" cell is **none**. The row is deleted, runbook §11 is now "a DIAGNOSTIC, not a deploy step", the script's header comment says so, and the Alignment row no longer claims `server-deploy` checks `alembic current`.
+6. **The plan asked the owner to edit a protected path round 2 had cancelled.** Runbook §10 — the alembic diagnostic, §11 before the 2026-10-05 cut renumbered it (§11 is now the dev-hooks install) — and an Owner-actions row told the owner to wire `scripts/alembic-current-check.sh` into `skills/server-deploy/SKILL.md`, one line below the plan's own claim that nothing edits a protected `SKILL.md`. Round-2 #8 resolved this as "P0 alembic check kept as a test only (no SKILL.md edit)" and §9's P0 "Protected touches" cell is **none**. The row is deleted, runbook §10 is now "a DIAGNOSTIC, not a deploy step", the script's header comment says so, and the Alignment row no longer claims `server-deploy` checks `alembic current`.
 
 ### Corrected — major
 
@@ -11316,7 +10669,7 @@ Third and final pass, against the spec **as round 3 froze it** (round 3 is termi
 
 1. **`jobs.sdk_cost_usd` + `cost_usd_list` from `pricing.py`** (Tasks 1, 2, 3, 16). The column is in `P0_JOB_COLUMNS`, the ORM block and the `sa.Column` list; `result_columns` takes `cost_usd_list` as a keyword with **no default** and puts `capture.total_cost_usd` in `sdk_cost_usd`; `run_session` calls `pricing.price_usage(capture.model_served or options.model, usage)`; `job_completed` carries both. **Ordering consequence, handled rather than hidden:** Task 16 moved to execution position 5 (before Task 3) because `pricing.py` is now a dependency of the session wiring, every downstream `**Execution position:**` line was renumbered, and Task 16's **Step 5b** (the launchd timer) is explicitly deferred to Task 12, which owns the `install_timer` env block and creates `tests/test_scripts_syntax.py`. The exit criterion is restated as "within 1 %, or the divergence is recorded with the rate the CLI uses", and `render_sdk_reconcile` + `implied_cache_write_rate` are what record it.
 2. **The settings check widened from auth keys to the settings channel** (Task 19): `SETTINGS_OVERRIDE_KEYS`, the reason string `settings_override`, `auth_key: bool` on the audit event so a committed hook reads differently from redirected billing, and `test_settings_no_hooks` over the two tracked files. **One honest deviation, argued in place:** spec §2.4 wants the exemption keyed on a **content hash pinned in `restraints.py`** — a P3 protected path. A hash literal in `session.py` would be editable by the same patch that edits the file it pins, so P0 exempts the server root's own files **per key** (`enabledPlugins`/`permissions` only, never `hooks`/`mcpServers`/`env`/`apiKeyHelper`) and pins their **contents in the deploy gate**; the residual (a file edited directly on prod) is written into Task 19 and the deferred list, and closes at P3 with `restraints.py`.
-3. **`scripts/install-dev-hooks.sh` + `test_protected_paths_hook`** (Task 13 Step 6c): `install`/`check` split so the decision is testable without git or a DB, the MISSION §M list with a test that it matches `MISSION.md`, an idempotent marker-delimited re-arm that **keeps the existing CHANGELOG hook**, and the P0 limitation printed at runtime (`approvals` is migration 008/P1 — the trailer is checked for presence and shape, not resolved to a row). Runbook §12 and an Owner-actions row carry the install.
+3. **`scripts/install-dev-hooks.sh` + `test_protected_paths_hook`** (Task 13 Step 6c): `install`/`check` split so the decision is testable without git or a DB, the MISSION §M list with a test that it matches `MISSION.md`, an idempotent marker-delimited re-arm that **keeps the existing CHANGELOG hook**, and the P0 limitation printed at runtime (`approvals` is migration 008/P1 — the trailer is checked for presence and shape, not resolved to a row). Runbook §11 — the dev-hooks install, §12 before the 2026-10-05 cut renumbered it (§12 is now the bingo-hook retirement) — and an Owner-actions row carry the install.
 4. **`account_on_hold`/`oauth_revoked`/`billing_error`** (Tasks 2, 3): mapped from the `system/api_retry` `error` **category**, checked **before** `api_error_status` (an account hold and an expired login are both 403), carried on the capture so `_run_in_process` keeps its 3-tuple, written into the raised `RuntimeError` so the failure branch classifies identically, and — a case the finding did not name — an enforcement category now **pre-empts the silent-empty-success check**, because escalating to another model against a suspended account burns the ladder for nothing.
 5. **`SDK_RECORD` → `volumes/sdk_recordings/<id>.json`** (Task 15, with Task 13 and the runbook): `recordings_dir()`, `scan_recordings(out_dir, audit_dir)` now that the two directories are separate, a `coverage` CLI that **exits non-zero while coverage is met and the flag is still on** (that is the "flag is unset afterwards" exit assertion, mechanised), a 90-day sweep in `backup.sh` (past spec §9's P3 window — the 30-day figure the first cut carried would have deleted the P0 deliverable before P3 could freeze it), short-circuited once `tests/replay/` is non-empty, with the directory kept out of the tarball, and the plan's old open question 9 closed because `rotate_audit_logs` can no longer reach the fixtures. The file keeps JSON-Lines content under the `.json` name the P0 row gives it; the spec's P3 cell calls the same file "the raw `.sdk.jsonl`", and the plan says so in one sentence rather than inventing a third name.
 6. **The §14 Q2 probe** (Task 19 Step 4b): `scripts/q2-settings-sandbox-probe.sh`, hand-run once per CLI pin, both halves safe by construction — a throwaway directory, and an `ANTHROPIC_BASE_URL` pointed at a **closed localhost port** so "honoured" shows up as a connection failure and nothing can be billed or leaked. Answers go to runner GOTCHAS and the P0 PR; the refusal ships either way.
@@ -11360,7 +10713,7 @@ Fourth pass, and the first whose findings were filed **against this plan** rathe
 ### Corrected — critical
 
 1. **Task 19's allowance was keyed on the cwd path, which refuses almost every write-capable job.** `own = _same_dir(cwd, settings.server_root)` is False inside a workspace clone, and the clone carries the canonical's two tracked settings files, one of which holds `permissions` — a key in `SETTINGS_OVERRIDE_KEYS`. With `isolation="workspace"` forced for every skill-less job and `server-patch`/`new-skill`/`atlas-build` on that tier, Task 19 as written would have refused the execution lane's own executors from its own commit onward. The allowance is now keyed on **provenance**: `settings_override(cwd, *, canonical)` allows a file only when the canonical is the server root **and** the file's bytes equal the canonical's copy (`_matches_canonical`). A clone is a copy, so it passes; a clone with a key added does not, so round-3 #1's actual threat is still refused. `run_session` passes the `canonical_cwd` it already holds. Three regression tests added (clone passes, clone+`hooks` refused, no canonical ⇒ no allowance), and the "second belt" paragraph now states the clone case it previously reasoned past.
-2. **The same refusal would have killed a live hosted service, with the blast radius uncomputed.** `projects/baseball-bingo/.claude/settings.json` carries `hooks`, is tracked in the bingo repo, exists in dev and prod, and is cloned into every workspace — so both tiers of every bingo job (update-poll, evaluate, deploy, event-triggered self-diagnose) would have failed `provider_refused{settings_override}` from the Task 19 commit. The forward risk is larger than that file: Claude Code writes `permissions` into `<project>/.claude/settings.local.json` whenever a session approves a tool, in any project. Task 19 Step 0 now **inventories `projects/*/.claude/settings*.json` in both checkouts** and records the result as a table; "the third belt" splits the arm — auth keys fail closed everywhere, any non-canonical settings file fails closed everywhere, and a code-channel key in a **project canonical's own tracked** file is audited (`observed_only: true`) and DM'd once per project per day while the job runs. `test_project_settings_inventory` fails the gate if a file this plan did not size appears; an Owner-actions row and runbook §13 ask the owner to retire bingo's hook through the bingo repo's own delivery path; flipping the arm to refuse is a P1 line in the deferred list. Chose observe over a blocking owner action because the alternative is a fail-closed refusal whose green test suite says nothing about the 41 schedules it would silence.
+2. **The same refusal would have killed a live hosted service, with the blast radius uncomputed.** `projects/baseball-bingo/.claude/settings.json` carries `hooks`, is tracked in the bingo repo, exists in dev and prod, and is cloned into every workspace — so both tiers of every bingo job (update-poll, evaluate, deploy, event-triggered self-diagnose) would have failed `provider_refused{settings_override}` from the Task 19 commit. The forward risk is larger than that file: Claude Code writes `permissions` into `<project>/.claude/settings.local.json` whenever a session approves a tool, in any project. Task 19 Step 0 now **inventories `projects/*/.claude/settings*.json` in both checkouts** and records the result as a table; "the third belt" splits the arm — auth keys fail closed everywhere, any non-canonical settings file fails closed everywhere, and a code-channel key in a **project canonical's own tracked** file is audited (`observed_only: true`) and DM'd once per project per day while the job runs. `test_project_settings_inventory` fails the gate if a file this plan did not size appears; an Owner-actions row and runbook §12 ask the owner to retire bingo's hook through the bingo repo's own delivery path; flipping the arm to refuse is a P1 line in the deferred list. Chose observe over a blocking owner action because the alternative is a fail-closed refusal whose green test suite says nothing about the 41 schedules it would silence.
 3. **Task 13 Step 6c installed the trailer check as a `pre-commit` hook reading `${1:-.git/COMMIT_EDITMSG}`.** git passes pre-commit **no** arguments and `.git/COMMIT_EDITMSG` there holds the **previous** commit's message (absent entirely for a first commit), so the guard refused approved commits and — worse — **allowed** unapproved ones whenever the preceding message carried the trailer, which is what a second protected-path commit in a row looks like. `test_protected_paths_hook` drives `check` with fixture files, so the gate stayed green while the shipped mechanism was broken. Now a **`commit-msg`** hook (the only hook git hands the message file as `$1`), path detection still `git diff --cached --name-only --diff-filter=ACMRD`, the CHANGELOG `pre-commit` hook untouched and named as a separate file, both re-armed idempotently by marker. New `test_install_targets_commit_msg_and_reads_the_message_argument` pins the hook path, pins `$1`, and asserts `COMMIT_EDITMSG` appears nowhere; `--amend`/`-F -` are covered by `commit-msg` and `--no-verify` is named as the god bypass.
 4. **Task 13 Step 6b targeted the wrong module and would have landed `pytest` red.** Item 2 sent the executor to `src/runner/main.py`, which contains none of the three symbols, and both new tests asserted against `main` — where `hasattr(main, "_check_idle_queue_alpha")` is False and `"_check_idle_queue_review" not in getsource(main)` passes vacuously, pinning nothing. Item 1 now names the `event_loop` try/except at `:494-498`, item 2 says in as many words that no `main.py` edit exists, and both tests are re-pointed at `src.runner.events` (`hasattr(events, "_check_idle_queue_alpha")`, `monkeypatch.setattr(events_mod, "enqueue_job", …)`, `getsource(events)`, plus an assertion that the alpha drainer is still wired). A new item 3 sweeps `tests/test_events.py` in the **same commit**: the module-level import removed, `TestIdleQueueReview` deleted, the `_check_idle_queue_review` monkeypatch and `fake_idle` dropped, the three breaker call-lists rewritten to `["idle_alpha"]` / `["skill", "project", "idle_alpha"]`, the class docstring corrected and the breaker test renamed. Step 7 now runs `tests/test_events.py` and the full `pytest -q`; Step 8's `git add` stages `events.py`, the two test files, the new guard script and a runner CHANGELOG entry (required by the pre-commit hook for a `src/` touch, and absent before). The P0 exit-evidence line no longer cites a `tests/test_idle_queue.py` that does not exist.
 5. **Task 20 Steps 4-6 acted on a module that does not exist yet.** Task 20 runs at position 8, Task 15 at 9, and Step 4 said "If Task 15 already landed (it does, in execution order it comes next …)" — self-contradictory, and three separate failures: `pytest tests/test_sdk_record.py` exits 4, `test_sdk_record_uses_the_shared_redactor` raises `ImportError`, and `git add src/runner/sdk_record.py tests/test_sdk_record.py` aborts with "pathspec did not match any files" and stages **nothing**, so the commit never happens. Step 4 is now an explicit "nothing to do here" that says why and forbids a stub; the pytest line, the `git add`, the `SYSTEM.md` anchor, the CHANGELOG entry and the gotcha all drop their `sdk_record` clauses; the `secret_redact` graph row's Used-by cell names only `runner.session`, and Task 15 appends itself.
@@ -11370,12 +10723,12 @@ Fourth pass, and the first whose findings were filed **against this plan** rathe
 6. **Task 15 defined a second redaction pattern set.** Its code block carried its own `_KEY_PATTERN`/`_PREFIX_PATTERNS`/`redact`/`_redact_tree` while its Step 0, Task 20's heading, the File-structure row and the type-consistency line all said it re-exports Task 20's — and the local copy lacked the PEM / un-armoured OpenSSH shapes and the `~/.config/ai-server/publish-key` path round-3 M9 added, so a `cat` of the P4 deploy key in any of the 48 unhooked skills would have landed verbatim in a durable `volumes/sdk_recordings/<id>.json`. The block is now `from src.runner.secret_redact import REDACTED, redact, redact_tree` at the top of the imports (the local `REDACTED` and the now-unused `import re` removed, `_redact_tree` → `redact_tree`), the Interfaces bullet points at `secret_redact` and states what the larger set buys, the graph row gains `runner.secret_redact`, and `test_sdk_record_uses_the_shared_redactor` + `test_the_private_key_shape_reaches_the_recorder` live here, with a source assertion that `re.compile` never appears in the module.
 7. **The recordings sweep would have deleted the P0 deliverable before P3 could use it.** `-mtime +30` runs from the moment Task 13 lands, but recordings are collected in P0 (spec §9 weeks 0-1) and frozen into `tests/replay/` at P3 (weeks 6-8) — two to four weeks after the sweep would have eaten them, with no re-recording available because the P0 exit criterion is that `SDK_RECORD` is unset. Raised to **`-mtime +90`**, with a second branch that deletes at any age once `tests/replay/` is non-empty (the fixtures then exist), both numbers and the branch pinned by `test_backup_has_retention_rule` (which also asserts `-mtime +30` is absent). Runbook §10, the TROUBLESHOOTING root cause, Task 15's test docstring, its CHANGELOG side-effects line and closed open question 9 all restated; the stale "recordings share the audit dir … after 30 days" docstring in Task 15's test file — a round-3 M8 leftover — corrected too.
 8. **Task 12 never applied round-3 m5–m8.** Spec §6 requires the canary to build its options with `setting_sources=["project"]` exactly as the runner does and to run the §2.4 refusal over its own cwd **and** over `~/.claude/settings*.json` before pinging, because a user-scope `apiKeyHelper`/`env.ANTHROPIC_BASE_URL` would let it report a green Keychain login on API-billed or redirected traffic — and D22 asks the owner to start editing that very file. The row was neither applied, nor recorded as satisfied, nor recorded as skipped. `canary_options` now pins `setting_sources=["project"]`; new `settings_scopes()`/`settings_precheck()` run Task 19's refusal over both scopes and return verdict `settings_override:<key>@<file>` at exit 1 **without pinging** (`main()` restructured around a `_finish` helper so the early return writes telemetry the same way); user scope is stricter — no tracked-file allowance and `USER_SETTINGS_REFUSED_KEYS = ("statusLine",)`, because a `statusLine` command runs on every session, which is why the finding's `{statusLine}` allowance is meaningful. `USER_SETTINGS_ALLOWED_KEYS` is empty at P0 and becomes exactly `{statusLine}` at P2 (§12a row 9). Six tests added, including `test_the_real_user_scope_is_clean_today` (green on this box today) and an autouse fixture that isolates the scopes so the existing `main()` cases stay decided by the ping. Step 0, Consumes, the graph row (`runner.session` added, function-level import and all) and the CHANGELOG updated.
-9. **`PROTECTED_PATTERNS` was two §M items short and its test was one-way.** MISSION §M has eight items; the list reached eight only by splitting item 8's three SKILL.md files, and it covered neither item 7 (`.context/org/ORG.md`'s safety principle) nor the code half of item 2 (the chat-ID/web-auth check, `src/gateway/web.py:49-63` — a path this plan's own Global Constraints already name as protected). `test_the_list_is_missions_list` only asserted `len == 8` and that each pattern appeared somewhere in MISSION.md, which passes with both gaps. Both paths added (ten patterns), the test made **two-way** with the required set spelled out, and the two non-path §M items (project/skill deletion; `TELEGRAM_ALLOWED_CHAT_IDS` as config, which lives in the guarded `.env`) listed as commented exceptions. One documented asymmetry: §M names the web-auth check by **description**, not by path, so direction 1 matches the phrase "chat-ID/web-auth checks"; spelling the path into `MISSION.md` is an owner edit of a protected file and is left to PR #1a rather than smuggled in here.
+9. **`PROTECTED_PATTERNS` was two §M items short and its test was one-way.** MISSION §M has eight items; the list reached eight only by splitting item 8's three SKILL.md files, and it covered neither item 7 (`.context/org/ORG.md`'s safety principle) nor the code half of item 2 (the chat-ID/web-auth check, `src/gateway/web.py:49-63` — a path this plan's own Global Constraints already name as protected). `test_the_list_is_missions_list` only asserted `len == 8` and that each pattern appeared somewhere in MISSION.md, which passes with both gaps. Both paths added (ten patterns), the test made **two-way** with the required set spelled out, and the two non-path §M items (project/skill deletion; `TELEGRAM_ALLOWED_CHAT_IDS` as config, which lives in the guarded `.env`) listed as commented exceptions. One documented asymmetry: §M names the web-auth check by **description**, not by path, so direction 1 matches the phrase "chat-ID/web-auth checks"; spelling the path into `MISSION.md` is an owner edit of a protected file and is left to the owner's protected-path PR (new spec **D6**) rather than smuggled in here.
 10. **Task 16's SYSTEM.md anchors do not exist at its execution position.** Round 3 moved Task 16 to position 5, but Step 6 still said "insert after the `src/runner/sdk_record.py` row, and a script row after the `scripts/restore-drill.sh` row" — rows added by Task 15 (position 9) and Task 13 (position 20); `.context/SYSTEM.md` has neither today. Re-anchored to rows that exist at position 5 (`src/runner/result_capture.py`, Task 2; the last existing `scripts/` row) with the note that table position is not lint-checked.
 
 ### Corrected — minor
 
-11. **`TRACKED_SETTINGS_DIGESTS` survived in three places** (File structure, Task 19 Files, the Step-1 test docstring) although the round-3 pass explicitly skipped digest literals and Task 19 builds `TRACKED_SETTINGS_ALLOWED_KEYS`/`TRACKED_SETTINGS_FILES`. All three now carry the per-key/provenance wording with the one-line reason (the hash lives in P3's `restraints.py`).
+11. **`TRACKED_SETTINGS_DIGESTS` survived in three places** (File structure, Task 19 Files, the Step-1 test docstring) although the round-3 pass explicitly skipped digest literals and Task 19 builds `TRACKED_SETTINGS_ALLOWED_KEYS`/`TRACKED_SETTINGS_FILES`. All three now carry the per-key/provenance wording with the one-line reason (the hash lived in `restraints.py`, deferred by the 2026-10-05 cut — new spec §14 item 10).
 12. **Task 14 Step 2's verify block documented the superseded recorder path** (`<id>.sdk.jsonl`) — the exact path round-3 M8 moved away from, and the whole point of the move is that nothing globs it as `*.jsonl`. Corrected to `volumes/sdk_recordings/<id>.json` (JSON Lines, outside `volumes/audit_log/`) with `runner.secret_redact` in its Depends-on, matching Task 15's own insert.
 13. **Task 16's runner CHANGELOG claimed a launchd timer the commit does not create.** Step 5b is deferred to Task 12, three lines below the same entry. The install-launchd/timer claims moved out of Task 16's entry (with "installed with Task 12" stated) and into Task 12's hosting CHANGELOG entry, which is the commit that creates it.
 14. **Task 17 claimed "six sites" where the tree has five** and the test pins five. Restated as "five construction sites today, plus the canary's in Task 12", with the five named.
@@ -11384,11 +10737,37 @@ Fourth pass, and the first whose findings were filed **against this plan** rathe
 
 ### Where findings conflicted with keeping the fleet alive, the fleet won — and it is written down
 
-- The bingo hook could have been handled by a blocking owner action plus a test pinning an empty inventory (the finding's option (a)). Rejected in favour of option (b) with a named exit, because an empty-inventory test goes red at random the moment Claude Code writes `permissions` into any project's `settings.local.json`, and because a fail-closed refusal whose unit tests are all green tells you nothing about the 41 schedules it silences. The residual is in Task 19, the Owner-actions table, runbook §13 and the deferred list — four places, none of them a placeholder.
+- The bingo hook could have been handled by a blocking owner action plus a test pinning an empty inventory (the finding's option (a)). Rejected in favour of option (b) with a named exit, because an empty-inventory test goes red at random the moment Claude Code writes `permissions` into any project's `settings.local.json`, and because a fail-closed refusal whose unit tests are all green tells you nothing about the 41 schedules it silences. The residual is in Task 19, the Owner-actions table, runbook §12 and the deferred list — four places, none of them a placeholder.
 - The observe arm's DM is **not** in Task 19's commit. `src/notify/` does not exist at position 7, and importing it there would make the task undeployable alone; the audit event plus the `WARNING` is what P0 ships at that commit, and Task 6 (position 13, where the runner first reaches the outbox) adds the once-per-project-per-day `ops_alert` with the same Redis claim shape Task 21 uses. Task 6's Files, Interfaces, test list, SYSTEM.md step, CHANGELOG and `git add` all carry it, so it cannot be dropped.
 - `settings_override` keeps its 2-tuple return. A 3-tuple carrying the mode would have been tidier but would have invalidated ten existing assertions in Task 19's own test file for no behavioural gain; the mode is a second pure predicate (`settings_override_observe_only`) instead.
 
-Not changed: **no file other than this plan was touched.** No task edits a protected path — `src/runner/guards.py`, `scripts/lint_docs.py`, `.env`, `.context/PROTOCOL.md`, `MISSION.md`, `skills/{server-patch,server-deploy,new-skill}/SKILL.md`, `TELEGRAM_ALLOWED_CHAT_IDS`, `web.py:49-63` — and the two items that would have needed one are owner actions: spelling the web-auth path into `MISSION.md` (PR #1a) and retiring bingo's hook through the bingo repo. `.context/org/ORG.md` and `src/gateway/web.py` are added to the guard's *pattern list*, which protects them; nothing edits them. Migration 007 stays additive, nullable-only and chained from 006; `ck_jobs_status_valid` is untouched; no audit kind is renamed (the kinds added across all passes remain `notice_queued`, `notice_sent`, `notice_failed`, `job_result_rejected`, `api_retry`, `provider_refused`, `schedule_deferred`, `utility_model_usage`, and `provider_refused` gains only new fields); every test stays pure/fixture style (the only subprocess calls are `bash` on repo scripts, the pattern `tests/test_scripts_syntax.py` already uses); `python scripts/lint_docs.py` is unaffected; and every commit in the plan remains deployable on its own — which is precisely what findings 4 and 5 above were about.
+Not changed: **no file other than this plan was touched.** No task edits a protected path — `src/runner/guards.py`, `scripts/lint_docs.py`, `.env`, `.context/PROTOCOL.md`, `MISSION.md`, `skills/{server-patch,server-deploy,new-skill}/SKILL.md`, `TELEGRAM_ALLOWED_CHAT_IDS`, `web.py:49-63` — and the two items that would have needed one are owner actions: spelling the web-auth path into `MISSION.md` (new spec **D6**) and retiring bingo's hook through the bingo repo (runbook §12). `.context/org/ORG.md` and `src/gateway/web.py` are added to the guard's *pattern list*, which protects them; nothing edits them. Migration 007 stays additive, nullable-only and chained from 006; `ck_jobs_status_valid` is untouched; no audit kind is renamed (the kinds added across all passes remain `notice_queued`, `notice_sent`, `notice_failed`, `job_result_rejected`, `api_retry`, `provider_refused`, `schedule_deferred`, `utility_model_usage`, and `provider_refused` gains only new fields); every test stays pure/fixture style (the only subprocess calls are `bash` on repo scripts, the pattern `tests/test_scripts_syntax.py` already uses); `python scripts/lint_docs.py` is unaffected; and every commit in the plan remains deployable on its own — which is precisely what findings 4 and 5 above were about.
+
+## Verification log (2026-10-05 — the spec cut)
+
+The spec this plan executes was cut down to the project the owner chose: `docs/superpowers/specs/2026-10-05-observability-and-trading-unblock-design.md` supersedes `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md` in scope (the owner took that spec's D0 branch — keep the money rules, delete the cross-vendor machinery rather than phase it). Applied in place; no file outside this plan, the two doc indexes and the superseded spec's own banner was touched.
+
+- **Re-pointed.** The Spec line and a new header note now cite the new spec's **§9 Phase-1 row** ("Observability and hygiene") with its Entry/Exit/Switch cells and §9's rollback and kill-switch paragraphs. The superseded spec's §9 **P0** row is named as the origin, its rounds 1–3 stay folded in unchanged, and every in-body `spec §…` citation still resolves against that document, which the new spec keeps as the reference for them (its §15: table shapes, column names, event kinds, check names, card renderings, phase mechanics and every `file:line` citation kept verbatim).
+- **One task deleted — the `SDK_RECORD=1` raw recorder (old Task 15).** It existed only to collect the ≥ 20 fixtures for the audit-replay gate, and the cut deletes both: new spec §10's last row ("the `SDK_RECORD` raw recorder (it existed only to collect executor-replay fixtures)") and §14 item 9 (the deferred executor seam). Removed with it: the File-structure rows for `src/runner/sdk_record.py` and `tests/test_sdk_record.py`; the Global Constraints "Raw SDK recorder" bullet; Review Focus items 6 and 7 (the three that follow renumbered 8/9/10 → 6/7/8, and Task 12's in-code reference re-pointed); the `backup.sh` recordings sweep (Task 13 Step 3) with the recordings assertions in both copies of `test_backup_has_retention_rule` and the `SDK_RECORD=1` needle in `test_runbook_exists`; owner-runbook section 10, with the remaining sections renumbered 11→10 (12→11 and 13→12 were *claimed* in that pass but neither section was written and several references were missed — both are written and every reference re-pointed in the 2026-10-05 verification-pass entry below); Task 20's Step 4 placeholder (its later steps renumbered 5/6 → 4/5) and its delegation prose; the `SDK_RECORD` symptom section and the module's CONTEXT/SYSTEM rows in Task 14; `pricing.SDK_RECORD_SUFFIX` and the audit-dir skip it fed in Task 16; the two P0 exit-evidence lines; the Owner-actions row; and the alignment rows for round-1 #27, round-3 M8, the §9 "recorder with the `overage_*` fields" requirement and the recorder half of round-2 #58 (the `overage_*` signal now first lands in `quota_snapshots`, migration 009, new spec §2.3).
+- **The second item the new spec's §10 names has no counterpart here.** The `--provider` leg of the reconcile script was never written into this plan — `--provider` appears nowhere in it and Task 16's script has no provider dimension — so the cut removes one task from this document, not two, and the new spec's "the other 20 tasks stand as written" is exactly what is left.
+- **Renumbered, and only that.** Task numbers are stable by the plan's own rule, so nothing but the `**Execution position:** N of M` lines and the previous/next chain moved: `of 21` → `of 20` throughout, Task 20's next and Task 17's previous are now each other, and positions 9–20 shifted down one. The execution order is **0** (own PR) **→ 1 → 18 → 2 → 16 → 3 → 19 → 20 → 17 → 4 → 5 → 6 → 21 → 7 → 8 → 9 → 10 → 12 → 13 → 14 = 20 executable tasks**; Task 11 remains a retired number and Task 15 is now a deleted one — dispatch neither.
+- **No other task served deleted scope.** Checked against the deleted machinery by name — `ExecSpec`, the executor seam, the replay gate, grading/grader/critic, redact-for-vendor, provider chains, qualification — and every surviving task's deliverable is named in the new spec's Phase-1 scope cell (migration 007, the capture and typed terminal reasons, the outbox and origin, the Telegram hygiene fixes, the settings-override refusal, the always-on redactor, the provisioning-gap shim, the canary, `pricing.py` + the two-window reconcile, the telemetry-off env and startup assertion, the alembic manifest, the ops hygiene runbook, the docs). Only prose was corrected where a kept task named a deferred thing as coming work: `_handle_message` stays the normaliser of record (the seam that would have moved the redactor behind `executors/base.py` is deferred), the credential canary is the stand-in for the runner's own session path rather than for a future `ClaudeSdkExecutor`, `provider_ledger` is renamed `call_ledger`, `routing-policy.yml`'s consumption of the lane seed is deferred rather than phased, the `ScriptExecutor` `provisioning_gap` check is Phase 4, and the sealed `setup-token` is "not at P0" without naming a phase that no longer exists.
+- **Checked after the edit:** the 20 execution positions are complete and unique (1–20) and the previous/next chain closes; `python scripts/lint_docs.py` → `All clean!`; the 16 fenced code blocks inside the deleted task were the only fences removed, so every surviving block is still balanced. Files touched by the cut: this plan, the superseded spec's banner, `.context/INDEX.md` and `docs/README.md` — no `src/`, no skill, no protected path.
+- **Not changed:** every code block, test name, column name and `file:line` citation in the 20 surviving tasks; the P0 scope, exit criteria and owner actions that the new spec's Phase-1 row keeps; and the Verification- and Re-cut-log entries dated 2026-09-25 and 2026-09-27, which stay as the history of what was done then and therefore still mention Task 15 as it existed.
+
+## Verification log (2026-10-05b — adversarial verification of the cut)
+
+An adversarial review of the cut spec, this plan and the two registry rows returned 47 findings (8 critical, 21 major, 18 minor). All were applied. What changed **here** (the spec's own changes are in its §15 provenance note):
+
+- **Deleted data model still being built (critical).** Migration 007, `src/models.py`, `result_capture.result_columns()`, the `_BACKFILL_PROVIDER` UPDATE, its `op.execute` call, the migration docstring, the psql verification one-liner, the `run_session` `resolved_*` UPDATE, the Task 2/3 fixtures, the CHANGELOG side-effects line and Task 14's db `CONTEXT.md` row all created or wrote `resolved_provider` / `executor` / `sensitivity`. The new spec's §2.3 row 007 lists none of the three — they are the deleted vendor/executor dimensions (new spec §14 items 1/8/9/10) and item 11. All three are **dropped** and added to `FORBIDDEN_007_COLUMNS` beside `priority`; the column count went 22 → **19**; `model_served` + `cli_version` are the served-identity columns that remain. The 2026-10-05 cut log's "No other task served deleted scope" was checked by mechanism name, not by column name — that is the gap this closes.
+- **The runbook promised two sections it never wrote (critical).** Step 6's heredoc now carries **§11 "Install the dev protected-path guard"** (from Step 6c) and **§12 "Retire bingo's PostToolUse hook — through the bingo repo"** (Task 19's third belt). Every `runbook §N` reference is re-pointed once: the alembic diagnostic → **§10** (3 sites), the dev-hooks install → **§11** (2 sites), the bingo exit → **§12** (7 sites), and the runbook's own time budget reads "§9–§12 ≈ 35 min", total ≈ 1.8 h. The earlier claim that every reference had been re-pointed is narrowed to what it actually did.
+- **Deleted decisions on the owner's critical path (critical).** The P0-entry Owner-actions row and its alignment twin asked the owner to settle **D21** (cross-vendor graders/critics — deleted, new spec §14 items 6/14) as a 45-minute gate before any Phase-1 work. Both now read the new spec's entry set: **D1 + D2 displacement + D3 posture**. The header gained a D-number map (old D1→D1, D25→D3, D3/D4→D4, D12→D5, D2→D6, D10→D7, D22→D8; everything else deleted or deferred, D21 and D13 included), a **P6 → deferred** clause, and a one-line disambiguation of old §14 ("Open questions", the Q2 probe) from **new spec §14** ("Deferred").
+- **The sealed `setup-token` had no phase (critical).** "Needed before P3 / the executor seam" is unphased under the header's own rule, so the token would never be minted and the T−30 d alarm could never fire. Both sites now point at the new spec's **§12 runbook row 7a, Phase 2, ~10 min**, with the mint date recorded in GOTCHAS as what the alarm keys off.
+- **Deleted artefacts named inside shipped code and docs (major).** `pricing.lane_for`/`lane_seed` docstrings, four prose sites and Task 16's verification step promised `routing-policy.yml` as the lane seed's future consumer — deferred (new spec §14 item 10); they now say the seed's only consumer is `LANE_WEEKLY_BUDGET_JSON` in `Settings` (Phase 3). The owner-facing billing rows promised `providers.yml` — replaced with "recorded in runner GOTCHAS with the date (new spec D4); the tripwires key on `billing_error`, then `overage_status`, then the 5-m cache-write signature". The shipped TROUBLESHOOTING line no longer tells a future session to clear the deleted replay gate "(spec D13)", the `session.py` comment drops "before the D13 bump", and the shipped error string says "(new spec D4)" rather than "(D3)", which now means the spend posture.
+- **Task 19's unbuilt half (minor) and its rationale (major).** `restraints.py`, the content-hash pin and "owner PR #1a" are replaced throughout by: provenance-to-canonical is the whole mechanism (new spec §6), the hash pin is deferred with `restraints.py` (new spec §14 item 10), and the compensating owner PR is **new spec D6's first half at Phase-1 entry**. Step 6b's justification for an irreversible removal is re-grounded on new spec §4.3 (the autonomous `server-patch` dispatcher) and §8 (≈ −30 M tokens ≈ −$15/month) instead of the deleted cross-vendor authorship rule, and it now states the `_check_idle_queue_alpha` test requirement explicitly.
+- **The alignment section was proving coverage of the wrong document (major).** Retitled "Alignment with the superseded spec's P0 row (traceability for the three applied review rounds)", with "the authoritative P0 scope" corrected to "the P0 scope this plan was cut from", and a second short table added: **new spec §9 Phase-1 scope cell → task**. That table is what surfaced the two gaps the old one structurally could not — the Haiku swap is **not** shipped (all four sites verified still on `claude-haiku-4-5-20251001` on 2026-10-05) and **no task implements the escalation error-class gate** (`main.py:704-853` appears nowhere here), which the spec therefore moved to Phase 4 beside the `{model, effort}` chain that defines it.
+- **Smaller corrections.** "(deferred)" marks the two `ai-mcp` consumer mentions; the quarterly attestation card is named as gone (the new spec drops `attestation` from `approvals.kind`), so the GOTCHAS note is the record; the reconcile exit gate cites **≈ $960/month** (the document of record) with "its per-model rows sum to $963" rather than naming a figure the spec does not contain; the header states that this plan was **re-pointed, not re-cut** at ≈10,700 lines, a known debt.
+- **Not changed:** every surviving task's code blocks, test names and `file:line` citations apart from the column drops named above; the execution order (still 20 tasks, 0→1→18→2→16→3→19→20→17→4→5→6→21→7→8→9→10→12→13→14); no protected path (`guards.py`, `lint_docs.py`, `MISSION.md`, `.env`, `PROTOCOL.md`, the three SKILL.md files) — the two findings whose fixes would have needed one are owner actions in the new spec's §12 (D6's two halves); the 2026-09-25 and 2026-09-27 logs, which stay as the history of what was done then. `python scripts/lint_docs.py` → `All clean!`.
 
 ## Re-cut log (2026-09-25, against the reviewed spec — round 1)
 
