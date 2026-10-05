@@ -1,3 +1,26 @@
+## 2026-10-05 — GOTCHAS: 3 runtime learnings from evening scout run (job c515b971)
+
+**Agent task**: docs append — record three GOTCHAS entries the read-only
+  evening scout session (job c515b971) could not write itself (INV-20)
+**Files changed**:
+- `skills/alpha-scout/GOTCHAS.md` — three entries inserted before the
+  F-08 scope entry: (1) Grep's `glob=` filter has the SAME single-`*`
+  directory-wildcard blind spot as Glob's pattern — `glob="*/state.json"`
+  returns zero matches even when 14 files match; use absolute `**` Glob
+  + per-file Reads; (2) F-04/F-06/F-07 are virgin families never filed
+  into — generative ground when mining existing families runs dry (with
+  F-06's discharge criteria referenced); (3) F-08 NAV source working
+  endpoints proved by A-0013 cycle-1 (keyless SSGA 6c-11 navhist/pdhist
+  xlsx URLs confirmed).
+
+**Why**: The Grep `glob=` false-zero is a third variant of the false-zero
+capacity-check failure class the file already documents twice; all three
+must be on record so future runs choose the absolute-`**`-Glob + Reads
+pattern consistently. The virgin-families entry prevents needless lesson
+sweeps when F-01/F-05/F-08 run dry. The F-08 NAV endpoint entry avoids
+future runs inventing an unverified source when a proved one is on record.
+**Side effects**: None — documentation-only change.
+
 ## 2026-10-04 — GOTCHAS: corrected Glob remedy + 4 new runtime learnings
 
 **Agent task**: correct the 'capacity-check Glob false-zero' gotcha (the

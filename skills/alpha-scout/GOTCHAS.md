@@ -68,6 +68,34 @@
   any consensus-surprise formulation is BLOCKED-ON-DATA and must not
   be filed; the consensus-FREE (EDGAR 8-K Item 2.02 abnormal-return)
   formulation is the only F-03 route that clears the free-data gate.
+- 2026-10-05 Grep's `glob=` filter has the SAME directory-wildcard blind
+  spot as Glob's pattern (companion to the two entries above):
+  `Grep(pattern='"stage"', path="<atlas>/alpha-lab/ideas",
+        glob="*/state.json")` returns **No matches found** even though all
+  14 files contain the string. A single `*` crossing a directory level
+  matches nothing in this harness, in Grep's `glob=` just as in Glob's
+  pattern. (Grep's `path=` DOES work, unlike Glob's — that part of the
+  2026-10-04 entry still holds.) So the capacity check cannot be done as
+  one Grep: use the absolute `**` Glob to enumerate the A-#### dirs, then
+  Read each `state.json` individually (14 parallel Reads is cheap). A
+  silent zero here is the false-zero failure mode again, one layer down.
+- 2026-10-05 three of the eight open families have NEVER had an idea
+  filed: **F-04 cross-asset-lead-lag, F-06 liquidity-mean-reversion,
+  F-07 momentum-decay-structure**. All 14 ideas to date sit in five
+  families (F-01 x2, F-02 x1, F-03 x2, F-05 x4, F-08 x2, plus the two
+  pre-family microstructure kills and A-0001). When mining comes up dry,
+  the virgin families are generative ground that costs no lesson check
+  beyond the family's own stated caveat — and F-06's caveat is concrete
+  and discharge-able (differentiate from the RSI-2-class quant-desk
+  rejects R-0003/R-0007/R-0011; R-0011 is `rsi2_meanrev` on SPY/QQQ/IWM,
+  REJECT on worst-fold Sharpe -0.0919, at `quant/reports/R-0011/`).
+- 2026-10-05 F-08 NAV-source, the working endpoints (supplements the
+  scope entry below): A-0013 cycle-1 PROVED the keyless SSGA 6c-11 files
+  fetch for SPY/XLF/FLRN —
+  `https://www.ssga.com/library-content/products/fund-data/etfs/us/navhist-us-en-<ticker>.xlsx`
+  and `.../pdhist-us-en-<ticker>.xlsx` (legal basis: Rule 6c-11(c)(1)).
+  Cite these rather than inventing a NAV provider; the provenance is in
+  `ideas/A-0013/research/probe_data.json`.
 - 2026-10-04 F-08 NAV-source scope: family F-08
   (etf-primary-market-frictions) requires that every candidate names the
   *exact free NAV source* in the idea_text, or triage blocks the card as
