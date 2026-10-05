@@ -9,7 +9,10 @@
 #
 # Usage: bash scripts/schedule-monitor.sh
 set -uo pipefail
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+# launchd gives this timer a minimal PATH — add common bin dirs so pipenv (if
+# any), brew tools, etc. resolve. $HOME/.local/bin covers `pip install --user
+# pipenv`; brew bins cover `brew install pipenv`.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -18,7 +21,31 @@ ALERT_STATE="$PROJECT_DIR/volumes/schedule-monitor-alert.epoch"
 ALERT_INTERVAL=43200   # one findings-DM per 12h; Sunday summary bypasses
 
 cd "$PROJECT_DIR"
-out=$(pipenv run python -m src.runner.schedule_adherence 2>>"$LOG")
+
+# Resolve the project venv's Python directly — do NOT depend on `pipenv run`.
+# launchd's minimal env has previously made this script silently rc=127 since
+# 2026-09-14 (`pipenv: command not found`), killing the only out-of-band
+# schedule-adherence alerter. Mirrors install-launchd.sh's `pipenv --venv`
+# resolution (VENV_DIR/bin/python); falls back to pipenv's deterministic venv
+# location (~/.local/share/virtualenvs/<basename>-<hash>) if the pipenv binary
+# itself isn't on PATH.
+PIPENV_VENV=""
+if command -v pipenv >/dev/null 2>&1; then
+    PIPENV_VENV="$(pipenv --venv 2>/dev/null || true)"
+fi
+if [[ -z "$PIPENV_VENV" || ! -x "$PIPENV_VENV/bin/python" ]]; then
+    base="$(basename "$PROJECT_DIR")"
+    for d in "$HOME/.local/share/virtualenvs/${base}-"*; do
+        if [[ -x "$d/bin/python" ]]; then PIPENV_VENV="$d"; break; fi
+    done
+fi
+VENV_PY="${PIPENV_VENV:+$PIPENV_VENV/bin/python}"
+if [[ -z "$VENV_PY" || ! -x "$VENV_PY" ]]; then
+    echo "$(date -u +%FT%TZ) FATAL schedule-monitor cannot locate project venv python (searched: PATH pipenv, ~/.local/share/virtualenvs/$(basename "$PROJECT_DIR")-*)" >> "$LOG"
+    exit 0
+fi
+
+out=$("$VENV_PY" -m src.runner.schedule_adherence 2>>"$LOG")
 rc=$?
 echo "$(date -u +%FT%TZ) run rc=$rc" >> "$LOG"
 printf '%s\n' "$out" >> "$LOG"

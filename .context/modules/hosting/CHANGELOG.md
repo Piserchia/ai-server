@@ -1,5 +1,40 @@
 # Changelog: hosting
 
+## 2026-10-05 — schedule-monitor.sh: resolve venv Python directly (watchdog unbroken)
+
+**Files created**: none
+**Files changed**: `scripts/schedule-monitor.sh` (replaced
+`pipenv run python -m src.runner.schedule_adherence` with direct
+`$VENV_PY -m ...` invocation; added `$HOME/.local/bin` to PATH; added
+`pipenv --venv` resolution with a glob fallback to
+`~/.local/share/virtualenvs/<basename>-*`; FATAL log + clean exit if neither
+locates a venv).
+**Why**: launchd's `com.assistant.schedule-monitor` timer has run daily at
+07:15 UTC since 2026-09-14 under a minimal env with no `pipenv` on PATH, so
+the `pipenv run python ...` call died with `pipenv: command not found` and
+`rc=127` every single day — silently killing the only out-of-band
+schedule-adherence watchdog. `schedule_rollup` grades runs that exist; this
+monitor is what notices DARK / NEVER_RAN / STUCK / FAILURE_STREAK — the
+08-17 governor-dark incident class. Mirrors `install-launchd.sh`'s own
+`pipenv --venv → $VENV_DIR/bin/python` pattern so launchd never has to
+locate `pipenv` itself. Evidence: ops-manager weekly review 2026-10-05;
+`volumes/logs/schedule-monitor.log` showed `pipenv: command not found` on
+every run from 2026-09-14 through 2026-10-04.
+**Side effects**: the daily DM resumes — the owner will again see findings
+DMs (rate-limited one per 12h) and the Sunday fleet summary. First
+post-deploy run (next 07:15 UTC) may surface a backlog of previously-silent
+findings; that is signal, not regression. Launchd `.plist` already matches
+current conventions (same `install_timer` function as `backup` /
+`healthcheck-all`); no plist edit required.
+**Gotchas discovered**: launchd timers installed via
+`install-launchd.sh:install_timer` do NOT bake the venv into
+`EnvironmentVariables.PATH` the way the service plists (runner/web/bot) do
+(install-launchd.sh:96-100). Shell scripts invoked by those timers must
+resolve the project venv themselves — do NOT rely on `pipenv` being on PATH.
+The analogous timers (`backup.sh`, `healthcheck-all.sh`) only use system
+tools (brew-provided `yq`, `curl`, `psql`), so they were unaffected by the
+same gap.
+
 ## 2026-09-10 — Caddy `trusted_proxies`: stop discarding visitor IPs
 
 **Agent task**: pickem whole-branch review fix wave (T18) — finding 7.
