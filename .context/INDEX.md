@@ -178,6 +178,13 @@ projects/<slug>/
 |---|---|
 | Understand the pickem trash-talk board (free-name UGC threads/comments, commissioner moderation, rate-limited public writes) | `docs/superpowers/specs/2026-09-16-pickem-trash-board-design.md` |
 
+## Additions 2026-10-08 (pickem natural-language charts — PROPOSED, plan written)
+
+| I need to... | Read these |
+|---|---|
+| Understand the per-player "ask for a chart" feature (prompt → gateway job → Opus-5/low builder + tool-less checker subagent → sandboxed SQL + chart spec stored on the player's page, re-run live on every view; capability-key ownership, caps, owner decisions D1–D6) | `docs/superpowers/specs/2026-10-08-pickem-charts-design.md` |
+| Build it task-by-task (11 tasks: pickem migration v3 / sandbox / spec / service / routes / SPA / docs, then ai-server helper script + two skills + golden eval, then ordered rollout) | `docs/superpowers/plans/2026-10-08-pickem-charts.md` |
+
 ## Update this file
 
 When you add a new documentation file, add it to this index.
