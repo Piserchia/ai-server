@@ -30,10 +30,13 @@ league: a FastAPI + React/Vite SPA over a cookie-authenticated CBS Sports
 GraphQL sync into sqlite, computing six money races (season, weekly, Brutus,
 bottom, underdog, Monday-Night-Lights) plus per-player and league analytics.
 Served at `pickem.chrispiserchia.com` on port 8793 (public — no CF Access).
-Two dedicated skills: `pickem-sync` (scheduled 4x/week; alerts on the sync
-CLI's exit-2 AUTH_EXPIRED contract and on reconcile mismatches) and
+Three dedicated skills: `pickem-sync` (scheduled 4x/week; alerts on the sync
+CLI's exit-2 AUTH_EXPIRED contract and on reconcile mismatches),
 `pickem-analysis` (visitor-triggered per-player AI write-up, queued by the
-service onto the gateway job lane). The project holds **no model credential
+service onto the gateway job lane), and `pickem-chart` (visitor-triggered
+natural-language chart requests: one sandboxed SQL query + chart spec,
+verified by the tool-less `pickem-chart-check` subagent before posting
+back). The project holds **no model credential
 and spends nothing per token** — analysis runs on the server's subscription
 lane. Two owner-side operational facts: the CBS cookie jar expires and is
 re-exported by hand (`scripts/export_cbs_cookies.py` → prod

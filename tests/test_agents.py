@@ -108,3 +108,15 @@ class TestBuildSubagents:
 
     def test_empty_subagents_list(self):
         assert agents.build_subagents(_cfg(), loader=self._loader({})) == {}
+
+
+class TestPickemChartSkills:
+    def test_pickem_chart_compiles_its_toolless_checker(self):
+        from src.registry.skills import load
+        cfg = load("pickem-chart")
+        assert cfg.subagents == ["pickem-chart-check"]
+        subs = agents.build_subagents(cfg, "claude-sonnet-4-6")
+        checker = subs["pickem-chart-check"]
+        assert checker.tools == []            # it reasons; it cannot act
+        assert checker.model == "claude-opus-5" and checker.effort == "low"
+        assert "VERDICT" in checker.prompt
