@@ -2,6 +2,69 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-05 — writeback: classify agent-config dirs as docs
+
+**Files created**: `tests/test_writeback.py` (17 new cases).
+**Files changed**: `src/runner/writeback.py` (added `.codex/agents/`,
+`.agents/`, `.claude/agents/` prefix checks and an `AGENTS.md` comment in
+`_is_doc_path()`).
+**Why**: implements proposal `a164301b-34ed-497c-a9db-98a6522de454`. Over
+the preceding 30 days, 5 of 23 `_writeback` jobs (21.7%) failed with
+`max_turns=20` exhaustion; all 5 parents were atlas-repo sessions whose
+`git status` consistently showed `.codex/agents/*.toml`, top-level
+`AGENTS.md`, and `.agents/skills/*.md` as the only modified paths. The
+classifier treated those as code, so the runner kept spawning writeback
+jobs on diffs that are entirely agent-config documentation. Bucketing them
+with the existing `/skills/` heuristic stops the false-positive dispatches
+at the source. Top-level `AGENTS.md` was already matched by the top-level
+`.md` rule; the new tests pin that behavior so a future refactor cannot
+regress it silently.
+**Side effects**: fewer `_writeback` jobs will be dispatched. Sessions
+whose ONLY modifications are agent-config files will no longer trip the
+"needs writeback" check — but those files are configuration documents, not
+code, so the CHANGELOG rule doesn't apply to them anyway. If a session
+mixes agent-config edits with real code changes, the real code still
+triggers writeback as before.
+**Gotchas discovered**: nested `.codex/agents/` under a project (e.g.
+`projects/atlas/.codex/agents/x.toml`) is NOT caught by the new rules —
+only top-level prefixes match. That's intentional: when the server-repo
+session has a project nested writable, the project's own config files are
+project code, and the project's own CHANGELOG should record them.
+
+## 2026-09-23 — mcp_dispatch: normalize dispatched job kinds
+
+**Files created**: none
+**Files changed**: `src/runner/mcp_dispatch.py` (+`_normalize_kind` pure
+helper; called in `enqueue_job_tool` right after `_validate_enqueue_args`
+returns clean, before the DB write / queue push), `tests/test_mcp_tools.py`
+(+`TestNormalizeKind` class, 9 cases).
+**Why**: implements proposal `abd0a223-44e9-4b8c-9a65-02be7458bcfc`. The
+runner already normalized at skill-resolution time (`session.py:_resolve_skill`
+— underscored kinds still ran the correct skill), but the DB stored the raw
+`kind` from the LLM, so 30-day rollups split each skill into two buckets
+(`server_deploy` 17 + `server-deploy` 3 = 20 real runs, `deploy_director` 17
++ `deploy-director` 17 = 34, etc.). The prior docstring-only fix (commit
+6781f31, 2026-09-12) didn't move the needle — 15/17 subsequent
+`server_deploy` dispatches still came in underscored. This normalizes at
+dispatch time so `jobs.kind` has one canonical hyphenated spelling per skill
+going forward. Existing rows keep their raw kinds; underscored buckets fade
+naturally.
+**Side effects**: none observed. Retrospective/rollup queries by
+`Job.kind` see fewer synthetic splits; downstream consumers that already
+handled either spelling continue to work. Historical rows unchanged (no
+migration).
+**Gotchas discovered**: the proposal's example test case for
+`_learning_apply` (→ `_learning-apply`) would have broken skill resolution
+because the on-disk skill directory is literally `skills/_learning_apply/`
+and `session.py:_resolve_skill` leaves `_`-prefixed kinds untouched.
+Implementation mirrors `session.py:_resolve_skill` verbatim instead:
+kinds starting with `_` pass through unchanged (documented in the helper's
+docstring and the test `test_leading_underscore_kind_passes_through_verbatim`).
+Renaming `skills/_learning_apply/` → `skills/_learning-apply/` is out of
+scope; internal-`_` kinds are enqueued only by the runner itself
+(`main._verify_writeback`, `main._spawn_evaluate`, `learning.maybe_extract_and_enqueue`),
+never by LLM MCP dispatch in practice, so this is theoretical.
+
 ## 2026-09-23 — events: idle-queue alpha drainer (flywheel)
 
 - **Agent task**: alpha-flywheel implementation (owner-approved spec

@@ -50,6 +50,34 @@ def _validate_enqueue_args(kind: str, description: str) -> list[str]:
     return errors
 
 
+def _normalize_kind(kind: str) -> str:
+    """Canonicalize a dispatched job kind to its hyphenated skill spelling.
+
+    Mirrors the rule at `runner/session.py:_resolve_skill` (kind →
+    skill_name): leading underscore preserved (internal skills like
+    `_writeback`, `_learning_apply`, `_evaluate` — namespace of their own),
+    any other underscore becomes a hyphen. Idempotent: hyphenated inputs
+    pass through untouched.
+
+    Called AFTER `_validate_enqueue_args` so error messages surface the
+    caller's raw input, and BEFORE the DB row / queue push so aggregations
+    by `kind` see a single canonical spelling per skill (fixes the observed
+    30d rollup split between `server_deploy` and `server-deploy`, etc.).
+    Empty / non-string input passes through so validation still catches it.
+    """
+    if not isinstance(kind, str):
+        return kind  # type: ignore[return-value]
+    stripped = kind.strip()
+    if not stripped:
+        return stripped
+    if stripped.startswith("_"):
+        # Internal skill namespace: literal filesystem name, hands off.
+        # (Matches session.py:_resolve_skill leaving `_`-prefixed kinds
+        # untouched; a rename of `skills/_learning_apply/` is out of scope.)
+        return stripped
+    return stripped.replace("_", "-")
+
+
 def _sanitize_payload(payload: dict) -> tuple[dict, list[str]]:
     """Drop privilege-bearing keys from a dispatched payload.
 
@@ -105,6 +133,11 @@ def create_server(spawning_job=None):
                 "content": [{"type": "text", "text": f"Validation failed: {'; '.join(validation_errors)}"}],
                 "is_error": True,
             }
+
+        # Canonicalize kind AFTER validation (so errors quote the raw input)
+        # and BEFORE we write it into the DB / queue. This collapses
+        # server_deploy/server-deploy (etc.) into one bucket for rollups.
+        kind = _normalize_kind(kind)
 
         if depends_on:
             # Deferred creation: row only, no queue push — the runner promotes
