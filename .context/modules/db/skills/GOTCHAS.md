@@ -14,6 +14,20 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-10-09 — Can't derive team W/L from pool-selected games
+
+When building charts that group by team performance attributes (e.g., "games vs losing teams"), the schema may lack those attributes directly. The `games` table contains only pool-selected games, so deriving W/L records from game scores would be dishonest — you'd be computing statistics from a biased subset.
+
+When a requested grouping category is unbuildable due to schema gaps, do NOT fake the data. Instead: create a named leftover bucket (e.g., "same conference, other division") that accounts for all remaining rows, and verify the sum matches the known total (e.g., total correct picks). Document the limitation clearly in the chart description.
+
+_Evidence: job `1995598b`_
+
+## 2026-10-09 — Double-counting in 'either team' category breakdowns without deduplication
+
+When breaking down sports analytics by team attributes (division, conference, league) and counting records 'if either team is from that category', intra-category games get counted twice without explicit deduplication. Naive grouping after joining picks to both home_team and away_team divisions produces double-counts: a divisional game with CORRECT result appears twice in that division's totals (once via home team, once via away team). Fix: use DISTINCT (game_id, category_attribute) in the result grouping or subquery. Example from NFL pick'em: 65C/46I total across 8 divisions, but only 39C/26I when single-counted = 17 intra-division games being double-counted.
+
+_Evidence: job `51f4dcc7`_
+
 ## 2026-04-20 — `sqlalchemy.update` name collision with Telegram's `Update`
 
 **Symptom**: `ImportError` or unexpected behavior when both SQLAlchemy and python-telegram-bot needed.
