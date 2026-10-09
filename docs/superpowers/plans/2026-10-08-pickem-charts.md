@@ -1062,10 +1062,13 @@ def test_fifth_request_from_one_ip_is_rate_limited_with_retry_after(season_db, a
     assert request_chart(season_db, _settings(tmp_path), ann, "x", "2.2.2.2")["status"] == "queued"
 
 
-def test_forty_first_request_is_rate_limited_globally(season_db, ann, tmp_path):
+def test_forty_first_request_is_rate_limited_globally(season_db, tmp_path):
+    # Spread over the five fixture players (8 each) so the 12-chart page cap
+    # never trips before the global cap does.
+    ids = [r["id"] for r in season_db.execute("SELECT id FROM players ORDER BY id")]
     for i in range(40):
-        assert request_chart(season_db, _settings(tmp_path), ann, "x", f"10.0.{i}.1")["status"] == "queued"
-    assert request_chart(season_db, _settings(tmp_path), ann, "x", "99.9.9.9")["status"] == "rate_limited"
+        assert request_chart(season_db, _settings(tmp_path), ids[i % 5], "x", f"10.0.{i}.1")["status"] == "queued"
+    assert request_chart(season_db, _settings(tmp_path), ids[0], "x", "99.9.9.9")["status"] == "rate_limited"
 
 
 def test_requests_older_than_the_window_do_not_count(season_db, ann, tmp_path):
