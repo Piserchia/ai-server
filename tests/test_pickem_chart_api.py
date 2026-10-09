@@ -83,6 +83,39 @@ def test_main_never_prints_the_token(mod, tmp_path, monkeypatch, capsys):
     assert seen["url"] == "http://localhost:8793/api/internal/chart-requests/5"
 
 
+def test_main_preview_missing_sql_file_prints_clean_detail(mod, tmp_path, monkeypatch, capsys):
+    env_dir = tmp_path / "projects" / "pickem"
+    env_dir.mkdir(parents=True)
+    (env_dir / ".env").write_text("PICKEM_ADMIN_TOKEN=supersecret\n")
+    monkeypatch.setenv("SERVER_ROOT", str(tmp_path))
+    missing = tmp_path / "does-not-exist.sql"
+
+    with pytest.raises(SystemExit) as exc_info:
+        mod.main(["preview", "5", "--sql-file", str(missing)])
+    out = capsys.readouterr().out
+    assert exc_info.value.code == 2
+    assert json.loads(out) == {"detail": f"sql-file not found: {missing}"}
+
+
+def test_main_stats_missing_player_id_key_prints_clean_detail(mod, tmp_path, monkeypatch, capsys):
+    env_dir = tmp_path / "projects" / "pickem"
+    env_dir.mkdir(parents=True)
+    (env_dir / ".env").write_text("PICKEM_ADMIN_TOKEN=supersecret\n")
+    monkeypatch.setenv("SERVER_ROOT", str(tmp_path))
+
+    class Resp:
+        status = 200
+        def read(self): return b'{"id": 5}'
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", lambda req, timeout: Resp())
+    rc = mod.main(["stats", "5"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert json.loads(out)["detail"].startswith("get response missing player_id")
+
+
 def test_main_stats_with_two_sequential_responses(mod, tmp_path, monkeypatch, capsys):
     """Test the stats command with two sequential fake responses."""
     env_dir = tmp_path / "projects" / "pickem"

@@ -58,3 +58,5 @@ WHERE p.player_id = :player_id
 ## Sandbox limits (a violation is a build failure you will see in `preview`)
 one SELECT/WITH statement · no comments · ≤ 4000 chars · ≤ 8 columns, plain
 identifier names (use `AS`) · ≤ 500 rows (aggregate!) · 2 s · only `:player_id`
+· spec labels (`x.label`, `series[].label`, `y_label`) ≤ 60 chars (`spec.py`
+`MAX_LABEL`)

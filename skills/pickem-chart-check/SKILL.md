@@ -27,8 +27,11 @@ Answer every point with evidence (quote the clause, the row, the number):
    `PENDING`/`MISSING`; underdog/favorite by the sign of `pick_spread`
    with 0 and NULL excluded; week = `weeks.id`; divisional = same
    conference AND division via `teams` on BOTH sides; consensus from
-   graded picks only. Any deviation without a caveat explaining it is a
-   FAIL.
+   graded picks only. **Favourite covered / upset is read off graded
+   picks' results, never derived from `home_score`/`away_score`.**
+   **Tiebreaker = the game with the lowest non-null `tiebreaker_order`
+   on a final week, not "the Monday-night game."** Any deviation without
+   a caveat explaining it is a FAIL.
 3. **Cross-check a total.** Sum a series over the rows and compare with
    the stats JSON (`record.correct`, `dog_fav.dog.picks`,
    `by_sport.NFL.correct`, `mnf.picks`, `consensus.against.picks`, …).

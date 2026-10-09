@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pickem-chart helper: the four calls the skill is allowed to make.
+"""pickem-chart helper: the five calls the skill is allowed to make.
 
 Stdlib only. Reads PICKEM_ADMIN_TOKEN from the production pickem .env itself
 and sends it as X-Admin-Token -- the token never passes through the model's
@@ -94,8 +94,12 @@ def main(argv=None) -> int:
     def read(path, what):
         if not path:
             ap.error(f"--{what}-file is required for {a.cmd}")
-        with open(path, encoding="utf-8") as fh:
-            return fh.read()
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return fh.read()
+        except OSError:
+            print(json.dumps({"detail": f"{what}-file not found: {path}"}))
+            raise SystemExit(2)
 
     kwargs = {}
     if a.cmd == "stats":
@@ -103,7 +107,11 @@ def main(argv=None) -> int:
         if status != 200:
             print(text)
             return 1
-        kwargs["player_id"] = json.loads(text)["player_id"]
+        try:
+            kwargs["player_id"] = json.loads(text)["player_id"]
+        except (ValueError, KeyError) as exc:
+            print(json.dumps({"detail": f"get response missing player_id: {exc}"}))
+            return 1
     elif a.cmd == "preview":
         kwargs["sql"] = read(a.sql_file, "sql")
     elif a.cmd == "complete":

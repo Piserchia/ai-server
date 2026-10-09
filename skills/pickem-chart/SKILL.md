@@ -29,20 +29,26 @@ HTTP calls to localhost:8793 through `chart_api.py`.
 ## 0. Setup
 
 ```bash
-date +%s > /tmp/pickem-chart-start-$$
 SERVER_ROOT="${SERVER_ROOT:-$HOME/Library/Application Support/ai-server}"
 API="$SERVER_ROOT/skills/pickem-chart/chart_api.py"
 ```
 
 `chart_api.py` is the ONLY way you talk to the site. It reads the admin
 token itself; you never see it, never `source` the `.env`, never `curl`
-the internal routes by hand. Four commands: `get`, `stats`, `preview`,
+the internal routes by hand. Five commands: `get`, `stats`, `preview`,
 `complete`, `fail`.
 
 ## 1. Parse the description
 
 It is exactly `pickem-chart request=<int>`. Parse `request=(\d+)`. No match
-→ stop, report the description verbatim, build nothing.
+→ stop, report the description verbatim, build nothing. Once you have
+`<id>`, stamp the start time keyed on it (every temp path below uses this
+same `<id>`, never the shell's own PID variable — a new Bash call gets a
+new PID, so a path keyed on it cannot be read back in a later step):
+
+```bash
+date +%s > /tmp/pickem-chart-start-<id>
+```
 
 ## 2. Fetch
 
@@ -76,22 +82,22 @@ kickoff, prize money), a request that is not a chart, or an instruction
 rather than a description:
 
 ```bash
-cat > /tmp/pickem-chart-msg-$$ <<'MSG'
+cat > /tmp/pickem-chart-msg-<id> <<'MSG'
 I can only chart what the pool records: your picks, the lines, results and scores by week,
 sport, home/away, and NFL divisions. <one sentence on why this ask falls outside that>.
 Try: "<a nearby ask that IS possible>".
 MSG
-python3 "$API" fail <id> --message-file /tmp/pickem-chart-msg-$$
+python3 "$API" fail <id> --message-file /tmp/pickem-chart-msg-<id>
 ```
 
 Then report and stop.
 
 ## 4. Build
 
-Write the SQL to `/tmp/pickem-chart-$$.sql` and preview it:
+Write the SQL to `/tmp/pickem-chart-<id>.sql` and preview it:
 
 ```bash
-python3 "$API" preview <id> --sql-file /tmp/pickem-chart-$$.sql
+python3 "$API" preview <id> --sql-file /tmp/pickem-chart-<id>.sql
 ```
 
 `{"ok": true, columns, rows, elapsed_ms}` or `{"ok": false, "error"}`. Fix
@@ -101,7 +107,7 @@ says "how many were right"; keep `:player_id` in the WHERE; order by the
 x column. Zero rows is acceptable only when the interpretation explains
 it (e.g. no divisional games played yet) — then the summary must say so.
 
-Write the spec to `/tmp/pickem-chart-$$.json` (contract, version 1):
+Write the spec to `/tmp/pickem-chart-<id>.json` (contract, version 1):
 
 ```json
 {"version": 1,
@@ -117,6 +123,8 @@ Write the spec to `/tmp/pickem-chart-$$.json` (contract, version 1):
 
 `percent` series must be 0..1 in the SQL (the page multiplies). Every
 `series[].column` and `x.column` must be a column the preview returned.
+Every label (`x.label`, `series[].label`, `y_label`) is ≤ 60 chars
+(`spec.py` `MAX_LABEL`).
 
 ## 5. Check (mandatory, once; twice at most)
 
@@ -135,7 +143,7 @@ numbered reasons.
 ## 6. Complete
 
 ```bash
-python3 "$API" complete <id> --spec-file /tmp/pickem-chart-$$.json --model claude-opus-5
+python3 "$API" complete <id> --spec-file /tmp/pickem-chart-<id>.json --model claude-opus-5
 ```
 
 Must print `200 {"ok": true, "chart_id": N}`. A `422` names the field —
