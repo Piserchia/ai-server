@@ -13,7 +13,7 @@ max_turns: 30
 role: worker
 division: atlas
 privilege_class: read-only
-context_files: ["skills/alpha-scout/GOTCHAS.md"]
+context_files: [".context/SYSTEM.md", "skills/alpha-scout/GOTCHAS.md"]
 tags: [atlas, alpha-lab, generation, scheduled-capable, needs-dispatch-mcp]
 ---
 

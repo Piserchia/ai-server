@@ -1,3 +1,30 @@
+## 2026-10-09 — Preload `.context/SYSTEM.md` via context_files
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/SKILL.md` (frontmatter `context_files`)
+**Why**: review-and-improve Rec 2 context-files audit (proposal
+138421f5-e363-42b0-bb9a-ae0fbe2dbb76, src/runner/retrospective.py:
+context_consumption) found alpha-scout Read `.context/SYSTEM.md` on 31 of
+32 runs (97%) over the last 30 days without the file being in the skill's
+`context_files` frontmatter. Adding it makes the Read deterministic
+(every run, driven by the directive's "Read these files first" list the
+runner builds at `src/runner/session.py:174-177`) instead of ad-hoc. The
+Read tool call is NOT eliminated — `context_files` is a reading LIST, not
+a content preload — so the proposal's "~32 Reads/month saved" framing is
+wrong (flagged in-session by the code-review subagent for the
+review-and-improve retrospective analyzer to correct upstream).
+Frontmatter-only change; no markdown-body edits, so the system prompt
+body and skill behavior are unchanged.
+**Side effects**: None — body unchanged; directive gains one bullet
+pointing at a file the agent was already reading 97% of the time.
+**Gotchas discovered**: review-and-improve Rec 2 analyzer treats
+`context_files` as a content preload. It is not — it is a reading list
+appended to the directive. Proposals framed as "eliminate N Reads/month"
+via `context_files` should be re-framed as "make the Read deterministic";
+if content-preload is genuinely desired, that is a different change
+(runner would have to read + inject file contents into the system
+prompt).
+
 ## 2026-10-05 — GOTCHAS: 3 runtime learnings from evening scout run (job c515b971)
 
 **Agent task**: docs append — record three GOTCHAS entries the read-only
