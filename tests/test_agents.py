@@ -4,6 +4,8 @@ SKILL.md → AgentDefinition compilation contract.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.registry.skills import SkillConfig
 from src.runner import agents
 
@@ -111,8 +113,16 @@ class TestBuildSubagents:
 
 
 class TestPickemChartSkills:
-    def test_pickem_chart_compiles_its_toolless_checker(self):
+    def test_pickem_chart_compiles_its_toolless_checker(self, monkeypatch):
+        from src.config import settings
         from src.registry.skills import load
+
+        # Checkout-independent: `load()` resolves `settings.skills_dir`
+        # (a property derived from `server_root`) against the production
+        # checkout by default, where this skill may not be deployed yet.
+        # Point server_root at this dev repo instead -- skills_dir has no
+        # setter of its own, so the underlying field is what has to move.
+        monkeypatch.setattr(settings, "server_root", Path(__file__).resolve().parents[1])
         cfg = load("pickem-chart")
         assert cfg.subagents == ["pickem-chart-check"]
         subs = agents.build_subagents(cfg, "claude-sonnet-4-6")
