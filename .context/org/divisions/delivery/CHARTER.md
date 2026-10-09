@@ -20,6 +20,8 @@ project, and keep hosted projects healthy across their lifecycle
 | `_evaluate` | worker | read-only | Acceptance QA: verify work against criteria → pass/fail |
 | `pickem-sync` | worker | prod-operator | Run the pickem CBS sync on the live checkout 4x/week; alert on AUTH_EXPIRED (exit 2) and reconcile mismatch (Sun/Mon/Tue/Fri 09:00) |
 | `pickem-analysis` | worker | content | Write one player's ~300-word pick'em analysis on demand and POST it back to the site's internal callback (visitor-triggered, not scheduled) |
+| `pickem-chart` | worker | content | Turn one visitor's plain-language chart request into a sandboxed SQL query + chart spec, verified by `pickem-chart-check`, then POST it back (visitor-triggered, not scheduled) |
+| `pickem-chart-check` | worker | read-only | Tool-less subagent: grades `pickem-chart`'s SQL + spec against the glossary and the player's stat totals; never dispatched as a job of its own |
 
 ## Standards
 
@@ -30,10 +32,11 @@ project, and keep hosted projects healthy across their lifecycle
   <slug>" dispatches `new-project` in register-only mode (validate manifest →
   register → verify healthcheck). The reconciler routes registration drift here.
 - **Project-specific operational workers live here** unless the project is big
-  enough to have its own division (atlas is the only one today). `pickem-sync`
-  and `pickem-analysis` are the pickem dashboard's two: one keeps its data
-  fresh, one serves its visitor-triggered AI panel. Both are report-or-post
-  only — neither may edit the project.
+  enough to have its own division (atlas is the only one today). `pickem-sync`,
+  `pickem-analysis`, `pickem-chart` and `pickem-chart-check` are the pickem
+  dashboard's four: one keeps its data fresh, one serves its visitor-triggered
+  AI panel, and the chart pair builds+checks visitor-triggered charts. All are
+  report-or-post only — none may edit the project.
 - "and deploy" is a real subtask (`project-redeploy`), not implied.
 - Every project carries a valid `delivery` contract (lint-enforced).
 - "Done" means evidence-checked by `_evaluate`, not claimed.

@@ -184,6 +184,8 @@ projects/<slug>/
 |---|---|
 | Understand the per-player "ask for a chart" feature (prompt → gateway job → Opus-5/low builder + tool-less checker subagent → sandboxed SQL + chart spec stored on the player's page, re-run live on every view; capability-key ownership, caps, owner decisions D1–D6) | `docs/superpowers/specs/2026-10-08-pickem-charts-design.md` |
 | Build it task-by-task (11 tasks: pickem migration v3 / sandbox / spec / service / routes / SPA / docs, then ai-server helper script + two skills + golden eval, then ordered rollout) | `docs/superpowers/plans/2026-10-08-pickem-charts.md` |
+| Build or change the chart-request builder skill (parse → fetch → process → build → check → complete/fail, schema + glossary + golden prompts) | `skills/pickem-chart/SKILL.md` (+ `SCHEMA.md`, `GLOSSARY.md`, `EVAL.md`) |
+| Build or change the independent chart checker subagent (tool-less, grades SQL + spec against the glossary and the player's stat totals) | `skills/pickem-chart-check/SKILL.md` |
 
 ## Update this file
 

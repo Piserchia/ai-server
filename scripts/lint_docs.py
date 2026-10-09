@@ -627,7 +627,7 @@ UNISOLATED_WRITER_ALLOWLIST = {
     # projects/pickem/.env — a clone carries the dev token, which the live
     # API rejects. Both are report-or-POST only and write no repo file;
     # rationale is restated in each SKILL.md.
-    "pickem-analysis", "pickem-sync",
+    "pickem-analysis", "pickem-chart", "pickem-sync",
     "plan", "project-redeploy",
     "project-update-poll", "research-deep", "research-report", "restore",
     "review-and-improve", "self-diagnose", "server-deploy", "server-upkeep",
