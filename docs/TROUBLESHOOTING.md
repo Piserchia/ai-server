@@ -3721,6 +3721,93 @@ fix; the parallel-fetch speed knob is now half-shipped inside H010.
 
 
 
+## Symptom: a job fails with `Failed to decode JSON: JSON message exceeded maximum buffer size of 1048576 bytes...`
+
+Observed in production on 2026-10-09 on two Opus-5 jobs operating on very
+large files inside atlas (ledger ~21k lines):
+
+- `4bce7355` — `alpha-governor` (effort medium)
+- `3c7c8c56` — `alpha-research` (effort high) — died mid-Edit on
+  `alpha-lab/evaluation/LEDGER.md` right as it was writing E-0144. The
+  Edit `new_string` visible in the audit log is ~11 KB + "[11073 chars
+  truncated]"; combined with the model's long thinking blocks, the
+  single JSON frame the Claude Code CLI emits for one tool_use message
+  exceeded 1 MiB and the SDK transport raised `SDKJSONDecodeError`.
+
+### Diagnostic
+
+```bash
+# search the audit index for prior occurrences
+cd "$ASSISTANT_SERVER"
+python3 -c "from src.runner.audit_index import search_index; from pathlib import Path; [print(e) for e in search_index(Path('volumes/audit_log/INDEX.jsonl'), keyword='buffer')]"
+
+# in the failing job's audit log the last tool_use before job_failed is
+# usually an Edit on a huge file, or a model response with very long
+# thinking content.
+tail -5 "$ASSISTANT_SERVER/volumes/audit_log/<job_id>.jsonl"
+```
+
+### Root cause
+
+The Claude Agent SDK's subprocess transport (`claude_agent_sdk/_internal/
+transport/subprocess_cli.py`) accumulates each JSON message from the CLI
+into a buffer. It raises `SDKJSONDecodeError("JSON message exceeded
+maximum buffer size of {N} bytes")` once the buffer passes
+`_DEFAULT_MAX_BUFFER_SIZE = 1024 * 1024` — 1 MiB. The SDK exposes
+`ClaudeAgentOptions.max_buffer_size` to override that default
+(`claude_agent_sdk/types.py` line 1735; honored by transport line 74),
+but `src/runner/session.py::_build_options()` (around line 711) never
+sets it. Opus-5 produces very long thinking blocks, and large Edit
+calls on atlas's LEDGER.md push a single JSON frame past the ceiling —
+the job dies and ALL of its work since the last commit is lost (`3c7c8c56`
+had no commits in its workspace yet).
+
+### Fix
+
+Server-code change (medium risk — needs code-reviewer sub-agent LGTM
+per INV-13). In `src/runner/session.py::_build_options()`, add
+`max_buffer_size` to the `kwargs` dict passed to `ClaudeAgentOptions`.
+A reasonable value is 64 MiB — enough for any sane model output,
+small compared to RSS. Make it configurable via `settings` so operators
+can bump it further without redeploying code:
+
+```python
+# src/runner/settings.py — add alongside default_model
+sdk_max_buffer_size: int = 64 * 1024 * 1024  # 64 MiB; SDK default is 1 MiB
+
+# src/runner/session.py::_build_options(), inside the kwargs dict
+# (around line 711):
+kwargs: dict[str, Any] = dict(
+    ...
+    model=model,
+    max_buffer_size=settings.sdk_max_buffer_size,
+)
+```
+
+Verify with:
+
+```bash
+# resubmit the failing alpha-research job (or wait for schedule)
+# then confirm the audit log shows kind=job_completed, not job_failed
+```
+
+Until the patch lands, Opus-5 alpha-* jobs operating on
+multi-megabyte files should be considered flaky — if one dies with this
+error, re-dispatch and hope the model's thinking is shorter the second
+try. Do NOT restart from cursor 0 on anything that writes an append-only
+ledger; follow the skill's resume path.
+
+### Prevention
+
+Alongside the `max_buffer_size` bump, categorize this error in
+`src/runner/errors.py` (or wherever `error_category` is assigned) as
+`sdk_buffer_overflow` instead of `unknown`, so the audit index can
+cluster these and the dashboard surfaces the class. Longer term, when
+the SDK ships a streaming/chunked parser (it currently accumulates a
+whole message before `json.loads`), drop the override.
+
+
+
 When you hit a new failure, append a section here in this shape:
 
 ```markdown
