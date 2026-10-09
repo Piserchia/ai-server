@@ -1,3 +1,18 @@
+## 2026-10-09 — Preload `.context/SYSTEM.md` via context_files
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/SKILL.md` (frontmatter `context_files`)
+**Why**: review-and-improve Rec 2 context-files audit (proposal
+138421f5-e363-42b0-bb9a-ae0fbe2dbb76, src/runner/retrospective.py:
+context_consumption) found alpha-scout Read `.context/SYSTEM.md` on 31 of
+32 runs (97%) over the last 30 days without having the file preloaded.
+Prepending it to `context_files` turns one Read tool call per run into a
+zero-cost preload (~32 Reads/month saved). Frontmatter-only change; no
+markdown-body edits, so the system prompt and skill behavior are
+unchanged.
+**Side effects**: None — body unchanged.
+**Gotchas discovered**: None.
+
 ## 2026-10-05 — GOTCHAS: 3 runtime learnings from evening scout run (job c515b971)
 
 **Agent task**: docs append — record three GOTCHAS entries the read-only
