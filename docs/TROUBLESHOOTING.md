@@ -3806,6 +3806,96 @@ cluster these and the dashboard surfaces the class. Longer term, when
 the SDK ships a streaming/chunked parser (it currently accumulates a
 whole message before `json.loads`), drop the override.
 
+### 2026-10-10 update: fix landed, triggered a self-restart cascade
+
+Commit `abb0dae` ("fix: raise SDK transport buffer ceiling to 20 MiB")
+landed in `src/runner/session.py` at 2026-10-10 03:32 and merged to main
+as `2eec724` — the ceiling is now `20 * 1024 * 1024` (`session.py` ~L829).
+BUT the fix only takes effect after a runner restart; the runner that was
+running at 03:36 still held the pre-fix bytecode. When an `alpha-research`
+job (`1a8bfc42`) hit the old 1 MiB limit at 04:26, the escalation chain
+produced the second symptom below.
+
+---
+
+## Symptom: two `self-diagnose` jobs fail back-to-back with exit 143, tripping the "2+ failures in 10 min" event trigger
+
+### Diagnostic
+
+```sql
+-- recent self-diagnose outcomes
+SELECT id, status, error_message, created_at FROM jobs
+WHERE kind='self-diagnose' ORDER BY created_at DESC LIMIT 5;
+```
+
+Classic shape (2026-10-10 incident):
+- job A: `failed`, `Command failed with exit code 143` — audit log ends on
+  a `Bash` tool_use whose command contains `launchctl kickstart -k …
+  com.assistant.runner`.
+- job B: `failed`, `Runner restarted while this job was still 'running';
+  marked failed by startup reconciliation` — spawned as the L3 "LAST
+  RESORT" escalation of job A, started seconds before the restart
+  completed.
+- Then the runner starts fresh (`ps -o lstart` on the runner's bash wrapper
+  shows a start time **within a second or two of job B's created_at**),
+  loads the fixed code, and the event trigger (2+ `self-diagnose` failures
+  in 10 min) fires one more `self-diagnose` on top.
+
+### Root cause
+
+The first `self-diagnose` correctly diagnosed the SDK-buffer-overflow bug
+(see previous symptom) and correctly concluded "code is on disk, needs a
+runner restart to load." Correct fix, wrong actor. The `self-diagnose`
+job runs INSIDE the runner process, so when it shelled out
+`launchctl kickstart -k gui/$(id -u)/com.assistant.runner`, launchd sent
+SIGTERM to the runner, which killed the child shell running the kickstart
+command — exit 143 (128 + 15). The runner's `main.py` failure path saw a
+non-zero exit, marked the job failed, and spawned the L3 "LAST RESORT"
+self-diagnose child, which started executing just as the runner was coming
+back up and got caught by startup reconciliation (`marked failed by
+startup reconciliation`). The event-trigger threshold is "2+ failures in
+10 min for the same skill" — both failures qualified, trigger fired,
+third `self-diagnose` runs on top of a now-fixed runner. The underlying
+alpha-research bug was already resolved by the restart; the alarm chain
+is purely self-inflicted.
+
+### Fix
+
+**No action needed for the incident itself.** Verify the runner is
+restarted and holds the fix:
+
+```bash
+# runner start time (should be newer than the fix commit timestamp)
+ps -o pid,lstart,command -p $(launchctl list | awk '/com\.assistant\.runner/{print $1}')
+
+# fix is on disk and the running interpreter will load it
+grep -n "max_buffer_size" "$ASSISTANT_SERVER/src/runner/session.py"
+```
+
+The two failed `self-diagnose` jobs can be left as-is — their diagnosis
+was CORRECT (first) or stale (second), and no production damage occurred.
+The current `self-diagnose` (the one triggered by the event rule) should
+confirm the fix is loaded and exit without further action.
+
+### Prevention
+
+Added to `skills/self-diagnose/SKILL.md` Gotchas: a `self-diagnose` job
+MUST NOT restart the runner itself — the restart kills its own process.
+If a diagnosis's correct fix is "reload runner code," the job must either
+(a) stop and output the exact `launchctl kickstart` command for an
+out-of-band actor to run, (b) delegate to `server-deploy` (which is
+structured to survive a self-targeted restart via its `nohup sleep N`
+preamble, assuming the god-skill's mutation guard isn't on the path), or
+(c) schedule the restart via `at`/`nohup sleep` AFTER emitting the final
+summary. Target string to recognise: Bash command contains
+`kickstart -k` AND `runner`.
+
+Longer term (requires server-patch), the escalation chain in
+`src/runner/main.py` should treat exit 143 on a `self-diagnose` job whose
+last `tool_use` is a `launchctl kickstart -k … runner` Bash command as a
+**successful self-restart**, not a failure, and suppress the L3 escalation
++ the event trigger's increment. See INV-29 (if filed) or write one.
+
 
 
 When you hit a new failure, append a section here in this shape:
