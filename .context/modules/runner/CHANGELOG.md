@@ -2,6 +2,36 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-10 — session: raise SDK transport buffer ceiling to 20 MiB
+
+**Files created**: none
+**Files changed**: `src/runner/session.py` (`_build_options` sets
+`kwargs.setdefault("max_buffer_size", 20 * 1024 * 1024)` just before
+constructing `ClaudeAgentOptions`).
+**Why**: implements proposal
+`0f3b5acc-3e44-4dc0-a5f2-4b736bf89b85`. The Claude Agent SDK's
+`subprocess_cli` transport buffers each JSON message from the bundled
+Claude CLI in memory before yielding it; its
+`_DEFAULT_MAX_BUFFER_SIZE = 1024 * 1024` (1 MiB) is overridable only via
+`ClaudeAgentOptions.max_buffer_size`, which `_build_options` never set.
+Three recent long-running sessions overflowed that cap and died with
+`JSON message exceeded maximum buffer size of 1048576 bytes` in the last
+48 h: alpha-governor jobs
+`8d848d17-2df7-4e41-9de6-9d0f504d69b5` and
+`4bce7355-59a1-415e-8c6b-5822543b8b13`, and alpha-research job
+`3c7c8c56-a580-4e26-a048-e1e7845bbb67`. Lifting the ceiling to 20 MiB
+accommodates realistic ToolResult payloads (large diffs, grep outputs,
+file reads) without unbounded growth.
+**Side effects**: every session now runs with a 20× larger per-message
+buffer. The buffer is per in-flight JSON message, not retained, so peak
+memory impact per session is bounded by the largest single message the
+CLI emits. `setdefault` leaves the knob overridable per payload / skill
+in the future.
+**Gotchas discovered**: `ClaudeAgentOptions.max_buffer_size` must be an
+int; `None` falls back to the SDK default (confirmed via
+`inspect.signature` — annotation `int | None`, default `None`). The
+cap is enforced in `claude_agent_sdk/_internal/transport/subprocess_cli.py`.
+
 ## 2026-10-05 — writeback: classify agent-config dirs as docs
 
 **Files created**: `tests/test_writeback.py` (17 new cases).

@@ -813,6 +813,21 @@ def _build_options(
         kwargs.get("permission_mode"),
     )
 
+    # SDK transport buffer ceiling (2026-10-10): the SDK's subprocess_cli
+    # transport buffers each JSON message from the bundled Claude CLI in
+    # memory before yielding it, and its default is 1 MiB (see
+    # `claude_agent_sdk/_internal/transport/subprocess_cli.py`
+    # `_DEFAULT_MAX_BUFFER_SIZE = 1024 * 1024`). Three recent long-running
+    # sessions overflowed that cap and died with
+    # `JSON message exceeded maximum buffer size of 1048576 bytes`:
+    #   8d848d17-2df7-4e41-9de6-9d0f504d69b5  (alpha-governor)
+    #   4bce7355-59a1-415e-8c6b-5822543b8b13  (alpha-governor)
+    #   3c7c8c56-a580-4e26-a048-e1e7845bbb67  (alpha-research)
+    # Raising to 20 MiB keeps us well above typical ToolResult payloads
+    # without unbounded growth. `setdefault` so a payload or skill override
+    # (none today) can still tighten or widen per-session.
+    kwargs.setdefault("max_buffer_size", 20 * 1024 * 1024)
+
     return ClaudeAgentOptions(**kwargs)
 
 
