@@ -65,6 +65,65 @@ FILE_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 # the dev repo (settings.server_root would then point elsewhere).
 _PROD_CHECKOUT = Path.home() / "Library" / "Application Support" / "ai-server"
 
+# The runner's own launchd label. Self-restarting it from a session kills
+# the session mid-work, triggers reconcile_orphaned_jobs on respawn, and —
+# when the kill came from a self-diagnose job — the event trigger refires on
+# the resulting failure, cascading indefinitely. Enforced in every guard
+# profile (workspace, read-only, universal). Prose gotchas in skill bodies
+# proved insufficient: incident 2026-10-10 motivated this code-level block.
+RUNNER_LAUNCHD_LABEL = "com.assistant.runner"
+_RUNNER_LABEL_REF = re.compile(r"\bcom\.assistant\.runner\b")
+# Mutating launchctl verbs — same list the read-only profile uses, minus
+# list/print (those are inspection and must stay allowed everywhere).
+_RUNNER_SELF_RESTART_VERB = re.compile(
+    r"\blaunchctl\b[^\n;|&]*\b(?:kickstart|kill|bootout|bootstrap|stop|start"
+    r"|load|unload|enable|disable|remove)\b"
+)
+# Mutating uses of the runner's plist file (bypasses launchctl entirely).
+# File-mutator head followed by the plist, OR sed -i against it, OR output
+# redirection into it. `cat`/`grep`/`ls` of the plist stay allowed — reads
+# are legitimate diagnosis.
+_RUNNER_PLIST_MUTATION = re.compile(
+    r"(?:^|[;&|]\s*)\s*(?:rm|rmdir|mv|cp|dd|tee|truncate|chmod|chown|ln|rsync)"
+    r"\b[^\n;|&]*com\.assistant\.runner\.plist"
+    r"|\bsed\s+(?:-[a-zA-Z]*i[a-zA-Z]*|--in-place)\b[^\n;|&]*com\.assistant\.runner\.plist"
+    r"|>{1,2}\s*\S*com\.assistant\.runner\.plist"
+)
+
+
+def runner_self_restart_violation(command: str) -> str | None:
+    """Return a denial reason if `command` would restart/stop/replace the
+    runner's own launchd label. None = unrelated. Pure function.
+
+    Fires for:
+      - launchctl mutating verbs (kickstart/kill/bootout/bootstrap/stop/
+        start/load/unload/enable/disable/remove) against `com.assistant.runner`
+      - mutating uses of `com.assistant.runner.plist` (rm/mv/cp/chmod/sed -i/
+        redirect-into); plain reads (`cat`/`grep`/`ls`) stay allowed
+
+    Deliberately allows `launchctl list|print … com.assistant.runner` —
+    inspection is a legitimate read for diagnosis.
+
+    god (isolation: host) is intentionally OUTSIDE every guard profile — it
+    is the break-glass lane (INV-18); this check only protects sessions that
+    DO get guard hooks (workspace / read-only / universal).
+    """
+    if not command:
+        return None
+    if _RUNNER_LABEL_REF.search(command) and _RUNNER_SELF_RESTART_VERB.search(command):
+        return (f"Bash denied: self-restart of {RUNNER_LAUNCHD_LABEL}. The "
+                f"runner cannot restart itself mid-session — that kills this "
+                f"session, orphans its row, and when event-triggered "
+                f"(self-diagnose, 2026-10-10) cascades. Request a restart "
+                f"out-of-band via deploy-director/server-deploy, or recommend "
+                f"it in your report. `launchctl list|print` are fine.")
+    if _RUNNER_PLIST_MUTATION.search(command):
+        return (f"Bash denied: direct mutation of "
+                f"{RUNNER_LAUNCHD_LABEL}.plist. The runner's launchd plist is "
+                f"owned by scripts/install-launchd.sh; a session rewriting it "
+                f"mid-run would kill itself. Reads (cat/grep/ls) are fine.")
+    return None
+
 
 def protected_roots() -> list[Path]:
     """Directories a workspace-tier session must never mutate."""
@@ -207,6 +266,13 @@ def bash_violation(
     masked = command.replace(str(workspace.resolve()), "«WS»")
     masked = masked.replace(str(workspace), "«WS»")
 
+    # Self-restart check runs first so the specific denial reason surfaces
+    # instead of a generic "launchctl denied" (defense in depth — the
+    # workspace profile's `\blaunchctl\b` hard-deny would also catch it).
+    reason = runner_self_restart_violation(masked)
+    if reason:
+        return reason
+
     for pattern, label in _HARD_DENY_PATTERNS:
         if pattern.search(masked):
             return f"Bash denied: {label}."
@@ -338,6 +404,14 @@ def readonly_bash_violation(command: str) -> str | None:
     """
     if not command:
         return None
+
+    # Self-restart check first: a specific reason beats a generic launchctl
+    # mutation deny, and the read-only profile allows `launchctl list|print`
+    # — so without this a session using a non-mutating form near the label
+    # could never be told WHY stop/start of this label specifically is unsafe.
+    reason = runner_self_restart_violation(command)
+    if reason:
+        return reason
 
     for pattern, label in _RO_HARD_DENY:
         if pattern.search(command):
@@ -486,5 +560,51 @@ def make_readonly_guard_hooks(job_id: str) -> dict[str, list[HookMatcher]]:
             # hook re-checks the suffix so a broader-than-intended matcher
             # can never deny an unrelated tool.
             HookMatcher(matcher=f".*{RESTART_TOOL_SUFFIX}", hooks=[_guard_restart]),
+        ]
+    }
+
+
+# ── Universal profile (self-restart interlock) ──────────────────────────────
+#
+# The workspace and read-only profiles both already catch self-restart via
+# their broader launchctl patterns; this profile exists for sessions outside
+# both — `isolation: none` skills with Bash access, chiefly `self-diagnose`
+# (which runs permission_mode=bypassPermissions and had no hook attached
+# before 2026-10-10, letting a session restart its own runner and cascade).
+#
+# This profile ONLY denies self-restart of the runner's launchd label. It is
+# intentionally minimal — it is a safety floor, not an isolation boundary.
+# god (isolation: host) still gets no hooks at all — break-glass by design
+# (INV-18); if god needs to restart the runner, that is the operator's
+# considered call, not something the runner should structurally forbid.
+
+
+def make_universal_guard_hooks(job_id: str) -> dict[str, list[HookMatcher]]:
+    """PreToolUse Bash hook that denies self-restart of the runner's
+    launchd label (`com.assistant.runner`). Attach to any session that
+    doesn't already have the workspace or read-only profile — most notably
+    `isolation: none` skills with Bash (e.g. self-diagnose), which would
+    otherwise be unguarded under `bypassPermissions`.
+
+    This is a defense-in-depth floor, not a sandbox: it checks exactly one
+    thing (self-restart). Sessions that need broader containment should run
+    under the workspace profile.
+    """
+
+    async def _guard_bash(input_data: dict, tool_use_id: str | None, context: Any) -> dict:
+        command = (input_data.get("tool_input") or {}).get("command", "")
+        reason = runner_self_restart_violation(command)
+        if reason:
+            audit_log.append(job_id, "guard_denied", tool_name="Bash",
+                             reason=reason, command=command[:300],
+                             profile="universal")
+            logger.warning("universal guard denied Bash for job %s: %s",
+                           job_id[:8], reason)
+            return _deny(reason)
+        return {}
+
+    return {
+        "PreToolUse": [
+            HookMatcher(matcher="Bash", hooks=[_guard_bash]),
         ]
     }

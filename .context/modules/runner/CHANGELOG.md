@@ -2,6 +2,47 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-11 — guards: universal hard-deny on self-restart of com.assistant.runner
+
+**Files created**: none
+**Files changed**: `src/runner/guards.py` (new predicate
+`runner_self_restart_violation`; new hook factory `make_universal_guard_hooks`;
+check wired into `bash_violation` and `readonly_bash_violation` as the first
+pattern so the specific denial reason surfaces); `src/runner/session.py`
+(`_build_options` now attaches `make_universal_guard_hooks` to sessions
+that aren't read-only, aren't workspace-tier, and aren't `isolation: host`
+— closes the gap for `isolation: none` skills with Bash); `tests/test_guards.py`
+(16 new predicate cases + hook-factory contract — covers every launchctl
+spelling against the runner label plus mutating uses of the plist file,
+and belt-and-suspenders coverage of the workspace/read-only profiles).
+**Why**: 2026-10-10 self-diagnose cascade. `self-diagnose` runs
+`isolation: none`, `permission_mode: bypassPermissions`, and consequently
+had no guard hook attached (both existing factories gate on readonly /
+guard_workspace, which was None here). Under bypassPermissions the session
+could run `launchctl kickstart -k gui/501/com.assistant.runner`, killing
+its own runner mid-work; on respawn `reconcile_orphaned_jobs` ran and —
+because the kill came from a failing self-diagnose job — the event trigger
+refired on the resulting failure, cascading. Prose gotchas in the skill
+body said "don't restart com.assistant.runner" and were ignored under
+pressure. The check now lives in code, in every guard profile, so no
+future `isolation: none` skill can repeat the pattern.
+**Side effects**: all workspace-tier sessions already denied launchctl
+broadly (`_HARD_DENY_PATTERNS`), so no behavior change there — just a
+clearer reason string. Read-only sessions likewise already denied
+launchctl mutations; the new predicate just surfaces first. `isolation:
+none` sessions now get a one-check hook (Bash → self-restart only); all
+other commands pass through — this is a safety floor, not a sandbox.
+Reads of the plist (`cat`/`grep`/`ls`) remain allowed. `launchctl
+list|print` against the runner label remains allowed (legitimate
+diagnosis). god (`isolation: host`) stays unhooked — break-glass by
+design (INV-18).
+**Gotchas discovered**: the hook wiring in `_build_options` is
+mutually exclusive — once `kwargs["hooks"]` is set, subsequent branches
+don't run. The new elif falls after readonly and workspace, so it only
+applies when neither of those did. If a future skill combines
+`privilege_class: read-only` with `isolation: workspace`, read-only still
+wins (it is strictly stronger), as documented in `session.py`.
+
 ## 2026-10-10 — session: raise SDK transport buffer ceiling to 20 MiB
 
 **Files created**: none
