@@ -970,6 +970,31 @@ the bug ALSO fires on long-stale queued rows revived at runner startup,
 not just within a single quota pause/resume window — any first-attempt
 preflight-reject leaves a landmine for every subsequent runner restart.
 
+**Seventh confirmed instance 2026-10-11 (`_writeback` child, re-diagnosed
+by escalation `3a16dd1e` for `3811db89`)**: in-session mid-run variant.
+Writeback for atlas parent `47357d2d` started at 17:53:43, made one Bash
+call (git-status + audit-log lookup), got `rate_limit_status:
+allowed_warning utilization=0.99` on that result, then the next SDK message
+tripped `rate_limit_status: rejected window=five_hour` (reset was ~36 min
+away at 18:30 UTC). `job_requeued_for_quota` fired, and within the SAME
+second the runner started a second `job_started` for the same job id —
+the SDK subprocess from attempt #1 had already registered the session_id,
+so attempt #2 hit `Error: Session ID 3811db89-… is already in use` → exit
+1 → failed → this escalation. Live counter: `grep -c "Session ID .* is
+already in use" volumes/logs/runner.err.log` = 25. **No deliverable to
+salvage** — the writeback was a non-critical CHANGELOG follow-up for 28
+atlas files; parent `47357d2d` had already pushed commit `c06b67e`
+(ledger `[E-0154]`) successfully, so atlas state is intact; the only loss
+is "CHANGELOG.md entries describing this hour's atlas doc edits," which
+the next governor/writeback can absorb incrementally. Confirms the bug is
+NOT limited to post-work completion (48ad692d) or preflight-reject
+(46acc317, 8f415798, 37adacc9) — ANY in-flight quota rejection that
+triggers requeue while the SDK subprocess has already registered its
+session is sufficient. The requeue→restart happened within one second
+rather than after the quota reset; need to check whether `main.py` is
+pausing the queue on in-session quota rejection the same way it does on
+preflight.
+
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
    16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
