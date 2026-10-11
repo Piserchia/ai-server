@@ -251,3 +251,55 @@ rewrite old entries.
   ten days later and nothing in the stack reaps or alerts on them. A fixed
   finding and an unreaped one look identical unless you re-query by status
   rather than by date.
+- 2026-10-11: `ledgerlink.high_water_equity()` is `SELECT max(equity) FROM
+  trader.equity_curve` (`ledgerlink.py:144-146`) and `upsert_equity` only runs
+  at executor step 9 — AFTER the `stale_data` return at step 5. So every stale
+  session's equity is permanently excluded from the drawdown kill-switch's
+  reference point, and the error is **fail-open** (understated peak →
+  understated drawdown → less likely to halt). T-0031: the true all-time high
+  101606.11 was set 2026-10-06 on a `stale_data` session; the system still
+  believed 100808.11 (09-03), understated 78.5bp, with 14/30 lifetime marks
+  invisible. ALWAYS compute lifetime high-water and maxDD from `runs.equity`
+  (complete) and report the delta against `max(equity_curve.equity)` (the
+  sample the system actually uses) — the delta IS the finding. Generalise: when
+  two tables record the same quantity, the one written EARLIER in the code path
+  is ground truth and the later one is a sample; never take an extremum from
+  the sample.
+- 2026-10-11: the staleness guard protects `needed = set(pos_map) | {"SPY",
+  "SGOV"}` (`executor.py:243`), so **BIL — a benchmark, never a position — has
+  NO freshness guard at all**. `bil_close` comes from step 9's bar, not from
+  `prices`, so the mandated benchmark leg can be marked from tape of unbounded
+  age and nothing flags it (T-0031: BIL's last round-lot print was 54.2 min
+  before the 10-06 run, 16.9 min before 10-08). Never assume the pair has a
+  freshness contract; state each mark's age when it matters.
+- 2026-10-11: the `adjustment=all` vs `split` ex-date screen can come back
+  EMPTY, and that is a result worth stating explicitly, not a skipped step.
+  When the two series are byte-identical across the window, price convention
+  and total-return convention COINCIDE on the benchmarks AND on the book, so
+  the grade's numbers are exact rather than corrected — say so. The monthly
+  BIL/SGOV ex is the FIRST business day, so any window starting after ~the 2nd
+  of a month typically screens clean (T-0031: 10-05→10-09 clean because the
+  ex was 10-01).
+- 2026-10-11: cross-check any rebuilt SPY mark against
+  `runs.details.positions.SPY.market_value / qty` — the executor records the
+  broker's position mark on EVERY row including `stale_data` ones. T-0031:
+  90583.74/117 = 774.22 vs the tape rebuild 774.205 on 10-05, and the method
+  reproduced the one recorded `bil_close` exactly / `spy_close` to 0.9bp. Two
+  independent sources for a mark the curve never stored.
+- 2026-10-11: terminating a stranded job is queue hygiene, NOT recovery. Both
+  of T-0022/T-0027's F14 casualties went terminal on 2026-10-05 (`37adacc9`
+  `failed`, `8f415798` `cancelled`) and the fleet-wide sweep is clean — but the
+  executor is today-only with no backfill, so 09-25's session is permanently
+  absent from `trader.runs`. Report "casualties cleared" and "race fixed" and
+  "session recovered" as three separate claims; they are not the same claim.
+- 2026-10-11: `scripts/schedule-monitor.sh` is ALIVE again — `rc=0` on every
+  run from 2026-10-05 onward after 33 days of `rc=127`. Keep checking for
+  `rc=0` anyway: line 25's `(( rc != 0 )) && exit 0  # not a finding` was NOT
+  fixed, so the next collector failure will again be indistinguishable from an
+  all-clear. A revived watchdog is not a trustworthy watchdog.
+- 2026-10-11: do not read one good coverage week as repair. Productive coverage
+  ran 100/100/25/40/25/**80**/20 across seven weeks with ZERO interventions on
+  the cause; T-0027 read the 80% as the start of a fix and the next week printed
+  the worst figure in the vertical's life. Before crediting an improved metric,
+  name the change that produced it — if there is none, it moved exogenously and
+  will move back.
