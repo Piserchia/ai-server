@@ -14,6 +14,44 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-10-11 — `isolation: none` + `bypassPermissions` = no guard hook attached
+
+**Trap**: `_build_options` in `session.py` only attaches a guard-hook profile
+when `skill_cfg.privilege_class == "read-only"` OR `guard_workspace is not
+None` (set only for workspace-tier sessions). A skill that declares
+`isolation: none` and `permission_mode: bypassPermissions` — self-diagnose,
+historically — therefore ran with NO PreToolUse hook at all AND no
+permission check. Any Bash it emits goes straight through.
+
+**Where it bit us**: 2026-10-10 self-diagnose cascade. A self-diagnose
+session, under bypassPermissions and with no hook attached, ran `launchctl
+kickstart -k gui/501/com.assistant.runner` — restarting its own runner,
+killing the session mid-work. `reconcile_orphaned_jobs` adopted the row as
+`failed` on respawn, the event trigger refired because the failure was
+within the window, a new self-diagnose job ran, repeat. The prose gotcha in
+`skills/self-diagnose/SKILL.md` ("don't restart com.assistant.runner") was
+not enough: under failure-mode pressure the agent did it anyway.
+
+**Fix**: `guards.make_universal_guard_hooks(job_id)` — a minimal Bash hook
+that denies self-restart of `com.assistant.runner` only. `session.py` now
+attaches it to any session that isn't read-only, isn't workspace-tier, and
+isn't `isolation: host` (god stays unhooked, INV-18 break-glass). The
+underlying predicate `guards.runner_self_restart_violation(...)` is also
+chained into `bash_violation` and `readonly_bash_violation` so the specific
+"self-restart of com.assistant.runner" denial surfaces instead of the
+generic launchctl deny (defense in depth — workspace and read-only
+profiles already blocked launchctl mutations, but the reason string was
+unhelpful).
+
+**For future work here**: any new "universal" interlock belongs in the
+universal profile. Keep it minimal — this is a safety floor, not a sandbox.
+If a skill needs broader containment, give it `isolation: workspace`
+instead of adding more cases to the universal profile.
+
+**Regression pin**: `tests/test_guards.py::TestRunnerSelfRestartViolation`
+(16 denied / 10 allowed) + `TestUniversalGuardHooks` (hook structure +
+audit profile = "universal").
+
 ## 2026-08-21 — `ResultMessage.is_error` is NOT a reliable "session succeeded" flag
 
 **Trap**: The bundled Claude CLI, on an Anthropic-side 5xx (e.g. 529

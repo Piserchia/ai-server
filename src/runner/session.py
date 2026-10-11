@@ -753,6 +753,13 @@ def _build_options(
         kwargs["hooks"] = guards.make_readonly_guard_hooks(str(job.id))
     elif guard_workspace is not None:
         kwargs["hooks"] = guards.make_guard_hooks(str(job.id), guard_workspace)
+    elif skill_cfg is None or skill_cfg.isolation != "host":
+        # Universal self-restart interlock for sessions outside both profiles:
+        # isolation=none skills with Bash (self-diagnose above all), which
+        # under bypassPermissions had no hook before 2026-10-10 and could
+        # restart their own runner → self-kill → event-triggered cascade.
+        # god (isolation=host) stays unhooked — break-glass by design (INV-18).
+        kwargs["hooks"] = guards.make_universal_guard_hooks(str(job.id))
 
     # ── MCP server injection ──────────────────────────────────────────
     # Skills opt in via "needs-projects-mcp" / "needs-dispatch-mcp" tags

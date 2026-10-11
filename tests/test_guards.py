@@ -555,3 +555,164 @@ class TestReadonlyGuardHooks:
             "tu-r5", None,
         )
         assert out == {}
+
+
+# ── runner_self_restart_violation ──────────────────────────────────────────
+#
+# The 2026-10-10 cascade: a self-diagnose session (isolation=none,
+# bypassPermissions, no hooks) restarted its own runner, killing itself
+# mid-work. The runner respawned, orphan reconciliation ran, the event
+# trigger refired, and the cascade repeated. Prose gotchas in the skill
+# body were insufficient — the check now lives in code and runs in every
+# guard profile (workspace, read-only, universal).
+
+RUNNER_SELF_RESTART_DENY = [
+    # launchctl mutating verbs against the runner label — every form a
+    # session actually spells (gui/501/, system/, bare label).
+    "launchctl kickstart -k gui/501/com.assistant.runner",
+    "launchctl bootout gui/501/com.assistant.runner",
+    "launchctl kill SIGTERM gui/501/com.assistant.runner",
+    "launchctl stop com.assistant.runner",
+    "launchctl start com.assistant.runner",
+    "launchctl load ~/Library/LaunchAgents/com.assistant.runner.plist",
+    "launchctl unload ~/Library/LaunchAgents/com.assistant.runner.plist",
+    "launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.assistant.runner.plist",
+    "launchctl disable gui/501/com.assistant.runner",
+    "launchctl enable gui/501/com.assistant.runner",
+    "launchctl remove com.assistant.runner",
+    # Direct plist manipulation bypasses launchctl entirely.
+    "rm ~/Library/LaunchAgents/com.assistant.runner.plist",
+    "mv com.assistant.runner.plist /tmp/stash",
+    "cat >~/Library/LaunchAgents/com.assistant.runner.plist <<EOF",
+    # Chained forms the self-diagnose incident 2026-10-10 would have used.
+    "launchctl kickstart gui/501/com.assistant.runner && echo done",
+    "sleep 1; launchctl bootout gui/501/com.assistant.runner",
+]
+
+RUNNER_SELF_RESTART_ALLOW = [
+    # Inspection against the runner label stays allowed — self-diagnose
+    # legitimately reads status.
+    "launchctl list | grep com.assistant.runner",
+    "launchctl print gui/501/com.assistant.runner",
+    "launchctl list com.assistant.runner",
+    # Other labels — not the runner.
+    "launchctl kickstart -k gui/501/com.assistant.web",
+    "launchctl bootout gui/501/com.assistant.bot",
+    "launchctl stop com.assistant.scheduler-monitor",
+    # Reading about the runner is fine (grep, cat, ls, read-only tools).
+    "grep com.assistant.runner scripts/install-launchd.sh",
+    "cat ~/Library/LaunchAgents/com.assistant.runner.plist",
+    "ls -la ~/Library/LaunchAgents/ | grep runner",
+    # Related tooling that doesn't restart the label.
+    "pipenv run python -m src.runner.main --help",
+    "python -m src.runner.main",
+]
+
+
+class TestRunnerSelfRestartViolation:
+    @pytest.mark.parametrize("cmd", RUNNER_SELF_RESTART_DENY, ids=lambda c: c[:48])
+    def test_denied(self, cmd):
+        reason = guards.runner_self_restart_violation(cmd)
+        assert reason is not None, f"should DENY: {cmd}"
+        assert "com.assistant.runner" in reason
+
+    @pytest.mark.parametrize("cmd", RUNNER_SELF_RESTART_ALLOW, ids=lambda c: c[:48])
+    def test_allowed(self, cmd):
+        assert guards.runner_self_restart_violation(cmd) is None, \
+            f"should ALLOW: {cmd}"
+
+    def test_empty_command_allowed(self):
+        assert guards.runner_self_restart_violation("") is None
+
+    def test_word_boundary_no_false_positive(self):
+        # Hypothetical: a label PREFIXED com.assistant.runner (e.g.
+        # `com.assistant.runnerX`) is a different label, not the runner.
+        assert guards.runner_self_restart_violation(
+            "launchctl stop com.assistant.runnerX") is None
+
+    def test_workspace_profile_catches_self_restart(self):
+        # Belt-and-suspenders: workspace profile has `\blaunchctl\b` as a
+        # hard-deny, so the universal check runs first but either way the
+        # command is denied — the self-restart message is just more specific.
+        reason = guards.bash_violation(
+            "launchctl kickstart -k gui/501/com.assistant.runner", WS, ROOTS)
+        assert reason is not None
+        assert "self-restart of com.assistant.runner" in reason
+
+    def test_readonly_profile_catches_self_restart(self):
+        reason = guards.readonly_bash_violation(
+            "launchctl kickstart -k gui/501/com.assistant.runner")
+        assert reason is not None
+        assert "self-restart of com.assistant.runner" in reason
+
+
+# ── Universal guard hook factory ────────────────────────────────────────────
+
+
+class TestUniversalGuardHooks:
+    def test_structure(self):
+        hooks = guards.make_universal_guard_hooks("job-u1")
+        assert set(hooks) == {"PreToolUse"}
+        matchers = hooks["PreToolUse"]
+        assert len(matchers) == 1
+        assert matchers[0].matcher == "Bash"
+
+    async def test_bash_hook_denies_self_restart_and_audits(self, monkeypatch):
+        events: list[tuple] = []
+        monkeypatch.setattr(guards.audit_log, "append",
+                            lambda job_id, kind, **kw: events.append((job_id, kind, kw)))
+        hooks = guards.make_universal_guard_hooks("job-u2")
+        bash_hook = hooks["PreToolUse"][0].hooks[0]
+        out = await bash_hook(
+            {"tool_name": "Bash",
+             "tool_input": {"command":
+                            "launchctl kickstart -k gui/501/com.assistant.runner"}},
+            "tu-u1", None,
+        )
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert events[0][1] == "guard_denied"
+        assert events[0][2]["profile"] == "universal"
+        assert "com.assistant.runner" in events[0][2]["reason"]
+
+    async def test_bash_hook_allows_other_commands(self):
+        # The universal profile is intentionally minimal — ANYTHING that
+        # isn't a self-restart passes. Containment is the workspace profile's
+        # job; this is a safety floor, not a sandbox.
+        hooks = guards.make_universal_guard_hooks("job-u3")
+        bash_hook = hooks["PreToolUse"][0].hooks[0]
+        for cmd in (
+            "sudo rm -rf /",            # workspace-tier would deny; universal doesn't
+            "launchctl list",
+            "launchctl kickstart com.assistant.web",
+            "grep foo src/",
+            "pytest tests/",
+            "psql assistant -c 'SELECT 1'",
+        ):
+            out = await bash_hook(
+                {"tool_name": "Bash", "tool_input": {"command": cmd}},
+                "tu-u2", None,
+            )
+            assert out == {}, cmd
+
+    async def test_bash_hook_allows_other_labels(self):
+        hooks = guards.make_universal_guard_hooks("job-u4")
+        bash_hook = hooks["PreToolUse"][0].hooks[0]
+        out = await bash_hook(
+            {"tool_name": "Bash",
+             "tool_input":
+             {"command": "launchctl kickstart -k gui/501/com.assistant.web"}},
+            "tu-u3", None,
+        )
+        assert out == {}
+
+    async def test_bash_hook_allows_inspection_of_runner_label(self):
+        # Reading launchctl state about the runner is legitimate diagnosis.
+        hooks = guards.make_universal_guard_hooks("job-u5")
+        bash_hook = hooks["PreToolUse"][0].hooks[0]
+        out = await bash_hook(
+            {"tool_name": "Bash",
+             "tool_input":
+             {"command": "launchctl print gui/501/com.assistant.runner"}},
+            "tu-u4", None,
+        )
+        assert out == {}
