@@ -169,3 +169,68 @@
   it is a different repo (production checkout, runtime-learnings lane,
   auto-published by `sync-learnings.sh`). A blocked atlas write never means
   the session has nothing to record.
+
+## 3 of 3 — the DoS is now the headline finding (2026-10-11, G-0004 still NOT written)
+
+- **Three consecutive scheduled grades lost** to the dirty-tree precondition
+  (09-27, 10-04, 10-11) — **four calendar weeks with no ledger grade since
+  G-0003 (2026-09-20)**. All three governor jobs ran and were marked
+  `completed` in `jobs` (`2082c8c5`, `92ac907d`, `0fd562b3`), so the
+  *dispatch* telemetry is green while the *function* has produced nothing for
+  a month. A skill whose success metric is "job completed" cannot see this
+  class of failure. Lead with it; it outranks every substantive finding.
+- `swing/` was **provably clean for the third time in a row**
+  (`git status --porcelain -- swing/` → empty, whole tree dirty). The
+  path-scoped precondition would have let all three grades through. That is
+  now a 3/3 measured case for the DR, not a hypothesis.
+- The orphan class **escalated from scaffold to a sibling's finished grade**.
+  10-11's dirty set was `M CHANGELOG.md`, `M evaluation/BACKLOG.md`
+  (356 lines), `M evaluation/SCORECARD.md` (**+187 lines = a complete
+  2026-10-05 project-evaluator run, composite 3.92→3.65**),
+  `M knowledge/stocks/coverage-matrix.md`, all mtime 2026-10-05 07:17–07:27,
+  plus the same recurring untracked `.agents/`, `.codex/`, `AGENTS.md`
+  (mtime 09-30) that `stash@{0}` already rescued once. Verified **not**
+  duplicated on origin (`git show origin/master:CHANGELOG.md | grep -c
+  '<headline>'` → 0; origin SCORECARD 867 lines vs local 1054). This is real,
+  unpushed, six-day-old work by another governor — all the more reason not to
+  touch it, and a far stronger owner-attention item than stray scaffold.
+- The clone drifted to **61 behind, 0 ahead**. Read ALL substantive evidence
+  via `git show origin/master:<path>` — the local `swing/evaluation/LEDGER.md`
+  was 2560 lines vs origin's 2892, i.e. **the local ledger was missing
+  C-0004's RESULT and all of C-0005**. Grading off the local copy would have
+  mis-reported the research lane as idle. The orphaned CHANGELOG entry
+  explains the drift: a commit authored *inside the pull-only runtime clone*
+  made every `--ff-only` deploy pull refuse, stranding 46 commits.
+
+## Watchdog: closing a finding on control-exists evidence (2026-10-11)
+
+- **F6/DR-0007 (the rc=127 watchdog) is genuinely FIXED** and is the first
+  finding closeable under the "not-recurring ≠ fixed" rule — because the
+  *control now demonstrably exists*, not because the week was quiet:
+  `volumes/logs/schedule-monitor.log` shows the rc=127 streak ending
+  2026-10-04 and **7 consecutive `rc=0` runs 10-05→10-11**, and
+  `schedule_adherence.json` `generated_at` was **46 minutes old** at grade
+  time (vs 19 days stale at G-0003). Check both the rc histogram and the
+  artifact's `generated_at` before crediting the fix — either alone is
+  forgeable by the other's failure mode.
+- Phase S still requires an **induced silent-worker drill**; a watchdog that
+  merely runs green has not been shown to *fire*. Working ≠ drilled — do not
+  let the rc=0 streak satisfy that exit criterion.
+
+## Query mechanics, round 2
+
+- `swing.runs` has **no `started_at`** column — the timestamp is **`ts`**
+  (schema: `id, ts, status, mode, git_sha, config_hash, equity, cash,
+  details`). `started_at` raises `column does not exist` and will abort a
+  whole chained pull.
+- The assistant `jobs` table likewise has **no `finished_at`**; use
+  `created_at` for last-seen liveness.
+- Atlas DB creds: the atlas clone's `.env` sources fine and its
+  `DATABASE_URL` needs `+asyncpg` stripped for psql. Enumerate rowcounts with
+  a loop over `information_schema.tables where table_schema='swing'` — it
+  proves the tables exist AND that the zeros are real in one pass
+  (the 529-as-completed guard).
+- `provisioning_gap` is still outside Phase S's clean taxonomy, so a 100%
+  `provisioning_gap` week scores **0/10 clean sessions**, not 10/10. At
+  62/62 lifetime (day 42 of DR-0005) the shakedown denominator has never
+  advanced past zero.
