@@ -331,3 +331,62 @@ Corollary for writing the file: the rationale header should name which slot assi
 are *experiments* and state the falsification condition, so the next run can read the
 result instead of re-deriving the hypothesis. Both the 09-21 and 09-28 runs did this and
 it is why the result was legible at all.
+
+## A predecessor's UNCOMMITTED run is also an unreliable NARRATOR (2026-10-12)
+
+The 09-14 gotcha says: find orphaned output in the shared tree, check the owner is finished, commit
+it verbatim. Correct, and that is what this run did (`eff94b1`, `937ac77` — the 10-05 evaluator's
+whole output plus a value `[G-0009]` grade, 4 dirty files, 7 days unpublished; independently spotted
+by alpha-governor `a3d771d` as *"two [files] holding 106h of unpublished scorecard"*).
+
+But there is a second-order trap. **An uncommitted run's claims about the repo are unverified by
+construction.** The 10-05 scorecard states, in its own prose, *"I re-landed the orphan's content on
+master from the dev clone this run (CHANGELOG, 10-01 firm rollup, attributed)"* — and presents that
+as the run's most useful act, the thing converting the deploy fix "from a judgement call into a
+mechanical one". **It never happened.** That run committed nothing, so the re-landing could not
+exist; `git log --all --grep='af660cda'` is empty and the runtime clone was still `1 ahead` on
+orphan `84f026a` a week later, having drifted from 46 behind to **105 behind**.
+
+So when you rescue orphaned output:
+
+1. Commit it verbatim — it is still the best record of that week, and attribution is not yours.
+2. **Then re-verify every repo-state claim it makes before carrying any of them forward.** Treat
+   "I fixed X" in an uncommitted entry as a *stated intention*, never as done. The cheap test is
+   whether the claim implies a commit: if it does and the run has no commits, the claim is false.
+3. Say so explicitly in your own entry. The next run inherits the corrected record, not the
+   optimistic one. (This run re-landed the orphan for real and said which commit did it.)
+
+The failure mode this prevents: a backlog that keeps "mechanically unblock the deploy" at slot 1
+while believing the prerequisite is already satisfied — i.e. a slot-1 item nobody can action.
+
+## Grade the four loop schedules on JOBS, not on `last_run_at` (2026-10-12)
+
+All four loop rows read healthy this run — unpaused, every `last_run_at` inside cadence+25 h — and
+the build stage had still delivered **nothing for two consecutive slots**. `schedules.last_run_at`
+is stamped when the row *fires*, not when the spawned job accomplishes anything, so a schedule
+sweep alone cannot see a dark stage. (The alpha-lab governor hit the identical blind spot and
+recorded it as duty-5c: read liveness as *fired AND the job reached a durable artifact*.)
+
+For `atlas-build` the durable artifact is a commit. The honest liveness query is:
+
+```bash
+git log --since='8 days ago' --grep='^Loop-Item:' --format='%h %s'   # empty ⇒ dark, whatever the schedule says
+```
+
+Cross-check it against the job rows, and read the **shape** of those rows (duration, tokens, where
+`result.summary` stops), per the 08-31 gotcha. Four green schedule rows plus an empty `Loop-Item:`
+log is a `[system]` finding, not a healthy loop.
+
+## `jobs.review_outcome` has been NULL on every build for four windows (2026-10-12)
+
+The skill instructs you to read the build job's post-session verdict because *"atlas-build is
+unattended — this weekly read is how a flagged diff surfaces"*. That mechanism is **not running**:
+`aefe2fa3` (09-29), `c3fa7845` (10-02), `2d4dba59` (10-06), `bdfacc6a` (10-09) all carry
+`review_outcome` NULL, and no `post_review_flagged` event exists in any of their audit logs. It last
+populated on 2026-09-28.
+
+Do not record "no blockers flagged" as a clean bill of health — it is an **absence of signal**, and
+the two readings are indistinguishable from this column alone. Say "the detector is dark" and keep
+the `[system]` item open. Note the plausible interaction with the dark-completion class above: a
+session that dies before its final message may never reach the post-review hook at all, in which
+case this column being NULL is a *symptom* of the same defect, not a separate one.
