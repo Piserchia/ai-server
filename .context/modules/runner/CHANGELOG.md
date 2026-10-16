@@ -2,23 +2,91 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
-## 2026-10-05 — self-diagnose: hygiene cleanup for session_id collision bug (no code change)
+## 2026-10-12 — self-diagnose 99ad4c85: SDK session_id collision — 8th instance recorded
 
 **Files created**: none
-**Files changed**: `docs/TROUBLESHOOTING.md` (+fifth/sixth confirmed-instance block
-for session_id collision; counter updated 22 → 24; added "INV-15 variant: stale
-queued rows revived across runner restart" to the known-sequence section).
-**Why**: self-diagnose job `48ca3cc5` on failures of `37adacc9`
-(atlas-trader-paper) and `8f415798` (atlas-advisors-ingest). Both were
-quota-rejected at preflight on 2026-09-24/25 and sat `queued` in the DB for
-~10 days; a runner restart at 2026-10-05 06:28 re-enqueued them via INV-15
-(`queued_requeued: queued row had no Redis entry at runner startup`) and both
-collided on the stale `~/.claude/projects/.../<uuid>.jsonl` → exit 1. No
-deliverable existed either time; both jobs stay `failed`. Stale CLI session
-files + workspace clones removed. Permanent fix dispatched to `server-patch`
-as job `33ca5268` (rotate `session_id` on requeue, both paths; add a
-collision-recovery short-circuit).
-**Risk**: very low (docs + runtime hygiene only; no code or config touched).
+**Files changed**: `docs/TROUBLESHOOTING.md` (eighth confirmed instance
+appended to "Session ID already in use" section). No runner source
+changes — the underlying bug (SDK subprocess registers session_id on
+first-attempt spawn, requeue→retry collides) is still owed a Phase 5
+server-patch fix.
+**Why**: atlas-report job `9c1f16dc` (NXXT, escalation of `fe494620`)
+tripped the five_hour window mid-run at 14:42:35 UTC after reading the
+packet + both charters/knowledge files and dispatching both lens
+subagents. Requeue + 4h48m retry hit `Error: Session ID 9c1f16dc-… is
+already in use` → exit 1. Known recurring pattern.
+**Remediation applied**: orphan CLI session artifacts cleaned
+(`~/.claude/projects/.../9c1f16dc-….jsonl` + its sibling dir and
+`~/.claude/session-env/9c1f16dc-…/`); job row marked `cancelled` with
+explanatory `error_message` citing TROUBLESHOOTING.md. No NXXT report
+deliverable existed to salvage — both subagents had been dispatched but
+neither returned before the rate-limit rejection.
+**Follow-up**: live `grep -c "Session ID .* is already in use"
+volumes/logs/runner.err.log` = 41 (was 25 on 2026-10-11; +16 in one
+day). The uptick suggests the five_hour window saturation is firing on
+nearly every atlas-report escalation this week. Phase 5 server-patch
+should rotate `session_id` on requeue OR short-circuit the SDK spawn
+when the collision error surfaces (both options noted earlier in
+TROUBLESHOOTING.md).
+
+## 2026-10-10 — session: raise SDK transport buffer ceiling to 20 MiB
+
+**Files created**: none
+**Files changed**: `src/runner/session.py` (`_build_options` sets
+`kwargs.setdefault("max_buffer_size", 20 * 1024 * 1024)` just before
+constructing `ClaudeAgentOptions`).
+**Why**: implements proposal
+`0f3b5acc-3e44-4dc0-a5f2-4b736bf89b85`. The Claude Agent SDK's
+`subprocess_cli` transport buffers each JSON message from the bundled
+Claude CLI in memory before yielding it; its
+`_DEFAULT_MAX_BUFFER_SIZE = 1024 * 1024` (1 MiB) is overridable only via
+`ClaudeAgentOptions.max_buffer_size`, which `_build_options` never set.
+Three recent long-running sessions overflowed that cap and died with
+`JSON message exceeded maximum buffer size of 1048576 bytes` in the last
+48 h: alpha-governor jobs
+`8d848d17-2df7-4e41-9de6-9d0f504d69b5` and
+`4bce7355-59a1-415e-8c6b-5822543b8b13`, and alpha-research job
+`3c7c8c56-a580-4e26-a048-e1e7845bbb67`. Lifting the ceiling to 20 MiB
+accommodates realistic ToolResult payloads (large diffs, grep outputs,
+file reads) without unbounded growth.
+**Side effects**: every session now runs with a 20× larger per-message
+buffer. The buffer is per in-flight JSON message, not retained, so peak
+memory impact per session is bounded by the largest single message the
+CLI emits. `setdefault` leaves the knob overridable per payload / skill
+in the future.
+**Gotchas discovered**: `ClaudeAgentOptions.max_buffer_size` must be an
+int; `None` falls back to the SDK default (confirmed via
+`inspect.signature` — annotation `int | None`, default `None`). The
+cap is enforced in `claude_agent_sdk/_internal/transport/subprocess_cli.py`.
+
+## 2026-10-05 — writeback: classify agent-config dirs as docs
+
+**Files created**: `tests/test_writeback.py` (17 new cases).
+**Files changed**: `src/runner/writeback.py` (added `.codex/agents/`,
+`.agents/`, `.claude/agents/` prefix checks and an `AGENTS.md` comment in
+`_is_doc_path()`).
+**Why**: implements proposal `a164301b-34ed-497c-a9db-98a6522de454`. Over
+the preceding 30 days, 5 of 23 `_writeback` jobs (21.7%) failed with
+`max_turns=20` exhaustion; all 5 parents were atlas-repo sessions whose
+`git status` consistently showed `.codex/agents/*.toml`, top-level
+`AGENTS.md`, and `.agents/skills/*.md` as the only modified paths. The
+classifier treated those as code, so the runner kept spawning writeback
+jobs on diffs that are entirely agent-config documentation. Bucketing them
+with the existing `/skills/` heuristic stops the false-positive dispatches
+at the source. Top-level `AGENTS.md` was already matched by the top-level
+`.md` rule; the new tests pin that behavior so a future refactor cannot
+regress it silently.
+**Side effects**: fewer `_writeback` jobs will be dispatched. Sessions
+whose ONLY modifications are agent-config files will no longer trip the
+"needs writeback" check — but those files are configuration documents, not
+code, so the CHANGELOG rule doesn't apply to them anyway. If a session
+mixes agent-config edits with real code changes, the real code still
+triggers writeback as before.
+**Gotchas discovered**: nested `.codex/agents/` under a project (e.g.
+`projects/atlas/.codex/agents/x.toml`) is NOT caught by the new rules —
+only top-level prefixes match. That's intentional: when the server-repo
+session has a project nested writable, the project's own config files are
+project code, and the project's own CHANGELOG should record them.
 
 ## 2026-09-23 — mcp_dispatch: normalize dispatched job kinds
 

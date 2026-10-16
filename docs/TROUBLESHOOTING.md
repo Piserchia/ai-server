@@ -995,6 +995,27 @@ rather than after the quota reset; need to check whether `main.py` is
 pausing the queue on in-session quota rejection the same way it does on
 preflight.
 
+**Eighth confirmed instance 2026-10-12 (`atlas-report` NXXT, re-diagnosed
+by escalation `99ad4c85` for `9c1f16dc`)**: in-session mid-run variant,
+same shape as the seventh. Report started at 14:42:14 UTC, read the
+packet + business context + both charters + both knowledge files, then
+`rate_limit_status: rejected window=five_hour` fired at 14:42:35 (reset
+~8 min away). `job_requeued_for_quota` at 14:42:40; retry 4h48m later at
+19:30:50 hit `Error: Session ID 9c1f16dc-… is already in use` → exit 1
+within 3 seconds. Both subagents (`atlas-report-business`,
+`atlas-report-technical`) had been dispatched at 14:42:24-26 but neither
+returned before the quota rejection — **no deliverable to salvage**.
+Parent `fe494620` (atlas-report NXXT at original effort) had already
+failed in a separate way earlier. Orphan session artifacts cleaned
+(`~/.claude/projects/…/9c1f16dc-….jsonl` + dir,
+`~/.claude/session-env/9c1f16dc-…/`); job row marked `cancelled` with
+explanatory message. Live counter: `grep -c "Session ID .* is already in
+use" volumes/logs/runner.err.log` = 41 (was 25 on 2026-10-11 — +16 in a
+day indicates the bug is firing on nearly every quota-rejected job
+through the active window). Confirms this is now the dominant failure
+mode for high-effort atlas-report escalations whose first attempt hits a
+five_hour window on the way out. Fix still owed by server-patch (Phase 5).
+
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
    16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
