@@ -1016,6 +1016,91 @@ through the active window). Confirms this is now the dominant failure
 mode for high-effort atlas-report escalations whose first attempt hits a
 five_hour window on the way out. Fix still owed by server-patch (Phase 5).
 
+**Ninth confirmed instance 2026-10-12 (`atlas-advisors-ingest`, re-diagnosed
+by escalation `921b81c6` for `88f99e74`)**: in-session mid-run variant,
+same shape as the seventh/eighth. Twice-weekly ingest started 2026-10-12
+14:48 UTC on medium Opus, pulled YouTube RSS, downloaded transcripts for
+five personas, dispatched claim-extraction subagents for the first three
+(financial-education, investing-with-brandon, jordi-visser → all returned
+and persisted claims.jsonl → 11.6KB total). At 19:53:48, after
+dispatching the humphrey + prof-g extraction subagents in parallel,
+`rate_limit_status: rejected window=five_hour` fired (utilization hit 0.99
+then 0.97 in the preceding seconds). `job_requeued_for_quota` at 19:54:02;
+retry at 19:54:43 UTC hit `Error: Session ID 88f99e74-… is already in
+use` → exit 1 within 4 seconds. Live counter: `grep -c "Session ID .*
+is already in use" volumes/logs/runner.err.log` = 43 (was 41 on 2026-10-12
+after instance #8 — +2 from this incident; the second collision at line
+10129 was unrelated job `ff4464a3`, which likely represents a tenth
+instance pending its own diagnosis). **Partial deliverable:** three of
+five personas (financial-education, investing-with-brandon, jordi-visser)
+had claims written to the WORKSPACE clone only (`volumes/workspaces/
+88f99e74-atlas/advisors/personas/*/claims.jsonl`), but no `git push` had
+run so the atlas dev repo and production never received them — those
+partial writes were lost with the workspace cleanup. Humphrey + prof-g
+extractions never returned (subagents in flight at quota hit). Twice-
+weekly schedule heals itself: next ingest job `59ec6305` is already
+queued for 2026-10-15 and will re-process everyone against the current
+RSS window. Orphan `~/.claude/session-env/88f99e74-…/` dir (empty) and
+stale workspace clone cleaned by this escalation; no
+`~/.claude/projects/…/88f99e74-….jsonl` was present (already GC'd). Job
+row marked `cancelled` with explanatory error_message. Fix still owed by
+server-patch (Phase 5). **Partial-work gotcha:** ingest skills that
+accumulate per-persona claims across many SDK turns are at especially
+high collision risk — long run time ⇒ high chance of crossing a five_hour
+reset mid-run, and workspace writes are not durable until the final
+commit/push. Next cycle (post-fix) should either (a) checkpoint after each
+persona via an interim commit the retry can resume from, or (b) make the
+skill idempotent on resume so partial workspace writes aren't thrown away.
+
+**Tenth confirmed instance 2026-10-12 (`atlas-report` BONK → self-diagnose
+cascade, re-diagnosed by LAST-RESORT escalation `6bb14430` for `ef8f70ce`)**:
+chained-cascade variant that exercised the full 3-level escalation ladder
+(the first time this bug has gone to LAST RESORT since detection). Original
+`fd373b83` (atlas-report BONK) created 2026-10-11 14:31:54 EDT → failed on
+first attempt → spawned level-1 escalation `f4a17be1` at high effort →
+`f4a17be1` ran 2026-10-12 09:58:32 UTC, got to the packet-inspection step,
+hit `rate_limit_status: rejected window=five_hour` at 09:58:50 →
+`job_requeued_for_quota` → retry 4h32m later at 14:30:22 UTC → `Error:
+Session ID f4a17be1-… is already in use` → exit 1 within 2 seconds →
+level-2 escalation `ef8f70ce` (self-diagnose) → `ef8f70ce` ran 2026-10-13
+00:30:19 UTC, hit `rate_limit_status: rejected window=seven_day` at
+00:30:34 (3-day pause ahead) → `job_requeued_for_quota`, but a second
+`job_started` for the same `ef8f70ce` was logged in the SAME second
+(00:30:34) → `Error: Session ID ef8f70ce-… is already in use` → exit 1 at
+00:30:35 → level-3 LAST-RESORT escalation `6bb14430` (this diagnosis).
+Shows the bug is a **cascade amplifier**: once it fires, every
+self-diagnose escalation triggered by it is itself vulnerable to the same
+collision whenever the escalation chain crosses a quota window — turning
+one bad quota rejection into 3-4 "failed" jobs in the DB and multiple
+spurious Telegram failure notifications. Live counter: `grep -c "Session
+ID .* is already in use" volumes/logs/runner.err.log` = 43 (unchanged
+from 2026-10-12 instance #9; this instance's two collisions on `f4a17be1`
+and `ef8f70ce` were already counted there). The near-zero gap between
+`job_requeued_for_quota` and the second `job_started` on `ef8f70ce`
+(00:30:34 → 00:30:34 → 00:30:35 failure) ALSO suggests a second,
+secondary bug: the `_job_loop` concurrency slot was already past the
+`is_paused()` check and waiting on the semaphore when the first slot's
+`QuotaExhausted` handler ran `pause_queue()` + `LPUSH`; when the first
+slot released the semaphore, the second slot acquired, BLPOP'd the
+just-requeued `ef8f70ce`, and dispatched `_run_with_held_slot` without
+re-checking `is_paused()`. This race window probably accounts for a
+large fraction of the "immediate retry → session_id collision" shape vs.
+the "~hours later → collision" shape — recommend a second `is_paused()`
+check between BLPOP and `_run_with_held_slot` in `src/runner/main.py:170-181`,
+in addition to the primary session_id rotation fix. **No deliverable to
+salvage:** 0 BONK reports in atlas DB for the last 7 days — both the
+original and the escalated retry failed before persisting. BONK is not
+on a self-healing twice-weekly schedule like the advisors-ingest case;
+remediation = owner re-triggers via `/task atlas-report BONK` after fix
+lands, or waits for the next alpha-scout cycle to re-request. Stale CLI
+session files cleaned by this escalation: 25 files, 5.6 MB total
+(includes the 3 chain-member files plus 22 orphans from prior failed
+jobs). All three chain members (`fd373b83`, `f4a17be1`, `ef8f70ce`)
+marked `cancelled` with explanatory `error_message` by this escalation.
+Fix still owed by server-patch (Phase 5): rotate session_id on requeue
+(primary) + re-check `is_paused()` post-BLPOP (secondary, closes the
+`_job_loop` race).
+
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
    16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
