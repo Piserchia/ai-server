@@ -11,6 +11,19 @@ failures in the wild — it's a living document.
 
 ## Symptom: job fails almost immediately with `Control request timeout: initialize` (error_category=timeout)
 
+### Occurrences
+
+| Date (UTC)        | Job        | Skill              | Notes |
+|-------------------|------------|--------------------|-------|
+| 2026-10-17 01:42  | `2b9e6573` | atlas-swing-trade  | First observed. Daily cron recovered on next run. |
+| 2026-10-17 04:49  | `182052e2` | alpha-research     | Dispatched by alpha-scout (`5807726b`); parent completed clean. Prior 7 alpha-research runs green. |
+
+Two occurrences within 3 hours on the same day, both atlas-project skills,
+different cron slots. Still below the "3+/week/skill" escalation threshold
+(each skill has only 1 occurrence). If a third hit lands within a week on
+*any* atlas skill, treat as a building pattern and escalate per the Fix
+section below.
+
 ### Root cause (diagnosed 2026-10-17, job `2b9e6573` atlas-swing-trade, self-diagnose child `470c03d6`)
 
 Transient failure in the Claude Agent SDK's startup handshake. The SDK
