@@ -1101,6 +1101,82 @@ Fix still owed by server-patch (Phase 5): rotate session_id on requeue
 (primary) + re-check `is_paused()` post-BLPOP (secondary, closes the
 `_job_loop` race).
 
+**Eleventh confirmed instance 2026-10-16 (`alpha-scout` escalation,
+re-diagnosed by escalation `81bc6aef` for `bdcacc08`)**: three-day quota
+pause variant. Chain: parent `78d2b84c` (alpha-scout 2026-10-12 EDT run)
+failed → level-1 escalation `bdcacc08` at high effort / claude-opus-5
+started 2026-10-13 00:30:21 UTC. Completed context reads (SYSTEM.md,
+alpha-scout GOTCHAS, FAMILIES.md, LESSONS.md, budget.yaml, state.json
+glob — six tool calls, zero FAMILIES/LESSONS writes), then hit
+`rate_limit_status: rejected window=seven_day` at 00:30:36 UTC.
+`job_requeued_for_quota` fired; retry at 2026-10-16 00:00:54 UTC
+(~3 days later, i.e. the actual window reset) hit `Error: Session ID
+bdcacc08-… is already in use` → exit 1 within 3 seconds → this
+escalation. Live counter: `grep -c "Session ID .* is already in use"
+volumes/logs/runner.err.log` = 51 (was 43 on 2026-10-12 post-instance #10
+= +8 in four days; bug is still firing on roughly every quota-rejected
+job through the active window). **No deliverable to salvage** — only
+context reads completed; isolation was `none`, so no workspace clone.
+Longest observed quota pause before collision in the series (prior
+longest = ~10 days for the INV-15 stale-queued variant on `37adacc9` /
+`8f415798`; this one at 3d matches the seven_day window). Confirms the
+bug is window-agnostic: five_hour, seven_day, and stale-queued-across-
+runner-restart all produce the same deterministic session_id collision
+on retry. Orphan `~/.claude/session-env/bdcacc08-…/` dir (empty, 2026-
+10-12 20:30 EDT) cleaned by this escalation; no
+`~/.claude/projects/…/bdcacc08-….jsonl` present (already GC'd). Job row
+`bdcacc08` marked `cancelled` with explanatory `error_message`. Alpha-
+scout schedule self-heals: twice-daily cadence, four runs since the
+failed one have landed `completed` (2026-10-13 and 2026-10-15 pairs);
+2026-10-14 pair failed for an unrelated reason (not investigated here —
+flag for a separate diagnosis if the alpha-scout failure rate stays
+elevated). Fix still owed by server-patch (Phase 5): session_id
+rotation on requeue remains the clean solution; the per-window counter
+climb (+8 in four days) is the strongest signal yet that this is the
+single highest-impact runner reliability bug.
+
+**Twelfth confirmed instance 2026-10-16 (`alpha-research` escalation,
+re-diagnosed by escalation `13223a20` for `dc9d9f61`)**: seven_day quota
+pause variant, same shape as instance #11 (`bdcacc08`). Chain: `dc9d9f61`
+(alpha-research for idea A-0019 — Input-output-linked sector lead-lag,
+Opus-5 / high / max_turns=80 / isolation=workspace-clone) started
+2026-10-12 19:38 UTC, completed inbox parse → rebase → id resolution →
+A-0019 append to INBOX.md → wrote `ideas/A-0019/research/triage.md` to
+the workspace clone, then at 2026-10-16 00:29:47 UTC hit
+`rate_limit_status: rejected window=five_hour` immediately after the
+triage.md Write succeeded. `job_requeued_for_quota` + a new
+`workspace_created` for the SAME job id fired in the next 8 seconds
+(00:29:55 UTC), `job_started` at 00:29:55, `Error: Session ID
+dc9d9f61-… is already in use` → exit 1 at 00:29:56 (1-second collision —
+one of the fastest observed so far; confirms the "secondary bug" theory
+from instance #10 about `_job_loop` missing an `is_paused()` recheck
+between BLPOP and `_run_with_held_slot`). Live counter: `grep -c
+"Session ID .* is already in use" volumes/logs/runner.err.log` = 51
+(unchanged from 2026-10-16 post-instance #11; this instance's collision
+was already counted in the +8 window). **No deliverable to salvage** —
+the only writes landed in the workspace clone (`ideas/A-0019/intake.md`,
+`research/triage.md`, and the INBOX.md A-0019 append), no `git push`
+occurred before the quota rejection, and the retry attempt's fresh
+clone wiped them. Alpha-research is dispatcher-fed (not on a cadence);
+the owner or next alpha-scout cycle can re-dispatch A-0019 if the idea
+is still live. Remediation applied by this escalation: workspace
+`volumes/workspaces/dc9d9f61-atlas` removed (18GB stale clone), orphan
+CLI session dir `~/.claude/projects/…dc9d9f61-atlas/dc9d9f61-….jsonl`
+removed, empty `~/.claude/session-env/dc9d9f61-…/` removed, job row
+marked `cancelled` with explanatory `error_message`. The near-zero gap
+between `job_requeued_for_quota` (00:29:47) and the retry
+`job_started` (00:29:55 — 8 seconds, well inside the quota pause
+window) STRONGLY reinforces the instance-#10 theory of a second,
+race-based bug in `_job_loop` where a worker slot BLPOPs the just-
+requeued job before `is_paused()` can take effect. Fix still owed by
+server-patch (Phase 5): rotate session_id on requeue (primary) + add
+`is_paused()` recheck post-BLPOP in `src/runner/main.py:170-181`
+(secondary). This bug has now caused at least 12 documented false-
+failed jobs plus their escalation chains across 5 skills (atlas-report,
+_learning_apply, _writeback, atlas-advisors-ingest, alpha-scout,
+alpha-research) — it is unambiguously the single highest-impact
+reliability bug on the server.
+
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
    16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
