@@ -9,6 +9,79 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: job fails almost immediately with `Control request timeout: initialize` (error_category=timeout)
+
+### Root cause (diagnosed 2026-10-17, job `2b9e6573` atlas-swing-trade, self-diagnose child `470c03d6`)
+
+Transient failure in the Claude Agent SDK's startup handshake. The SDK
+(`claude_agent_sdk/_internal/query.py:546`) sends an `initialize` control
+request to the bundled Claude Code CLI subprocess over its stdin/stdout
+transport and awaits a response within an anyio `fail_after` window. If the
+subprocess doesn't reply in time (default ~60s), the SDK raises
+`Exception("Control request timeout: initialize")` and the runner records
+`error_category=timeout`.
+
+Observed signature for the 2b9e6573 instance:
+- `job_started` 01:41:31 UTC → `job_failed` 01:42:42 UTC (71s elapsed).
+- No tool-use / thinking / text events between them — the session never
+  completed init, so there is nothing to inspect in the audit log besides
+  the failure line.
+- Zero prior occurrences in the audit index (first ever).
+- The daily cron for `atlas-swing-trade` recovered on its own: the previous
+  3 scheduled runs and the next day's run (`92833b19`) all completed clean.
+
+Likely proximate causes (not deterministically distinguishable from the
+failure line alone):
+- Concurrent CLI subprocess startup contention — `alpha-scout` (`9826fea5`)
+  and another atlas session were spinning up / running in the same window.
+- Transient Anthropic API latency during the CLI's own auth/handshake
+  (subscription-auth login flow runs inside the subprocess before it
+  responds to the SDK's init).
+- macOS fork/exec slowness under memory pressure.
+
+### Diagnostics (when it recurs)
+
+```bash
+# 1. Confirm this is the same failure signature (not a different timeout)
+grep -A1 '"job_failed"' volumes/audit_log/<job>.jsonl
+#   → "error": "Control request timeout: initialize", "error_category": "timeout"
+
+# 2. Count historical frequency — if this is still rare, it's transient
+python3 -c "from src.runner.audit_index import search_index; from pathlib import Path; \
+  es = search_index(Path('volumes/audit_log/INDEX.jsonl'), status='failed'); \
+  m = [e for e in es if 'Control request timeout' in (e.get('error_first_line','') or '')]; \
+  print(len(m), 'total'); [print(e['job_id'][:8], e['skill']) for e in m[-10:]]"
+
+# 3. Check runner health — the control-request plumbing lives in the SDK
+#    the runner hosts, so a runner wedge would surface here too
+launchctl list | grep com.assistant.runner   # should show a PID, status 0
+
+# 4. Check if the next scheduled run of the same skill succeeded (daily crons)
+psql assistant -c "SELECT id, status, created_at FROM jobs \
+  WHERE kind='<skill_name>' ORDER BY created_at DESC LIMIT 5;"
+```
+
+### Fix
+
+**None required if it's a one-off**. The daily cron naturally retries at the
+next scheduled slot; this is self-healing. Treat a single instance per
+skill-per-week as noise.
+
+**If it recurs 3+ times in a week for the same skill**, escalate to a server
+patch to bump the SDK's init timeout or add retry-on-init-timeout wrapper
+around the SDK session construction. The timeout isn't configurable from the
+runner today — it would require patching the SDK call site in
+`src/runner/session.py` to catch this specific exception and retry once
+before letting it propagate to `job_failed`.
+
+### Recovery (this diagnosis)
+
+No action taken — single-instance transient, next day's run succeeded, no
+delegation needed. Recorded here so the next operator sees it and can tell
+"one-off noise" from "building pattern" without re-doing the analysis.
+
+---
+
 ## Symptom: `review-and-improve` fails with `error_max_turns (30)` after finishing data-gathering
 
 ### Root cause (diagnosed 2026-09-14, job `a1292d78`, self-diagnose child `f9a74701`)
@@ -1259,6 +1332,112 @@ re-check inside `_run_with_held_slot` (or after BLPOP, before
 leaky, and fixing only (b) still leaves cross-process restarts or
 long-stale-queued revivals exposed. Fix still owed by server-patch
 (Phase 5).
+
+**Fifteenth confirmed instance 2026-10-16 (`atlas-trader-research`,
+diagnosed by self-diagnose `f336a862`)**: five_hour quota pause variant,
+single-level cascade — but with the richest "real work lost" profile in
+the series so far. `60da313a-atlas-trader-research` (Opus-5 / high, 80
+max_turns, isolation=workspace-clone, created 2026-10-14 09:00 EDT and
+deferred ~2 days through the lingering atlas-evaluate quota chain)
+popped on 2026-10-16 20:13 UTC and ran ~16 minutes of productive work:
+read T-0028 score.py / tests, iterated multiple Edits on
+`research/T-0028/score.py` and `tests/research/test_t0028_score.py`
+(V8c implied-weight check / mutation i look-ahead detection), executed
+diagnostic `.venv/bin/python` probes verifying the look-ahead trade-day
+detection logic. Utilization climbed through `allowed_warning`
+0.91→0.92→0.93→0.99 across 20:28:47 → 20:29:57 UTC, then
+`rate_limit_status: rejected window=five_hour` fired at 20:29:57
+(resets_at 1792198800 = 2026-10-16 21:00 UTC). `job_requeued_for_quota`
+at 20:29:58; retry fired at 20:30:34 UTC — only 36 seconds after the
+pause, 29 min BEFORE the actual reset — and failed in ONE second:
+`Error: Session ID 60da313a-… is already in use` → exit 1 at
+20:30:35 → this escalation (level-2 self-diagnose). Matches the
+instance-#14 "25-second retry" shape proving the BLPOP-already-parked
+race in `_job_loop`. Live counter: `grep -c "Session ID .* is already
+in use" volumes/logs/runner.err.log` = 51 (unchanged pre-grep; this
+collision ticks it to 52+ at next read). **No deliverable to salvage**
+— the Edits had landed only in the workspace clone and the retry's
+fresh recreation at 20:30:34 wiped them (`git log` on the clone shows
+HEAD at `390964a` from canonical, no uncommitted work remaining; no
+`git push` ever occurred before quota). Weekly cadence self-heals:
+previous 4 runs (2026-09-16, 09-23, 09-30, 10-07) all completed; next
+tick 2026-10-21 09:00 EDT will restart the T-0028 research cycle from
+the current atlas HEAD. Remediation applied by this escalation: orphan
+`~/.claude/projects/…-volumes-workspaces-60da313a-atlas/60da313a-….jsonl`
++ workspace clone `volumes/workspaces/60da313a-atlas/` (401 MB)
+removed; stale `~/.claude/session-env/60da313a-…/` (0 B, 2026-10-16
+16:05 EDT) removed; job row `60da313a` marked `cancelled` with
+explanatory `error_message` pointing at this entry. **New observation**:
+this is the first instance in the series where the pre-quota attempt
+did meaningful CODE EDITS (not just reads) — the T-0028 score.py and
+test file edits are the richest "real work lost" sample yet. Any
+atlas-trader-research weekly tick that fits inside a single
+five_hour window will self-heal; longer-running research tasks that
+straddle windows will keep losing work until server-patch (Phase 5)
+lands both fixes (session_id rotation on requeue + `is_paused()`
+re-check after BLPOP in `src/runner/main.py:170-181`).
+
+**Sixteenth confirmed instance 2026-10-17 (`alpha-research` 2-level
+cascade, diagnosed by LAST-RESORT escalation `b51096ac` for `c97e45a4`)**:
+five_hour quota pause variant with a NEW layered finding — the level-2
+self-diagnose exhausted its max_turns before completing remediation.
+Chain: `6637542a-0007-4fc3-b069-cd3786818e1b` (alpha-research for idea
+A-0019 "echo momentum t-12..t-7 in the US sector-sleeve cross-section",
+Opus-5 / high / max_turns=80 / isolation=workspace-clone) started
+2026-10-12 15:37 EDT, ran through filing + rebase + push → **git push
+to atlas master succeeded at 2026-10-16 00:29:08 UTC as commit `ca25b13`**
+("feat(alpha-lab): file A-0019 and triage it to `triaged`"). Immediately
+after the push (one tool call later), `rate_limit_status: allowed_warning
+utilization=0.92` fired at 00:29:04 and then within one SDK round-trip
+the window flipped to `rejected window=five_hour`. `job_requeued_for_quota`
+fired; retry hit `Error: Session ID dc9d9f61-ac33-4ba1-be04-c4dad12c6a70
+is already in use` → exit 1 → level-2 self-diagnose `c97e45a4` spawned.
+`c97e45a4` ran 2026-10-17 01:57 UTC on claude-opus-4-7 / high / **max_turns=30**
+and correctly identified the pattern (orphan session dir still on disk,
+deliverable already landed in atlas master), opened TROUBLESHOOTING.md,
+walked session.py line 717 (`session_id=str(job.id)`) and the quota
+requeue path in main.py:457, confirmed the push via `git log` in the
+dev clone, and started the standard remediation (`UPDATE jobs SET
+status='succeeded'` — hit the `ck_jobs_status_valid` constraint because
+`succeeded` is not a valid value; valid is `completed`), then tried to
+`rm` the stale workspace + session artifacts — but the cancelled-parallel
+tool call plus the already-consumed budget tripped `error_max_turns` at
+turn 30 before the cleanup landed. Level-3 LAST-RESORT escalation
+`b51096ac` (this diagnosis) finished the remediation in ~10 tool calls.
+Live counter: `grep -c "Session ID .* is already in use"
+volumes/logs/runner.err.log` = 51 (unchanged from instance #15; this
+collision ticks it to 52+ at next read — the dc9d9f61 line already
+landed on 2026-10-16 00:29). **Deliverable WAS salvaged** — ca25b13 is
+on origin/master and in production atlas state; owner-visible research
+on A-0019 is intact. Weekly / dispatcher-fed cadence; no re-dispatch
+needed. Remediation applied by this escalation: `6637542a` job row
+marked `completed` (not `cancelled`, because the deliverable landed),
+`c97e45a4` job row marked `cancelled` (max_turns truncation on
+remediation), stale `volumes/workspaces/6637542a-atlas/` (386 MB) +
+`~/.claude/projects/-…-volumes-workspaces-6637542a-atlas/*` +
+`~/.claude/session-env/{6637542a-…,c97e45a4-…}/` +
+`~/.claude/projects/-…-ai-server/c97e45a4-…{.jsonl,/}` all removed.
+**NEW LAYERED FINDING (max_turns=30 insufficient for self-diagnose
+session-collision remediation sequences)**: the standard remediation
+for this bug class is now 20+ tool calls (verify deliverable landed in
+atlas remote via `git log` + 2 psql reads, mark both chain rows with
+long explanatory messages, remove 4-5 stale paths, append to
+TROUBLESHOOTING.md), plus 10+ for the investigation itself (read
+TROUBLESHOOTING.md section, inspect session.py + main.py, confirm the
+pattern). This routinely runs 30-45 tool calls total. `max_turns=30`
+in `skills/self-diagnose/SKILL.md` therefore causes **level-2
+self-diagnose jobs to fail mid-remediation on this specific bug class**,
+triggering a LAST-RESORT level-3 escalation that then has to finish the
+same work. Each time this happens the user sees an extra Telegram
+failure notification for the level-2 job. Recommended fix: raise
+self-diagnose `max_turns` to 60 (low-risk skill-frontmatter change
+done in the dev repo); the collision-remediation sequence has a
+natural stop point (summary message) long before 60 turns, so there's
+no runaway risk, and the extra budget absorbs the full
+collision-cleanup sequence plus Troubleshooting-doc write in a single
+level-2 pass. Fix still owed by server-patch (Phase 5) for the primary
+bug; raising `max_turns` is a mitigation that stops the LAST-RESORT
+cascades.
 
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
