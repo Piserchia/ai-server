@@ -1177,6 +1177,89 @@ _learning_apply, _writeback, atlas-advisors-ingest, alpha-scout,
 alpha-research) — it is unambiguously the single highest-impact
 reliability bug on the server.
 
+**Thirteenth confirmed instance 2026-10-16 (`atlas-evaluate` escalation,
+re-diagnosed by escalation `3b49cc1f` for `6561c5c1`)**: five_hour quota
+pause variant with a chained-collision shape — BOTH the original job
+`ff4464a3` AND its level-1 escalation `6561c5c1` hit the same session-id
+collision. Chain: `ff4464a3` (atlas-evaluate weekly, Opus-5 / xhigh)
+scheduled 2026-10-12 07:00 EDT ran against the five_hour window, got
+`job_requeued_for_quota`, retry hit `Error: Session ID ff4464a3-… is
+already in use` → exit 1 at 2026-10-12 20:30:21 EDT → level-1 escalation
+`6561c5c1`. `6561c5c1` ran at 2026-10-16 05:15 UTC, got through
+`context_budget_used` + ~5 min of tool calls (SCORECARD/CHANGELOG/web
+probe/schedules/queue state inspection — mapping atlas health for the
+scorecard) and hit `rate_limit_status: rejected window=five_hour` at
+2026-10-16 05:23:19 UTC with utilization 0.99. `job_requeued_for_quota`
+at 05:23:20. Quota reset at 10:00:00 UTC (per the `resets_at` field).
+Retry fired at 2026-10-16 10:00:27 UTC — 27s after reset — and failed in
+ONE second: `Error: Session ID 6561c5c1-… is already in use` → exit 1 at
+10:00:28 → this escalation (level-2). The orphan session file on disk
+(`~/.claude/projects/-Users-alfredbot-ai-butler-Library-Application-Support-ai-server/6561c5c1-…jsonl`,
+1.19 MB — the FULL transcript of the pre-quota 8 minutes) proves the
+first SDK subprocess registered the session_id before the quota raise
+tore it down; the retry's fresh subprocess saw it on-disk and refused.
+Live counter: `grep -c "Session ID .* is already in use"
+volumes/logs/runner.err.log` = 51 (unchanged from instance #12;
+`ff4464a3` + `6561c5c1` collisions are both already counted in the
++8/four-day bump leading to instance #11's 51 observation). **No
+deliverable to salvage** — atlas-evaluate writes the SCORECARD.md entry
+and backlog re-route; the pre-quota 8 minutes only READ atlas state
+(no git push, isolation=none for the escalation). Weekly cadence
+self-heals: next atlas-evaluate schedule tick is 2026-10-19 07:00 EDT.
+Remediation applied by this escalation: orphan
+`~/.claude/projects/…/6561c5c1-….jsonl` + `~/.claude/session-env/6561c5c1-…/`
++ stale `~/.claude/session-env/ff4464a3-…/` (4 days old) removed; job
+rows `ff4464a3` and `6561c5c1` marked `cancelled` with explanatory
+`error_message` pointing at this entry. **Chain shape** is important:
+both consecutive levels of the SAME chain collided — matches the
+instance-#10 observation about escalations being themselves vulnerable
+when the chain crosses quota windows. Confirms that neither (a) escalating
+to a different model/effort nor (b) waiting out the five-hour window
+breaks the pattern — the fix must be structural (session_id rotation
+on requeue). Fix still owed by server-patch (Phase 5).
+
+**Fourteenth confirmed instance 2026-10-16 (`atlas-value-research`,
+diagnosed by self-diagnose `5dffeb1c`)**: five_hour quota pause variant,
+single-level cascade. `d2cf2ce6-atlas-value-research` (Opus-5 / high, 80
+max_turns, created 2026-10-13 09:00 EDT, deferred for 3 days in queue —
+the schedule had been under quota-pause for the atlas-evaluate chain)
+popped on 2026-10-16 10:24:12 UTC, read 3 orient-phase files
+(GOTCHAS 404 / CONTEXT.md / PROJECT_PROTOCOL.md), hit
+`rate_limit_status: allowed_warning utilization=0.99` at 10:24:16, then
+`rate_limit_status: rejected window=five_hour` at 10:24:20 (reset at
+15:00:00 UTC). `job_requeued_for_quota` at 10:24:21. **Retry fired at
+10:24:46 UTC — only 25 seconds after the pause was set, 4h 35min BEFORE
+the actual reset** — and failed in ONE second: `Error: Session ID
+d2cf2ce6-… is already in use` → exit 1 at 10:24:48 → this escalation
+(level-2 self-diagnose). The 25-second retry window (rather than waiting
+~4.6h for reset) proves a **second bug layered on top of the known
+session-id collision**: a worker already BLPOP-waiting at the moment of
+`quota.pause_queue(...)` + `redis.lpush(QUEUE_JOBS, job_id)` immediately
+receives the re-pushed job WITHOUT re-checking `is_paused()`. The
+`_job_loop` iteration (`src/runner/main.py:122-181`) calls
+`is_paused()` ONCE at the top, acquires a semaphore slot with a 2s
+timeout, then BLPOPs with a 2s timeout — but a waiter already parked in
+BLPOP from the prior iteration will fulfill the lpush instantly, skipping
+step 1 entirely for the just-pushed id. Live counter: `grep -c "Session
+ID .* is already in use" volumes/logs/runner.err.log` = 51 (unchanged
+from instance #13; this collision will tick it to 52 once the next grep
+runs — the log line already landed at 10:24:47 UTC and the counter was
+read post-hoc inside this diagnose session). **No deliverable to
+salvage** — the pre-quota 2 minutes only READ project context files
+(no git push, workspace isolation; the clone had no uncommitted work).
+Remediation applied by this escalation: orphan
+`~/.claude/projects/…-volumes-workspaces-d2cf2ce6-atlas/d2cf2ce6-….jsonl`
++ workspace clone `volumes/workspaces/d2cf2ce6-atlas/` removed; job row
+`d2cf2ce6` marked `cancelled` with explanatory `error_message` pointing
+at this entry. Weekly `atlas-value-research` cadence self-heals: next
+tick is 2026-10-20 09:00 EDT. **New structural finding**: the fix must
+cover BOTH (a) session_id rotation on requeue AND (b) a `is_paused()`
+re-check inside `_run_with_held_slot` (or after BLPOP, before
+`_process_job`) — fixing only (a) still leaves the quota-pause window
+leaky, and fixing only (b) still leaves cross-process restarts or
+long-stale-queued revivals exposed. Fix still owed by server-patch
+(Phase 5).
+
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
    16:14, technical lens saved 16:19, aggregate report saved 16:23 with score
