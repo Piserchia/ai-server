@@ -96,6 +96,17 @@
   and `.../pdhist-us-en-<ticker>.xlsx` (legal basis: Rule 6c-11(c)(1)).
   Cite these rather than inventing a NAV provider; the provenance is in
   `ideas/A-0013/research/probe_data.json`.
+- 2026-10-17 free capacity ≠ license to generate when INBOX is non-empty:
+  a slot opening up in the pipeline (active ideas < max_active_ideas) does
+  NOT mean the scout should immediately generate and file a new idea. If the
+  INBOX queue (ideas with stage `inbox`, awaiting triage) already holds one or
+  more cards, the pipeline is effectively full from the triage team's
+  perspective — filing another card just deepens the unreviewed backlog and
+  wastes a job slot. Confirmed by 5 consecutive F-04 runs that each filed a
+  new idea while prior INBOX cards sat unreviewed. Rule: count `stage ==
+  "inbox"` separately and add it to the active non-terminal count before
+  deciding to generate. If `inbox_count + active_non_terminal >=
+  max_active_ideas`, treat the pipeline as full and exit without filing.
 - 2026-10-04 F-08 NAV-source scope: family F-08
   (etf-primary-market-frictions) requires that every candidate names the
   *exact free NAV source* in the idea_text, or triage blocks the card as

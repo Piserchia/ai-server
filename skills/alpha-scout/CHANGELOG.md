@@ -1,3 +1,14 @@
+## 2026-10-17 — GOTCHA: free capacity slot ≠ license to generate when INBOX non-empty
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — one entry added
+**Why**: 5 consecutive F-04 scout runs each filed a new idea while prior
+  INBOX cards sat unreviewed, wasting job slots. The gotcha documents the
+  rule: count `inbox` stage ideas alongside non-terminal active ideas before
+  deciding to generate; treat `inbox_count + active_non_terminal >=
+  max_active_ideas` as "pipeline full — do not file."
+**Side effects**: None — documentation-only change.
+
 ## 2026-10-09 — Preload `.context/SYSTEM.md` via context_files
 
 **Files created**: none
