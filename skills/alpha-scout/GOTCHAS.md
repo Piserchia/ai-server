@@ -116,3 +116,35 @@
   ETF spread proxy stated explicitly). The quality gate — mechanism +
   loser + free-data source — is satisfied only when the NAV provider is
   named, not implied.
+- 2026-10-18 virgin-families update (supersedes the 2026-10-05 "three of
+  the eight open families" entry): **F-04 cross-asset-lead-lag is now the
+  ONLY remaining virgin family.** The other two have been entered and
+  their first-round ideas have all reached verdicts:
+  · F-06 (liquidity-mean-reversion) — entered 2026-10-07 by three ideas
+    filed in one scout run: A-0016 (nav_discount_concession, NO-GO
+    [E-0133/E-0134]), A-0017 (clv_reversal, NO-GO [E-0127]), A-0018
+    (nonews_liquidity_reversal, NO-GO [E-0148]). The F-06 RSI-2
+    caveat is now TIGHTENED by lesson [A-0018]: "differentiation from
+    R-0003/R-0007/R-0011 must be measured in PAYOFF at card stage, not
+    argued from a Jaccard overlap" — RSI-2 beat all three F-06 candidates
+    in gross payoff. The "exclude scheduled-disclosure days" escape hatch
+    is closed for the family (lesson [A-0018] §a). Future F-06 ideas
+    must name a concrete mechanism by which a liquidity concession is
+    paid and show at card stage that the proposed conditioner outperforms
+    RSI-2 in gross payoff; a mechanism-difference argument alone is no
+    longer sufficient.
+  · F-07 (momentum-decay-structure) — entered 2026-10-17 by A-0019
+    (momentum_decay_structure, intermediate-horizon "echo" momentum in
+    nine sector-sleeve SPDR, NO-GO [E-0163]). Lesson [A-0019]: the
+    family's premise survives (all signs were in the predicted direction)
+    but the nine-sleeve monthly panel is dead on POWER before filing — a
+    wider cross-section or longer hold is required. A-0020 (same family
+    string, binding ruling [E-0159] item 1(i)) was in triage as of
+    2026-10-18. Any new F-07 idea must prove its SE-against-DSR-bar
+    arithmetic is satisfiable on a panel that is wider than nine names.
+  · F-04 — no idea has ever been filed; the original caveat ("the other
+    side is the slower venue's liquidity takers; sub-daily is
+    lesson-pruned L-0002/L-0003") is still the only lesson gate.
+  Pipeline as of 2026-10-18: 20 ideas (A-0001–A-0020) spanning seven
+  FAMILIES.md families (F-01, F-02, F-03, F-05, F-06, F-07, F-08); only
+  F-04 is virgin.

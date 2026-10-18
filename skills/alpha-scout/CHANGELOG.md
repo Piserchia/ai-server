@@ -1,3 +1,20 @@
+## 2026-10-18 — GOTCHA: correct stale "virgin open families" entry
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — one entry appended
+**Why**: The 2026-10-05 entry listed F-04/F-06/F-07 as the three virgin
+  families with "no lesson check beyond the family's own stated caveat."
+  Since then, F-06 was entered (A-0016/A-0017/A-0018, all NO-GO) and
+  F-07 was entered (A-0019 NO-GO, A-0020 in triage). LESSONS.md now
+  records critical constraints for both: F-06's RSI-2 differentiation
+  rule was tightened from Jaccard-overlap to PAYOFF-at-card-stage, its
+  "exclude disclosure days" escape hatch is closed, and F-07's nine-sleeve
+  monthly expression is dead on power (wider cross-section required).
+  Only F-04 remains virgin. The stale entry now steers future scouts
+  toward F-06/F-07 as lesson-free ground when they are not; the new entry
+  supersedes it with current facts and the binding lesson constraints.
+**Side effects**: None — documentation-only change.
+
 ## 2026-10-17 — GOTCHA: free capacity slot ≠ license to generate when INBOX non-empty
 
 **Files created**: none
