@@ -303,3 +303,54 @@ rewrite old entries.
   the worst figure in the vertical's life. Before crediting an improved metric,
   name the change that produced it — if there is none, it moved exogenously and
   will move back.
+- 2026-10-18: `schedules.last_run_at` showing a FLAWLESS cadence is not evidence
+  the loop ran — it stamps at ENQUEUE (F13). T-0032: all three trader schedules
+  showed perfect weekly/daily stamps across a 71h29m window in which the runner
+  started ZERO jobs fleet-wide. This is the complement of the identical-
+  microsecond outage signature: that one looks broken and is, this one looks
+  perfect and is dead. ALWAYS build liveness on terminal job **status** +
+  `completed_at`, and cross-check `started_at - created_at` lag per job.
+- 2026-10-18: a fleet-wide queue pause is invisible in the `assistant` DB — the
+  jobs just sit `queued`. The only durable record is
+  `volumes/logs/runner.out.log`: `grep -n "quota queue pause set\|quota pause
+  expired" ` and pull the window with `grep -oE "window=[a-z_]+"`. T-0032:
+  `window=seven_day`, `reset_at=2026-10-16T00:00:00+00:00`, 71h29m30s of dead
+  queue. The five_hour window recovers on its own inside a session; the
+  seven_day window does not, and it is the one that eats whole weeks.
+- 2026-10-18: cheapest way to SEE a multi-day stall before theorising about it:
+  `select date_trunc('hour',started_at) h, count(*) from jobs where started_at
+  > now() - interval '14 days' group by 1 order by 1;` — the gap is visually
+  unmissable and it dates both edges. Then attribute the exhaustion with
+  `select kind, count(*) ... group by 1 order by 2 desc` over the 7 days BEFORE
+  the pause edge. T-0032: 231 starts, `atlas-report` 42 (≈44 fanned out by one
+  sweep in 90s), the whole trader vertical 6 = **2.6%**. The order path is a
+  minority tenant of a shared quota it does not itself consume.
+- 2026-10-18: `executor.py` derives `today` from the BROKER CLOCK at step 1
+  (`broker_now.date()`), then returns `market_closed` if `is_open` is false. So
+  a job drained from a backlog days late writes a **factually false**
+  `market_closed` row dated the day it finally ran — and T-0002 observable (a)
+  ("a run row exists") ACCEPTS it. Count rows by STATUS and reconcile against
+  the NYSE calendar yourself; never let row-existence stand in for execution.
+  A single day can also end up with multiple contradictory rows (10-16: one
+  `ok` + three `market_closed`).
+- 2026-10-18: `trader.equity_curve` has no instant/timestamp column — only
+  `day`. A backlog-drained or early run therefore mixes sampling instants into
+  one series with nothing marking it. T-0032: the week's single productive run
+  landed 15:02:19Z, 2h29m before the mandated 17:31Z convention, and 76.7bp of
+  move sat inside that one row. ALWAYS rebuild the 17:31Z mark from the tape
+  for every session in the window rather than trusting stored rows — and state
+  the stored-row answer too, because the delta is the finding (10-08→10-16 as
+  stored read −3.34bp vs the rebuild's −153.02bp: every number correct,
+  understated by ~150bp).
+- 2026-10-18: while positions are static you can reconstruct book equity
+  exactly from the tape — T-0032: `117*SPY + 99*SGOV + 450.10`, validated to
+  +0.17bp against the one recorded row at its actual instant. Use it. But note
+  the weight-attribution residual is then TAUTOLOGICAL (you rebuilt equity from
+  the same weights you are attributing to); say so in the ledger instead of
+  presenting it as independent confirmation.
+- 2026-10-18: detection working is not recovery existing. `schedule-monitor.sh`
+  ran `rc=0` daily through the whole outage and DM'd the owner `STUCK
+  atlas-trader-paper` on three consecutive days. Nothing acted. When the
+  watchdog fired correctly and the loop still died, lead the grade with THAT —
+  it is a different and worse finding than governor-dark, because the
+  observability spend is already paid and bought nothing.
