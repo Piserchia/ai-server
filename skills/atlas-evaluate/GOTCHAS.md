@@ -390,3 +390,67 @@ the two readings are indistinguishable from this column alone. Say "the detector
 the `[system]` item open. Note the plausible interaction with the dark-completion class above: a
 session that dies before its final message may never reach the post-review hook at all, in which
 case this column being NULL is a *symptom* of the same defect, not a separate one.
+
+## The scanner reads the LIVE db; the pytest gate reads the TEST db — they can disagree (2026-10-19)
+
+The standing gotchas tell you to run the glossary scanner last and to confirm `source: db` in its
+header. Both were done this run and the scanner reported **`RESULT: PASS` — 0 undefined, 133 defined**.
+The dashboard suite reported **`1 failed, 538 passed`**: `test_glossary_audit.py::test_zero_undefined_terms`,
+undefined term `implied-volatility-expected-move`. Same term, same repo, opposite verdicts, neither tool
+broken.
+
+The scanner resolves `defined` against **`$DATABASE_URL`** (production). The pytest gate resolves it
+against the auto-derived **`<db>_test`**, which is built by replaying the **migration files**. A term
+seeded straight into the live DB — with no migration file — is therefore defined for the scanner and
+undefined for the gate. That is exactly what had happened (next gotcha).
+
+Consequences you must not get wrong:
+- **Grade Educational depth on the GATE, not the scanner.** The gate is what `atlas_redeploy` runs, so
+  it is what decides whether anything ships. A green scanner over a red gate is the evaluator certifying
+  its own blindness.
+- Always reconcile the two counts explicitly:
+  `ls db/migrations/*.sql | wc -l` vs `psql "$DATABASE_URL" -c 'select count(*) from schema_migrations'`.
+  **57 files / 58 applied** was the tell this run.
+- Run the suite yourself (09-07 gotcha) — the scanner alone cannot see this class at all.
+
+## A build that dies before pushing is NOT side-effect-free — it can leave an orphan MIGRATION (2026-10-19)
+
+LOOP.md §5 R2 states the recovery for "atlas-build dies before push" is to *"rebuild from scratch in a
+fresh clone (idempotent — **nothing external happened**)"*. **That premise is false when the item
+touches the schema.** The workspace clone copies the repo `.env`, whose `DATABASE_URL` points at the
+**production** database, so `dbmate up` during the build applies the migration to live *before* the
+commit exists. If the session then dies at the commit step, you get:
+
+- live DB at `0058`, repo at `0057` — schema drift with **no file to review, revert, or replay**;
+- a green live-DB scanner masking a red file-derived gate (previous gotcha);
+- and a `[glossary]`/`[pipeline]` defect that looks fixed from production and broken from CI.
+
+This happened to job `22ba8777` (10-16, 1257 s, `review_outcome` LGTM, **0 commits**) whose summary
+stops at *"Now the full suite and glossary scanner."* Its sibling `c863d795` shipped `44fbff0` and
+even warned in its own commit body that the glossary gate was red and would block the deploy lane.
+
+So when you grade a dark-completed build, **do not record it as a lost slot and move on**:
+
+1. Diff migration files against `schema_migrations` — every run, it is one cheap query.
+2. If an applied version has no file, that is a top-of-backlog item, and the content is recoverable
+   verbatim from the live rows (here: `SELECT * FROM glossary WHERE term=…` gave the full
+   `definition_md`, `formula` and `related[]` to rebuild the seed).
+3. Route it as **builder-eligible S** — it is a file-creation task with a deterministic gate — and put
+   it at slot 1 if it is blocking the deploy lane, because it blocks *every other item too*.
+
+## Verify "the universe is collapsing" against a WEEKLY rollup before scoring it (2026-10-19)
+
+The 10-12 entry's headline data-quality finding was a constituent universe *"collapsing: 520 → **399
+on 10-09**, −23% and steepening"*, and it cost the dimension −0.5. Re-measuring 10-09 this run returned
+**517**. Nothing was repaired in between.
+
+`constituent_bars` **backfills**: the most recent 2–4 days are always partially fetched, so a per-day
+`count(DISTINCT symbol)` read at the leading edge is a measurement of *fetch lag*, not of universe size.
+Grouped by week over 60 days the series is flat — 523, 523, 523, 523, 523, 520, 521, 520, 518 — i.e.
+−5 symbols in eight weeks, ordinary index turnover.
+
+Before scoring any "X is shrinking" claim: re-measure the **same dates** the previous run cited (if
+today's number for an old date differs, the metric backfills and the prior reading was an artifact),
+and aggregate by week. The underlying fetch errors were real and still growing (169 × `unable to open
+database file`, 199 failed downloads, 4,159 "possibly delisted") — report *those* as the defect, but do
+not convert a lagging edge into a collapsing universe.
