@@ -17,12 +17,15 @@ failures in the wild — it's a living document.
 |-------------------|------------|--------------------|-------|
 | 2026-10-17 01:42  | `2b9e6573` | atlas-swing-trade  | First observed. Daily cron recovered on next run. |
 | 2026-10-17 04:49  | `182052e2` | alpha-research     | Dispatched by alpha-scout (`5807726b`); parent completed clean. Prior 7 alpha-research runs green. |
+| 2026-10-19 09:40  | `eef498bf` | alpha-research     | Dispatched by alpha-governor (`abe9083d`). Same signature: `job_started` 09:41:06 → `job_failed` 09:43:14 (128s), zero tool events in between. Immediately prior alpha-research runs (`80625646` 04:13, `efd66924` 10-18 05:36) completed clean. Runner healthy (PID 81640, status 0). Payload was large (~15 KB idea-text) but the earlier `80625646` same-day run with similar payload size succeeded, so size isn't the discriminator. |
 
-Two occurrences within 3 hours on the same day, both atlas-project skills,
-different cron slots. Still below the "3+/week/skill" escalation threshold
-(each skill has only 1 occurrence). If a third hit lands within a week on
-*any* atlas skill, treat as a building pattern and escalate per the Fix
-section below.
+Three occurrences in three days; all three are atlas-ecosystem skills.
+`alpha-research` now has 2 of 3 (2026-10-17 and 2026-10-19), still under
+the "3+/week/same-skill" hard escalation threshold but one hit away. If a
+third `alpha-research` instance lands within 7 days of 2026-10-17, treat as
+a building pattern — escalate per the Fix section below and open a
+server-patch to wrap the SDK session construction in a one-shot
+retry-on-init-timeout.
 
 ### Root cause (diagnosed 2026-10-17, job `2b9e6573` atlas-swing-trade, self-diagnose child `470c03d6`)
 
