@@ -1,3 +1,19 @@
+## 2026-10-19 — GOTCHA: 3 inbox-count learnings (recipe correction from job 98081219)
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — three entries inserted before
+  the F-08 NAV-source scope entry: (1) inbox count is INBOX.md unchecked lines,
+  not `stage=="inbox"` (corrects the 2026-10-17 recipe; measured 5 stacked F-04
+  dispatches, job ids 0236ae66/bf1fd342/9e5ad071/c04795c2/9d52f12e); (2) when the
+  INBOX queue is non-empty a freed slot belongs to drain not generation — dispatch
+  FIFO citing the INBOX line as binding pre-registration text; (3) the capacity
+  ceiling is OWNER-PARKED SLOTS (A-0011/A-0014, 18/13 days), not over-production —
+  escalate DECISION-REQUESTs by id in every Telegram summary until they clear.
+**Why**: the alpha-scout session (job 98081219) measured these findings under the
+  read-only guard profile and cannot write them itself; this server-patch is the
+  sanctioned route.
+**Side effects**: None — documentation-only change.
+
 ## 2026-10-18 — GOTCHA: correct stale "virgin open families" entry
 
 **Files created**: none

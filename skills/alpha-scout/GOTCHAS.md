@@ -107,6 +107,56 @@
   "inbox"` separately and add it to the active non-terminal count before
   deciding to generate. If `inbox_count + active_non_terminal >=
   max_active_ideas`, treat the pipeline as full and exit without filing.
+- 2026-10-19 the inbox count is UNCHECKED INBOX.md LINES, not `stage: "inbox"`
+  (corrects the recipe in the 2026-10-17 "free capacity != license to generate"
+  entry above; the RULE in that entry is right and was vindicated this run, only
+  its measurement instruction was wrong). No idea has ever carried
+  `stage == "inbox"` -- the stages seen on disk are submitted/triaged/carded/
+  backtesting/verdict -- so `count(stage == "inbox")` returns 0 forever and the
+  guard it was supposed to arm never fires. The real queue of
+  offered-but-unfiled candidates is the unchecked checkboxes in
+  `alpha-lab/evaluation/INBOX.md`: a scout that hits the capacity ceiling
+  QUEUES its candidate as a `- [ ]` line with no A-#### id, no state.json, no
+  card.md and no trials row -- so it is invisible to every dedup surface except
+  that one grep, and invisible to a stage-based capacity count entirely. Measure
+  it with
+  `Grep(pattern="^- \\[ \\]", path="<atlas>/alpha-lab/evaluation/INBOX.md",
+        output_mode="content")`
+  and add that to the non-terminal state.json count BEFORE the generate branch.
+  Measured 2026-10-19: 3 non-terminal ideas + **5 unchecked INBOX lines** = 8
+  against `max_active_ideas: 4`. Those five lines are FIVE CONSECUTIVE FILE-mode
+  scout dispatches (jobs 0236ae66, bf1fd342, 9e5ad071, c04795c2, 9d52f12e, all
+  2026-10-17) that each queued at capacity and filed nothing -- and all five are
+  family F-04, because F-04 is the last virgin family and five runs in a row
+  independently reached for it. Read the queue before generating or you will
+  write a sixth.
+- 2026-10-19 when a slot frees up and the INBOX queue is non-empty, the
+  slot belongs to the QUEUE, not to generation. Draining is not production: a
+  queued `- [ ]` line is exactly the offered-but-unfiled E-0006 class that
+  PROTOCOL section 2b lists as a scout source and that the skill body tells you
+  to prefer over invention. So the 2026-10-17 "treat the pipeline as full and
+  exit" rule means *generate* nothing -- it does NOT mean dispatch nothing,
+  because a drain takes the backlog 5 -> 4 where a new file takes it 5 -> 6.
+  Dispatch FIFO (oldest unchecked line), cite the INBOX line as the BINDING
+  pre-registration text rather than re-quoting it lossily into the payload
+  (`jobs.payload` is not append-only evidence -- the [E-0110] dark-job class),
+  and carry the sibling lines' conditioners as mandatory scored comparators
+  where a queue line itself recommends it: job 9e5ad071's line records that one
+  GLD/GDX panel scored with both its own and job 0236ae66's conditioner would
+  resolve TWO queue entries in ONE capacity slot. Never auto-drain two lines in
+  a session -- the queue lines are mutually informative and must be sequenced,
+  so a NO-GO on one is evidence about the next.
+- 2026-10-19 the ceiling's cause has been OWNER-PARKED SLOTS, not scout
+  over-production, for ~3 weeks, and saying so is the run's highest-value
+  output. A-0011 (backtesting 1/6, undischarged DECISION-REQUEST [E-0087],
+  2026-10-01) and A-0014 (backtesting 0/6, undischarged [E-0118], 2026-10-06)
+  have occupied 2 of 4 slots for 18 and 13 days, so effective working width is
+  2 and the generator queues behind decisions only the owner can make. All five
+  queued lines flagged this as an "OWNER-VISIBLE FINDING" and it is still
+  unanswered -- which means a scout summary that reports only
+  candidates/filed/dropped is burying the one thing that would unblock the
+  flywheel. Escalate the parked DECISION-REQUESTs by id in the Telegram
+  summary, every run, until they clear.
 - 2026-10-04 F-08 NAV-source scope: family F-08
   (etf-primary-market-frictions) requires that every candidate names the
   *exact free NAV source* in the idea_text, or triage blocks the card as
