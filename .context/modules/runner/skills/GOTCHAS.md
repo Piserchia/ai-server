@@ -14,6 +14,55 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## A schedule row's `{"model": "codex/…"}` is refused when the skill pins an Anthropic model (2026-10-21)
+
+`session.lane_refusal` honours a `payload.model` that moves an
+Anthropic-pinned skill to another provider ONLY from an owner origin
+(`created_by` = `telegram:*`, `web`, `cli`). The scheduler's `created_by` is
+`scheduler`, so a schedule payload override of e.g. `atlas-report`
+(`model: claude-opus-4-8`) fails with `provider_refused … only the owner
+(telegram/web/cli) may override it`. That is by design (plan T4: an
+autonomous origin — scheduler, escalation, dispatch MCP, event trigger —
+must not be able to retarget a pinned skill onto a vendor lane). To
+"schedule routines using other agents": pin `model: codex/<id>` in the
+skill's own frontmatter (then `reason=pin`), or schedule a skill with no
+`model:` pin. The refusal audit names the origin and the pin.
+
+## Non-Anthropic lanes keep their clone and never ff-sync (T4, 2026-10-21)
+
+After a successful Codex job `run_session` does NOT call
+`workspaces.sync_canonical` and passes `keep=True` to
+`cleanup_workspace` — the executor cannot push (network off, no
+credentials), so the edits sit uncommitted in
+`volumes/workspaces/<job>…` until the T5 pre-push Anthropic gate commits
+and syncs them. Until T5 lands, a completed Codex job's work is only in
+that clone (audit `note` names the path); `server-upkeep` prunes old
+workspaces, so do not expect it to survive a week. Also: `learning`'s
+Write/Edit gate will not fire for Codex jobs (its writes are audited as
+`Bash` `command_execution`); decide modified files from `git status
+--porcelain` in the clone. And `post_review` (belt 2, `_maybe_review`) is a
+`stale_head` no-op for every completed Codex job until T5: it resolves the
+CANONICAL cwd, whose HEAD predates the job because nothing was synced, so
+each such job logs `post_review_skipped reason=stale_head` plus the
+"canonical sync failed or nothing committed" WARNING — expected noise, not
+a fault; T5 must either point `_maybe_review` at the kept clone for
+non-Anthropic providers or make the pre-push gate the review of record.
+
+## Non-Anthropic failures are terminal on every path — do not "fix" the missing escalation (review round 1, 2026-10-21)
+
+A Codex job that times out at main's ceiling, crashes before the executor
+process starts (`CodexNotFound`, bad sandbox), or dies in a generic
+exception stamps `terminal_reason=timeout|api_error`, audits a `note`, and
+STOPS — `main._non_anthropic_lane(job)` short-circuits `_maybe_escalate`
+in the `asyncio.TimeoutError` and generic `Exception` branches. This is
+deliberate (T4 note 4): the skill's `on_failure` target is an Anthropic
+model, and escalating would silently re-run the job on another vendor.
+The 2026-08-07 "timeouts must escalate" contract
+(`tests/test_timeout_escalation.py`) still holds for Anthropic jobs and for
+jobs that died before the session stamped `resolved_provider`. T6 adds the
+per-provider `rate_limited` hold + front-requeue, which is the retry story
+for these lanes.
+
 ## 2026-10-21 — Codex writes files through `Bash`, so the Write/Edit gates do not see them
 
 **Trap**: `learning.should_extract` (and anything else keyed on

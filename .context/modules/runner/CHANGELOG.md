@@ -2,6 +2,103 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T4: dispatch at the single executor call site (`session.run_session`)
+
+**Agent task**: cross-vendor writer slice T4
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; plan
+§4a/§4h, old spec §2.4/§2.6/§5.3 belt 3b).
+**Files changed**:
+- `src/runner/session.py` — `run_session` now dispatches on the resolved
+  provider: Anthropic runs in-process through the SDK exactly as before;
+  any other provider runs through the executor module the registry names
+  (`models.yml` `executor:` → `_EXECUTORS = {"codex_cli": codex_cli}`,
+  `executor_for(provider)`), sharing skill/cwd/isolation/clone/system-prompt
+  assembly before and marker-parse/summary/`job_completed` after.
+  `resolve_model_choice(payload, skill_cfg) -> (ModelRef, reason)` replaces
+  the body of `_resolve_model` (which is now the value-only wrapper) and
+  refuses `no executor` from the registry's executor name instead of T1's
+  interim `_EXECUTABLE_PROVIDERS`. **Fail-closed lane rules** (pure
+  `lane_refusal(...)`, raised as `ProviderRefused` BEFORE `create_workspace`
+  so a refusal never leaves a clone): isolation tier must be `workspace`;
+  no `subagents:`; no `needs-*-mcp` tag; `CODE_SERVER_SKILLS`
+  (`server-patch`, `server-deploy`, `new-skill`, `deploy-director`,
+  `atlas-redeploy`, `project-redeploy`) need the provider in
+  `settings.router_code_server_providers` (`code_server_providers()`); a
+  `payload.model` override that moves an Anthropic-pinned skill to another
+  provider is honoured only from an owner origin (`is_owner_origin`:
+  `telegram:*`, `web`, `cli`/`cli:*` — an allowlist). New audit
+  `provider_selected{provider, model, reason ∈ payload|pin|default}`;
+  `job_started` gains `provider`; `job_completed` gains `provider`,
+  `model_served`, `terminal_reason`; the result dict gains `provider`,
+  `model`, `model_served`, `terminal_reason`; the `resolved_*` DB stamp
+  gains `resolved_provider` (`resolved_model` stays the bare id).
+  `_build_system_prompt(...)` split out of `_build_options` unchanged
+  (`_build_options(..., system_prompt=)` accepts the pre-built prompt;
+  identical bytes either way); `build_executor_prompt(system_prompt,
+  description)` prepends it to the task for CLI executors (§4h — never
+  `AGENTS.md`). `_run_executor(...)` calls `executor.run(job, cwd=<clone>,
+  prompt=…, model_id=<bare id>, sandbox=settings.codex_sandbox_default —
+  tightened to `read-only` for `privilege_class: read-only` skills,
+  timeout_s=resolve_session_timeout(...))`; any `terminal_reason != "ok"`
+  raises `ExecutorFailed(provider, model_id, terminal_reason, message,
+  model_served=)`. Non-Anthropic lanes NEVER get `delivery.env_files`
+  provisioned, never `sync_canonical`, and their clone is KEPT (audit
+  `note`) for the T5 pre-push Anthropic gate. `interrupt(job_id)` falls
+  through to the executors' `interrupt` when no SDK session holds the job
+  (INV-8). The Anthropic path is behaviourally identical apart from the
+  additive fields. `resolve_session_timeout` + `SESSION_TIMEOUT_CAP_SECONDS`
+  moved here from `main.py` (same code; `main` re-exports both) so the
+  executor branch shares the ceiling without a `session → main` import.
+- `src/runner/main.py` — `_terminal_values(...)` (pure) + `_finish_job(...,
+  provider=, terminal_reason=, model_served=)` stamp the migration-007
+  columns only when known; the completed path stamps from the result dict,
+  `ProviderRefused` stamps `provider` + `terminal_reason=provider_refused`;
+  new `except session_mod.ExecutorFailed` handler ahead of the generic
+  `except` — `job_failed error_category=<terminal_reason>`, stamps
+  provider/terminal_reason/model_served, task DM, **no escalation** (a
+  vendor switch is a routing decision this slice does not make; T6 adds
+  the `rate_limited` hold + front-requeue).
+- `src/audit_log.py` — docstring: `provider_selected` kind; additive
+  fields on `job_started`/`job_completed`; executor terminal reasons as
+  `job_failed.error_category` values. Existing kinds untouched (C14).
+**Tests**: `tests/test_provider_dispatch.py` (53: each refusal as a pure
+predicate and through `run_session` with a fake executor behind
+`_EXECUTORS` and a captured DB stamp; precedence + reason; Codex branch
+call shape, audit sequence, marker parse, no env_files / no sync / clone
+kept; `ExecutorFailed`; `interrupt` fall-through; Anthropic path unchanged;
+`main` AST + `_terminal_values`). `tests/test_models_registry.py::
+test_session_refuses_enabled_provider_without_executor` now empties
+`_EXECUTORS` to keep its rule under test (codex has an executor since T4).
+**Review (code-review T4, 2026-10-21) applied before commit** — one major,
+two minors: (a) **No Anthropic escalation off a non-Anthropic lane, on any
+failure path.** Main's `wait_for` timer starts before skill resolution and
+the clone, so with equal deadlines it always won over the executor's own
+`timeout_s`; the resulting `asyncio.TimeoutError`, and a pre-process
+`CodexNotFound`/`ValueError` from `executor.run`, fell into the generic
+branches of `_process_job` and `_maybe_escalate` re-ran the job on the
+skill's Anthropic `on_failure` model. Now: `main._non_anthropic_lane(job)`
+(pure read of the `resolved_provider` stamp the session writes before the
+process starts) guards both the `asyncio.TimeoutError` and generic
+`Exception` branches — refetch first, then `_finish_job(..., provider=,
+terminal_reason="timeout"|"api_error")`, audit `note`, no escalation; an
+unstamped job (died before the stamp) keeps the old escalation path.
+`session._run_executor` converts `FileNotFoundError` (incl. `CodexNotFound`)
+and `ValueError` from `executor.run` into `ExecutorFailed(provider,
+model_id, "api_error", …)` (plus an `executor_error` audit) so pre-process
+infrastructure failures take the typed terminal path; and the executor's
+`timeout_s` is `session.executor_timeout_s(ceiling)` = ceiling −
+`EXECUTOR_TIMEOUT_MARGIN_S` (30 s), floored at `EXECUTOR_TIMEOUT_FLOOR_S`
+(30 s), so its own `timeout` terminal reason is reachable (main's deadline
+stays the backstop). (b) The unrelated `.claude/settings.local.json` hunk
+is not staged. (c) GOTCHAS + plan T5 note: `_maybe_review` is a
+`stale_head` no-op for Codex jobs until T5 commits/syncs. Tests 53 → 63
+(`executor_timeout_s`; pre-process errors → `ExecutorFailed`;
+`_non_anthropic_lane`; `_process_job` driven with faked collaborators:
+codex timeout and codex generic exception never escalate and stamp the
+typed reason, Anthropic timeout and unstamped failure still escalate).
+**Not in this task**: the pre-push review gate + runner commit (T5),
+per-provider quota keys (T6), surfaces (T7).
+
 ## 2026-10-21 — T3: the Codex executor (`src/runner/executors/codex_cli.py`)
 
 **Agent task**: cross-vendor writer slice T3

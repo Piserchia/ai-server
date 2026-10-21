@@ -8,10 +8,11 @@ Why JSONL files, not a DB table:
 - When future Claude reads audit logs to pick up context, it can `cat`/`head`/`tail` naturally.
 
 Kinds used (keep this list honest — update when adding new kinds):
-- job_started:      {"kind", "ts", "job_id", "description", "payload"}
-- job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no cost (subscription auth)
-- job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused
-- provider_refused: {"kind", "ts", "job_id", "provider", "model", "raw", "reason"}  # registry refused `[provider/]model_id` before any process (T1, 2026-10-21)
+- job_started:      {"kind", "ts", "job_id", "description", "payload"}  # + "provider" (additive, T4 2026-10-21)
+- job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no cost (subscription auth); + "provider", "model_served", "terminal_reason" (additive, T4)
+- job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused|<executor terminal_reason: rate_limited|auth_expired|api_error|timeout|interrupted> (T4)
+- provider_selected: {"kind", "ts", "job_id", "provider", "model", "reason"}  # which provider/model the job resolved to; reason ∈ payload|pin|default (T4, 2026-10-21)
+- provider_refused: {"kind", "ts", "job_id", "provider", "model", "raw", "reason"}  # registry or lane rule refused `[provider/]model_id` before any clone or process (T1/T4, 2026-10-21)
 - job_cancelled:    {"kind", "ts", "job_id"}
 - tool_use:         {"kind", "ts", "job_id", "tool_name", "tool_use_id", "input"}
 - tool_result:      {"kind", "ts", "job_id", "tool_use_id", "is_error", "result_preview"}  # + "exit_code", "output" from the Codex executor (additive, T3)

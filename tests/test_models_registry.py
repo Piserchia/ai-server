@@ -397,11 +397,15 @@ def test_session_refuses_disabled_provider_by_default(monkeypatch):
 
 
 def test_session_refuses_enabled_provider_without_executor(monkeypatch):
-    # Interim until T4 lands the dispatch branch: an enabled non-Anthropic
-    # provider still cannot reach the Anthropic SDK with a foreign model id.
+    # An enabled non-Anthropic provider whose registry `executor:` this
+    # runner does not have can never reach the Anthropic SDK with a foreign
+    # model id. (Until T4 this held for codex itself; T4 wired `codex_cli`
+    # into `session._EXECUTORS`, so the table is emptied here to keep the
+    # rule under test — see tests/test_provider_dispatch.py.)
     from src.runner import session
 
     monkeypatch.setattr(settings, "router_providers_enabled", "anthropic,codex")
+    monkeypatch.setattr(session, "_EXECUTORS", {})
     with pytest.raises(reg.ProviderRefused) as ei:
         session._resolve_model({"model": "codex/gpt-6-luna"}, None)
     assert "no executor" in ei.value.reason

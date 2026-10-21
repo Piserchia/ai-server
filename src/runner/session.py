@@ -65,6 +65,7 @@ class SkillResolutionError(RuntimeError):
     """
 from src.runner import agents as agents_mod
 from src.runner import delivery, guards, quota, router, workspaces
+from src.runner.executors import codex_cli
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +74,17 @@ _running_sessions: dict[str, ClaudeSDKClient] = {}
 
 
 async def interrupt(job_id: str | uuid.UUID) -> bool:
+    """Stop a running job (cancel listener, INV-8): the in-process SDK
+    session when there is one, else whichever non-Anthropic executor holds
+    the job's process (T4, 2026-10-21)."""
     client = _running_sessions.get(str(job_id))
     if client is None:
+        for executor in _EXECUTORS.values():
+            try:
+                if await executor.interrupt(str(job_id)):
+                    return True
+            except Exception as exc:
+                logger.warning("executor interrupt failed for %s: %s", job_id, exc)
         return False
     try:
         await client.interrupt()
@@ -583,16 +593,84 @@ def context_budget_fraction(
     return tokens, budget, tokens / budget if budget > 0 else 0.0
 
 
-# Providers this runner can actually execute. T4 replaces this with the
-# dispatch branch (`if provider != "anthropic": codex_cli.run(...)`); until
-# then an enabled-but-unexecutable provider is refused here rather than
-# handing a foreign model id to the Anthropic SDK.
-_EXECUTABLE_PROVIDERS: frozenset[str] = frozenset({"anthropic"})
+# ── Session timeout (moved here from main.py in T4; main re-exports) ────────
+
+# Hard ceiling on per-job session-timeout extension. A payload can raise the
+# global default for a legitimately heavy session (atlas-momo-research cycles
+# — three cycle-2 attempts died at the 30-min ceiling, 2026-08-11) but can
+# never disable the ceiling entirely.
+SESSION_TIMEOUT_CAP_SECONDS = 5400
 
 
-def _resolve_model(payload: dict | None, skill_cfg: SkillConfig | None) -> models_registry.ModelRef:
+def resolve_session_timeout(payload: dict | None, default: int,
+                            cap: int = SESSION_TIMEOUT_CAP_SECONDS) -> int:
+    """Effective session timeout for a job. Pure function.
+
+    `payload.session_timeout_seconds` overrides the global default, clamped
+    to [60, cap]; missing or unparseable values fall back to the default.
+    Used by `main._process_job`'s `wait_for` and, since T4, as the CLI
+    executor's own `timeout_s` so both ceilings agree.
+    """
+    try:
+        raw = (payload or {}).get("session_timeout_seconds")
+        if raw is None:
+            return default
+        val = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(60, min(val, cap))
+
+
+#: How far under `main._process_job`'s `wait_for` ceiling the CLI executor's
+#: own `timeout_s` sits (review round 1, 2026-10-21). Main's timer starts
+#: before skill resolution and the clone, so an equal deadline always lost
+#: to main's and the executor's `timeout` terminal reason was unreachable;
+#: the margin covers the pre-process setup plus the executor's kill grace.
+EXECUTOR_TIMEOUT_MARGIN_S = 30.0
+#: Never hand the executor less than this, whatever the ceiling.
+EXECUTOR_TIMEOUT_FLOOR_S = 30.0
+
+
+def executor_timeout_s(ceiling_s: float) -> float:
+    """The CLI executor's `timeout_s` for a session ceiling. Pure: strictly
+    below the ceiling by `EXECUTOR_TIMEOUT_MARGIN_S`, floored at
+    `EXECUTOR_TIMEOUT_FLOOR_S` (the ceiling itself is never below 60)."""
+    return max(EXECUTOR_TIMEOUT_FLOOR_S, float(ceiling_s) - EXECUTOR_TIMEOUT_MARGIN_S)
+
+
+# ── Provider dispatch (cross-vendor writer slice T4, 2026-10-21) ────────────
+#
+# One dispatch branch in `run_session` (plan §4a — no `ExecSpec` extraction):
+# Anthropic runs in-process through the SDK exactly as before; any other
+# provider runs through the executor module the registry names for it
+# (`models.yml` `executor:` → `_EXECUTORS`). Everything before the branch
+# (skill, cwd, isolation, clone, system prompt) and after it (marker parse,
+# summary, `job_completed`) is shared.
+
+#: Registry `executor:` name → module with `run(job, *, cwd, prompt, model_id,
+#: sandbox, timeout_s, …) -> ExecResult` and `interrupt(job_id) -> bool`.
+#: Anthropic is NOT here (it is the in-process SDK, not an executor module).
+_EXECUTORS: dict[str, Any] = {codex_cli.EXECUTOR_NAME: codex_cli}
+
+
+def executor_for(provider: str) -> Any | None:
+    """The executor module for a non-Anthropic provider, or None (Anthropic,
+    or a registry provider whose `executor:` this runner does not have)."""
+    if provider == models_registry.DEFAULT_PROVIDER:
+        return None
+    entry = models_registry.REGISTRY.provider(provider)
+    if entry is None:
+        return None
+    return _EXECUTORS.get(entry.executor)
+
+
+def resolve_model_choice(
+    payload: dict | None, skill_cfg: SkillConfig | None,
+) -> tuple[models_registry.ModelRef, str]:
     """Pick and validate the job's model: `payload.model > skill.model >
     settings.default_model`, resolved through the registry (T1, 2026-10-21).
+    Returns `(ref, reason)` with `reason ∈ payload | pin | default` — the
+    `provider_selected` audit field (T4).
 
     Pure. Raises `ProviderRefused` (terminal in `main._process_job`, never
     escalated) when the id is unknown (C12), its provider is not in
@@ -601,15 +679,141 @@ def _resolve_model(payload: dict | None, skill_cfg: SkillConfig | None) -> model
     SDK was handed before.
     """
     payload = payload or {}
-    raw = (payload.get("model")
-           or (skill_cfg.model if skill_cfg and skill_cfg.model else "")
-           or settings.default_model)
+    if payload.get("model"):
+        raw, reason = payload["model"], "payload"
+    elif skill_cfg is not None and skill_cfg.model:
+        raw, reason = skill_cfg.model, "pin"
+    else:
+        raw, reason = settings.default_model, "default"
     ref = models_registry.resolve_enabled(raw)
-    if ref.provider not in _EXECUTABLE_PROVIDERS:
+    if ref.provider != models_registry.DEFAULT_PROVIDER and executor_for(ref.provider) is None:
         raise models_registry.ProviderRefused(
             raw, f"no executor for provider {ref.provider!r} in this runner",
             provider=ref.provider, model_id=ref.model_id)
-    return ref
+    return ref, reason
+
+
+def _resolve_model(payload: dict | None, skill_cfg: SkillConfig | None) -> models_registry.ModelRef:
+    """`resolve_model_choice(...)[0]` — the value-only form `_build_options` uses."""
+    return resolve_model_choice(payload, skill_cfg)[0]
+
+
+#: Skills that write to THIS repo or deploy it (plan D-A): a non-Anthropic
+#: provider may run them only when `settings.router_code_server_providers`
+#: lists it. Default off — the review gate is one Anthropic session's
+#: judgement, and `guards.py` / `lint_docs.py` are what an injected diff
+#: would target.
+CODE_SERVER_SKILLS: frozenset[str] = frozenset({
+    "server-patch", "server-deploy", "new-skill", "deploy-director",
+    "atlas-redeploy", "project-redeploy",
+})
+
+
+def code_server_providers() -> frozenset[str]:
+    """`settings.router_code_server_providers` as a set (CSV, case-folded)."""
+    raw = settings.router_code_server_providers or ""
+    return frozenset(p.strip().lower() for p in raw.split(",") if p.strip())
+
+
+def is_owner_origin(created_by: str | None) -> bool:
+    """True when the job was launched by the owner directly — Telegram, the
+    web dashboard or the CLI. Pure. Everything the runner's own machinery
+    spawns (scheduler, escalation, dispatch MCP, event triggers, plans,
+    evaluators, …) and an unknown/empty origin is NOT the owner — an
+    allowlist, so a new autonomous origin can never pass by omission."""
+    cb = (created_by or "").strip().lower()
+    if cb.startswith("telegram:"):
+        return True
+    return cb in ("web", "cli") or cb.startswith("cli:")
+
+
+def lane_refusal(
+    ref: models_registry.ModelRef,
+    *,
+    skill_name: str,
+    skill_cfg: SkillConfig | None,
+    isolation: str,
+    payload: dict | None,
+    created_by: str | None,
+    code_server_providers: frozenset[str],
+) -> str | None:
+    """Why a non-Anthropic provider may NOT run this job, or None. Pure.
+
+    Fail-closed lane rules (plan T4; old spec §2.6 Codex row: workspace
+    only, no MCP, no subagents, `code-server` pinned by setting):
+    - isolation tier must be `workspace` (the executor's Seatbelt confines
+      writes to the clone; `none`/`host` would be an unconfined host session);
+    - the skill declares no `subagents:` and no `needs-*-mcp` tag (there is
+      no delegation and no MCP on a non-Anthropic executor — silently running
+      without them would change the skill's contract);
+    - a `code-server` skill needs the provider in `router_code_server_providers`;
+    - a `payload.model` override that moves an Anthropic-pinned skill to
+      another provider is honoured only from the owner (Telegram/web/CLI),
+      never from the scheduler, an escalation, the dispatch MCP, … — a
+      scheduled routine runs another provider by pinning it in the skill
+      frontmatter or by overriding a skill with no pin (plan §2).
+    The provider-enabled check is `models.resolve_enabled` (earlier).
+    """
+    if ref.provider == models_registry.DEFAULT_PROVIDER:
+        return None
+    if isolation != "workspace":
+        return (f"isolation tier {isolation!r}: non-Anthropic executors run on the "
+                f"'workspace' tier only")
+    if skill_cfg is not None:
+        if skill_cfg.subagents:
+            return (f"skill {skill_cfg.name!r} declares subagents "
+                    f"({', '.join(skill_cfg.subagents)}): no delegation on a "
+                    f"non-Anthropic executor")
+        mcp_tags = [t for t in skill_cfg.tags
+                    if t.startswith("needs-") and t.endswith("-mcp")]
+        if mcp_tags:
+            return (f"skill {skill_cfg.name!r} needs MCP ({', '.join(mcp_tags)}): "
+                    f"no MCP on a non-Anthropic executor")
+    if skill_name in CODE_SERVER_SKILLS and ref.provider not in code_server_providers:
+        return (f"skill {skill_name!r} is in the code-server set; provider "
+                f"{ref.provider!r} is not in ROUTER_CODE_SERVER_PROVIDERS "
+                f"({','.join(sorted(code_server_providers)) or '<empty>'})")
+    payload = payload or {}
+    if payload.get("model") and skill_cfg is not None and skill_cfg.model \
+            and skill_cfg.provider == models_registry.DEFAULT_PROVIDER \
+            and not is_owner_origin(created_by):
+        return (f"payload model override to {ref.qualified!r} on a job from "
+                f"{(created_by or '<unknown>')!r}: skill {skill_cfg.name!r} pins "
+                f"{skill_cfg.model!r} and only the owner (telegram/web/cli) may override it")
+    return None
+
+
+class ExecutorFailed(RuntimeError):
+    """A non-Anthropic executor ended without `terminal_reason == "ok"`.
+
+    Terminal in `main._process_job` (stamps `terminal_reason`/`model_served`,
+    `error_category=<terminal_reason>`), never escalated: an escalation would
+    silently re-run the job on the skill's Anthropic escalation target — a
+    vendor switch this slice does not make (T6 adds the per-provider hold
+    and front-requeue for `rate_limited`).
+    """
+
+    def __init__(self, provider: str, model_id: str, terminal_reason: str,
+                 message: str | None, *, model_served: str | None = None):
+        self.provider = provider
+        self.model_id = model_id
+        self.terminal_reason = terminal_reason
+        self.model_served = model_served
+        super().__init__(
+            f"{provider}/{model_id} executor ended {terminal_reason}: "
+            f"{(message or 'no detail')[:500]}")
+
+
+def build_executor_prompt(system_prompt: str, description: str) -> str:
+    """The single prompt string a CLI executor gets: the system prompt
+    (directive + job id + marker protocol + transcript + skill body)
+    prepended to the task (plan §4h — never written to `AGENTS.md`, which
+    the job would commit). Pure. Never begins with `-` (the argv builder
+    would refuse it as a flag)."""
+    head = (system_prompt or "").rstrip()
+    body = (description or "").strip()
+    text = f"{head}\n\n---\n\n# Task\n\n{body}\n" if head else f"# Task\n\n{body}\n"
+    return text
 
 
 async def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
@@ -675,21 +879,18 @@ async def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
     return skill_name, cfg
 
 
-def _build_options(
+def _build_system_prompt(
     job: Job,
     cwd: Path,
     skill_cfg: SkillConfig | None,
     task_turns: list[dict] | None = None,
     *,
     canonical_cwd: Path | None = None,
-    guard_workspace: Path | None = None,
-) -> ClaudeAgentOptions:
-    """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults.
-
-    guard_workspace: when set (workspace-tier), PreToolUse guard hooks are
-    attached that contain the session to this path (INV-17).
-    """
-    # System prompt — context-aware preamble + skill body + task context
+) -> str:
+    """The system prompt every executor gets: context-aware server directive
+    + job id + task-event marker protocol + task transcript + skill body.
+    Split out of `_build_options` unchanged (T4, 2026-10-21) so the SDK path
+    and the CLI-executor path assemble the one prompt the same way."""
     server_directive = _build_server_directive(
         skill_cfg, cwd, job.description,
         canonical_cwd=canonical_cwd,
@@ -718,6 +919,30 @@ def _build_options(
 
     if skill_cfg and skill_cfg.body.strip():
         system_prompt = f"{system_prompt}\n\n---\n\n# Active skill\n\n{skill_cfg.body}"
+    return system_prompt
+
+
+def _build_options(
+    job: Job,
+    cwd: Path,
+    skill_cfg: SkillConfig | None,
+    task_turns: list[dict] | None = None,
+    *,
+    canonical_cwd: Path | None = None,
+    guard_workspace: Path | None = None,
+    system_prompt: str | None = None,
+) -> ClaudeAgentOptions:
+    """Assemble ClaudeAgentOptions. Skill frontmatter wins over server defaults.
+
+    guard_workspace: when set (workspace-tier), PreToolUse guard hooks are
+    attached that contain the session to this path (INV-17).
+    system_prompt: a prompt already assembled by `_build_system_prompt` (what
+    `run_session` passes); None builds it here — identical bytes either way.
+    """
+    # System prompt — context-aware preamble + skill body + task context
+    if system_prompt is None:
+        system_prompt = _build_system_prompt(
+            job, cwd, skill_cfg, task_turns, canonical_cwd=canonical_cwd)
 
     # Model + effort + permission + tools. Per-request overrides from
     # job.payload take precedence over skill frontmatter; the registry
@@ -911,7 +1136,10 @@ async def run_session(job: Job) -> dict[str, Any]:
     # clone behind or reaches the SDK (T1, 2026-10-21; C12 fail-closed).
     # `_build_options` resolves again for the value; this call is the gate.
     # `ProviderRefused` is terminal in main._process_job, not escalated.
-    _resolve_model(job.payload, skill_cfg)
+    model_ref, model_reason = resolve_model_choice(job.payload, skill_cfg)
+    provider = model_ref.provider
+    audit_log.append(job_id, "provider_selected",
+                     provider=provider, model=model_ref.model_id, reason=model_reason)
 
     canonical_cwd, deliv, is_deploy, slug = await _resolve_project(job, skill_name)
 
@@ -966,6 +1194,20 @@ async def run_session(job: Job) -> dict[str, Any]:
                          reason="generic task has no skill contract")
         isolation = "workspace"
 
+    # Non-Anthropic lane rules (T4, 2026-10-21) — fail closed, here, so a
+    # refused job never leaves a clone behind and no process ever starts.
+    # `ProviderRefused` is terminal in main._process_job (audit
+    # `provider_refused` + `job_failed error_category=provider_refused`).
+    refusal = lane_refusal(
+        model_ref, skill_name=skill_name, skill_cfg=skill_cfg, isolation=isolation,
+        payload=job.payload, created_by=job.created_by,
+        code_server_providers=code_server_providers())
+    if refusal is not None:
+        raise models_registry.ProviderRefused(
+            model_ref.canonical, refusal,
+            provider=provider, model_id=model_ref.model_id)
+    is_anthropic = provider == models_registry.DEFAULT_PROVIDER
+
     ws: workspaces.Workspace | None = None
     cwd = canonical_cwd
     if isolation == "workspace":
@@ -975,8 +1217,11 @@ async def run_session(job: Job) -> dict[str, Any]:
             # Manifest-declared gitignored secrets (delivery.env_files) — a
             # clone doesn't carry them, so owner-provisioned credentials
             # (e.g. atlas's Alpaca keys) must be copied in explicitly.
+            # NEVER for a non-Anthropic executor (plan §6; old spec §2.6):
+            # its scrubbed env and Seatbelt are the containment, and a
+            # vendor process must not find broker keys in its clone.
             env_files_copied: list[str] = []
-            if deliv is not None and deliv.env_files:
+            if is_anthropic and deliv is not None and deliv.env_files:
                 env_files_copied = workspaces.provision_env_files(
                     ws.path, canonical_cwd, deliv.env_files)
             audit_log.append(job_id, "workspace_created",
@@ -996,15 +1241,28 @@ async def run_session(job: Job) -> dict[str, Any]:
                 f"workspace creation failed for a workspace-tier job: {exc}"
             ) from exc
 
-    options = _build_options(
+    # One system prompt for every executor (T4); the SDK path wraps it in
+    # ClaudeAgentOptions exactly as before, the CLI path prepends it to the
+    # task text (plan §4h).
+    system_prompt = _build_system_prompt(
         job, cwd, skill_cfg, task_turns,
         canonical_cwd=canonical_cwd if ws else None,
-        guard_workspace=ws.path if ws else None,
     )
+    options: ClaudeAgentOptions | None = None
+    if is_anthropic:
+        options = _build_options(
+            job, cwd, skill_cfg, task_turns,
+            canonical_cwd=canonical_cwd if ws else None,
+            guard_workspace=ws.path if ws else None,
+            system_prompt=system_prompt,
+        )
+        model_used = options.model or ""
+    else:
+        model_used = model_ref.model_id
 
     # Log context budget usage (Rec 8)
     ctx_tokens, ctx_budget, ctx_fraction = context_budget_fraction(
-        options.system_prompt or "", options.model or "",
+        system_prompt or "", model_used,
     )
     audit_log.append(
         job_id,
@@ -1025,8 +1283,9 @@ async def run_session(job: Job) -> dict[str, Any]:
         await s.execute(
             sql_update(Job).where(Job.id == job.id).values(
                 resolved_skill=skill_name or None,
-                resolved_model=options.model,
+                resolved_model=model_used,
                 resolved_effort=effort_used,
+                resolved_provider=provider,
             )
         )
         await s.commit()
@@ -1038,18 +1297,25 @@ async def run_session(job: Job) -> dict[str, Any]:
         job_kind=job.kind,
         skill=skill_name,
         cwd=str(cwd),
-        model=options.model,
+        model=model_used,
         effort=effort_used,
         isolation=isolation,
+        provider=provider,
         payload=job.payload,
         parent_job_id=str(job.parent_job_id) if job.parent_job_id else None,
     )
 
     started_at = datetime.now(timezone.utc)
     session_failed = False
+    model_served: str | None = None
+    terminal_reason = "ok"
 
     try:
-        final_summary, usage = await _run_in_process(job_id, job.description, options)
+        if options is not None:
+            final_summary, usage = await _run_in_process(job_id, job.description, options)
+        else:
+            final_summary, usage, model_served = await _run_executor(
+                job, model_ref, cwd=cwd, system_prompt=system_prompt, skill_cfg=skill_cfg)
 
         if final_summary:
             audit_log.write_summary(job_id, final_summary)
@@ -1071,6 +1337,9 @@ async def run_session(job: Job) -> dict[str, Any]:
             "job_completed",
             duration_seconds=duration,
             usage=usage,
+            provider=provider,
+            model_served=model_served,
+            terminal_reason=terminal_reason,
         )
 
         return {
@@ -1079,19 +1348,91 @@ async def run_session(job: Job) -> dict[str, Any]:
             "usage": usage,
             "skill": skill_name,
             "isolation": isolation,
+            "provider": provider,
+            "model": model_used,
+            "model_served": model_served,
+            "terminal_reason": terminal_reason,
         }
     except BaseException:
         session_failed = True
         raise
     finally:
         if ws is not None:
-            if not session_failed:
+            if not session_failed and is_anthropic:
                 ok, msg = workspaces.sync_canonical(ws)
                 audit_log.append(job_id, "workspace_synced", ok=ok, detail=msg)
                 if not ok:
                     logger.warning("canonical sync failed for %s: %s", job_id[:8], msg)
+            elif not session_failed:
+                # Non-Anthropic lane (T4): the executor cannot push (network
+                # off, no credentials) and nothing reaches a canonical repo
+                # before the Anthropic pre-push review gate (T5) — so no
+                # ff-sync here, and the clone with its uncommitted edits is
+                # KEPT for that gate instead of being thrown away.
+                audit_log.append(
+                    job_id, "note",
+                    text=(f"workspace kept: {provider} lane output awaits the "
+                          f"Anthropic pre-push review gate (T5); no canonical "
+                          f"sync performed ({ws.path})"))
             # Keep failed-job workspaces for debugging; server-upkeep prunes.
-            workspaces.cleanup_workspace(ws, keep=session_failed)
+            workspaces.cleanup_workspace(ws, keep=session_failed or not is_anthropic)
+
+
+async def _run_executor(
+    job: Job,
+    ref: models_registry.ModelRef,
+    *,
+    cwd: Path,
+    system_prompt: str,
+    skill_cfg: SkillConfig | None,
+) -> tuple[str, dict[str, Any], str | None]:
+    """The non-Anthropic execution path (T4): one CLI-executor process in the
+    clone. Returns `(final_text, usage, model_served)` on `ok`; raises
+    `ExecutorFailed` on any other terminal reason (terminal in main, never
+    escalated). The executor audits/streams its own events (C14 kinds).
+    """
+    executor = executor_for(ref.provider)
+    if executor is None:   # pragma: no cover — resolve_model_choice refused earlier
+        raise models_registry.ProviderRefused(
+            ref.canonical, f"no executor for provider {ref.provider!r} in this runner",
+            provider=ref.provider, model_id=ref.model_id)
+    # Sandbox: the configured default, tightened to read-only for read-only
+    # skills (mirrors the SDK path's read-only guard profile). Never relaxed.
+    sandbox = settings.codex_sandbox_default
+    if skill_cfg is not None and skill_cfg.privilege_class == "read-only":
+        sandbox = "read-only"
+    # Strictly under the ceiling main._process_job's wait_for applies (which
+    # started before the clone), so the executor's own `timeout` terminal
+    # reason is reachable; main's deadline remains the backstop and its
+    # cancellation terminates the child too (review round 1).
+    ceiling = resolve_session_timeout(job.payload, settings.session_timeout_seconds)
+    timeout_s = executor_timeout_s(ceiling)
+
+    try:
+        result = await executor.run(
+            job,
+            cwd=cwd,
+            prompt=build_executor_prompt(system_prompt, job.description),
+            model_id=ref.model_id,
+            sandbox=sandbox,
+            timeout_s=timeout_s,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        # Pre-process infrastructure failures (`CodexNotFound` is a
+        # FileNotFoundError; a bad sandbox/prompt/cwd is a ValueError): no
+        # child ever started, so there is no ExecResult — surface them on
+        # the same terminal path as a vendor error instead of letting the
+        # generic `except Exception` in main escalate onto an Anthropic
+        # model (review round 1, 2026-10-21).
+        audit_log.append(job.id if isinstance(job.id, str) else str(job.id),
+                         "executor_error", terminal_reason="api_error",
+                         message=f"{type(exc).__name__}: {exc}"[:500])
+        raise ExecutorFailed(ref.provider, ref.model_id, "api_error",
+                             f"{type(exc).__name__}: {exc}") from exc
+    if result.terminal_reason != "ok":
+        raise ExecutorFailed(ref.provider, ref.model_id, result.terminal_reason,
+                             result.error, model_served=result.model_served)
+    return (result.final_text or "").strip(), dict(result.usage or {}), result.model_served
 
 
 async def _run_in_process(

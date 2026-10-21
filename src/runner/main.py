@@ -204,28 +204,11 @@ async def _run_with_held_slot(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None
 # once, then drop for good.
 
 # Delay before each SELECT attempt; first is immediate, sleeps total ~2s.
-# Hard ceiling on per-job session-timeout extension. A payload can raise the
-# global default for a legitimately heavy session (atlas-momo-research cycles
-# — three cycle-2 attempts died at the 30-min ceiling, 2026-08-11) but can
-# never disable the ceiling entirely.
-SESSION_TIMEOUT_CAP_SECONDS = 5400
-
-
-def resolve_session_timeout(payload: dict | None, default: int,
-                            cap: int = SESSION_TIMEOUT_CAP_SECONDS) -> int:
-    """Effective session timeout for a job. Pure function.
-
-    `payload.session_timeout_seconds` overrides the global default, clamped
-    to [60, cap]; missing or unparseable values fall back to the default.
-    """
-    try:
-        raw = (payload or {}).get("session_timeout_seconds")
-        if raw is None:
-            return default
-        val = int(raw)
-    except (TypeError, ValueError, OverflowError):
-        return default
-    return max(60, min(val, cap))
+# Per-job session timeout: defined in `session.py` since T4 (the executor
+# branch needs the same ceiling and session must not import main); the names
+# stay importable from here for existing callers and tests.
+SESSION_TIMEOUT_CAP_SECONDS = session_mod.SESSION_TIMEOUT_CAP_SECONDS
+resolve_session_timeout = session_mod.resolve_session_timeout
 
 
 _JOB_FETCH_DELAYS: tuple[float, ...] = (0.0, 0.2, 0.3, 0.5, 1.0)
@@ -318,6 +301,22 @@ async def _refetch_job(job_id: uuid.UUID, fallback: Job, log) -> Job:
         return fallback
 
 
+def _non_anthropic_lane(job) -> str | None:
+    """The job's non-Anthropic provider, or None. Pure read of the
+    `resolved_provider` stamp `session.run_session` writes BEFORE the process
+    starts, so a timed-out or crashed non-Anthropic job is still
+    recognisable afterwards. Used by the timeout and generic failure
+    branches of `_process_job` to skip `_maybe_escalate`: the skill's
+    `on_failure` target is an Anthropic model, and re-running a Codex job
+    there is a vendor switch this slice does not make (T4 note 4; review
+    round 1, 2026-10-21). An unstamped job (died before the session's
+    stamp) is treated as Anthropic — the pre-T4 behaviour."""
+    provider = getattr(job, "resolved_provider", None)
+    if not provider or provider == models_registry.DEFAULT_PROVIDER:
+        return None
+    return provider
+
+
 async def _process_job(job_id: uuid.UUID) -> None:
     job: Job | None = None
     for delay in _JOB_FETCH_DELAYS:
@@ -379,7 +378,12 @@ async def _process_job(job_id: uuid.UUID) -> None:
             timeout=resolve_session_timeout(
                 job.payload, settings.session_timeout_seconds),
         )
-        await _finish_job(job_id, JobStatus.completed, result=result)
+        await _finish_job(
+            job_id, JobStatus.completed, result=result,
+            provider=result.get("provider"),
+            terminal_reason=result.get("terminal_reason"),
+            model_served=result.get("model_served"),
+        )
         log.info("job completed")
 
         # Refresh the ORM instance before the post-steps: resolved_skill is
@@ -487,12 +491,36 @@ async def _process_job(job_id: uuid.UUID) -> None:
                          reason=exc.reason)
         audit_log.append(str(job_id), "job_failed", error=reason,
                          error_category="provider_refused")
-        await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}")
+        await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}",
+                          provider=exc.provider, terminal_reason="provider_refused")
         log.warning("provider refused — job terminal", reason=reason)
         if job.task_id:
             try:
                 await _notify_task(job.task_id, "failed",
                                    text=f"Provider refused: {reason}")
+            except Exception:
+                pass
+
+    except session_mod.ExecutorFailed as exc:
+        # A non-Anthropic executor ended without `ok` (rate_limited,
+        # auth_expired, api_error, timeout, interrupted) — terminal, NOT
+        # escalated: the skill's escalation target is an Anthropic model, and
+        # silently re-running the job on another vendor is a routing decision
+        # this slice does not make (T4, 2026-10-21; T6 adds the per-provider
+        # hold + front-requeue for `rate_limited`). The executor already
+        # audited `executor_error`; the clone is kept like any failed job.
+        reason = str(exc)
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category=exc.terminal_reason)
+        await _finish_job(job_id, JobStatus.failed, error=f"Executor failed: {reason}",
+                          provider=exc.provider, terminal_reason=exc.terminal_reason,
+                          model_served=exc.model_served)
+        log.warning("executor failed — job terminal", provider=exc.provider,
+                    terminal_reason=exc.terminal_reason, reason=reason)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed",
+                                   text=f"Executor failed: {reason}")
             except Exception:
                 pass
 
@@ -535,42 +563,72 @@ async def _process_job(job_id: uuid.UUID) -> None:
     except asyncio.TimeoutError:
         audit_log.append(str(job_id), "job_failed", error="session_timeout",
                          error_category="timeout")
-        await _finish_job(job_id, JobStatus.failed, error="Session timed out")
-        log.warning("job timeout")
-
-        # Timeouts escalate like any other failure. This branch used to
-        # return without _maybe_escalate, making every session timeout a
-        # silent dead end system-wide (no retry, no self-diagnose) — found
-        # by the atlas-momo-research smoke run 2026-08-07, which timed out
-        # and produced no escalation child. Same refetch rationale as the
-        # generic branch: the session may have stamped resolved_skill.
+        # Refetch BEFORE the terminal stamp: the session stamps
+        # `resolved_provider` (and resolved_skill) in its own transaction,
+        # and the lane decision below reads it.
         job = await _refetch_job(job_id, job, log)
-        try:
-            await _maybe_escalate(job)
-        except Exception:
-            log.exception("escalation attempt failed (non-fatal)")
+        lane = _non_anthropic_lane(job)
+        if lane:
+            # Main's deadline won over the executor's (its child was killed
+            # by the cancellation) — stamp the typed terminal reason the
+            # executor would have, and stop: no Anthropic escalation off a
+            # non-Anthropic lane (review round 1, 2026-10-21).
+            await _finish_job(job_id, JobStatus.failed, error="Session timed out",
+                              provider=lane, terminal_reason="timeout")
+            audit_log.append(str(job_id), "note",
+                             text=f"{lane} lane timed out — terminal, not escalated "
+                                  f"(no vendor switch onto Anthropic)")
+            log.warning("job timeout — non-Anthropic lane, terminal", provider=lane)
+        else:
+            await _finish_job(job_id, JobStatus.failed, error="Session timed out")
+            log.warning("job timeout")
+
+            # Timeouts escalate like any other failure. This branch used to
+            # return without _maybe_escalate, making every session timeout a
+            # silent dead end system-wide (no retry, no self-diagnose) — found
+            # by the atlas-momo-research smoke run 2026-08-07, which timed out
+            # and produced no escalation child. Same refetch rationale as the
+            # generic branch: the session may have stamped resolved_skill.
+            try:
+                await _maybe_escalate(job)
+            except Exception:
+                log.exception("escalation attempt failed (non-fatal)")
 
     except Exception as exc:
         from src.runner.audit_index import categorize_error
         err_str = str(exc)[:500]
         audit_log.append(str(job_id), "job_failed", error=err_str,
                          error_category=categorize_error(err_str))
-        await _finish_job(job_id, JobStatus.failed, error=err_str)
         log.exception("job failed")
 
         # Refresh the ORM instance here too — the session may have stamped
-        # resolved_skill before dying, and _maybe_escalate's level-0 path
-        # reads it for the skill-declared escalation config (same detached-
-        # instance staleness as the completed branch; without this, level-0
-        # escalation silently jumped to self-diagnose for task-kind jobs).
+        # resolved_skill (and resolved_provider) before dying, and
+        # _maybe_escalate's level-0 path reads it for the skill-declared
+        # escalation config (same detached-instance staleness as the
+        # completed branch; without this, level-0 escalation silently
+        # jumped to self-diagnose for task-kind jobs).
         job = await _refetch_job(job_id, job, log)
+        lane = _non_anthropic_lane(job)
+        if lane:
+            # Anything the ExecutorFailed handler above did not already
+            # type (an infrastructure error around the executor) — terminal
+            # on the lane it ran on, never escalated onto Anthropic
+            # (review round 1, 2026-10-21).
+            await _finish_job(job_id, JobStatus.failed, error=err_str,
+                              provider=lane, terminal_reason="api_error")
+            audit_log.append(str(job_id), "note",
+                             text=f"{lane} lane failed — terminal, not escalated "
+                                  f"(no vendor switch onto Anthropic)")
+            log.warning("job failed — non-Anthropic lane, terminal", provider=lane)
+        else:
+            await _finish_job(job_id, JobStatus.failed, error=err_str)
 
-        # Escalation: if the skill declares on_failure, enqueue a retry with
-        # the escalated model/effort. One level only, guarded by a payload flag.
-        try:
-            await _maybe_escalate(job)
-        except Exception:
-            log.exception("escalation attempt failed (non-fatal)")
+            # Escalation: if the skill declares on_failure, enqueue a retry with
+            # the escalated model/effort. One level only, guarded by a payload flag.
+            try:
+                await _maybe_escalate(job)
+            except Exception:
+                log.exception("escalation attempt failed (non-fatal)")
 
 
 async def _maybe_review(job: Job, result: dict) -> None:
@@ -1288,12 +1346,46 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             )
 
 
+def _terminal_values(
+    status: JobStatus,
+    *,
+    result: dict | None,
+    error: str | None,
+    provider: str | None = None,
+    terminal_reason: str | None = None,
+    model_served: str | None = None,
+) -> dict:
+    """The column values a terminal transition writes. Pure.
+
+    The provider columns (migration 007: `resolved_provider`,
+    `terminal_reason`, `model_served`) are written only when known, so a
+    path that does not know them (timeout, generic failure) leaves what the
+    session stamped at start untouched (T4, 2026-10-21).
+    """
+    values: dict = dict(
+        status=status.value,
+        result=result,
+        error_message=error,
+        completed_at=datetime.now(timezone.utc),
+    )
+    if provider is not None:
+        values["resolved_provider"] = provider
+    if terminal_reason is not None:
+        values["terminal_reason"] = terminal_reason
+    if model_served is not None:
+        values["model_served"] = model_served
+    return values
+
+
 async def _finish_job(
     job_id: uuid.UUID,
     status: JobStatus,
     *,
     result: dict | None = None,
     error: str | None = None,
+    provider: str | None = None,
+    terminal_reason: str | None = None,
+    model_served: str | None = None,
 ) -> None:
     async with session_scope() as s:
         # INV-9: never overwrite a user cancellation. The cancel listener may set
@@ -1307,12 +1399,9 @@ async def _finish_job(
             update(Job)
             .where(Job.id == job_id)
             .where(Job.status != JobStatus.cancelled.value)
-            .values(
-                status=status.value,
-                result=result,
-                error_message=error,
-                completed_at=datetime.now(timezone.utc),
-            )
+            .values(**_terminal_values(
+                status, result=result, error=error, provider=provider,
+                terminal_reason=terminal_reason, model_served=model_served))
         )
         if result_proxy.rowcount == 0:
             logger.info("finish suppressed — job already in a protected terminal state",
