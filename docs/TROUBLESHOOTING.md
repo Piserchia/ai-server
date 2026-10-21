@@ -2802,6 +2802,45 @@ Job status is not proof of output. Watchdogs must check artifacts:
 schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
 open follow-up.
 
+## Symptom: a `codex/...` job fails with `Review blocked: pre-push review gate returned changes_requested|blocker|error` (error_category `review_blocked`)
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "(merge_gate_verdict|code_review_done|workspace_published)"' volumes/audit_log/<job_id>.jsonl
+ls volumes/workspaces/ | grep <job8>      # the clone is KEPT with the un-pushed diff
+```
+
+### Root cause
+
+Every non-Anthropic (Codex) job's clone diff is reviewed by the fixed
+Anthropic reviewer BEFORE the runner commits and pushes (T5, 2026-10-21;
+INV-21(c)). Anything but LGTM — including a reviewer timeout (600 s, counted
+as `changes_requested`) or `error` (the reviewer could not run) — fails the
+job on the lane: nothing is committed, pushed or ff-synced, no escalation,
+`jobs.review_outcome` carries the verdict. There is no switch to bypass it.
+
+### Fix
+
+Read `code_review_done.review_text` in the audit log for the findings. Either
+re-run the job with the findings in the description, or finish the work from
+the kept clone yourself (`git -C volumes/workspaces/<job8>-<name> diff`). A
+`workspace_published{ok:false}` after an LGTM is a different case
+(`error_category=publish_failed`, review round 1): the push was rejected
+(remote moved) — `git pull --rebase && git push` from the clone, see runner
+GOTCHAS. A `merge_gate_refused{reason=denied_path, paths}` with NO
+`code_review_done` means the diff touched a denied path (`.claude/`,
+`.codex/`, `.git*`/`.github/`, `AGENTS.md`, `CLAUDE.md`, `.mcp.json`) and
+was refused before any reviewer ran — make that edit on an Anthropic lane.
+A `provider_refused` whose reason names **D-A** means the job's canonical
+resolved to the server root (no project slug / missing project dir): Codex
+may not write to this repo unless `ROUTER_CODE_SERVER_PROVIDERS` lists it.
+
+### Prevention
+
+Pin smaller tasks to the Codex lane; the gate is one Anthropic session's
+judgement over the whole diff, and a 50k-char diff is truncated for review.
+
 ## Adding entries to this file
 ## Symptom: `atlas-momo-research` hits `session_timeout` at 60 min while the engineer probe is still running
 

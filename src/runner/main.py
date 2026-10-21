@@ -383,6 +383,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
             provider=result.get("provider"),
             terminal_reason=result.get("terminal_reason"),
             model_served=result.get("model_served"),
+            review_outcome=result.get("review_outcome"),
         )
         log.info("job completed")
 
@@ -498,6 +499,41 @@ async def _process_job(job_id: uuid.UUID) -> None:
             try:
                 await _notify_task(job.task_id, "failed",
                                    text=f"Provider refused: {reason}")
+            except Exception:
+                pass
+
+    except session_mod.ReviewBlocked as exc:
+        # The pre-push Anthropic review gate (T5, 2026-10-21; INV-21(c))
+        # did not LGTM a non-Anthropic job's diff — terminal, NOT escalated
+        # (re-running on an Anthropic model would be a vendor switch, and
+        # the verdict is about this diff). Nothing was committed, pushed or
+        # synced; the clone is kept with the diff for the owner. The
+        # verdict is stamped as `review_outcome` so /status and the
+        # retrospective read it like a post-review verdict.
+        reason = str(exc)
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category="review_blocked")
+        if exc.denied_paths:
+            card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}): it touches denied paths "
+                    f"({', '.join(exc.denied_paths)}) — refused before any reviewer "
+                    f"ran. Nothing was pushed; the clone is kept.")
+        else:
+            card = (f"Pre-push review gate: {exc.verdict} on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}, {exc.findings_n} finding(s)"
+                    f"{', reviewer timed out' if exc.timed_out else ''}). "
+                    f"Nothing was pushed; the clone is kept — see the audit log's "
+                    f"code_review_done for the findings.")
+        await _finish_job(job_id, JobStatus.failed, error=f"Review blocked: {reason}",
+                          provider=exc.provider, terminal_reason="review_blocked",
+                          review_outcome=exc.verdict,
+                          done_payload={"summary": card})
+        log.warning("pre-push review gate blocked — job terminal",
+                    provider=exc.provider, verdict=exc.verdict,
+                    findings=exc.findings_n)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed", text=card)
             except Exception:
                 pass
 
@@ -656,6 +692,19 @@ async def _maybe_review(job: Job, result: dict) -> None:
 
     trigger = skill_cfg.post_review.get("trigger", "never")
     if trigger == "never":
+        return
+
+    lane = _non_anthropic_lane(job)
+    if lane:
+        # Non-Anthropic lanes are reviewed BEFORE anything is pushed (the
+        # pre-push gate, T5, 2026-10-21) by the same fixed Anthropic
+        # reviewer; its verdict is already stamped as `review_outcome`. A
+        # second pass here would grade the same diff twice — and the
+        # stale-head guard below would skip it anyway until the gate's
+        # commit lands. The gate is the review of record for these lanes.
+        audit_log.append(str(job.id), "post_review_skipped",
+                         reason="pre_push_gate", provider=lane,
+                         verdict=(result or {}).get("review_outcome"))
         return
 
     # Resolve the cwd the session actually worked in (delivery-aware): for a
@@ -1354,6 +1403,7 @@ def _terminal_values(
     provider: str | None = None,
     terminal_reason: str | None = None,
     model_served: str | None = None,
+    review_outcome: str | None = None,
 ) -> dict:
     """The column values a terminal transition writes. Pure.
 
@@ -1374,6 +1424,10 @@ def _terminal_values(
         values["terminal_reason"] = terminal_reason
     if model_served is not None:
         values["model_served"] = model_served
+    if review_outcome is not None:
+        # The pre-push gate's verdict (T5); the Anthropic post-review
+        # stamps this column itself in `_maybe_review`.
+        values["review_outcome"] = review_outcome
     return values
 
 
@@ -1386,7 +1440,12 @@ async def _finish_job(
     provider: str | None = None,
     terminal_reason: str | None = None,
     model_served: str | None = None,
+    review_outcome: str | None = None,
+    done_payload: dict | None = None,
 ) -> None:
+    """Terminal transition + `jobs:done` publish. `done_payload` overrides
+    the published payload (the done DM's text) — used by the review-blocked
+    path so the DM names the verdict instead of a bare "failed"."""
     async with session_scope() as s:
         # INV-9: never overwrite a user cancellation. The cancel listener may set
         # `cancelled` in the race window before a session finishes; without this
@@ -1401,13 +1460,17 @@ async def _finish_job(
             .where(Job.status != JobStatus.cancelled.value)
             .values(**_terminal_values(
                 status, result=result, error=error, provider=provider,
-                terminal_reason=terminal_reason, model_served=model_served))
+                terminal_reason=terminal_reason, model_served=model_served,
+                review_outcome=review_outcome))
         )
         if result_proxy.rowcount == 0:
             logger.info("finish suppressed — job already in a protected terminal state",
                         job_id=str(job_id)[:8], attempted=status.value)
             return
-    payload = {"summary": (result or {}).get("summary", "")} if result else {}
+    if done_payload is not None:
+        payload = dict(done_payload)
+    else:
+        payload = {"summary": (result or {}).get("summary", "")} if result else {}
     await session_mod.publish_done(str(job_id), status.value, payload=payload)
 
     # Incremental audit index update (B2)

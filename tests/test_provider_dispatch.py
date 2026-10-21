@@ -280,9 +280,10 @@ def harness(tmp_path, monkeypatch):
 
     canonical = tmp_path / "canonical"
     canonical.mkdir()
+    (canonical / ".git").mkdir()      # T5: a non-Anthropic lane needs a git canonical
     h = SimpleNamespace(
         skill=_skill(isolation="workspace"), skill_name="demo",
-        deliv=None, canonical=canonical,
+        deliv=None, canonical=canonical, slug="demo",
         executor=_FakeExecutor(), db=_FakeDB(),
         created=[], synced=[], cleaned=[], env_files=[], sdk_calls=[],
     )
@@ -291,7 +292,9 @@ def harness(tmp_path, monkeypatch):
         return h.skill_name, h.skill
 
     async def fake_resolve_project(job, skill_name=None):
-        return h.canonical, h.deliv, False, None
+        # A PROJECT canonical with a slug (T5 review round 1: a slug-less
+        # job resolves to the server root, which D-A refuses by path).
+        return h.canonical, h.deliv, False, h.slug
 
     def fake_create_workspace(job_id, canon, base_dir):
         ws_path = tmp_path / "ws" / job_id
@@ -321,6 +324,11 @@ def harness(tmp_path, monkeypatch):
     monkeypatch.setattr(session.workspaces, "sync_canonical", fake_sync)
     monkeypatch.setattr(session.workspaces, "cleanup_workspace", fake_cleanup)
     monkeypatch.setattr(session.workspaces, "provision_env_files", fake_env_files)
+    # T5: the pre-push gate sees an EMPTY diff here (no reviewer, no commit),
+    # so these T4 tests keep exercising dispatch alone; the gate itself is
+    # covered in tests/test_pre_push_gate.py.
+    monkeypatch.setattr(session.workspaces, "head_sha", lambda path: "b" * 40)
+    monkeypatch.setattr(session.review, "diff_for_gate", lambda cwd, base_sha: "")
     monkeypatch.setattr(session, "_run_in_process", fake_run_in_process)
     monkeypatch.setattr(session, "async_session", h.db)
     monkeypatch.setattr(session, "_EXECUTORS", {"codex_cli": h.executor})
@@ -393,15 +401,16 @@ async def test_run_session_dispatches_to_the_codex_executor(harness):
     assert p["resolved_model"] == "gpt-6-luna"
     assert p["resolved_skill"] == "demo"
 
-    # Containment: no env_files for a non-Anthropic executor (plan §6), no
-    # ff-sync before the T5 gate, clone KEPT for the gate.
+    # Containment: no env_files for a non-Anthropic executor (plan §6). With
+    # an empty diff the T5 gate skips: nothing to publish, no ff-sync, the
+    # clone is removed like any clean success.
     assert h.env_files == []
     assert _event(job.id, "workspace_created")["env_files"] == []
     assert h.synced == []
     assert "workspace_synced" not in kinds
-    assert h.cleaned == [(h.created[0], True)]
-    note = _event(job.id, "note")
-    assert "kept" in note["text"] and "codex" in note["text"]
+    assert _event(job.id, "merge_gate_skipped")["reason"] == "empty_diff"
+    assert h.cleaned == [(h.created[0], False)]
+    assert result["review_outcome"] is None
 
 
 async def test_run_session_read_only_skill_gets_the_read_only_sandbox(harness):
@@ -642,7 +651,11 @@ async def test_run_session_executor_gets_a_timeout_under_mains_ceiling(harness):
     await session.run_session(job)
     ceiling = session.resolve_session_timeout(job.payload, settings.session_timeout_seconds)
     assert ceiling == 900
-    assert h.executor.calls[0]["timeout_s"] == session.executor_timeout_s(900) < 900
+    # T5 review round 1: the gate's allowance (reviewer ceiling + publish
+    # margin) is carved out of the executor's budget on this lane.
+    own = h.executor.calls[0]["timeout_s"]
+    assert own == session.executor_timeout_s(900, reserve_s=session.gate_reserve_s()) < 900
+    assert own + session.gate_reserve_s() + session.EXECUTOR_TIMEOUT_MARGIN_S <= 900
 
 
 @pytest.mark.parametrize("exc", [

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,17 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 MAX_DIFF_CHARS = 50_000
+
+# The reviewer is FIXED here (never chosen by the reviewed skill). The
+# pre-push gate (T5, 2026-10-21) names it in the `Reviewed-By:` trailer of
+# the commit it approves, so the constant and `run_code_review` must agree.
+REVIEWER_PROVIDER = "anthropic"
+REVIEWER_MODEL = "claude-opus-4-7"
+REVIEWER_EFFORT = "high"
+
+# Pre-push gate ceiling (plan T5; old spec §5.3 belt 3b). A timeout is a
+# `changes_requested` verdict, not a skip — the gate fails closed.
+GATE_TIMEOUT_SECONDS = 600
 
 
 class ReviewOutcome(enum.Enum):
@@ -178,6 +190,135 @@ def get_git_diff(cwd: Path, ref: str = "HEAD~1") -> str:
         return ""
 
 
+def diff_for_gate(cwd: Path, base_sha: str | None) -> str:
+    """Everything a workspace job changed since `base_sha` — committed,
+    staged, unstaged and untracked (gitignored files excluded) — as one
+    unified diff for the pre-push review gate (T5, 2026-10-21; plan §4b:
+    "if the job committed on its own, the diff is `git diff <base>` plus
+    the index and working tree").
+
+    `git diff <base>` compares the WORKING TREE to the base commit, which
+    covers the job's own commits, its index and its unstaged edits in one
+    pass; untracked files are appended via `git diff --no-index` against
+    /dev/null so a brand-new file is reviewed too.
+
+    Fails CLOSED: any git failure (not a repo, unknown base, missing base)
+    raises RuntimeError rather than returning "" — an empty string means
+    "nothing to review, complete the job", and a broken diff must never
+    read as that.
+    """
+    if not base_sha:
+        raise RuntimeError("pre-push gate: no base commit recorded for the clone")
+
+    def _run(args: list[str], ok_codes=(0,)) -> subprocess.CompletedProcess:
+        try:
+            res = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
+                                 text=True, timeout=60)
+        except Exception as exc:  # noqa: BLE001 — surfaced as a gate failure
+            raise RuntimeError(f"pre-push gate: git {args[0]} failed: {exc}") from exc
+        if res.returncode not in ok_codes:
+            raise RuntimeError(
+                f"pre-push gate: git {' '.join(args[:2])} exited {res.returncode}: "
+                f"{res.stderr.strip()[:300]}")
+        return res
+
+    tracked = _run(["diff", "--no-color", base_sha, "--"]).stdout or ""
+    untracked = _run(["ls-files", "--others", "--exclude-standard", "-z"]).stdout
+    parts = [tracked] if tracked else []
+    for name in [n for n in untracked.split("\0") if n]:
+        # `--no-index` exits 1 when the files differ (always, vs /dev/null).
+        res = _run(["diff", "--no-color", "--no-index", "--", "/dev/null", name],
+                   ok_codes=(0, 1))
+        if res.stdout:
+            parts.append(res.stdout)
+    return "".join(parts)
+
+
+_FINDING_LINE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+\S")
+
+
+def count_findings(review_text: str | None) -> int:
+    """How many list items the reviewer's text carries — a heuristic
+    (bullets `-`/`*`/`•` and `1.`/`1)` items), recorded on
+    `merge_gate_verdict.findings_n` for the scoreboard. Pure. A verdict
+    with prose only counts 0; this is a signal, not a contract."""
+    if not review_text:
+        return 0
+    return sum(1 for line in review_text.splitlines() if _FINDING_LINE.match(line))
+
+
+#: Repo-root-relative paths a non-Anthropic job's diff may NEVER carry
+#: through the pre-push gate (T5 review round 1, 2026-10-21) — a minimal
+#: hardcoded deny list standing in for the old spec's per-target
+#: `publish_allowlist` (§5.3 belt 3b: deny is evaluated first and wins;
+#: a rename counts as both paths), applied BEFORE a reviewer session is
+#: spent. Everything here is read as *instructions or executable config*
+#: by some agent that later opens the checkout: Claude Code's settings
+#: (hooks run as the owner), Codex's `.codex/` + `AGENTS.md`, `CLAUDE.md`
+#: (loaded by every Anthropic session on the project), git hook/config
+#: paths and CI workflows. The per-target allowlist stays T8/owner work.
+GATE_DENIED_DIRS: tuple[str, ...] = (
+    ".claude", ".codex", ".git", ".githooks", ".github",
+)
+GATE_DENIED_FILES: tuple[str, ...] = (
+    ".gitmodules", ".gitattributes", ".gitconfig", ".mcp.json",
+)
+GATE_DENIED_BASENAMES: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md")
+
+_DIFF_PATH_LINE = re.compile(
+    r"^(?:\+\+\+ b/|--- a/|rename (?:from|to) |copy (?:from|to) )(?P<path>.+?)\s*$")
+_DIFF_GIT_LINE = re.compile(r"^diff --git a/(?P<a>.+) b/(?P<b>.+)$")
+
+
+def gate_diff_paths(diff: str) -> list[str]:
+    """Every repo-relative path a unified diff names (both sides of a
+    rename/copy, the `+++`/`---` headers and the `diff --git` line), in
+    order of first appearance. Pure. `/dev/null` sides are ignored."""
+    seen: list[str] = []
+
+    def add(p: str) -> None:
+        p = p.strip().strip('"')
+        if not p or p == "/dev/null" or p.startswith("/dev/null"):
+            return
+        if p not in seen:
+            seen.append(p)
+
+    for line in diff.splitlines():
+        m = _DIFF_GIT_LINE.match(line)
+        if m:
+            add(m.group("a"))
+            add(m.group("b"))
+            continue
+        m = _DIFF_PATH_LINE.match(line)
+        if m:
+            add(m.group("path"))
+    return seen
+
+
+def gate_path_denied(path: str) -> bool:
+    """True when `path` (repo-root-relative, POSIX) hits the deny list. Pure."""
+    norm = path.strip()
+    while norm.startswith("./"):
+        norm = norm[2:]
+    parts = [p for p in norm.split("/") if p and p != "."]
+    if not parts:
+        return False
+    top = parts[0]
+    if top in GATE_DENIED_DIRS:
+        return True          # anything under it, or the entry itself
+    if len(parts) == 1 and top in GATE_DENIED_FILES:
+        return True
+    if parts[-1] in GATE_DENIED_BASENAMES:
+        return True
+    return False
+
+
+def gate_path_denials(diff: str) -> list[str]:
+    """The denied paths a gate diff touches (empty = clean). Pure; the
+    session refuses the diff before `run_code_review` when non-empty."""
+    return [p for p in gate_diff_paths(diff) if gate_path_denied(p)]
+
+
 def head_commit_epoch(cwd: Path) -> int | None:
     """Committer epoch of HEAD in `cwd`, or None (not a repo / no commits)."""
     try:
@@ -247,12 +388,21 @@ async def run_code_review(
     options = ClaudeAgentOptions(
         cwd=str(cwd),
         system_prompt=REVIEW_SYSTEM_PROMPT,
-        model="claude-opus-4-7",
-        effort="high",
+        model=REVIEWER_MODEL,
+        effort=REVIEWER_EFFORT,
         permission_mode="plan",  # read-only
         allowed_tools=["Read", "Glob", "Grep"],
         max_turns=6,
         output_format=REVIEW_OUTPUT_FORMAT,
+        # SDK isolation mode (T5 review round 1, 2026-10-21): `None` would
+        # load the reviewed checkout's `.claude/settings.json`,
+        # `.claude/settings.local.json` and `CLAUDE.md` — a `hooks` block
+        # planted there by the job under review (a Codex clone under
+        # `workspace-write` can write exactly those files) would run as the
+        # owner, in the runner's unscrubbed env, before the reviewer read a
+        # line of the diff. The reviewer needs none of them: the prompt
+        # carries the diff and the system prompt carries the instructions.
+        setting_sources=[],
     )
 
     final_text = ""

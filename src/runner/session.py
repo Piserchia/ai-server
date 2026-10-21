@@ -64,7 +64,7 @@ class SkillResolutionError(RuntimeError):
     just re-fail it.
     """
 from src.runner import agents as agents_mod
-from src.runner import delivery, guards, quota, router, workspaces
+from src.runner import delivery, guards, quota, review, router, workspaces
 from src.runner.executors import codex_cli
 
 logger = logging.getLogger(__name__)
@@ -631,11 +631,28 @@ EXECUTOR_TIMEOUT_MARGIN_S = 30.0
 EXECUTOR_TIMEOUT_FLOOR_S = 30.0
 
 
-def executor_timeout_s(ceiling_s: float) -> float:
+#: Wall-clock the pre-push gate's commit + push + audit take after the
+#: reviewer returns (T5 review round 1, 2026-10-21) — reserved, with
+#: `review.GATE_TIMEOUT_SECONDS`, out of the executor's budget so the gate
+#: completes INSIDE main's `wait_for` ceiling instead of being cancelled
+#: mid-review (which would fail a successful job as `timeout`).
+GATE_PUBLISH_MARGIN_S = 60.0
+
+
+def gate_reserve_s() -> float:
+    """Seconds a non-Anthropic lane keeps back for the pre-push gate: the
+    reviewer's ceiling plus the publish margin. Pure (reads the gate
+    constant at call time so a test can shrink it)."""
+    return float(review.GATE_TIMEOUT_SECONDS) + GATE_PUBLISH_MARGIN_S
+
+
+def executor_timeout_s(ceiling_s: float, reserve_s: float = 0.0) -> float:
     """The CLI executor's `timeout_s` for a session ceiling. Pure: strictly
-    below the ceiling by `EXECUTOR_TIMEOUT_MARGIN_S`, floored at
+    below the ceiling by `EXECUTOR_TIMEOUT_MARGIN_S` plus `reserve_s` (the
+    gate allowance on non-Anthropic lanes, `gate_reserve_s()`), floored at
     `EXECUTOR_TIMEOUT_FLOOR_S` (the ceiling itself is never below 60)."""
-    return max(EXECUTOR_TIMEOUT_FLOOR_S, float(ceiling_s) - EXECUTOR_TIMEOUT_MARGIN_S)
+    return max(EXECUTOR_TIMEOUT_FLOOR_S,
+               float(ceiling_s) - EXECUTOR_TIMEOUT_MARGIN_S - float(reserve_s))
 
 
 # ── Provider dispatch (cross-vendor writer slice T4, 2026-10-21) ────────────
@@ -783,6 +800,50 @@ def lane_refusal(
     return None
 
 
+def canonical_refusal(
+    canonical_cwd: Path,
+    *,
+    slug: str | None,
+    provider: str,
+    code_server_providers: frozenset[str],
+    server_root: Path,
+    projects_dir: Path,
+) -> str | None:
+    """Why a non-Anthropic provider may NOT write to this canonical, or
+    None. Pure (T5 review round 1, 2026-10-21; plan D-A).
+
+    `lane_refusal` pins the `code-server` rule on skill NAMES, but a
+    slug-less job (a generic task, a project whose directory is missing)
+    resolves its canonical to `settings.server_root` — THIS repo — and the
+    T5 publish path would then commit and push a Codex diff to
+    `origin/main` (deploy autopilot) from a clone of the production
+    checkout, which D-A keeps off and the single-writer topology forbids.
+    So, unless the provider is in `ROUTER_CODE_SERVER_PROVIDERS`, refuse
+    when: the job has no project slug; the canonical IS the server root;
+    or the canonical lies inside the server root but outside
+    `projects_dir` (`.context/`, `skills/`, `volumes/` …). A dev-repo
+    project's clone elsewhere on disk (atlas) is a project and passes.
+    """
+    if provider == models_registry.DEFAULT_PROVIDER or provider in code_server_providers:
+        return None
+    try:
+        canon = canonical_cwd.resolve()
+        root = server_root.resolve()
+        projects = projects_dir.resolve()
+    except OSError:
+        canon, root, projects = canonical_cwd, server_root, projects_dir
+    what = (f"provider {provider!r} is not in ROUTER_CODE_SERVER_PROVIDERS "
+            f"({','.join(sorted(code_server_providers)) or '<empty>'}; plan D-A)")
+    if not slug:
+        return f"job has no project slug, so its canonical is the server root; {what}"
+    if canon == root:
+        return f"canonical {canonical_cwd} is the server root; {what}"
+    if canon.is_relative_to(root) and not canon.is_relative_to(projects):
+        return (f"canonical {canonical_cwd} is inside the server root but not a "
+                f"project directory; {what}")
+    return None
+
+
 class ExecutorFailed(RuntimeError):
     """A non-Anthropic executor ended without `terminal_reason == "ok"`.
 
@@ -802,6 +863,36 @@ class ExecutorFailed(RuntimeError):
         super().__init__(
             f"{provider}/{model_id} executor ended {terminal_reason}: "
             f"{(message or 'no detail')[:500]}")
+
+
+class ReviewBlocked(RuntimeError):
+    """The pre-push Anthropic review gate (T5, 2026-10-21; INV-21(c)) did
+    not return LGTM for a non-Anthropic job's diff: `changes_requested`,
+    `blocker`, `error` (the reviewer could not run) or a timeout (counted as
+    `changes_requested`). Terminal in `main._process_job`
+    (`error_category=review_blocked`, `terminal_reason=review_blocked`,
+    `review_outcome=<verdict>`), never escalated; the clone is kept with
+    its uncommitted diff, nothing was committed, pushed or ff-synced.
+    """
+
+    def __init__(self, provider: str, model_id: str, *, verdict: str,
+                 findings_n: int = 0, timed_out: bool = False,
+                 denied_paths: list[str] | None = None):
+        self.provider = provider
+        self.model_id = model_id
+        self.verdict = verdict
+        self.findings_n = findings_n
+        self.timed_out = timed_out
+        # Non-empty = the diff was refused BEFORE a reviewer ran because it
+        # touches `review.GATE_DENIED_*` paths (T5 review round 1).
+        self.denied_paths = list(denied_paths or [])
+        if self.denied_paths:
+            why = f"diff touches denied paths: {', '.join(self.denied_paths)}"
+            head = f"pre-push review gate refused the diff for {provider}/{model_id}"
+        else:
+            why = "reviewer timed out" if timed_out else f"{findings_n} finding(s)"
+            head = f"pre-push review gate returned {verdict} for {provider}/{model_id}"
+        super().__init__(f"{head} ({why}); nothing was pushed — the clone is kept")
 
 
 def build_executor_prompt(system_prompt: str, description: str) -> str:
@@ -1207,8 +1298,29 @@ async def run_session(job: Job) -> dict[str, Any]:
             model_ref.canonical, refusal,
             provider=provider, model_id=model_ref.model_id)
     is_anthropic = provider == models_registry.DEFAULT_PROVIDER
+    canonical_why = canonical_refusal(
+        canonical_cwd, slug=slug, provider=provider,
+        code_server_providers=code_server_providers(),
+        server_root=settings.server_root, projects_dir=settings.projects_dir)
+    if canonical_why is not None:
+        # D-A: this repo is off-limits to non-Anthropic writers unless the
+        # owner lists the provider in ROUTER_CODE_SERVER_PROVIDERS — by
+        # canonical PATH, not only by skill name (T5 review round 1).
+        raise models_registry.ProviderRefused(
+            model_ref.canonical, canonical_why,
+            provider=provider, model_id=model_ref.model_id)
+    if not is_anthropic and not workspaces.is_git_repo(canonical_cwd):
+        # The pre-push gate (T5) diffs and commits in a git clone; a copied
+        # non-git canonical has no diff to review and no publish path, so
+        # the lane cannot be made safe — refuse before the copy exists.
+        raise models_registry.ProviderRefused(
+            model_ref.canonical,
+            f"the {provider} lane needs a git canonical for the pre-push "
+            f"review gate; {canonical_cwd} is not a git checkout",
+            provider=provider, model_id=model_ref.model_id)
 
     ws: workspaces.Workspace | None = None
+    base_sha: str | None = None
     cwd = canonical_cwd
     if isolation == "workspace":
         try:
@@ -1224,9 +1336,15 @@ async def run_session(job: Job) -> dict[str, Any]:
             if is_anthropic and deliv is not None and deliv.env_files:
                 env_files_copied = workspaces.provision_env_files(
                     ws.path, canonical_cwd, deliv.env_files)
+            if not is_anthropic:
+                # The base the pre-push gate diffs against (T5). Recorded
+                # before any process runs; a missing base fails the gate
+                # closed (`review.diff_for_gate` raises).
+                base_sha = workspaces.head_sha(ws.path)
             audit_log.append(job_id, "workspace_created",
                              workspace=str(ws.path), canonical=str(canonical_cwd),
-                             isolation=isolation, env_files=env_files_copied)
+                             isolation=isolation, env_files=env_files_copied,
+                             base_sha=base_sha)
         except Exception as exc:
             # Fail CLOSED. Guard hooks are keyed to the workspace path, so a
             # workspace-tier skill that can't get its clone would otherwise run
@@ -1309,6 +1427,8 @@ async def run_session(job: Job) -> dict[str, Any]:
     session_failed = False
     model_served: str | None = None
     terminal_reason = "ok"
+    review_outcome: str | None = None
+    published = False
 
     try:
         if options is not None:
@@ -1316,6 +1436,14 @@ async def run_session(job: Job) -> dict[str, Any]:
         else:
             final_summary, usage, model_served = await _run_executor(
                 job, model_ref, cwd=cwd, system_prompt=system_prompt, skill_cfg=skill_cfg)
+            # Pre-push Anthropic review gate (T5; INV-21(c)) — a RULE keyed
+            # on the provider, not a switch: every non-Anthropic diff is
+            # reviewed by Anthropic before the runner commits, pushes and
+            # ff-syncs. Non-LGTM raises ReviewBlocked (clone kept, nothing
+            # published); an empty diff skips the gate and the commit.
+            if ws is not None:
+                review_outcome, published = await _pre_push_gate(
+                    job, model_ref, ws, base_sha=base_sha, skill_name=skill_name)
 
         if final_summary:
             audit_log.write_summary(job_id, final_summary)
@@ -1352,30 +1480,123 @@ async def run_session(job: Job) -> dict[str, Any]:
             "model": model_used,
             "model_served": model_served,
             "terminal_reason": terminal_reason,
+            "review_outcome": review_outcome,
         }
     except BaseException:
         session_failed = True
         raise
     finally:
         if ws is not None:
-            if not session_failed and is_anthropic:
+            # ff-sync the canonical after the session pushed: the Anthropic
+            # session pushes itself; on a non-Anthropic lane only the runner
+            # pushes, and only after the gate's LGTM (`published`). A
+            # non-LGTM, an empty diff or any failure never reaches here
+            # with `published` set, so nothing un-reviewed is ever synced.
+            if not session_failed and (is_anthropic or published):
                 ok, msg = workspaces.sync_canonical(ws)
                 audit_log.append(job_id, "workspace_synced", ok=ok, detail=msg)
                 if not ok:
                     logger.warning("canonical sync failed for %s: %s", job_id[:8], msg)
-            elif not session_failed:
-                # Non-Anthropic lane (T4): the executor cannot push (network
-                # off, no credentials) and nothing reaches a canonical repo
-                # before the Anthropic pre-push review gate (T5) — so no
-                # ff-sync here, and the clone with its uncommitted edits is
-                # KEPT for that gate instead of being thrown away.
-                audit_log.append(
-                    job_id, "note",
-                    text=(f"workspace kept: {provider} lane output awaits the "
-                          f"Anthropic pre-push review gate (T5); no canonical "
-                          f"sync performed ({ws.path})"))
-            # Keep failed-job workspaces for debugging; server-upkeep prunes.
-            workspaces.cleanup_workspace(ws, keep=session_failed or not is_anthropic)
+            # Keep failed-job workspaces for debugging (a review-blocked
+            # clone holds the un-pushed diff); server-upkeep prunes.
+            workspaces.cleanup_workspace(ws, keep=session_failed)
+
+
+async def _pre_push_gate(
+    job: Job,
+    ref: models_registry.ModelRef,
+    ws: workspaces.Workspace,
+    *,
+    base_sha: str | None,
+    skill_name: str | None,
+) -> tuple[str | None, bool]:
+    """The pre-push Anthropic review gate for non-Anthropic lanes (T5,
+    2026-10-21; old spec §5.3 belt 3b; INV-21(c)). Returns
+    `(review_outcome, published)`.
+
+    Reads NO settings — there is no switch (round-1 critical #1).
+
+    - `review.diff_for_gate(clone, base)` — committed + staged + unstaged +
+      untracked; a git failure raises (fail closed, never "empty").
+    - Empty diff → audit `merge_gate_skipped{reason=empty_diff}`, no
+      reviewer, no commit; the job completes (research-class jobs).
+    - Otherwise `review.run_code_review` (the fixed Anthropic reviewer)
+      under `asyncio.wait_for(GATE_TIMEOUT_SECONDS)`; a timeout IS a
+      `changes_requested` verdict. Audit `merge_gate_verdict{belt=pre_push,
+      reviewer_provider, reviewer_model, verdict, findings_n, timed_out,
+      diff_chars}`.
+    - LGTM → `workspaces.publish_workspace` (runner commits with the
+      `Executor:`/`Job:`/`Reviewed-By:` trailers and pushes; audit
+      `workspace_published`); a failed publish raises RuntimeError (terminal
+      on the lane, clone kept — never retried with a rebase, never forced).
+    - Anything else → `ReviewBlocked` (terminal, clone kept, no sync).
+    """
+    job_id = str(job.id)
+    diff = review.diff_for_gate(ws.path, base_sha)
+    if not diff.strip():
+        audit_log.append(job_id, "merge_gate_skipped", belt="pre_push",
+                         reason="empty_diff", base_sha=base_sha)
+        return None, False
+
+    # Path deny list BEFORE a reviewer session is spent (review round 1;
+    # old spec §5.3 belt 3b "a diff outside it is refused before the gate
+    # runs"): settings/hooks, Codex + Claude instruction files, git
+    # hook/config paths, CI workflows. Terminal like a `blocker` verdict —
+    # clone kept, nothing committed, pushed or synced.
+    denied = review.gate_path_denials(diff)
+    if denied:
+        audit_log.append(job_id, "merge_gate_refused", belt="pre_push",
+                         reason="denied_path", paths=denied,
+                         diff_chars=len(diff), base_sha=base_sha)
+        raise ReviewBlocked(ref.provider, ref.model_id,
+                            verdict=review.ReviewOutcome.blocker.value,
+                            findings_n=len(denied), denied_paths=denied)
+
+    timed_out = False
+    try:
+        outcome = await asyncio.wait_for(
+            review.run_code_review(job_id, diff, ws.path),
+            timeout=review.GATE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        timed_out = True
+        outcome = review.ReviewOutcome.changes_requested
+        audit_log.append(job_id, "code_review_done", outcome=outcome.value,
+                         review_text=f"Review timed out after "
+                                     f"{review.GATE_TIMEOUT_SECONDS}s (gate: changes_requested)")
+
+    done = [e for e in audit_log.read(job_id) if e.get("kind") == "code_review_done"]
+    findings_n = review.count_findings((done[-1].get("review_text") if done else "") or "")
+    verdict = outcome.value
+    audit_log.append(
+        job_id, "merge_gate_verdict", belt="pre_push",
+        reviewer_provider=review.REVIEWER_PROVIDER, reviewer_model=review.REVIEWER_MODEL,
+        verdict=verdict, findings_n=findings_n, timed_out=timed_out,
+        diff_chars=len(diff), base_sha=base_sha,
+    )
+    if outcome is not review.ReviewOutcome.lgtm:
+        raise ReviewBlocked(ref.provider, ref.model_id, verdict=verdict,
+                            findings_n=findings_n, timed_out=timed_out)
+
+    reviewer = f"{review.REVIEWER_PROVIDER}/{review.REVIEWER_MODEL}"
+    # An empty/whitespace description is legal (web POST, schedule rows):
+    # fall back to the job kind rather than IndexError after an LGTM.
+    lines = (job.description or "").strip().splitlines()
+    subject = (lines[0] if lines else job.kind)[:72]
+    message = f"{skill_name or job.kind}: {subject}"
+    trailers = workspaces.provenance_trailers(
+        provider=ref.provider, model_id=ref.model_id, job_id=job_id, reviewer=reviewer)
+    ok, detail, commit = workspaces.publish_workspace(
+        ws, base_sha=base_sha, message=message, trailers=trailers)
+    audit_log.append(job_id, "workspace_published", ok=ok, detail=detail,
+                     commit=commit, trailers=trailers)
+    if not ok:
+        # Typed so the ledger can tell "reviewed, approved, push rejected"
+        # from a vendor `api_error` (review round 1): main's ExecutorFailed
+        # handler stamps `terminal_reason=publish_failed`, clone kept.
+        raise ExecutorFailed(ref.provider, ref.model_id, "publish_failed",
+                             f"publish after LGTM failed: {detail}")
+    return verdict, True
 
 
 async def _run_executor(
@@ -1405,8 +1626,12 @@ async def _run_executor(
     # started before the clone), so the executor's own `timeout` terminal
     # reason is reachable; main's deadline remains the backstop and its
     # cancellation terminates the child too (review round 1).
+    # … minus the pre-push gate's allowance (reviewer ceiling + publish
+    # margin): the gate runs AFTER the executor under the same `wait_for`,
+    # so without the reserve a long run that produced a diff was cancelled
+    # mid-review and mislabelled `timeout` (review round 1).
     ceiling = resolve_session_timeout(job.payload, settings.session_timeout_seconds)
-    timeout_s = executor_timeout_s(ceiling)
+    timeout_s = executor_timeout_s(ceiling, reserve_s=gate_reserve_s())
 
     try:
         result = await executor.run(

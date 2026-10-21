@@ -10,7 +10,7 @@ Why JSONL files, not a DB table:
 Kinds used (keep this list honest — update when adding new kinds):
 - job_started:      {"kind", "ts", "job_id", "description", "payload"}  # + "provider" (additive, T4 2026-10-21)
 - job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no cost (subscription auth); + "provider", "model_served", "terminal_reason" (additive, T4)
-- job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused|<executor terminal_reason: rate_limited|auth_expired|api_error|timeout|interrupted> (T4)
+- job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused|review_blocked (T5)|<executor terminal_reason: rate_limited|auth_expired|api_error|timeout|interrupted (T4)|publish_failed (T5: LGTM but the runner's push was rejected)>
 - provider_selected: {"kind", "ts", "job_id", "provider", "model", "reason"}  # which provider/model the job resolved to; reason ∈ payload|pin|default (T4, 2026-10-21)
 - provider_refused: {"kind", "ts", "job_id", "provider", "model", "raw", "reason"}  # registry or lane rule refused `[provider/]model_id` before any clone or process (T1/T4, 2026-10-21)
 - job_cancelled:    {"kind", "ts", "job_id"}
@@ -26,6 +26,12 @@ Kinds used (keep this list honest — update when adding new kinds):
 - executor_started: {"kind", "ts", "job_id", "executor", "thread_id", "model", "cli_version", "env_keys"}  # non-Anthropic executor process started (T3, 2026-10-21)
 - turn_completed:   {"kind", "ts", "job_id", "usage"}              # one vendor turn finished; usage in SDK key names (T3)
 - executor_error:   {"kind", "ts", "job_id", "terminal_reason", "message"}  # vendor turn.failed/error, timeout or exit without turn.completed (T3)
+- workspace_created: {"kind", "ts", "job_id", "workspace", "canonical", "isolation", "env_files"}  # + "base_sha" (additive, T5: the clone's HEAD before the job on non-Anthropic lanes; None otherwise)
+- merge_gate_verdict: {"kind", "ts", "job_id", "belt": "pre_push", "reviewer_provider", "reviewer_model", "verdict", "findings_n", "timed_out", "diff_chars", "base_sha"}  # pre-push Anthropic review of a non-Anthropic job's clone diff; verdict ∈ LGTM|changes_requested|blocker|error (T5, 2026-10-21)
+- merge_gate_skipped: {"kind", "ts", "job_id", "belt": "pre_push", "reason": "empty_diff", "base_sha"}  # nothing to review — no reviewer, no commit, job completes (T5)
+- merge_gate_refused: {"kind", "ts", "job_id", "belt": "pre_push", "reason": "denied_path", "paths", "diff_chars", "base_sha"}  # the diff touches `review.GATE_DENIED_*` paths (.claude/, .codex/, .git*/.github, AGENTS.md, CLAUDE.md, .mcp.json) — refused BEFORE any reviewer ran; terminal like a blocker (T5 review round 1)
+- workspace_published: {"kind", "ts", "job_id", "ok", "detail", "commit", "trailers"}  # the RUNNER committed (Executor/Job/Reviewed-By trailers) + pushed the clone after LGTM; ok=false = push rejected, clone kept (T5)
+- post_review_skipped: {"kind", "ts", "job_id", "reason", ...}  # reason ∈ stale_head|no_diff|timeout|pre_push_gate (+ "provider", "verdict" for pre_push_gate — the gate is the review of record on non-Anthropic lanes, T5)
 
 Also writes a human-readable `<job_id>.summary.md` at job completion (written by the runner,
 not here — it's the last turn the assistant produces).

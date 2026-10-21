@@ -2,6 +2,130 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T5 review round 1 applied (code-review T5, blocker → lgtm)
+
+**Agent task**: cross-vendor writer slice T5, reviewer findings (2 blockers,
+1 major, 3 minors). **Files changed**:
+- `src/runner/review.py` — `run_code_review` passes `setting_sources=[]`
+  (SDK isolation mode): with the default `None` the reviewer `claude`
+  process loaded the REVIEWED checkout's `.claude/settings.json` /
+  `settings.local.json` (hooks run as the owner, unscrubbed env) and
+  `CLAUDE.md` — a Codex clone under `workspace-write` can plant exactly
+  those. Applies to belt 2 as well. New pure helpers `gate_diff_paths(diff)`,
+  `gate_path_denied(path)`, `gate_path_denials(diff)` over a hardcoded deny
+  list (`GATE_DENIED_DIRS` = `.claude .codex .git .githooks .github`,
+  `GATE_DENIED_FILES` = `.gitmodules .gitattributes .gitconfig .mcp.json`,
+  `GATE_DENIED_BASENAMES` = `AGENTS.md CLAUDE.md`; deny wins, a rename
+  counts both sides) — the minimal stand-in for the old spec's per-target
+  `publish_allowlist` (T8/owner).
+- `src/runner/session.py` — (1) `_pre_push_gate` refuses a diff touching a
+  denied path BEFORE spending a reviewer: audit `merge_gate_refused{belt,
+  reason=denied_path, paths}` + `ReviewBlocked(..., verdict="blocker",
+  denied_paths=)` (new attr); clone kept. (2) NEW pure
+  `canonical_refusal(canonical_cwd, *, slug, provider, code_server_providers,
+  server_root, projects_dir)` called in `run_session` beside the git-canonical
+  check, before `create_workspace`: unless the provider is in
+  `ROUTER_CODE_SERVER_PROVIDERS`, a non-Anthropic job with no project slug,
+  a canonical equal to `settings.server_root`, or one inside the server
+  root but outside `projects_dir` is `ProviderRefused` naming D-A —
+  `lane_refusal` keyed `code-server` on skill NAMES only, so a generic
+  (router-unmatched) `/task --model=codex/…` resolved to THIS repo and T5's
+  publish path would have pushed it to `origin/main` from a clone of the
+  production checkout. (3) Budget: `executor_timeout_s(ceiling, reserve_s=)`
+  + `gate_reserve_s()` (= `review.GATE_TIMEOUT_SECONDS` + new
+  `GATE_PUBLISH_MARGIN_S` 60 s); `_run_executor` reserves it, so the gate
+  completes inside main's `wait_for` instead of being cancelled mid-review
+  and mislabelled `timeout` (1800 s ceiling → executor 1110 s). (4) Commit
+  subject falls back to `job.kind` on an empty/whitespace description
+  (was IndexError after LGTM). (5) A rejected push after LGTM raises
+  `ExecutorFailed(..., "publish_failed")` (was a bare RuntimeError →
+  `api_error`), so the ledger separates "approved, push rejected" from a
+  vendor error.
+- `src/runner/main.py` — the review-blocked card names the denied paths.
+- `src/audit_log.py` — docstring: `merge_gate_refused` kind; `job_failed`
+  category `publish_failed`.
+**Tests**: `tests/test_pre_push_gate.py` 33 → 74 collected (deny-list parse/rules,
+refusal before the reviewer, `setting_sources=[]` captured off a faked
+`query` + source assertion, D-A canonical rule pure + through `run_session`
+both ways, budget arithmetic + a shrunk-clock run under main's ceiling,
+empty description, typed publish failure, main card); both harnesses'
+`_resolve_project` now return a slug (the rule refuses slug-less jobs) and
+`test_run_session_executor_gets_a_timeout_under_mains_ceiling` asserts the
+reserved budget. Suite green; lint clean. Not done (hard rule): no
+`guards.py`/`lint_docs.py` change — the per-target allowlist stays T8.
+
+## 2026-10-21 — T5: pre-push Anthropic review gate for non-Anthropic lanes (INV-21(c))
+
+**Agent task**: cross-vendor writer slice T5
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; plan
+§4b, old spec §5.3 belt 3b). Closes the ff-sync-before-review hole for
+vendor writers: Anthropic reviews every non-Anthropic diff BEFORE anything
+reaches a canonical repo, and the runner is the only committer/pusher.
+**Files changed**:
+- `src/runner/session.py` — `_pre_push_gate(job, ref, ws, *, base_sha,
+  skill_name) -> (review_outcome, published)` runs in `run_session` right
+  after `_run_executor` returns and before `job_completed`, keyed on the
+  provider alone (a RULE, no setting — the test asserts the function reads
+  nothing from `settings`). `review.diff_for_gate(clone, base_sha)` →
+  empty → audit `merge_gate_skipped{belt=pre_push, reason=empty_diff}`,
+  job completes with no commit; otherwise `review.run_code_review` (the
+  fixed Anthropic reviewer) under `asyncio.wait_for(review.GATE_TIMEOUT_SECONDS
+  = 600)` — a timeout IS `changes_requested` — audited as
+  `merge_gate_verdict{belt, reviewer_provider, reviewer_model, verdict,
+  findings_n, timed_out, diff_chars, base_sha}`. LGTM →
+  `workspaces.publish_workspace` (runner commits with `Executor:`/`Job:`/
+  `Reviewed-By:` trailers, pushes; audit `workspace_published`) and only
+  then the existing `sync_canonical` in `finally` (gated on `published`);
+  a failed publish raises `RuntimeError` (terminal on the lane, clone kept).
+  Anything else raises the new `session.ReviewBlocked(provider, model_id,
+  *, verdict, findings_n, timed_out)` — clone kept, no commit, no sync.
+  `base_sha` (`workspaces.head_sha(clone)`) is captured right after
+  `create_workspace` for non-Anthropic jobs and rides `workspace_created`
+  additively; a non-Anthropic job on a NON-git canonical is `ProviderRefused`
+  before the clone (no diff, no publish path). The T4 "clone kept for T5"
+  `note` is gone: successful non-Anthropic jobs now clean up like Anthropic
+  ones; `cleanup_workspace(keep=session_failed)` for every lane. Result dict
+  gains `review_outcome` (None on Anthropic / empty diff).
+- `src/runner/review.py` — `REVIEWER_PROVIDER`/`REVIEWER_MODEL`/
+  `REVIEWER_EFFORT` constants (`run_code_review` now reads them — same
+  opus-4-7/high, so the trailer and the reviewer cannot drift),
+  `GATE_TIMEOUT_SECONDS`, `diff_for_gate(cwd, base_sha)` (committed +
+  staged + unstaged via `git diff <base>` on the working tree, plus
+  untracked via `git diff --no-index /dev/null <f>`; gitignored excluded;
+  RAISES on any git failure — fail closed, never an "empty" diff),
+  `count_findings(text)` (list-item heuristic for `findings_n`).
+- `src/runner/workspaces.py` — `head_sha(path)`, `current_branch(path)`,
+  `provenance_trailers(provider=, model_id=, job_id=, reviewer=)`,
+  `publish_workspace(ws, *, base_sha, message, trailers) -> (ok, detail,
+  sha)`: `git add -A`, commit (`--no-verify`, message + trailers; an empty
+  provenance commit when the job committed on its own — never amend),
+  `git push origin <branch>:<branch>` when the canonical has a remote. ONE
+  push attempt: a rejection is reported (`ok=False`, sha kept), never
+  rebased, never forced. Never raises.
+- `src/runner/main.py` — `except session_mod.ReviewBlocked` (before
+  `ExecutorFailed`): audit `job_failed error_category=review_blocked`,
+  `_finish_job(failed, provider=, terminal_reason="review_blocked",
+  review_outcome=<verdict>, done_payload={summary: <card>})`, task
+  `failed` card naming the verdict/findings, never escalated.
+  `_terminal_values`/`_finish_job` gain `review_outcome=` (+ `_finish_job`
+  `done_payload=` to override the `jobs:done` DM text); the completed path
+  stamps `result["review_outcome"]`. `_maybe_review` skips non-Anthropic
+  lanes with `post_review_skipped{reason=pre_push_gate, provider, verdict}`
+  — the gate is the review of record (T4-review note resolved: no more
+  `stale_head` WARNING on every Codex job).
+- `src/audit_log.py` — docstring: `merge_gate_verdict`,
+  `merge_gate_skipped`, `workspace_published`, `post_review_skipped`
+  reasons, `workspace_created.base_sha`, `job_failed` category
+  `review_blocked`.
+**Tests**: `tests/test_pre_push_gate.py` (33: diff/publish on real temp
+repos, every gate outcome through `run_session` with spies, main's
+terminal handling, belt-2 skip, rule-not-switch AST check);
+`tests/test_provider_dispatch.py` harness gained a git-looking canonical
+and an empty-diff gate stub, and the T4 end-to-end test's tail now asserts
+the empty-diff skip instead of the kept clone. Suite 1886 passed, 1
+skipped; lint clean.
+
+
 ## 2026-10-21 — T4: dispatch at the single executor call site (`session.run_session`)
 
 **Agent task**: cross-vendor writer slice T4

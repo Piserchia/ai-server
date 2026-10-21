@@ -270,6 +270,96 @@ def sync_canonical(ws: Workspace) -> tuple[bool, str]:
     return True, "canonical fast-forwarded from origin"
 
 
+def head_sha(path: Path) -> str | None:
+    """Full SHA of HEAD in `path`, or None (not a repo / no commits). The
+    session records this right after `create_workspace` for a non-Anthropic
+    job: it is the base the pre-push gate diffs against (T5, 2026-10-21)."""
+    res = _run_git(["rev-parse", "--verify", "HEAD"], cwd=path, timeout=30)
+    if res.returncode != 0:
+        return None
+    out = res.stdout.strip()
+    return out or None
+
+
+def current_branch(path: Path) -> str | None:
+    """Short branch name checked out in `path`, or None (detached / error)."""
+    res = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path, timeout=30)
+    if res.returncode != 0:
+        return None
+    out = res.stdout.strip()
+    return out if out and out != "HEAD" else None
+
+
+def provenance_trailers(*, provider: str, model_id: str, job_id,
+                        reviewer: str) -> list[str]:
+    """The git trailers the runner stamps on a commit it makes on a
+    non-Anthropic job's behalf (plan §4b / T5): who executed, which job,
+    and which Anthropic reviewer approved the diff. Pure."""
+    return [
+        f"Executor: {provider}/{model_id}",
+        f"Job: {job_id}",
+        f"Reviewed-By: {reviewer}",
+    ]
+
+
+def publish_workspace(
+    ws: Workspace, *, base_sha: str | None, message: str, trailers: list[str],
+) -> tuple[bool, str, str | None]:
+    """After the pre-push gate's LGTM: the RUNNER stages everything in the
+    clone, commits with the provenance trailers, and pushes the clone's
+    branch to origin (T5, 2026-10-21). The executor never holds git
+    credentials and never pushes (plan §4b); this is the only way a
+    non-Anthropic job's work reaches a remote.
+
+    Returns `(ok, detail, commit_sha)`. Never raises.
+    - nothing staged and HEAD == base → `(False, "nothing to publish", None)`
+      (the gate's empty-diff check should have kept us from getting here);
+    - nothing staged but the job committed on its own → an empty
+      provenance commit on top, so the trailers are on record (never amend);
+    - a rejected push (remote moved, non-ff) is reported, NOT retried with
+      a rebase and never forced: the reviewed commit stays in the kept
+      clone for the owner, and the job fails on the lane. `commit_sha` is
+      still returned so the audit names the commit.
+    - canonical with no remote (`pushes_to_origin=False`): no push;
+      `sync_canonical` fetches from the workspace as today.
+    """
+    res = _run_git(["add", "-A", "--"], cwd=ws.path)
+    if res.returncode != 0:
+        return False, f"git add failed: {res.stderr[:300]}", None
+    staged = _run_git(["diff", "--cached", "--quiet"], cwd=ws.path)
+    has_staged = staged.returncode == 1
+    if staged.returncode not in (0, 1):
+        return False, f"git diff --cached failed: {staged.stderr[:300]}", None
+    head = head_sha(ws.path)
+    if not has_staged and (base_sha is None or head == base_sha):
+        return False, "nothing to publish: no staged changes and HEAD is the base", None
+
+    body = message.rstrip() + "\n\n" + "\n".join(trailers) + "\n"
+    args = ["commit", "-q", "--no-verify", "-F", "-"]
+    if not has_staged:
+        args.append("--allow-empty")
+    try:
+        commit = subprocess.run(
+            ["git", *args], cwd=str(ws.path), input=body, capture_output=True,
+            text=True, timeout=120)
+    except Exception as exc:  # noqa: BLE001 — reported, never raised
+        return False, f"git commit failed: {exc}", None
+    if commit.returncode != 0:
+        return False, f"git commit failed: {commit.stderr[:300]}", None
+    sha = head_sha(ws.path)
+
+    if not ws.pushes_to_origin:
+        return True, f"committed {sha[:8] if sha else '?'} (no remote; canonical syncs from the workspace)", sha
+
+    branch = current_branch(ws.path)
+    if not branch:
+        return False, "git push skipped: detached HEAD in the workspace", sha
+    push = _run_git(["push", "origin", f"{branch}:{branch}"], cwd=ws.path, timeout=180)
+    if push.returncode != 0:
+        return False, f"git push rejected (not retried, never forced): {push.stderr[:300]}", sha
+    return True, f"committed {sha[:8] if sha else '?'} and pushed origin/{branch}", sha
+
+
 def cleanup_workspace(ws: Workspace, *, keep: bool = False) -> None:
     """Remove the workspace directory (unless keep=True, e.g. failed jobs)."""
     if keep:

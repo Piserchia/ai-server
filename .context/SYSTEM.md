@@ -30,11 +30,11 @@
 | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
 | `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
-| `src/runner/session.py` | Skill/isolation resolution + one session per job: in-process SDK for Anthropic (guard hooks + subagents wired here), else dispatch to the registry-named executor module (T4, 2026-10-21; fail-closed lane rules before the clone) | config, db, models, audit_log, registry.skills, registry.models, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, runner.executors.codex_cli, context.module_graph | runner.main |
+| `src/runner/session.py` | Skill/isolation resolution + one session per job: in-process SDK for Anthropic (guard hooks + subagents wired here), else dispatch to the registry-named executor module (T4, 2026-10-21; fail-closed lane rules before the clone) | config, db, models, audit_log, registry.skills, registry.models, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, runner.executors.codex_cli, runner.review, context.module_graph | runner.main |
 | `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks + deploy-authority gate | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, runner.delivery, gateway.jobs, registry.skills, registry.models, audit_log | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher (incl. `plan` for multi-step asks) | — | runner.session, gateway.telegram_bot (triage) |
 | `src/runner/llm_router.py` | `settings.utility_model` routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
-| `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution | — | runner.session, server-upkeep skill |
+| `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution; runner-side commit+push for non-Anthropic lanes after the pre-push gate (T5) | — | runner.session, server-upkeep skill |
 | `src/runner/executors/codex_cli.py` | Codex CLI executor (T3, 2026-10-21): `codex exec --json` per job under Seatbelt, scrubbed env, JSONL → existing audit kinds + `jobs:stream`; `interrupt` SIGTERM→SIGKILL. Dispatched by `runner.session._run_executor` since T4 | config, db, audit_log | runner.session |
 | `src/runner/delivery.py` | Project delivery contract enforcement: dev-repo cwd scoping + deploy-authority gate | config, registry.manifest | runner.session, runner.main |
 | `src/runner/guards.py` | PreToolUse guard hooks: workspace write containment + Bash denylist (INV-17) | config, audit_log, claude_agent_sdk | runner.session |
@@ -42,7 +42,7 @@
 | `src/runner/plans.py` | Plan validation + subtask DAG spawn/promotion/cascade | config, db, models, audit_log | runner.main, gateway.telegram_bot (manual approve) |
 | `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
-| `src/runner/review.py` | Code-review sub-agent; evaluates diffs post-session | config, audit_log, claude_agent_sdk | runner.main |
+| `src/runner/review.py` | Code-review sub-agent; evaluates diffs post-session (Anthropic belt 2) and PRE-push for non-Anthropic lanes (T5 gate: `diff_for_gate`, fixed reviewer) | config, audit_log, claude_agent_sdk | runner.main, runner.session |
 | `src/runner/events.py` | Event-trigger rules engine (4th async task) | db, models, gateway.jobs | runner.main |
 | `src/runner/mcp_projects.py` | MCP server: project tools (list, get, logs, restart) | config, db, models | runner.session |
 | `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool (task/parent linkage + depends_on deferral) | gateway.jobs, db, models | runner.session |

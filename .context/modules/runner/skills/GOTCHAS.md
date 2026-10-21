@@ -14,6 +14,55 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## A Codex job that passed the pre-push gate can still FAIL with `publish after LGTM failed: git push rejected` (2026-10-21, T5)
+
+`workspaces.publish_workspace` makes ONE push attempt and never rebases or
+forces: if the remote moved between the clone and the push (another job,
+the owner's laptop), the reviewed commit stays in the KEPT clone
+(`volumes/workspaces/<job8>-<name>/`, audit `workspace_published{ok:false,
+commit}`), the job ends `terminal_reason=publish_failed` (`job_failed
+error_category=publish_failed`; review round 1 — it was `api_error`, which
+hid "approved but rejected" behind vendor errors) and nothing is synced. A
+rebase would change the base of a diff Anthropic already
+approved, so it is deliberately not automated. Recovery is the owner's:
+`git -C <clone> pull --rebase origin <branch> && git push`, or re-run the
+job. Also: the gate's diff is `git diff <base_sha>` + untracked, so a job
+that `git commit`s on its own is reviewed all the same and gets an empty
+provenance commit (trailers) on top — never an amend. The commit is made
+with `--no-verify` (a clone has no hooks anyway; a canonical's
+`core.hooksPath` would otherwise run the owner's hooks on a job's behalf).
+
+## A Codex diff touching `.claude/`, `AGENTS.md`, `CLAUDE.md`, `.github/` … is refused with NO reviewer run (`merge_gate_refused`) (2026-10-21, T5 review round 1)
+
+`review.gate_path_denials` runs before `run_code_review`: any path under
+`.claude/ .codex/ .git/ .githooks/ .github/`, the files `.gitmodules
+.gitattributes .gitconfig .mcp.json`, or any `AGENTS.md`/`CLAUDE.md` fails
+the job as `ReviewBlocked(verdict="blocker", denied_paths=[…])` — audit
+`merge_gate_refused{reason=denied_path, paths}`, no `code_review_done`, no
+`merge_gate_verdict`. These files are *instructions or executable config*
+for the next agent that opens the checkout (Claude Code hooks run as the
+owner; Codex reads AGENTS.md; every Anthropic project session loads
+CLAUDE.md), so a prompt-injected job must not be able to push them through
+one reviewer's judgement. Legit edits to them go through an Anthropic lane.
+Related: the reviewer itself now runs with `setting_sources=[]` — it would
+otherwise have loaded the clone's `.claude/settings.json` hooks before
+reading the diff. Also: a slug-less `codex/…` job (generic task, router
+miss, missing project dir) is `ProviderRefused` naming D-A *by canonical
+path* — its canonical is `settings.server_root`, i.e. this repo, and the
+publish path would push to `origin/main`; `ROUTER_CODE_SERVER_PROVIDERS`
+is the only way through.
+
+## Non-Anthropic lanes do not run belt 2 (`post_review`) — look at `merge_gate_verdict` instead (2026-10-21, T5)
+
+`main._maybe_review` audits `post_review_skipped{reason=pre_push_gate}` for
+every non-Anthropic job: the pre-push gate (same fixed Anthropic reviewer,
+same `run_code_review`) already graded the diff before the push, and its
+verdict is stamped as `jobs.review_outcome` and audited as
+`merge_gate_verdict`. `/status` and the retrospective read the column as
+usual; the `reason` differs from the Anthropic lanes' `stale_head|no_diff|
+timeout` so the two belts never get conflated in sweeps.
+
+
 ## A schedule row's `{"model": "codex/…"}` is refused when the skill pins an Anthropic model (2026-10-21)
 
 `session.lane_refusal` honours a `payload.model` that moves an
