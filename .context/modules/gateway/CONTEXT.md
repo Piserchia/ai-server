@@ -45,7 +45,9 @@ the single enqueue/cancel/lookup helper.
 
 `parse_flags()` in `telegram_bot.py` extracts `--model=`, `--effort=`,
 `--permission=`, `--project=`, `--kind=` from the front of a description.
-Model aliases: `opus`, `opus-4-7`, `opus-4-6`, `sonnet`, `haiku`, etc.
+Model aliases: `opus`, `opus-4-7`, `opus-4-6`, `sonnet`, etc. Retired aliases
+(`haiku`, `haiku-4-5`) resolve to `claude-sonnet-4-6` via `_RETIRED_MODEL_ALIASES`
+and are not part of `VALID_MODELS`.
 Flags land in `job.payload` and take precedence over skill frontmatter.
 
 ## Auth

@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T0: Haiku 4.5 retired from the alias table and dashboard
+
+- `telegram_bot._MODEL_ALIASES`: `haiku` / `haiku-4-5` keys removed, so
+  `VALID_MODELS` (derived from the VALUES) no longer admits
+  `claude-haiku-4-5-20251001` in any SKILL.md. New `_RETIRED_MODEL_ALIASES`
+  maps those two aliases to `claude-sonnet-4-6`; `parse_flags` consults it
+  after `_MODEL_ALIASES` so `--model=haiku` typed from muscle memory lands on
+  the replacement instead of leaking a bare `haiku` string into
+  `job.payload.model`. Retired models must never be re-added to
+  `_MODEL_ALIASES` (that re-admits them to the skill-contract allowlist).
+- `web.py`: dashboard model `<select>` drops the `haiku 4.5` option.
+- Plan: `docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` T0.
+  Tests: `tests/test_haiku_retirement.py`, `tests/test_pure_functions.py`
+  (`test_model_alias_expansion` now expects sonnet for `haiku`).
+
 ## 2026-08-31 — /task --kind=god rejected; httpx log noise cut (EVALUATION_2026-08-30 F1/F7)
 
 - `telegram_bot`: `/task --kind=god` now replies with an error pointing at

@@ -2,7 +2,7 @@
 LLM routing fallback (P2). The regex router (`runner.router`) promised an LLM
 fallback for ambiguous inputs since Phase 4 — this is it, finally.
 
-When the rules don't match, a one-turn Haiku classifier picks the best skill
+When the rules don't match, a one-turn classifier on `settings.utility_model` picks the best skill
 from the installed catalog (or `plan` for multi-step asks, or `""` for a
 generic task). Same invocation pattern as `runner.learning`: cheap model, plan
 permission mode, no tools, one turn, never raises.
@@ -114,7 +114,7 @@ def build_catalog_with_descriptions(entries: list[tuple[str, str]]) -> str:
 
 
 async def llm_route(description: str) -> tuple[str, float]:
-    """Route an ambiguous description via Haiku. Returns (skill, confidence).
+    """Route an ambiguous description via the utility model. Returns (skill, confidence).
 
     ("", 0.0) means generic task. "plan" means decompose first.
     Never raises.
@@ -145,8 +145,8 @@ async def llm_route(description: str) -> tuple[str, float]:
     options = ClaudeAgentOptions(
         cwd=str(settings.server_root),
         system_prompt=ROUTER_SYSTEM_PROMPT,
-        model="claude-haiku-4-5-20251001",
-        effort="low",
+        model=settings.utility_model,
+        effort=settings.utility_effort,
         permission_mode="plan",
         allowed_tools=[],
         max_turns=2,

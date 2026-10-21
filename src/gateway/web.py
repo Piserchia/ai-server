@@ -688,7 +688,6 @@ _INDEX_HTML = """<!DOCTYPE html>
       <option value="">default</option>
       <option value="claude-sonnet-4-6">sonnet 4.6</option>
       <option value="claude-opus-4-7">opus 4.7</option>
-      <option value="claude-haiku-4-5-20251001">haiku 4.5</option>
     </select>
     <select name="effort">
       <option value="">default</option>

@@ -464,7 +464,6 @@ def extract_text_events(final_text: str) -> list[dict[str, Any]]:
 
 # Approximate context windows by model family (input tokens).
 _MODEL_BUDGETS: dict[str, int] = {
-    "claude-haiku-4-5-20251001": 200_000,
     "claude-sonnet-4-6": 200_000,
     "claude-opus-4-7": 200_000,
 }

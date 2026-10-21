@@ -12,7 +12,7 @@
 ---
 name: <kebab-case-name>
 description: <one-line summary of what the skill does>
-model: <claude-opus-4-7 | claude-sonnet-4-6 | claude-haiku-4-5-20251001>
+model: <claude-opus-4-7 | claude-sonnet-4-6>
 effort: <low | medium | high | xhigh | max>
 permission_mode: <default | acceptEdits | bypassPermissions | plan>
 required_tools: [Read, Write, Edit, Bash, Glob, Grep]

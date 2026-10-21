@@ -270,3 +270,21 @@ Consumers should treat a truncated review as PARTIAL findings: the governor
 (or a fix session) should re-run a review on the actual diff rather than
 assume the visible issues are the complete list. Follow-up worth routing:
 store the full text to a sidecar file and keep the event as a pointer.
+
+## `pipenv run pytest` ignores a shell `SERVER_ROOT` — the dev `.env` wins (2026-10-21)
+
+Tests that read the skill tree (`test_skill_contracts`, anything via
+`settings.skills_dir`) resolve it from `settings.server_root`, which the dev
+checkout's `.env` points at the PRODUCTION tree. Exporting
+`SERVER_ROOT="$PWD"` in the shell does NOT fix it: `pipenv run` loads the
+project `.env` on top of the shell environment (the "Loading .env environment
+variables..." line), so the override is silently replaced. Symptom seen during
+T0 (Haiku retirement): `skills/project-update-poll/SKILL.md` already said
+sonnet in the dev tree, yet `test_model_valid[project-update-poll]` failed
+because it was reading prod's still-Haiku copy against the dev alias table.
+
+**Fix**: `PIPENV_DONT_LOAD_ENV=1 SERVER_ROOT="$PWD" pipenv run pytest -q -p
+no:cacheprovider`. pydantic-settings still reads `.env` for everything else
+(`postgres_dsn` etc.); only the shell variable now takes precedence. Any
+skill-contract failure that disappears under this invocation is dev/prod
+drift that a deploy resolves, not a defect in the change.

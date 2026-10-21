@@ -11,9 +11,10 @@ Run: pipenv run pytest tests/test_skill_contracts.py -v
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from src.config import settings
 from src.gateway.telegram_bot import (
     _MODEL_ALIASES,
     _VALID_EFFORTS,
@@ -23,7 +24,14 @@ from src.registry.skills import SkillConfig, list_all
 
 VALID_MODELS = set(_MODEL_ALIASES.values())
 
-ALL_SKILLS = list_all()
+# Assert the checked-out tree, not `settings.skills_dir`: the dev `.env`
+# points SERVER_ROOT at the production checkout, so reading through settings
+# validated prod's skills against this tree's alias table (red on every
+# dev-branch frontmatter change until deploy — seen on T0, 2026-10-21).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_SKILLS = _REPO_ROOT / "skills"
+
+ALL_SKILLS = list_all(_REPO_SKILLS)
 SKILL_IDS = [s.name for s in ALL_SKILLS]
 
 
@@ -64,7 +72,7 @@ class TestSkillContracts:
 
     def test_context_files_exist(self, skill: SkillConfig):
         for cf in skill.context_files:
-            assert (settings.server_root / cf).exists(), (
+            assert (_REPO_ROOT / cf).exists(), (
                 f"{skill.name}: context_file {cf!r} does not exist"
             )
 

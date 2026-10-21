@@ -23,6 +23,11 @@ class Settings(BaseSettings):
 
     # Models
     default_model: str = "claude-sonnet-4-6"
+    # Utility model for the one-turn, fail-open classifiers (LLM router,
+    # learning extractor). Was a hard-coded Haiku 4.5 pin until that model's
+    # retirement window opened 2026-10-15 (T0, 2026-10-21).
+    utility_model: str = "claude-sonnet-4-6"
+    utility_effort: str = "low"
 
     # Database
     postgres_dsn: str
@@ -60,7 +65,7 @@ class Settings(BaseSettings):
     quota_pause_minutes: int = 60
 
     # Intent pipeline (P2/P3)
-    # LLM routing fallback for asks the regex rules don't match (Haiku, 1 turn).
+    # LLM routing fallback for asks the regex rules don't match (utility_model, 1 turn).
     llm_router_enabled: bool = True
     # Plans auto-approve: the plan is posted to Telegram with a Cancel button
     # and execution starts immediately. Set false to require explicit approval.

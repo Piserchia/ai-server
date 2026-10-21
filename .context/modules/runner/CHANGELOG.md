@@ -2,6 +2,42 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T0: Haiku 4.5 retirement; utility classifiers read `settings.utility_model`
+
+**Agent task**: cross-vendor writer slice T0
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5) — retire
+the hard-coded `claude-haiku-4-5-20251001` pin whose retirement window opened
+2026-10-15 while it was still being served by the two fail-open classifiers.
+**Files changed**:
+- `src/config.py` — new `utility_model: str = "claude-sonnet-4-6"` and
+  `utility_effort: str = "low"` (env-overridable like `default_model`).
+- `src/runner/llm_router.py` — `llm_route` builds `ClaudeAgentOptions` with
+  `model=settings.utility_model, effort=settings.utility_effort`; docstrings
+  no longer name Haiku.
+- `src/runner/learning.py` — `extract_learning` likewise; docstrings updated.
+- `src/runner/router.py` — docstring wording only.
+- `src/runner/session.py` — `_MODEL_BUDGETS` drops the Haiku row (sonnet row
+  already present; `_DEFAULT_BUDGET` covers unknown ids unchanged).
+**Why**: both classifiers fail open (router → generic task, learning →
+`had_learning=False`), so a retired model would have silently degraded routing
+and learning capture with no job failure to notice. One setting replaces three
+literals so the next swap is a `.env` change, not a code change.
+**Tests**: new `tests/test_haiku_retirement.py` (no retired literal under
+`src/` or skill docs; settings defaults; both classifiers' options carry the
+setting and follow an override — SDK `query` monkeypatched, no network; alias
+table; dashboard; budget row). Full suite 1500 passed, 1 skipped.
+**Side effects**: none on the job path — `default_model` and every skill pin
+are untouched. `skills/project-update-poll/SKILL.md` moves to
+`claude-sonnet-4-6`. Review fix (same commit): `test_skill_contracts` now
+reads the repo's own `skills/` via `registry.skills.list_all(skills_dir)`
+(see registry CHANGELOG 2026-10-21) instead of `settings.skills_dir`, so the
+plain `pipenv run pytest -q -p no:cacheprovider` is green from the dev
+checkout; the `PIPENV_DONT_LOAD_ENV=1` workaround in
+`.context/modules/runner/skills/GOTCHAS.md` still applies to anything else
+that reads through `settings.server_root`. The two `llm_route` tests also
+patch `src.registry.skills.list_all` so the catalog build is
+filesystem-independent.
+
 ## 2026-10-10 — session: raise SDK transport buffer ceiling to 20 MiB
 
 **Files created**: none

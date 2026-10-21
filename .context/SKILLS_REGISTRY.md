@@ -21,7 +21,7 @@
 | `review-and-improve` | Opus 4.7 / max (acceptEdits; hook-enforced read-only, INV-20 — plan mode had silently blocked its dispatch for weeks) | Analyze recent job data, propose tuning changes. Dispatches server-patch follow-up | 5 |
 | `research-deep` | Opus 4.7 / high (-> Opus 4.7 / xhigh on failure) | Deep-dive research: 10-20 sources, 2000-5000 words, conflicting-evidence treatment | 6 |
 | `idea-generation` | Sonnet 4.6 / medium | Generate 3-5 novel ideas, deduped against prior ideas in history.jsonl | 6 |
-| `project-update-poll` | Haiku 4.5 / low | Run a project's configured `on_update` command. Cheap, fast, fail-silent | 6 |
+| `project-update-poll` | Sonnet 4.6 / low | Run a project's configured `on_update` command. Cheap, fast, fail-silent | 6 |
 | `restore` | Sonnet 4.6 / medium | Restore from backup tarball. DESTRUCTIVE -- requires explicit user confirmation | 6 |
 | `_learning_apply` | Sonnet 4.6 / low | **Internal.** Appends learning proposals from the learning extractor hook to `.context/modules/<x>/skills/<CATEGORY>.md`. Not user-triggerable. | Rec 1 |
 | `god` | Opus 4.7 / max (bypassPermissions, 200 turns) | Full-context, full-permission admin session. Equivalent to a human at the terminal. **Host-native by design** (isolation: host) — the break-glass fix-anything-from-Telegram lane. | — |

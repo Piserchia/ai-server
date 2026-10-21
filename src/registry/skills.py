@@ -95,19 +95,24 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return (data, body.lstrip("\n"))
 
 
-def load(name: str) -> SkillConfig | None:
+def load(name: str, skills_dir: Path | None = None) -> SkillConfig | None:
     """Load a skill by directory name. Returns None if not found.
 
     Raises SkillFrontmatterError if the skill exists but its frontmatter is
     corrupt — callers must fail the job, not run it on defaults.
+
+    `skills_dir` defaults to `settings.skills_dir` (the runtime tree). Tests
+    pass the repo's own `skills/` so they assert the checked-out tree rather
+    than whatever `SERVER_ROOT` in `.env` points at (2026-10-21).
     """
-    path = settings.skills_dir / name / "SKILL.md"
+    root = settings.skills_dir if skills_dir is None else Path(skills_dir)
+    path = root / name / "SKILL.md"
     if not path.exists():
         return None
     fm, body = _parse_frontmatter(path.read_text())
-    # Validate context_files exist
+    # Validate context_files exist (relative to the tree the skill came from)
     for cf in fm.get("context_files", []):
-        cf_path = settings.server_root / cf
+        cf_path = root.parent / cf
         if not cf_path.exists():
             logger.warning(
                 "Skill '%s' declares context_file '%s' but it does not exist",
@@ -137,15 +142,19 @@ def load(name: str) -> SkillConfig | None:
     )
 
 
-def list_all() -> list[SkillConfig]:
-    """All skills, sorted by name. Used by SKILLS_REGISTRY.md generation."""
-    if not settings.skills_dir.exists():
+def list_all(skills_dir: Path | None = None) -> list[SkillConfig]:
+    """All skills, sorted by name. Used by SKILLS_REGISTRY.md generation.
+
+    `skills_dir` defaults to `settings.skills_dir`; see `load()`.
+    """
+    root = settings.skills_dir if skills_dir is None else Path(skills_dir)
+    if not root.exists():
         return []
     out: list[SkillConfig] = []
-    for child in sorted(settings.skills_dir.iterdir()):
+    for child in sorted(root.iterdir()):
         if child.is_dir() and (child / "SKILL.md").exists():
             try:
-                cfg = load(child.name)
+                cfg = load(child.name, root)
             except SkillFrontmatterError as exc:
                 # Listing must not crash registry generation on one bad file,
                 # but the error is loud; execution paths (load via

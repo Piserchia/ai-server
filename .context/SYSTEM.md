@@ -33,7 +33,7 @@
 | `src/runner/session.py` | Skill/isolation resolution + one in-process SDK session per job (guard hooks + subagents wired here) | config, db, models, audit_log, registry.skills, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, context.module_graph | runner.main |
 | `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks + deploy-authority gate | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, runner.delivery, gateway.jobs, registry.skills, audit_log | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher (incl. `plan` for multi-step asks) | — | runner.session, gateway.telegram_bot (triage) |
-| `src/runner/llm_router.py` | Haiku routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
+| `src/runner/llm_router.py` | `settings.utility_model` routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
 | `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution | — | runner.session, server-upkeep skill |
 | `src/runner/delivery.py` | Project delivery contract enforcement: dev-repo cwd scoping + deploy-authority gate | config, registry.manifest | runner.session, runner.main |
 | `src/runner/guards.py` | PreToolUse guard hooks: workspace write containment + Bash denylist (INV-17) | config, audit_log, claude_agent_sdk | runner.session |
@@ -49,7 +49,7 @@
 | `src/runner/audit_index.py` | Build INDEX.jsonl for fast job lookup by skill/status/keyword | config | server-upkeep skill, self-diagnose skill |
 | `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats + context consumption) | config, db, models | review-and-improve skill, gateway.web |
 | `src/runner/proposals.py` | Proposal tracking helpers (pure + async DB ops); dedup/merge-stamping in review-and-improve + server-patch. NOTE: there is no `/proposals` Telegram command yet — pending server-code proposals have no user-facing surface (EVALUATION_2026-07-28 U-backlog) | db, models | review-and-improve skill, server-patch skill |
-| `src/runner/learning.py` | Post-session Haiku classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
+| `src/runner/learning.py` | Post-session `settings.utility_model` classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
 | `src/context/module_graph.py` | Parse SYSTEM.md module graph; dependency detection + import validation | — | runner.session, scripts/lint_docs.py |
 | `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |

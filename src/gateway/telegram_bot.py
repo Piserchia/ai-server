@@ -116,9 +116,11 @@ _FLAG_RE = re.compile(r"--(\w+)=(\S+)")
 # Model alias expansion — accepts short names on the command line
 # Aliases for the /task --model=<x> flag; VALID_MODELS (the skill-contract
 # test's allowlist) is derived from the VALUES here, so any model a SKILL.md
-# may reference must appear as a value. Bare-name defaults (opus/sonnet/haiku)
+# may reference must appear as a value. Bare-name defaults (opus/sonnet)
 # are left on their established targets — explicit versioned aliases are added
 # for newer models (opus-5, opus-4-8, fable-5) rather than moving the defaults.
+# Retired models never appear here (that would re-admit them to VALID_MODELS);
+# their aliases live in _RETIRED_MODEL_ALIASES and resolve to the replacement.
 _MODEL_ALIASES = {
     "opus": "claude-opus-4-7",
     "opus-5": "claude-opus-5",
@@ -129,8 +131,14 @@ _MODEL_ALIASES = {
     "fable-5": "claude-fable-5",
     "sonnet": "claude-sonnet-4-6",
     "sonnet-4-6": "claude-sonnet-4-6",
-    "haiku": "claude-haiku-4-5-20251001",
-    "haiku-4-5": "claude-haiku-4-5-20251001",
+}
+
+# Aliases of retired models, typed from muscle memory. Resolved to the current
+# replacement so a retired (or bare, unknown) id never lands in job.payload.
+# Haiku 4.5 retirement window opened 2026-10-15 (T0, 2026-10-21).
+_RETIRED_MODEL_ALIASES = {
+    "haiku": "claude-sonnet-4-6",
+    "haiku-4-5": "claude-sonnet-4-6",
 }
 
 _VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
@@ -154,7 +162,9 @@ def parse_flags(text: str) -> tuple[str, dict]:
             break   # stop at first non-flag; description starts here
         key, val = m.group(1), m.group(2)
         if key == "model":
-            flags["model"] = _MODEL_ALIASES.get(val.lower(), val)
+            alias = val.lower()
+            flags["model"] = _MODEL_ALIASES.get(
+                alias, _RETIRED_MODEL_ALIASES.get(alias, val))
         elif key == "effort":
             if val.lower() in _VALID_EFFORTS:
                 flags["effort"] = val.lower()

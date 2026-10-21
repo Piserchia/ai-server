@@ -2,6 +2,24 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T0 review fix: `load`/`list_all` accept an explicit `skills_dir`
+
+**Agent task**: cross-vendor writer slice T0, reviewer finding (major) on
+`tests/test_skill_contracts.py`.
+**Files changed**:
+- `src/registry/skills.py` — `load(name, skills_dir=None)` and
+  `list_all(skills_dir=None)`. Default is still `settings.skills_dir`, so
+  every runtime caller (`session`, `agents`, `main`, `llm_router`) is
+  unchanged. When a dir is passed, `context_files` are validated relative to
+  that dir's parent instead of `settings.server_root`.
+**Why**: the dev checkout's `.env` points `SERVER_ROOT` at the production
+tree, so `test_skill_contracts` was validating prod's skills against the dev
+alias table and went red on every dev-branch frontmatter change until deploy
+(T0 hit this with `project-update-poll`'s Haiku → Sonnet move). The test now
+calls `list_all(<repo>/skills)` and asserts the checked-out tree.
+**Tests**: `tests/test_skill_contracts.py` (reads the repo tree),
+`tests/test_agents.py`, `tests/test_registry_failclosed.py` unchanged and green.
+
 ## 2026-09-13 — atlas-firm-rollup: preload .context/PROJECT_PROTOCOL.md (review-and-improve proposal 2b51e8b1)
 
 **Agent task**: apply the `review-and-improve` context-files proposal
