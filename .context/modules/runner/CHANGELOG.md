@@ -2,6 +2,68 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T8: protected-path bundle (branch `multi-model/protected-bundle`, owner-merged)
+
+**Agent task**: cross-vendor writer slice T8 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5, D-D). Protected paths — the owner reviews and merges this branch by hand (INV-4); it is never merged by the slice itself.
+**Files changed**:
+- `src/runner/guards.py` — `VENDOR_CREDENTIAL_NAMES` (`OPENAI_API_KEY`,
+  `CODEX_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`) denied at assignment and export beside
+  `ANTHROPIC_API_KEY`, in BOTH hard-deny lists (workspace + read-only
+  profiles); the two existing `ANTHROPIC_API_KEY` rows are untouched. INV-22
+  server-side deny (the "open follow-up" on the SYSTEM.md row): `api.tradier.com`
+  wholesale, `sandbox.tradier.com/v1/accounts/*/orders` and
+  `*.alpaca.markets/v2/orders` in both lists — market-data/account reads on the
+  sandbox, paper and data hosts stay free. Reads of a credential name
+  (`printenv`, `echo $X`, grep) are still allowed: the deny is on assignment,
+  the scrubbed executor env is why no key is inheritable. Text-level belt;
+  the atlas kernel tripwires remain the INV-22 enforcement of record.
+  KNOWN FALSE POSITIVE (review, 2026-10-21): because `api.tradier.com` is
+  denied wholesale, a read-only mention of the production host on a command
+  line (`grep -rn api.tradier.com swing/`, a `git commit -m` naming it) is
+  denied too, inside atlas workspace build jobs as well. It fails closed with
+  a `Bash denied: production brokerage host api.tradier.com` reason — use
+  `grep -f <pattern-file>` or split the host across variables; it is not a
+  bug (`tests/test_guards.py::test_production_tradier_host_mention_is_a_known_false_positive`).
+- `scripts/lint_docs.py` — checks 14 (`check_model_pins`: every skill
+  `model:`/escalation target resolves in `models.yml`; non-Anthropic ⇒
+  `isolation: workspace`; a `code-server` skill may pin a non-Anthropic
+  provider only when `ROUTER_CODE_SERVER_PROVIDERS` — the same setting the
+  session reads — lists it; and, after review, an `escalation.on_failure.model`
+  must resolve to Anthropic — `main.py:_maybe_escalate` enqueues the retry
+  with `payload.model=<target>`/`created_by="escalation:…"`, which
+  `lane_refusal`'s owner-origin rule refuses on an Anthropic-pinned skill, so
+  a non-Anthropic target was a retry that could never run) and 15 (`check_code_server_set`: the protected
+  `CODE_SERVER_SKILLS` here is the set of record; `runner/session.py`'s copy
+  is AST-read and must be byte-equal, so neither yml nor an INV-4-lane edit
+  can widen the lane). Wired into `run_all()`.
+- `.context/SYSTEM.md` — INV-21 row rewritten to the implemented profile
+  (workspace-only + Seatbelt + scrubbed env + no MCP/subagents; code-server
+  and in-repo canonicals pinned by setting; pre-push Anthropic gate, runner
+  commits/pushes; provider keys never session-assignable; per-provider lane
+  pause; ships dark) with the enforcement column naming every mechanism and
+  test; the "Model router" workstream sentence that said the row still
+  carried the 08-17 wording updated to match.
+- `tests/test_guards.py` — vendor-credential deny (parametrised over the
+  set), assignment-vs-read distinction, broker order hosts denied / non-order
+  broker reads allowed, both profiles, reason names INV-22.
+- `tests/test_doc_lint.py` — repo-level + fixture tests for checks 14/15
+  (each rule fires and stays silent; the setting flip relaxes rule 3; set
+  drift and a missing literal are reported; `run_all` wiring).
+
+**Why**: D-D — the slice's own tests enforce these rules without the
+protected files (T1/T4 lint-equivalents, T3 env scrub); the bundle makes
+them structural in the files an injected diff would target. `MISSION.md`
+untouched (its non-goal wording stays true while D-A is off).
+
+**Side effects**: none on the Anthropic path — existing guard cases are
+unchanged and `test_guards` 207/207; `python scripts/lint_docs.py` prints
+"All clean!" on the live tree. Audit event kinds unchanged (C14).
+`.context/modules/runner/CONTEXT.md` still says the SYSTEM.md INV-21 row
+"carries the 08-17 wording until the owner merges plan T8" — true until this
+branch merges; the sentence is outside T8's allowed edit set and should be
+dropped on merge.
+
 ## 2026-10-21 — T9: docs, registries, runbook (no code change)
 
 **Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
