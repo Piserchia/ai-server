@@ -2,6 +2,39 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T2: migration 007-lite, provider columns on jobs
+
+**Agent task**: cross-vendor writer slice T2
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `alembic/versions/007_provider_columns.py` (new, revises 006) — additive,
+  nullable: `jobs.resolved_provider` String(32), `jobs.terminal_reason`
+  String(32), `jobs.model_served` String(64). Backfill
+  `resolved_provider='anthropic' WHERE resolved_model LIKE 'claude-%'`;
+  every other row stays NULL (C12: never a default). `jobs.status` and its
+  006 CHECK are not touched. Downgrade drops the three columns.
+- `src/models.py` — the same three columns on `Job`, all nullable. Nothing
+  writes them yet: T4 stamps `resolved_provider` / `terminal_reason` /
+  `model_served` from the dispatch branch; T7 surfaces them.
+- `tests/test_migrations.py` — new SQLite layer (1b): the 007 module is
+  loaded via `ScriptDirectory` and run under `Operations.context` on an
+  in-memory sync SQLite engine (env.py is async-Postgres only; no aiosqlite),
+  against a pre-007 `jobs` fixture carrying the 006 CHECK. Asserts head =
+  007 revising 006, the ORM widths, backfill (claude-* → anthropic, codex /
+  NULL untouched), reflected types == ORM, upgrade → downgrade round-trip
+  with the CHECK still enforcing, and that the 007 source never names
+  `ck_jobs_status_valid`.
+
+**Why**: the executor dispatch (T4) and quota keys (T6) need a per-job
+provider of record and a typed terminal reason; "-lite" because the old
+spec's 007 (cost / cache-tier / origin observability columns) stays with
+Observability Phase 1.
+
+**How to verify**: `pipenv run pytest -q -p no:cacheprovider
+tests/test_migrations.py`; on deploy `alembic upgrade head` then
+`psql assistant -c "\\d jobs"` shows the three columns.
+
+
 ## 2026-07-31 — Event-loop circuit breaker key/TTL constants
 
 **Files changed**: `src/db.py` — `KEY_EVENTS_BREAKER = "events:breaker"` and

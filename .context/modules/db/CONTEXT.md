@@ -11,7 +11,12 @@ JSONL audit log on disk.
 
 - `jobs` — one unit of work. Includes `resolved_skill`, `resolved_model`,
   `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id`,
-  `task_id` for the auto-tuning loop and multi-turn interaction.
+  `task_id` for the auto-tuning loop and multi-turn interaction. Since
+  migration 007 (2026-10-21) also `resolved_provider` ("anthropic" |
+  "codex"), `terminal_reason` (executor outcome) and `model_served` (the id
+  the provider reports back) — all nullable; pre-007 rows carry
+  `resolved_provider='anthropic'` only where `resolved_model` is a
+  `claude-*` id.
 - `schedules` — cron recipes that enqueue jobs.
 - `projects` — registry of hosted projects.
 - `proposals` — tuning/doc proposals emitted by `review-and-improve`.
@@ -60,6 +65,13 @@ Migrations under `alembic/versions/`. Never edit existing ones — new file per 
   adds `task_id` FK column to `jobs`.
 - `004_task_thread_message_id.py` — 2026-04-20. Adds `thread_message_id`
   (BigInteger) to `tasks` for Telegram thread-based interaction.
+- `005_task_plan.py` — 2026-07-12. Adds `plan` (JSON) to `tasks`.
+- `006_job_status_constraint.py` — 2026-08-31. Repairs illegal statuses and
+  adds the `ck_jobs_status_valid` CHECK on `jobs.status`.
+- `007_provider_columns.py` — 2026-10-21. Adds nullable `resolved_provider`,
+  `terminal_reason`, `model_served` to `jobs`; backfills
+  `resolved_provider='anthropic'` for `claude-*` rows. Round-tripped on
+  SQLite in `tests/test_migrations.py` (layer 1b).
 
 To add a migration after editing `src/models.py`:
 ```bash
