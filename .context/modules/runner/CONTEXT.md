@@ -10,7 +10,7 @@ to a skill and a Claude Agent SDK session, streams the session's messages to the
 audit log, and updates the Job row with the result.
 
 Four async tasks running in one process:
-1. `_job_loop` — BLPOPs from `jobs:queue`, respects `quota.is_paused()`, runs sessions under a semaphore gated by `MAX_CONCURRENT_JOBS`.
+1. `_job_loop` — BLPOPs from `jobs:queue`, respects `quota.is_paused()` (the global = Anthropic pause), runs sessions under a semaphore gated by `MAX_CONCURRENT_JOBS`. A job whose NON-Anthropic provider lane is paused (`quota.is_provider_paused`) is HELD inside `_process_job`'s fetch transaction — never marked running, `job_held` audited once per pause window, RPUSHed to the TAIL after `hold_delay(until, now)` (≤ `HOLD_RECHECK_SECONDS` = 30 s) by a slot-free task — while every other lane keeps draining (T6, 2026-10-21; plan §4g).
 2. `_scheduler_loop` — every 30s, picks schedules with `next_run_at <= now` and enqueues jobs from their templates.
 3. `_cancel_listener` — subscribes to `jobs:cancel` channel, calls `session.interrupt(job_id)` for matches.
 4. `event_loop` — every 60s, checks skill-failure + project-unhealthy + idle-queue rules, auto-enqueues self-diagnose or review-and-improve.
@@ -21,7 +21,7 @@ Four async tasks running in one process:
 - `session.resolve_session_timeout(payload, default, cap=5400)` (re-exported as `main.resolve_session_timeout`; moved in T4 so the executor branch shares the ceiling without session importing main) — pure: per-job session-timeout override via `payload.session_timeout_seconds`, clamped to [60, 5400]; unparseable → default. Added 2026-08-11 after three atlas-momo-research cycle-2 attempts died at the global 30-min ceiling; the web API exposes the field and the momo schedule row carries 3600.
 - `src.runner.session.run_session(job) -> dict` — runs one job; raises `QuotaExhausted`, `ProviderRefused`, `ExecutorFailed` or generic `Exception` on failure. Result dict: `summary, duration_seconds, usage, skill, isolation` + (T4) `provider, model, model_served, terminal_reason`.
 - `src.runner.session.interrupt(job_id)` — signal a running session to stop (the SDK session, else the executor holding the job's process).
-- `src.runner.quota.is_paused()` / `pause_queue(...)` / `clear()` — queue pause state.
+- `src.runner.quota.is_paused()` / `pause_queue(...)` / `clear()` — the GLOBAL (Anthropic) pause; INV-12 front requeue, unchanged. Per-provider lanes (T6): `provider_keys(p)` (pure), `pause_provider(p, reset_at, reason)`, `is_provider_paused(p)`, `clear_provider(p)`, `paused_providers(names)` over `quota:provider:<p>:*`; the Anthropic name delegates to the global functions. `main.preresolve_provider(kind, description, payload, *, load, route)` (pure: the session's model precedence minus the LLM router; `None` = cannot tell, never a refusal) and `main.hold_delay(until, now)` (pure). A non-Anthropic executor's `rate_limited` pauses ONLY its lane (`main._process_job` `ExecutorFailed` branch: `pause_provider` + LPUSH front + `job_requeued_for_quota{+provider, +until}`), never `quota:paused_until`.
 - `src.runner.router.route(description)` — rule-based skill matcher; returns a skill name or `None`.
 - `src.runner.mcp_projects.create_server()` — returns an `McpSdkServerConfig` for the projects MCP server (tools: `list_projects`, `get_project`, `read_project_logs`, `restart_project`).
 - `src.runner.mcp_dispatch.create_server()` — returns an `McpSdkServerConfig` for the dispatch MCP server (tool: `enqueue_job`).

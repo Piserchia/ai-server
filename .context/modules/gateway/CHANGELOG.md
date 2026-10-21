@@ -2,6 +2,28 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T6: per-provider quota on the surfaces
+
+**Agent task**: cross-vendor writer slice T6
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/gateway/web.py` — `GET /api/quota` keeps `{paused, reset_at, reason}`
+  (the global = Anthropic pause) and ADDS `providers: {<p>: {paused,
+  reset_at, reason}}` for every non-Anthropic registry provider. The
+  dashboard banner also renders each paused lane ("<p> lane paused — its
+  jobs are held").
+- `src/gateway/telegram_bot.py` — `/status` opens with one line per paused
+  provider lane (`_paused_lane_lines()`: name, reset HH:MM UTC, reason,
+  the `/resume <p>` hint); nothing when no lane is paused. `/resume`
+  without an argument is unchanged (global pause); `/resume <provider>`
+  lifts ONE lane via `quota.clear_provider` and never touches the global
+  key; an unknown provider name is refused with the known list.
+- Tests: `tests/test_quota.py` (web shape + paused lane; `/status` with
+  and without a paused lane; `/resume codex` vs bare `/resume`; unknown /
+  not-paused provider).
+- Review round (code-review T6, lgtm): literal `\u2014` escape in a
+  `cmd_status` comment replaced with a plain dash. No behaviour change.
+
 ## 2026-10-21 — T1: alias table, dashboard dropdown and POST /api/jobs fed by the models registry
 
 **Agent task**: cross-vendor writer slice T1

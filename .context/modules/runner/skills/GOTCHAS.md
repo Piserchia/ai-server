@@ -11,6 +11,35 @@
 > This file is seeded empty. Claude sessions working in this module should
 > append here when they learn something reusable (see `.context/PROTOCOL.md`).
 
+## 2026-10-21 — Per-provider lane holds: what holds a job and what does not (T6)
+
+**Pattern.** A paused NON-Anthropic lane does not stop the job loop (only
+the global `quota:paused_until` does). Its jobs are held in
+`main._process_job` BEFORE the row is flipped to `running`: no DB write,
+no slot, no process; the id comes back at the queue TAIL after
+`hold_delay(until, now)` (≤ 30 s) from a slot-free task. Three traps:
+
+1. **The lane is decided by the `resolved_provider` stamp first, then by
+   `preresolve_provider`** — which uses the RULE router only. A task-kind
+   job whose Codex-pinned skill came from the LLM router is NOT held on its
+   first pop (it runs, the executor hits the 429, the session's stamp is
+   written, and every later pop holds it). Do not "fix" this by calling
+   the LLM router in the hold path: it is not cheap and the hold runs on
+   every pop of every job.
+2. **`job_held` is written once per (job, pause window)** (`_held_audited`,
+   in-process memory). A held job cycles every 30 s; auditing each cycle
+   would write ~120 lines per job per hour. A runner restart re-audits
+   once — that is fine.
+3. **A held job sits as `status=queued` with no Redis entry for up to 30 s.**
+   Graceful shutdown cancels the delayed pushes (they RPUSH immediately in
+   `finally`); a crash leaves it to `requeue_stranded_queued()` at the next
+   startup. Do not add a "queued row with no Redis entry = bug" check that
+   fires inside that window.
+
+Lifting a lane by hand is `/resume <provider>`; bare `/resume` is still the
+global pause only. Tests: `tests/test_quota.py` (TestHeldJob,
+TestCodexRateLimited).
+
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 

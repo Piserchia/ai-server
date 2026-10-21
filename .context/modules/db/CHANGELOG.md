@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T6: quota key constants
+
+**Agent task**: cross-vendor writer slice T6. **Files changed**:
+- `src/db.py` — `KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"` and
+  `KEY_QUOTA_LAST_REASON = "quota:last_reason"` (the GLOBAL = Anthropic
+  pair `runner.quota` had inlined; same strings, INV-12 unchanged) and
+  `KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"` (+ `<p>:paused_until` /
+  `<p>:last_reason` — one pair per non-Anthropic provider, never written
+  for `anthropic`). No schema change.
+
 ## 2026-10-21 — T2: migration 007-lite, provider columns on jobs
 
 **Agent task**: cross-vendor writer slice T2

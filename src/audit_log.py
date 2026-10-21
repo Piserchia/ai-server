@@ -32,6 +32,8 @@ Kinds used (keep this list honest — update when adding new kinds):
 - merge_gate_refused: {"kind", "ts", "job_id", "belt": "pre_push", "reason": "denied_path", "paths", "diff_chars", "base_sha"}  # the diff touches `review.GATE_DENIED_*` paths (.claude/, .codex/, .git*/.github, AGENTS.md, CLAUDE.md, .mcp.json) — refused BEFORE any reviewer ran; terminal like a blocker (T5 review round 1)
 - workspace_published: {"kind", "ts", "job_id", "ok", "detail", "commit", "trailers"}  # the RUNNER committed (Executor/Job/Reviewed-By trailers) + pushed the clone after LGTM; ok=false = push rejected, clone kept (T5)
 - post_review_skipped: {"kind", "ts", "job_id", "reason", ...}  # reason ∈ stale_head|no_diff|timeout|pre_push_gate (+ "provider", "verdict" for pre_push_gate — the gate is the review of record on non-Anthropic lanes, T5)
+- job_requeued_for_quota: {"kind", "ts", "job_id", "reason"}  # the job hit a rate limit and was LPUSHed to the FRONT (INV-12); + "provider", "until" when a NON-Anthropic executor's `rate_limited` paused that provider's lane (additive, T6 2026-10-21; absent on the Anthropic/global path)
+- job_held:         {"kind", "ts", "job_id", "provider", "reason", "until"}  # the job's provider lane is paused: NOT run, requeued at the TAIL after a bounded delay (plan §4g); written once per (job, pause window), not on every cycle (T6)
 
 Also writes a human-readable `<job_id>.summary.md` at job completion (written by the runner,
 not here — it's the last turn the assistant produces).

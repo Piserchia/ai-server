@@ -75,7 +75,7 @@ is rendered from the registry (`web._model_options_html`).
 ## Dependencies
 
 - `src.config`, `src.db`, `src.models`, `src.audit_log`
-- `src.runner.quota` (read-only: is_paused, clear)
+- `src.runner.quota` (is_paused, clear; T6: is_provider_paused, paused_providers, clear_provider — `GET /api/quota` adds `providers: {<p>: {paused, reset_at, reason}}` for non-Anthropic registry providers; `/status` lists each paused lane; `/resume <provider>` lifts one lane, bare `/resume` the global pause)
 - `fastapi`, `python-telegram-bot`
 
 ## Testing

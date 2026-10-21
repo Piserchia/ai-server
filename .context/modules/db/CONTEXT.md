@@ -43,12 +43,15 @@ Defined as named constants in `src/db.py`, not inline strings:
 - `CHANNEL_JOB_STREAM = "jobs:stream"` → per-job: `"jobs:stream:<id>"`
 - `CHANNEL_JOB_DONE = "jobs:done"` → per-job: `"jobs:done:<id>"`
 - `CHANNEL_JOB_CANCEL = "jobs:cancel"`
+- `KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"` / `KEY_QUOTA_LAST_REASON = "quota:last_reason"` — the GLOBAL (= Anthropic) pause pair (INV-12)
+- `KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"` → `quota:provider:<p>:paused_until` / `:last_reason` — one pair per non-Anthropic provider lane (T6, 2026-10-21); never written for `anthropic`
 
 ## Audit log
 
 JSONL files at `volumes/audit_log/<job_id>.jsonl`. Append-only. Event kinds:
 `job_started`, `text`, `tool_use`, `tool_result`, `thinking`, `job_completed`,
-`job_failed`, `job_cancelled`, `job_requeued_for_quota`, `note`.
+`job_failed`, `job_cancelled`, `job_requeued_for_quota`, `job_held` (T6), `note`
+(the full list with field shapes is the `src/audit_log.py` docstring).
 
 Plus `volumes/audit_log/<job_id>.summary.md` — human-readable one-paragraph
 summary, written at job completion (the final text message from Claude).

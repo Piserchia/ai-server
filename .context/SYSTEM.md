@@ -40,7 +40,7 @@
 | `src/runner/guards.py` | PreToolUse guard hooks: workspace write containment + Bash denylist (INV-17) | config, audit_log, claude_agent_sdk | runner.session |
 | `src/runner/agents.py` | SKILL.md → SDK AgentDefinition compilation (frontmatter `subagents:` → in-session delegation) | registry.skills, claude_agent_sdk | runner.session |
 | `src/runner/plans.py` | Plan validation + subtask DAG spawn/promotion/cascade | config, db, models, audit_log | runner.main, gateway.telegram_bot (manual approve) |
-| `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
+| `src/runner/quota.py` | Detect rate limits; global (Anthropic) queue pause + per-provider lane pauses `quota:provider:<p>:*` (T6, 2026-10-21) | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
 | `src/runner/review.py` | Code-review sub-agent; evaluates diffs post-session (Anthropic belt 2) and PRE-push for non-Anthropic lanes (T5 gate: `diff_for_gate`, fixed reviewer) | config, audit_log, claude_agent_sdk | runner.main, runner.session |
 | `src/runner/events.py` | Event-trigger rules engine (4th async task) | db, models, gateway.jobs | runner.main |
@@ -119,7 +119,7 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | INV-9 | Job status transitions are valid; a user `cancelled` is never overwritten by a trailing finish (the cancel-race) | `_finish_job` guards `WHERE status != 'cancelled'` + rowcount check |
 | INV-10 | Skills in `plan` mode cannot write files | SDK-level permission_mode |
 | INV-11 | Audit logs are append-only | filesystem O_APPEND in `audit_log.append` |
-| INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front | `runner/main.py:_process_job` |
+| INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front (global/Anthropic only; a paused non-Anthropic lane holds its jobs to the TAIL — T6, plan §4g) | `runner/main.py:_process_job` |
 | INV-13 | Code-touching skills require a `code-review` sub-agent LGTM **in-session, before push** (that is the merge gate). `main._maybe_review` is a SECOND belt that runs post-session, after the push, and only FLAGS: it stamps `review_outcome` (job stays `completed`) and on blocker/error emits `post_review_flagged` + a task DM — it does NOT park or fail the job. (Behavior weakened 2026-08-05; row corrected to match 2026-08-31 — restoring a fail-closed pre-push gate in code is an open owner decision, see EVALUATION_2026-08-30 F4.3.) | in-session `code-review` subagent per skill SKILL.md; `main._maybe_review` + `review.run_code_review` (flag-only) |
 | INV-14 | Project slugs unique; port allocations never reused | `registry/manifest.py` + `projects/_ports.yml` |
 | INV-15 | On startup the runner reconciles orphaned `running` jobs (fail-only) AND re-queues `queued` rows with no Redis entry, before consuming the queue; the job loop holds a concurrency slot before BLPOP so ids are never parked in-process | `runner/reconcile.py` + `runner/main.py:main`/`_job_loop` |

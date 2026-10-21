@@ -503,11 +503,25 @@ async def _get_projects(include_delivery: bool = False) -> list[dict]:
 
 @app.get("/api/quota", dependencies=[Depends(_check_auth)])
 async def quota_status() -> dict:
+    """Global (= Anthropic) pause as before, plus a per-provider map for every
+    other registry provider (T6, 2026-10-21): `providers.<p> = {paused,
+    reset_at, reason}`. A paused lane holds only that lane's jobs."""
     paused, reset_at, reason = await quota.is_paused()
+    providers: dict[str, dict] = {}
+    for name in models_registry.providers():
+        if name == models_registry.DEFAULT_PROVIDER:
+            continue
+        p_paused, p_reset, p_reason = await quota.is_provider_paused(name)
+        providers[name] = {
+            "paused": p_paused,
+            "reset_at": p_reset.isoformat() if p_reset else None,
+            "reason": p_reason,
+        }
     return {
         "paused": paused,
         "reset_at": reset_at.isoformat() if reset_at else None,
         "reason": reason,
+        "providers": providers,
     }
 
 
@@ -855,9 +869,19 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
 
     function renderQuota(data) {
       const banner = document.getElementById("quota-banner");
+      const lines = [];
       if (data && data.paused) {
         const resetStr = data.reset_at ? new Date(data.reset_at).toLocaleString() : "unknown";
-        banner.textContent = `⏸ Queue paused on subscription quota. Reset at ${resetStr}. Reason: ${data.reason || '—'}`;
+        lines.push(`⏸ Queue paused on subscription quota. Reset at ${resetStr}. Reason: ${data.reason || '—'}`);
+      }
+      // Per-provider lane pauses (T6): only that lane's jobs are held.
+      for (const [name, p] of Object.entries((data && data.providers) || {})) {
+        if (!p || !p.paused) continue;
+        const resetStr = p.reset_at ? new Date(p.reset_at).toLocaleString() : "unknown";
+        lines.push(`⏸ ${name} lane paused (its jobs are held). Reset at ${resetStr}. Reason: ${p.reason || '—'}`);
+      }
+      if (lines.length) {
+        banner.textContent = lines.join("  ·  ");
         banner.classList.add("visible");
       } else {
         banner.classList.remove("visible");

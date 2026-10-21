@@ -428,12 +428,20 @@ async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         )
         tasks = list(result.scalars().all())
 
+    # One line per paused provider LANE (T6, 2026-10-21): a held lane is
+    # otherwise invisible - its jobs cycle to the queue tail silently.
+    # The global (Anthropic) pause has its own notifier; it is not repeated here.
+    lane_lines = await _paused_lane_lines()
+
     if not tasks:
-        await update.message.reply_text("No active tasks. Start one with /task.")
+        await update.message.reply_text(
+            "\n".join(lane_lines + ["No active tasks. Start one with /task."]),
+            parse_mode="Markdown" if lane_lines else None,
+        )
         return
 
     status_icons = {"active": "\U0001f504", "awaiting_user": "\u2753", "pending_approval": "\u270b"}
-    lines = [f"*Active tasks ({len(tasks)}):*\n"]
+    lines = lane_lines + [f"*Active tasks ({len(tasks)}):*\n"]
     for t in tasks:
         prefix = str(t.id)[:8]
         desc = _esc_md(t.description[:50])
@@ -469,9 +477,41 @@ async def cmd_projects(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
+async def _paused_lane_lines() -> list[str]:
+    """Markdown lines, one per paused NON-Anthropic provider lane (T6)."""
+    names = [p for p in models_registry.providers() if p != models_registry.DEFAULT_PROVIDER]
+    paused = await quota.paused_providers(names)
+    return [
+        f"⏸ `{_esc_md(name)}` lane paused until {reset_at.strftime('%H:%M UTC')} "
+        f"— its jobs are held ({_esc_md(reason[:80]) or 'no reason recorded'}). "
+        f"`/resume {_esc_md(name)}` to lift."
+        for name, (reset_at, reason) in paused.items()
+    ]
+
+
 @_error_safe
-async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_resume(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/resume` lifts the global (Anthropic) pause as before; `/resume
+    <provider>` lifts ONE provider lane's pause (T6, 2026-10-21) and leaves
+    the global key alone."""
     if await _guard(update) is None:
+        return
+    args = [a.strip().lower() for a in (ctx.args or []) if a.strip()]
+    if args:
+        name = args[0]
+        if name not in models_registry.providers():
+            await update.message.reply_text(
+                f"Unknown provider '{name}'. Known: {', '.join(models_registry.providers())}."
+            )
+            return
+        paused, _reset_at, reason = await quota.is_provider_paused(name)
+        if not paused:
+            await update.message.reply_text(f"{name} lane is not paused.")
+            return
+        await quota.clear_provider(name)
+        await update.message.reply_text(
+            f"{name} lane manually resumed (was paused for: {reason[:100]})."
+        )
         return
     paused, reset_at, reason = await quota.is_paused()
     if not paused:

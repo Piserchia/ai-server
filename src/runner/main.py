@@ -49,6 +49,7 @@ from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
 from src.registry import models as models_registry
 from src.registry.skills import load as load_skill
+from src.runner import router
 from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
 from src.runner.reconcile import reconcile_orphaned_jobs, requeue_stranded_queued
@@ -185,6 +186,15 @@ async def _job_loop() -> None:
         logger.info("draining in-flight jobs", count=len(in_flight))
         await asyncio.gather(*in_flight, return_exceptions=True)
 
+    # Held-lane requeues (T6) sleep without a slot; cancel them so each id
+    # is RPUSHed NOW instead of sitting as a queued row with no Redis entry
+    # until the next startup's requeue_stranded_queued().
+    pending_holds = list(_held_requeues)
+    if pending_holds:
+        for t in pending_holds:
+            t.cancel()
+        await asyncio.gather(*pending_holds, return_exceptions=True)
+
 
 async def _run_with_held_slot(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None:
     """Run one job on a semaphore slot the job loop already acquired."""
@@ -317,6 +327,126 @@ def _non_anthropic_lane(job) -> str | None:
     return provider
 
 
+# ── Per-provider lane holds (cross-vendor writer slice T6, 2026-10-21) ──────
+#
+# The global pause (Anthropic, INV-12) stops the loop before BLPOP. A paused
+# NON-Anthropic lane must not: its jobs are HELD — never marked running, never
+# a process — and requeued at the TAIL (plan §4g) after a bounded delay so the
+# loop neither spins on one held id nor pins a concurrency slot on it. The
+# delayed RPUSH runs as its own task (no slot); `_job_loop` cancels them on
+# shutdown so they push at once, and `requeue_stranded_queued()` heals the
+# crash case at the next startup.
+
+#: Longest a held job waits before it is re-offered to the loop (and the
+#: lane re-checked). Bounded so a manual `/resume <provider>` is felt soon.
+HOLD_RECHECK_SECONDS: float = 30.0
+
+#: In-flight delayed requeues (kept so the tasks are not GC'd; drained on shutdown).
+_held_requeues: set[asyncio.Task] = set()
+
+#: job_id → ISO `until` of the pause window last audited as `job_held`, so a
+#: job cycling every HOLD_RECHECK_SECONDS writes ONE audit line per window.
+_held_audited: dict[str, str] = {}
+
+
+def preresolve_provider(
+    kind: str,
+    description: str,
+    payload: dict | None,
+    *,
+    load=None,
+    route=None,
+) -> str | None:
+    """Cheap guess at the job's provider BEFORE the session: the same
+    precedence as `session.resolve_model_choice` (`payload.model > skill pin
+    > settings.default_model`) with the same kind→skill mapping as
+    `session._resolve_skill`, minus the LLM router fallback (not cheap; a
+    task-kind job with no rule match pre-resolves to the default). Pure
+    given `load`/`route`. Never raises and never refuses: `None` means "could
+    not tell" and the job proceeds to the session, which raises the real
+    `ProviderRefused` / `SkillResolutionError` with its audit. The enabled
+    set is NOT consulted here — this answers WHICH lane, not whether it may
+    run. `load`/`route` default to the module-level `load_skill` /
+    `router.route` at CALL time (not definition time) so a test's
+    `monkeypatch.setattr(main, "load_skill", ...)` is honoured."""
+    load = load or load_skill
+    route = route or router.route
+    payload = payload or {}
+    try:
+        raw = payload.get("model") or ""
+        if not raw:
+            skill_name = ""
+            if kind == "task":
+                skill_name = route(description) or ""
+            elif kind:
+                skill_name = kind if kind.startswith("_") else kind.replace("_", "-")
+            cfg = load(skill_name) if skill_name else None
+            raw = (getattr(cfg, "model", "") or "") if cfg is not None else ""
+        if not raw:
+            raw = settings.default_model
+        return models_registry.resolve(raw).provider
+    except Exception:
+        return None
+
+
+def hold_delay(until: datetime | None, now: datetime) -> float:
+    """Seconds to park a held job: the remaining pause window, capped at
+    `HOLD_RECHECK_SECONDS`, never negative. Pure."""
+    if until is None:
+        return HOLD_RECHECK_SECONDS
+    return max(0.0, min(HOLD_RECHECK_SECONDS, (until - now).total_seconds()))
+
+
+async def _requeue_held(job_id: str, delay: float) -> None:
+    try:
+        await asyncio.sleep(delay)
+    finally:
+        # Also on cancellation (shutdown): push now rather than strand.
+        try:
+            await redis.rpush(QUEUE_JOBS, job_id)
+        except Exception:
+            logger.exception("held requeue failed — startup reconcile re-pushes it",
+                             job_id=job_id)
+
+
+def _schedule_held_requeue(job_id: str, delay: float) -> asyncio.Task:
+    task = asyncio.create_task(_requeue_held(job_id, delay), name=f"held_requeue:{job_id[:8]}")
+    _held_requeues.add(task)
+    task.add_done_callback(_held_requeues.discard)
+    return task
+
+
+async def _hold_if_provider_paused(job: Job, log) -> bool:
+    """True when the job's provider lane is paused and the job was held
+    (audited, delayed tail requeue scheduled). The caller must then NOT mark
+    it running. The provider is the session's `resolved_provider` stamp from
+    an earlier attempt (a job requeued after a Codex `rate_limited`) else
+    the cheap pre-resolution. Never raises: a Redis blip fails OPEN to the
+    session — if the lane really is red the executor's own 429 re-pauses it."""
+    job_id = str(job.id)
+    provider = (getattr(job, "resolved_provider", None)
+                or preresolve_provider(job.kind, job.description, job.payload))
+    if not provider or provider == models_registry.DEFAULT_PROVIDER:
+        return False
+    try:
+        paused, until, reason = await quota.is_provider_paused(provider)
+    except Exception:
+        log.warning("provider pause check failed — running the job", provider=provider)
+        return False
+    if not paused:
+        _held_audited.pop(job_id, None)
+        return False
+    until_iso = until.isoformat() if until else ""
+    if _held_audited.get(job_id) != until_iso:
+        audit_log.append(job_id, "job_held", provider=provider, reason=reason[:200],
+                         until=until_iso)
+        _held_audited[job_id] = until_iso
+        log.info("job held — provider lane paused", provider=provider, until=until_iso,
+                 reason=reason[:80])
+    _schedule_held_requeue(job_id, hold_delay(until, datetime.now(timezone.utc)))
+    return True
+
+
 async def _process_job(job_id: uuid.UUID) -> None:
     job: Job | None = None
     for delay in _JOB_FETCH_DELAYS:
@@ -329,6 +459,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
             if job is not None:
                 _requeued_missing_ids.discard(str(job_id))
                 if job.status != JobStatus.queued.value:
+                    return
+                # T6: a paused provider lane holds the job here — before it
+                # is ever marked running (no DB write, no slot held, no
+                # process); it returns to the queue tail after a bounded
+                # delay. Anthropic is never held here (global pause gates
+                # the loop before BLPOP).
+                if await _hold_if_provider_paused(job, logger.bind(job_id=str(job_id))):
                     return
                 job.status = JobStatus.running.value
                 job.started_at = datetime.now(timezone.utc)
@@ -538,14 +675,37 @@ async def _process_job(job_id: uuid.UUID) -> None:
                 pass
 
     except session_mod.ExecutorFailed as exc:
-        # A non-Anthropic executor ended without `ok` (rate_limited,
-        # auth_expired, api_error, timeout, interrupted) — terminal, NOT
-        # escalated: the skill's escalation target is an Anthropic model, and
-        # silently re-running the job on another vendor is a routing decision
-        # this slice does not make (T4, 2026-10-21; T6 adds the per-provider
-        # hold + front-requeue for `rate_limited`). The executor already
-        # audited `executor_error`; the clone is kept like any failed job.
         reason = str(exc)
+        if exc.terminal_reason == "rate_limited":
+            # The vendor throttled THIS lane (T6, 2026-10-21): pause only
+            # that provider's key — never `quota:paused_until`, which is the
+            # Anthropic/global pause — and requeue at the FRONT like the
+            # Anthropic path (INV-12). The next pop finds the lane paused and
+            # holds the job to the tail (plan §4g) until the window passes.
+            # The stream carries no reset time → settings.quota_pause_minutes.
+            # Not failed, not escalated, no task DM (same as QuotaExhausted).
+            until = await quota.pause_provider(exc.provider, None, reason)
+            await redis.lpush(QUEUE_JOBS, str(job_id))
+            async with session_scope() as s:
+                await s.execute(
+                    update(Job).where(Job.id == job_id).values(
+                        status=JobStatus.queued.value,
+                        error_message=(f"queued for {exc.provider} quota reset "
+                                       f"({reason[:100]})"),
+                    )
+                )
+            audit_log.append(str(job_id), "job_requeued_for_quota", reason=reason[:200],
+                             provider=exc.provider, until=until.isoformat())
+            log.warning("executor rate limited — provider lane paused, job requeued",
+                        provider=exc.provider, until=until.isoformat())
+            return
+
+        # Any other non-`ok` end (auth_expired, api_error, timeout,
+        # interrupted) — terminal, NOT escalated: the skill's escalation
+        # target is an Anthropic model, and silently re-running the job on
+        # another vendor is a routing decision this slice does not make
+        # (T4, 2026-10-21). The executor already audited `executor_error`;
+        # the clone is kept like any failed job.
         audit_log.append(str(job_id), "job_failed", error=reason,
                          error_category=exc.terminal_reason)
         await _finish_job(job_id, JobStatus.failed, error=f"Executor failed: {reason}",

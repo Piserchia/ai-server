@@ -2,6 +2,72 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T6: per-provider quota keys (lane pause + hold-to-tail)
+
+**Agent task**: cross-vendor writer slice T6
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/runner/quota.py` — the global pair (`quota:paused_until` /
+  `quota:last_reason`, now the `src.db.KEY_QUOTA_*` constants) keeps its
+  Anthropic meaning and INV-12 semantics; `pause_queue` / `is_paused` /
+  `clear` are behaviourally unchanged (shared `_write_pause` / `_read_pause`
+  internals). NEW per-provider lane pause over `quota:provider:<p>:paused_until`
+  / `:last_reason`: `provider_keys(p)` (pure; refuses `anthropic`, empty, or
+  `:`/`/` in the name), `pause_provider(p, reset_at, reason)`,
+  `is_provider_paused(p)` (auto-resume on expiry, corrupt value deleted),
+  `clear_provider(p)`, `paused_providers(names)`. The Anthropic name
+  delegates to the global functions so one call answers for any provider.
+  `GLOBAL_PROVIDER = "anthropic"` (asserted equal to the registry default in
+  tests; the registry is NOT imported — module row stays config+db).
+- `src/runner/main.py` — (1) **Hold**: inside `_process_job`'s fetch
+  transaction, BEFORE the row is flipped to `running`,
+  `_hold_if_provider_paused(job)` checks the job's lane: provider =
+  the session's `resolved_provider` stamp from an earlier attempt, else
+  `preresolve_provider(kind, description, payload)` (pure given
+  `load`/`route`: `payload.model > skill pin > settings.default_model` with
+  `_resolve_skill`'s kind→skill mapping and the RULE router only — no LLM
+  fallback; never raises, `None` = cannot tell → run and let the session
+  refuse properly). Paused ⇒ audit `job_held{provider, reason, until}` (once
+  per (job, pause window) via `_held_audited`, not every cycle), schedule
+  `_requeue_held(job_id, hold_delay(until, now))` — an RPUSH to the TAIL
+  (plan §4g) after `min(remaining, HOLD_RECHECK_SECONDS=30)` seconds as its
+  own task (no concurrency slot, no DB write; `_job_loop` cancels the
+  pending ones on shutdown so they push immediately; a crash is healed by
+  `requeue_stranded_queued`) — and return without touching the row. A
+  Redis blip on the check fails OPEN to the session. Anthropic jobs never
+  reach the Redis read (the global pause gates the loop before BLPOP).
+  (2) **Codex 429**: the `ExecutorFailed` handler's `rate_limited` branch
+  now mirrors `QuotaExhausted` on the lane: `quota.pause_provider(provider,
+  None, reason)` (never the global key; the stream has no reset time →
+  `settings.quota_pause_minutes`), `LPUSH` FRONT, row back to `queued` with
+  `error_message="queued for <provider> quota reset (…)"`, audit
+  `job_requeued_for_quota{reason, +provider, +until}` (additive fields),
+  no `job_failed`, no `_finish_job`, no DM, no escalation. Every other
+  terminal reason is unchanged (terminal, never escalated). `router` is
+  now a top-level import (already in the SYSTEM.md row).
+- `src/audit_log.py` — docstring: `job_held` (new kind) and the additive
+  `provider`/`until` fields on `job_requeued_for_quota`.
+- Tests: `tests/test_quota.py` +50 (keys; provider pause/resume round
+  trips; independence from the global key both ways; expiry; Anthropic
+  delegation; `preresolve_provider` precedence/mapping/None cases;
+  `hold_delay`; `_process_job` held → tail with audit, dedupe, stamp wins,
+  Anthropic never held, fail-open, cancel-pushes-now; Codex `rate_limited`
+  → lane pause + FRONT + queued, global key untouched, other reasons
+  terminal, Anthropic `QuotaExhausted` shape untouched; web `/api/quota`
+  map; Telegram `/status` lane line and `/resume [provider]`). Suite 1977
+  passed, 1 skipped; lint clean.
+- **Review round (code-review T6, lgtm; minors applied)**:
+  `preresolve_provider` now resolves `load` / `route` at CALL time
+  (`None` defaults → module-level `load_skill` / `router.route`), so a
+  module-level monkeypatch is honoured — the test harness's
+  `load_skill` patch was previously dead (default captured at
+  definition time). The `main_harness` fixture also stubs
+  `plans.promote_deferred_for`: it ran for every completing job and
+  opened a REAL asyncpg connection through plans.py's own
+  `async_session`, the source of the `coroutine 'Connection._cancel'
+  was never awaited` warning. SYSTEM.md INV-12 row notes the
+  hold-to-tail exception.
+
 ## 2026-10-21 — T5 review round 1 applied (code-review T5, blocker → lgtm)
 
 **Agent task**: cross-vendor writer slice T5, reviewer findings (2 blockers,
