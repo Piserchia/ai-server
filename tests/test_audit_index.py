@@ -179,3 +179,47 @@ class TestSearchIndex:
         }))
         result = search_index(index_file, keyword="ConnectionRefused")
         assert len(result) == 1
+
+
+# ── T7 (2026-10-21): `provider` in INDEX.jsonl entries ─────────────────────
+
+
+class TestProviderField:
+    def test_provider_from_job_started(self):
+        lines = [
+            json.dumps({"kind": "job_started", "skill": "app-patch", "model": "gpt-6-luna",
+                        "effort": "medium", "provider": "codex"}),
+            json.dumps({"kind": "job_completed", "provider": "codex"}),
+        ]
+        entry = build_index_entry("job-c", lines)
+        assert entry is not None
+        assert entry.provider == "codex"
+        assert json.loads(json.dumps(entry.__dict__))["provider"] == "codex"
+
+    def test_pre_007_rows_have_none(self):
+        # Audit logs written before T4 carry no `provider` key on job_started.
+        lines = [
+            json.dumps({"kind": "job_started", "skill": "app-patch",
+                        "model": "claude-sonnet-4-6", "effort": "medium"}),
+            json.dumps({"kind": "job_completed"}),
+        ]
+        entry = build_index_entry("job-old", lines)
+        assert entry is not None
+        assert entry.provider is None
+
+    def test_field_is_in_the_dataclass_order_after_model(self):
+        from dataclasses import fields
+        from src.runner.audit_index import IndexEntry
+        names = [f.name for f in fields(IndexEntry)]
+        assert names.index("provider") == names.index("model") + 1
+
+    def test_search_index_filters_by_provider(self, tmp_path):
+        index_file = tmp_path / "INDEX.jsonl"
+        index_file.write_text("\n".join([
+            json.dumps({"skill": "x", "status": "failed", "keywords": [], "provider": "codex"}),
+            json.dumps({"skill": "x", "status": "failed", "keywords": [], "provider": "anthropic"}),
+            json.dumps({"skill": "x", "status": "failed", "keywords": []}),   # pre-T7 entry
+        ]))
+        assert len(search_index(index_file, provider="codex")) == 1
+        assert search_index(index_file, provider="codex")[0]["provider"] == "codex"
+        assert len(search_index(index_file)) == 3                           # no filter: all

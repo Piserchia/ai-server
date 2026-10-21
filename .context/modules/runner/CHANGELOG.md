@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T7: `provider` in INDEX.jsonl entries
+
+**Agent task**: cross-vendor writer slice T7
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/runner/audit_index.py` — `IndexEntry.provider: str | None` (placed
+  after `model`), filled from `job_started.provider` (additive since T4);
+  `None` for audit logs written before that — a pre-007 entry is never
+  guessed to be Anthropic. `search_index(..., provider=)` optional filter;
+  entries without the key never match a provider filter. `rebuild_index` /
+  `append_to_index` emit the field via `asdict` unchanged.
+- Tests: `tests/test_audit_index.py` (+4).
+
 ## 2026-10-21 — T6: per-provider quota keys (lane pause + hold-to-tail)
 
 **Agent task**: cross-vendor writer slice T6

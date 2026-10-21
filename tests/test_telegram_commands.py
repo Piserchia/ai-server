@@ -130,3 +130,282 @@ class TestErrorSafeDecorator:
         assert call_count == 2  # original + 1 retry
         # Should have called reply_text at least twice (retry msg + final error msg)
         assert update.message.reply_text.call_count >= 2
+
+
+# ── T7 (2026-10-21): provider on every Telegram surface ────────────────────
+#
+# `--model=` parses THROUGH the models registry: an alias or a
+# `[provider/]model_id` lands in `job.payload["model"]` in its canonical form
+# (bare Anthropic id, `provider/model_id` otherwise), and anything the
+# registry does not know is refused at parse time with the registry's reason
+# — never passed through raw for the session to fail later. The handlers
+# reply with that reason and create no task and no job. `/jobs` rows, the
+# done/failed DM and the task "details" card name the lane
+# (`provider/model`) the job ran on.
+
+import uuid as _uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from src.config import settings
+from src.gateway import telegram_bot as tg
+from src.gateway.telegram_bot import ModelFlagRefused, _done_dm_text, _lane_label
+
+
+class TestParseFlagsProviderIds:
+    def test_qualified_codex_id_is_canonical(self):
+        desc, flags = parse_flags("--model=codex/gpt-6-luna fix the flaky test")
+        assert desc == "fix the flaky test"
+        assert flags["model"] == "codex/gpt-6-luna"
+
+    def test_explicit_anthropic_prefix_is_stored_bare(self):
+        # `anthropic/opus` is accepted and lands bare, exactly what the
+        # session's registry resolution and the Anthropic path already read.
+        assert parse_flags("--model=anthropic/opus x")[1]["model"] == "claude-opus-4-7"
+        assert parse_flags("--model=anthropic/claude-sonnet-4-6 x")[1]["model"] == "claude-sonnet-4-6"
+
+    def test_case_insensitive(self):
+        assert parse_flags("--model=CODEX/GPT-6-SOL x")[1]["model"] == "codex/gpt-6-sol"
+        assert parse_flags("--model=OPUS x")[1]["model"] == "claude-opus-4-7"
+
+    def test_retired_alias_still_maps_to_replacement(self):
+        assert parse_flags("--model=haiku x")[1]["model"] == "claude-sonnet-4-6"
+
+    def test_unknown_provider_refused_at_parse_time_with_reason(self):
+        with pytest.raises(ModelFlagRefused) as ei:
+            parse_flags("--model=gemini/flash fix it")
+        assert ei.value.raw == "gemini/flash"
+        assert "unknown provider 'gemini'" in ei.value.reason
+        assert "gemini/flash" in str(ei.value)
+
+    def test_unknown_model_refused_at_parse_time_with_reason(self):
+        with pytest.raises(ModelFlagRefused) as ei:
+            parse_flags("--model=codex/gpt-9 fix it")
+        assert "unknown model 'gpt-9' for provider 'codex'" in ei.value.reason
+
+    def test_bare_non_anthropic_id_is_refused(self):
+        # C12: a bare id means anthropic/; `gpt-6-luna` is not an Anthropic
+        # model, so it is refused rather than guessed to be Codex.
+        with pytest.raises(ModelFlagRefused) as ei:
+            parse_flags("--model=gpt-6-luna x")
+        assert "anthropic" in ei.value.reason
+
+    def test_bare_retired_id_is_refused(self):
+        with pytest.raises(ModelFlagRefused):
+            parse_flags("--model=claude-haiku-4-5-20251001 x")
+
+    def test_refusal_is_a_value_error(self):
+        assert issubclass(ModelFlagRefused, ValueError)
+
+    def test_other_flags_still_parse_before_a_model_refusal(self):
+        # The refusal is raised for the model flag alone; nothing else about
+        # the grammar changed.
+        desc, flags = parse_flags("--effort=high --model=codex/gpt-6-astra do it")
+        assert desc == "do it"
+        assert flags == {"effort": "high", "model": "codex/gpt-6-astra"}
+
+
+class TestLaneLabel:
+    def test_provider_and_model(self):
+        assert _lane_label("codex", "gpt-6-luna") == "codex/gpt-6-luna"
+        assert _lane_label("anthropic", "claude-opus-4-7") == "anthropic/claude-opus-4-7"
+
+    def test_pre_007_row_has_model_only(self):
+        assert _lane_label(None, "claude-opus-4-7") == "claude-opus-4-7"
+
+    def test_queued_row_has_neither(self):
+        assert _lane_label(None, None) == ""
+        assert _lane_label("", "") == ""
+
+    def test_terminal_reason_appended_when_not_ok(self):
+        assert _lane_label("codex", "gpt-6-luna", "auth_expired") == "codex/gpt-6-luna · auth_expired"
+        assert _lane_label("codex", "gpt-6-luna", "ok") == "codex/gpt-6-luna"
+        assert _lane_label("codex", "gpt-6-luna", None) == "codex/gpt-6-luna"
+
+
+class TestDoneDmText:
+    def test_completed_names_lane_and_rate_hint(self):
+        text = _done_dm_text("0123456789abcdef", "completed", "did the thing",
+                             "codex/gpt-6-luna")
+        assert text.startswith("Job `01234567` *completed* · `codex/gpt-6-luna`")
+        assert "did the thing" in text
+        assert "/rate 01234567 1-5" in text
+
+    def test_failed_names_lane_and_reason(self):
+        text = _done_dm_text("0123456789abcdef", "failed", "",
+                             "codex/gpt-6-luna · rate_limited")
+        assert text == "Job `01234567` *failed* · `codex/gpt-6-luna · rate_limited`"
+
+    def test_no_lane_is_the_pre_t7_text(self):
+        text = _done_dm_text("0123456789abcdef", "completed", "sum", "")
+        assert text == "Job `01234567` *completed*\n\nsum\n\n💡 `/rate 01234567 1-5`"
+
+
+# ── handler-level: refusal replies, no job; /jobs rows; done DM lookup ──────
+
+
+def _tg_update(text: str) -> SimpleNamespace:
+    msg = SimpleNamespace(text=text, reply_text=AsyncMock())
+    return SimpleNamespace(effective_chat=SimpleNamespace(id=1), message=msg)
+
+
+class _FakeDB:
+    """Minimal `async_session()` stand-in: `execute(select)` returns the
+    given rows via `.scalars().all()`, `get(Job, id)` returns the matching row."""
+
+    def __init__(self, rows=()):
+        self.rows = list(rows)
+        self.added = []
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, stmt):
+        rows = self.rows
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))
+
+    async def get(self, model, ident):
+        for r in self.rows:
+            if r.id == ident:
+                return r
+        return None
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def commit(self):
+        pass
+
+    async def refresh(self, obj):
+        pass
+
+
+def _job_row(**over):
+    base = dict(
+        id=_uuid.uuid4(), status="completed", kind="task", resolved_skill="app-patch",
+        description="fix the flaky test", task_id=None,
+        resolved_provider="codex", resolved_model="gpt-6-luna",
+        terminal_reason="ok", error_message=None, result=None,
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+class TestHandlersRefuseUnknownModel:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+        self.db = _FakeDB()
+        monkeypatch.setattr(tg, "async_session", self.db)
+        self.enqueue = AsyncMock()
+        monkeypatch.setattr(tg, "enqueue_job", self.enqueue)
+
+    async def test_task_unknown_model_replies_reason_and_creates_nothing(self):
+        upd = _tg_update("/task --model=gemini/flash fix it")
+        await tg.cmd_task(upd, SimpleNamespace(args=["--model=gemini/flash", "fix", "it"]))
+        upd.message.reply_text.assert_awaited_once()
+        text = upd.message.reply_text.call_args.args[0]
+        assert "gemini/flash" in text and "unknown provider 'gemini'" in text
+        self.enqueue.assert_not_awaited()
+        assert self.db.added == []            # no Task row either
+
+    async def test_task_disabled_provider_replies_reason_and_creates_nothing(self, monkeypatch):
+        # Known to the registry, but not in ROUTER_PROVIDERS_ENABLED (default
+        # `anthropic`): refused at the command, same as the web's 422, instead
+        # of a job that the session fails with provider_refused.
+        monkeypatch.setattr(settings, "router_providers_enabled", "anthropic")
+        upd = _tg_update("/task --model=codex/gpt-6-luna fix it")
+        await tg.cmd_task(upd, SimpleNamespace(args=["--model=codex/gpt-6-luna", "fix", "it"]))
+        text = upd.message.reply_text.call_args.args[0]
+        assert "not enabled" in text and "codex" in text
+        self.enqueue.assert_not_awaited()
+        assert self.db.added == []
+
+    async def test_refusal_reply_lists_what_is_accepted(self, monkeypatch):
+        monkeypatch.setattr(settings, "router_providers_enabled", "anthropic,codex")
+        upd = _tg_update("/task --model=nope fix it")
+        await tg.cmd_task(upd, SimpleNamespace(args=["--model=nope", "fix", "it"]))
+        text = upd.message.reply_text.call_args.args[0]
+        assert "opus" in text and "sonnet" in text
+        assert "codex/gpt-6-luna" in text
+        # Never a Markdown reply: the raw value is user text.
+        assert upd.message.reply_text.call_args.kwargs.get("parse_mode") is None
+
+    async def test_chat_and_god_refuse_the_same_way(self):
+        for handler in (tg.cmd_chat, tg.cmd_god):
+            upd = _tg_update("--model=codex/gpt-9 hello")
+            await handler(upd, SimpleNamespace(args=["--model=codex/gpt-9", "hello"]))
+            text = upd.message.reply_text.call_args.args[0]
+            assert "unknown model 'gpt-9'" in text
+        self.enqueue.assert_not_awaited()
+        assert self.db.added == []
+
+    async def test_enabled_codex_model_enqueues_canonical(self, monkeypatch):
+        monkeypatch.setattr(settings, "router_providers_enabled", "anthropic,codex")
+        self.enqueue.return_value = SimpleNamespace(id=_uuid.uuid4())
+        upd = _tg_update("/chat --model=codex/gpt-6-luna hello")
+        await tg.cmd_chat(upd, SimpleNamespace(args=["--model=codex/gpt-6-luna", "hello"]))
+        self.enqueue.assert_awaited_once()
+        assert self.enqueue.await_args.kwargs["payload"] == {"model": "codex/gpt-6-luna"}
+
+
+class TestJobsRowsShowLane:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_rows_name_provider_slash_model(self, monkeypatch):
+        rows = [
+            _job_row(resolved_provider="codex", resolved_model="gpt-6-luna"),
+            _job_row(resolved_provider="anthropic", resolved_model="claude-opus-4-7",
+                     status="failed"),
+            _job_row(resolved_provider=None, resolved_model=None, status="queued"),
+        ]
+        monkeypatch.setattr(tg, "async_session", _FakeDB(rows))
+        upd = _tg_update("/jobs")
+        await tg.cmd_jobs(upd, SimpleNamespace(args=[]))
+        text = upd.message.reply_text.call_args.args[0]
+        assert "`codex/gpt-6-luna`" in text
+        assert "`anthropic/claude-opus-4-7`" in text
+        # The queued row has no lane yet and gets no empty bracket.
+        queued_line = [ln for ln in text.splitlines() if str(rows[2].id)[:8] in ln][0]
+        assert "`/cancel" not in queued_line and "``" not in queued_line
+        assert "⏳" in queued_line
+
+
+class TestDoneDmLookup:
+    async def test_deliver_done_reads_lane_from_the_job_row(self, monkeypatch):
+        row = _job_row(resolved_provider="codex", resolved_model="gpt-6-luna",
+                       status="failed", terminal_reason="auth_expired")
+        monkeypatch.setattr(tg, "async_session", _FakeDB([row]))
+        bot = SimpleNamespace(send_message=AsyncMock())
+        await tg._deliver_done(SimpleNamespace(bot=bot), 1, str(row.id), {"status": "failed"})
+        text = bot.send_message.await_args.args[1]
+        assert text == f"Job `{str(row.id)[:8]}` *failed* · `codex/gpt-6-luna · auth_expired`"
+
+    async def test_deliver_done_survives_a_db_error(self, monkeypatch):
+        class _Boom:
+            def __call__(self):
+                raise RuntimeError("db down")
+        monkeypatch.setattr(tg, "async_session", _Boom())
+        bot = SimpleNamespace(send_message=AsyncMock())
+        jid = str(_uuid.uuid4())
+        await tg._deliver_done(SimpleNamespace(bot=bot), 1, jid,
+                               {"status": "completed", "summary": "done"})
+        text = bot.send_message.await_args.args[1]
+        assert text.startswith(f"Job `{jid[:8]}` *completed*\n\ndone")
+
+    async def test_deliver_done_unknown_row_has_no_lane(self, monkeypatch):
+        monkeypatch.setattr(tg, "async_session", _FakeDB([]))
+        bot = SimpleNamespace(send_message=AsyncMock())
+        jid = str(_uuid.uuid4())
+        await tg._deliver_done(SimpleNamespace(bot=bot), 1, jid, {"status": "completed"})
+        assert bot.send_message.await_args.args[1] == f"Job `{jid[:8]}` *completed*\n\n💡 `/rate {jid[:8]} 1-5`"

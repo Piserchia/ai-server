@@ -100,6 +100,11 @@ class JobOut(BaseModel):
     result: dict | None
     error_message: str | None
     created_by: str
+    # Migration 007 provider columns (T7, 2026-10-21): additive, None on
+    # rows stamped before T4 — never guessed to be Anthropic here.
+    resolved_provider: str | None = None
+    model_served: str | None = None
+    terminal_reason: str | None = None
 
 
 class RateRequest(BaseModel):
@@ -123,6 +128,11 @@ def _serialize(job: Job) -> JobOut:
         result=job.result,
         error_message=job.error_message,
         created_by=job.created_by,
+        # getattr: the columns are additive/nullable (007) and absent on
+        # the row stand-ins older tests build — None is the honest value.
+        resolved_provider=getattr(job, "resolved_provider", None),
+        model_served=getattr(job, "model_served", None),
+        terminal_reason=getattr(job, "terminal_reason", None),
     )
 
 
@@ -671,16 +681,20 @@ def _model_options_html(enabled: frozenset[str] | None = None) -> str:
     """`<option>` rows for the dashboard model dropdown, from the registry
     (T1, 2026-10-21): enabled providers only (default `anthropic`), in
     models.yml order, values in the canonical form POST /api/jobs accepts
-    (bare Anthropic ids, `provider/model_id` otherwise)."""
+    (bare Anthropic ids, `provider/model_id` otherwise). One `<optgroup>`
+    per enabled provider (T7) so the lane a pick runs on is visible before
+    the job exists; the leading `default` option stays outside any group."""
     enabled = models_registry.enabled_providers() if enabled is None else enabled
     rows = ['<option value="">default</option>']
     for provider in models_registry.providers():
         if provider not in enabled:
             continue
+        rows.append(f'<optgroup label="{html_mod.escape(provider, quote=True)}">')
         for m in models_registry.list_models(provider):
             rows.append(
-                f'<option value="{html_mod.escape(m.ref.canonical, quote=True)}">'
+                f'  <option value="{html_mod.escape(m.ref.canonical, quote=True)}">'
                 f'{html_mod.escape(m.label)}</option>')
+        rows.append("</optgroup>")
     return "\n      ".join(rows)
 
 
@@ -793,13 +807,16 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
     function renderJobs(rows) {
       if (!rows.length) return "<p>No jobs yet.</p>";
       return `<table>
-        <tr><th>ID</th><th>Skill / Kind</th><th>Model · Effort</th>
+        <tr><th>ID</th><th>Skill / Kind</th><th>Provider</th><th>Model · Effort</th>
             <th>Status</th><th>Description</th><th>Rating</th><th>Created</th></tr>
         ${rows.map(r => `<tr>
           <td><a href="/api/jobs/${r.id}" target="_blank">${r.id.slice(0, 8)}</a></td>
           <td>${r.resolved_skill || r.kind}</td>
-          <td>${r.resolved_model ? r.resolved_model.replace('claude-', '') : '—'}${
-            r.resolved_effort ? ' · ' + r.resolved_effort : ''}</td>
+          <td title="${esc(r.model_served ? 'served: ' + r.model_served : '')}${
+            r.terminal_reason && r.terminal_reason !== 'ok' ? ' ' + esc(r.terminal_reason) : ''}">${
+            r.resolved_provider ? esc(r.resolved_provider) : '—'}</td>
+          <td>${r.resolved_model ? esc(r.resolved_model.replace('claude-', '')) : '—'}${
+            r.resolved_effort ? ' · ' + esc(r.resolved_effort) : ''}</td>
           <td><span class="badge ${r.status}">${r.status}</span></td>
           <td>${esc(r.description).slice(0, 60)}</td>
           <td>${r.user_rating ?? (r.status === 'completed' ? rateCell(r.id) : '—')}</td>
@@ -888,7 +905,8 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
       }
     }
 
-    function esc(s) { return (s || "").replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])); }
+    // Escapes for text AND attribute contexts (the jobs table uses it in a title="").
+    function esc(s) { return (s || "").replace(/[<>&"']/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&#39;"}[c])); }
   </script>
 </body>
 </html>

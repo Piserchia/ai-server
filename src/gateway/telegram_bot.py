@@ -121,9 +121,12 @@ _FLAG_RE = re.compile(r"--(\w+)=(\S+)")
 # `provider/model_id` for any other provider, exactly the keys
 # `registry.models.resolve()` accepts. Add or move an alias in models.yml,
 # not here. Retired models never appear in the registry; their aliases live
-# in _RETIRED_MODEL_ALIASES below and resolve to the replacement. A value
-# with no alias passes through raw — the session's registry resolution
-# refuses it fail-closed if it is not a real `[provider/]model_id`.
+# in _RETIRED_MODEL_ALIASES below and resolve to the replacement. Whatever
+# the alias tables yield is then resolved THROUGH the registry (T7,
+# 2026-10-21): the stored value is always the canonical `[provider/]model_id`
+# and an unknown provider or model is refused at parse time
+# (`ModelFlagRefused`, carrying the registry's reason) — a bad id never
+# reaches `job.payload` for the session to fail later.
 _MODEL_ALIASES = models_registry.alias_table()
 
 # Aliases of retired models, typed from muscle memory. Resolved to the current
@@ -138,6 +141,20 @@ _VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 _VALID_PERMISSIONS = {"default", "acceptEdits", "bypassPermissions", "plan"}
 
 
+class ModelFlagRefused(ValueError):
+    """`--model=<raw>` names something the models registry does not know
+    (T7, 2026-10-21). `reason` is the registry's own wording. Raised by
+    `parse_flags`; the command handlers catch it via
+    `_parse_flags_or_reply`, reply with the reason and create nothing. A
+    caller that forgets to catch it trips `_error_safe` — loud, never a
+    silently-passed-through id."""
+
+    def __init__(self, raw: str, reason: str):
+        self.raw = raw
+        self.reason = reason
+        super().__init__(f"--model={raw} refused: {reason}")
+
+
 def parse_flags(text: str) -> tuple[str, dict]:
     """
     Extract --flag=value tokens from the front of a description.
@@ -145,6 +162,8 @@ def parse_flags(text: str) -> tuple[str, dict]:
 
     Supported flags: --model, --effort, --permission, --project, --kind.
     Unknown flags are left in the description (caller can decide to reject).
+    `--model` is resolved through the registry and stored canonical; an
+    unknown `[provider/]model_id` raises `ModelFlagRefused` (T7).
     """
     flags: dict = {}
     tokens = text.strip().split()
@@ -156,8 +175,12 @@ def parse_flags(text: str) -> tuple[str, dict]:
         key, val = m.group(1), m.group(2)
         if key == "model":
             alias = val.lower()
-            flags["model"] = _MODEL_ALIASES.get(
+            candidate = _MODEL_ALIASES.get(
                 alias, _RETIRED_MODEL_ALIASES.get(alias, val))
+            try:
+                flags["model"] = models_registry.resolve(candidate).canonical
+            except models_registry.ProviderRefused as exc:
+                raise ModelFlagRefused(val, exc.reason) from exc
         elif key == "effort":
             if val.lower() in _VALID_EFFORTS:
                 flags["effort"] = val.lower()
@@ -173,6 +196,56 @@ def parse_flags(text: str) -> tuple[str, dict]:
         consumed += 1
     remaining = " ".join(tokens[consumed:])
     return remaining, flags
+
+
+def _model_flag_help() -> str:
+    """What `--model=` accepts right now: Anthropic aliases bare, every
+    other ENABLED provider's ids qualified. Plain text (no Markdown)."""
+    enabled = models_registry.enabled_providers()
+    parts: list[str] = []
+    for provider in models_registry.providers():
+        if provider not in enabled:
+            continue
+        for m in models_registry.list_models(provider):
+            if provider == models_registry.DEFAULT_PROVIDER:
+                parts.extend(m.aliases or (m.model_id,))
+            else:
+                parts.append(m.ref.canonical)
+    return ", ".join(parts)
+
+
+async def _parse_flags_or_reply(update: Update, raw: str) -> tuple[str, dict] | None:
+    """`parse_flags` for a command handler: a `--model` the registry does not
+    know, or whose provider is not in ROUTER_PROVIDERS_ENABLED, is answered
+    with the reason and `None` — no Task row, no job (T7, 2026-10-21; the
+    web's 422 is the same rule). Plain-text reply: the raw value is user
+    text and must not be parsed as Markdown."""
+    try:
+        description, flags = parse_flags(raw)
+        if flags.get("model"):
+            models_registry.resolve_enabled(flags["model"])
+    except (ModelFlagRefused, models_registry.ProviderRefused) as exc:
+        await update.message.reply_text(
+            f"\u274c --model={exc.raw} refused: {exc.reason}.\n"
+            f"Accepted: {_model_flag_help()}."
+        )
+        return None
+    return description, flags
+
+
+def _lane_label(provider: str | None, model: str | None,
+                terminal_reason: str | None = None) -> str:
+    """`provider/model` for the surfaces (T7). Pure. A pre-007 row (model,
+    no provider) shows its model alone — never guessed to be Anthropic; a
+    queued row (neither) shows nothing. A terminal reason other than `ok`
+    is appended so a failed DM says WHY the lane ended."""
+    if provider and model:
+        lane = f"{provider}/{model}"
+    else:
+        lane = model or provider or ""
+    if lane and terminal_reason and terminal_reason != "ok":
+        lane += f" \u00b7 {terminal_reason}"
+    return lane
 
 
 # ── Commands ────────────────────────────────────────────────────────────────
@@ -283,7 +356,10 @@ async def cmd_task(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /task [flags] <what you want me to do>")
         return
 
-    description, flags = parse_flags(raw)
+    parsed = await _parse_flags_or_reply(update, raw)
+    if parsed is None:
+        return
+    description, flags = parsed
     if not description:
         await update.message.reply_text(
             "Flags parsed but no description remaining. Put the task after the flags."
@@ -346,7 +422,10 @@ async def cmd_chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /chat <your message>")
         return
 
-    description, flags = parse_flags(raw)
+    parsed = await _parse_flags_or_reply(update, raw)
+    if parsed is None:
+        return
+    description, flags = parsed
     job = await enqueue_job(
         description,
         kind=JobKind.chat.value,
@@ -368,7 +447,10 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /god <what you want done — full system access>")
         return
 
-    description, flags = parse_flags(raw)
+    parsed = await _parse_flags_or_reply(update, raw)
+    if parsed is None:
+        return
+    description, flags = parsed
     if not description:
         await update.message.reply_text("Put the task description after any flags.")
         return
@@ -747,7 +829,10 @@ async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         skill = j.resolved_skill or j.kind
         desc = _esc_md(j.description[:40])
         task_ref = f" (task `{str(j.task_id)[:8]}`)" if j.task_id else ""
-        line = f"`{prefix}` {icon} {skill} — {desc}{task_ref}"
+        # Which lane ran it (T7): `provider/model`; nothing while queued.
+        lane = _lane_label(getattr(j, "resolved_provider", None), j.resolved_model)
+        lane_ref = f" `{lane}`" if lane else ""
+        line = f"`{prefix}` {icon} {skill}{lane_ref} — {desc}{task_ref}"
         if j.status == JobStatus.completed.value:
             line += f"\n  → `/rate {prefix} 1-5` or `/status {prefix}`"
         elif j.status == JobStatus.failed.value:
@@ -989,7 +1074,10 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if not job:
             await query.message.reply_text("No jobs found for this task.")
             return
-        lines = [f"Job `{str(job.id)[:8]}` — *{job.status}*"]
+        lane = _lane_label(getattr(job, "resolved_provider", None), job.resolved_model,
+                           getattr(job, "terminal_reason", None))
+        lines = [f"Job `{str(job.id)[:8]}` — *{job.status}*"
+                 + (f" \u00b7 `{lane}`" if lane else "")]
         if job.error_message:
             lines.append(f"Error: `{job.error_message[:200]}`")
         if job.result:
@@ -1059,6 +1147,46 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 # ── Listeners ──────────────────────────────────────────────────────────────
 
 
+def _done_dm_text(job_id: str, status: str, summary: str, lane: str) -> str:
+    """The done/failed DM. Pure. `lane` is `_lane_label(...)` — appended to
+    the headline when known (T7) so the owner sees which provider ran the
+    job without opening /jobs; empty keeps the pre-T7 text byte-identical."""
+    text = f"Job `{job_id[:8]}` *{status}*"
+    if lane:
+        text += f" \u00b7 `{lane}`"
+    if summary:
+        text += f"\n\n{summary}"
+    if status == JobStatus.completed.value:
+        text += f"\n\n💡 `/rate {job_id[:8]} 1-5`"
+    return text
+
+
+async def _job_lane(job_id: str) -> str:
+    """Lane of a finished job from its row: the session stamps
+    `resolved_provider`/`resolved_model` before the process starts, so every
+    terminal path (timeout, refusal, executor failure) has them by the time
+    `jobs:done` fires — the row, not the done payload, is the source of
+    truth. Any lookup failure yields "" — the DM is never blocked on it."""
+    try:
+        async with async_session() as s:
+            job = await s.get(Job, uuid.UUID(job_id))
+    except Exception:  # noqa: BLE001 — surface-only; the DM still goes out
+        logger.warning("could not read job row for done DM", job_id=job_id[:8])
+        return ""
+    if job is None:
+        return ""
+    return _lane_label(getattr(job, "resolved_provider", None), job.resolved_model,
+                       getattr(job, "terminal_reason", None))
+
+
+async def _deliver_done(app: Application, chat_id: int, job_id: str, payload: dict) -> None:
+    status = payload.get("status", "unknown")
+    summary = (payload.get("summary") or "")[:1500]
+    lane = await _job_lane(job_id)
+    text = _done_dm_text(job_id, status, summary, lane)
+    await app.bot.send_message(chat_id, text, parse_mode="Markdown")
+
+
 async def _done_listener(app: Application) -> None:
     pubsub = redis.pubsub()
     await pubsub.psubscribe(f"{CHANNEL_JOB_DONE}:*")
@@ -1075,16 +1203,8 @@ async def _done_listener(app: Application) -> None:
                 payload = json.loads(msg.get("data", "{}"))
             except json.JSONDecodeError:
                 payload = {}
-            status = payload.get("status", "unknown")
-            summary = (payload.get("summary") or "")[:1500]
-
-            text = f"Job `{job_id[:8]}` *{status}*"
-            if summary:
-                text += f"\n\n{summary}"
-            if status == JobStatus.completed.value:
-                text += f"\n\n💡 `/rate {job_id[:8]} 1-5`"
             try:
-                await app.bot.send_message(chat_id, text, parse_mode="Markdown")
+                await _deliver_done(app, chat_id, job_id, payload)
             except Exception:
                 logger.exception("failed to DM result", chat_id=chat_id, job_id=job_id)
     finally:
