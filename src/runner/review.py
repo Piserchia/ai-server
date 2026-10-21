@@ -190,6 +190,20 @@ def get_git_diff(cwd: Path, ref: str = "HEAD~1") -> str:
         return ""
 
 
+#: `git -c …` pins for every gate read of an UNTRUSTED clone (whole-branch
+#: review, 2026-10-21). Mirrors `workspaces.UNTRUSTED_GIT_OPTS` for the
+#: hook/fsmonitor part (kept separate so `review` does not import
+#: `workspaces`); `core.quotePath=false` is the gate's own need.
+GATE_GIT_OPTS: tuple[str, ...] = (
+    "-c", "core.quotePath=false",
+    "-c", "core.fsmonitor=false",
+    "-c", "core.hooksPath=/dev/null",
+)
+#: Flags on every `git diff` the gate runs: attributes in the clone cannot
+#: hide content (`--text`) or substitute a driver (`--no-ext-diff`).
+GATE_DIFF_FLAGS: tuple[str, ...] = ("--no-color", "--text", "--no-ext-diff")
+
+
 def diff_for_gate(cwd: Path, base_sha: str | None) -> str:
     """Everything a workspace job changed since `base_sha` — committed,
     staged, unstaged and untracked (gitignored files excluded) — as one
@@ -206,14 +220,24 @@ def diff_for_gate(cwd: Path, base_sha: str | None) -> str:
     raises RuntimeError rather than returning "" — an empty string means
     "nothing to review, complete the job", and a broken diff must never
     read as that.
+
+    The clone is UNTRUSTED (whole-branch review, 2026-10-21): the job wrote
+    it, so nothing in its working tree or `.git/config` may shape what the
+    reviewer sees or run code under the runner — `--text` (a nested
+    `.gitattributes` with `* -diff` would otherwise render every file as
+    `Binary files … differ`), `--no-ext-diff` (no `diff=<driver>` /
+    `diff.external` command), `core.quotePath=false` (non-ASCII paths print
+    raw so the deny list sees them; tabs/quotes/newlines stay quoted and
+    `gate_unparseable_headers` refuses those), `core.fsmonitor=false` and
+    `core.hooksPath=/dev/null` (no config-driven command execution).
     """
     if not base_sha:
         raise RuntimeError("pre-push gate: no base commit recorded for the clone")
 
     def _run(args: list[str], ok_codes=(0,)) -> subprocess.CompletedProcess:
         try:
-            res = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                                 text=True, timeout=60)
+            res = subprocess.run(["git", *GATE_GIT_OPTS, *args], cwd=str(cwd),
+                                 capture_output=True, text=True, timeout=60)
         except Exception as exc:  # noqa: BLE001 — surfaced as a gate failure
             raise RuntimeError(f"pre-push gate: git {args[0]} failed: {exc}") from exc
         if res.returncode not in ok_codes:
@@ -222,12 +246,12 @@ def diff_for_gate(cwd: Path, base_sha: str | None) -> str:
                 f"{res.stderr.strip()[:300]}")
         return res
 
-    tracked = _run(["diff", "--no-color", base_sha, "--"]).stdout or ""
+    tracked = _run(["diff", *GATE_DIFF_FLAGS, base_sha, "--"]).stdout or ""
     untracked = _run(["ls-files", "--others", "--exclude-standard", "-z"]).stdout
     parts = [tracked] if tracked else []
     for name in [n for n in untracked.split("\0") if n]:
         # `--no-index` exits 1 when the files differ (always, vs /dev/null).
-        res = _run(["diff", "--no-color", "--no-index", "--", "/dev/null", name],
+        res = _run(["diff", *GATE_DIFF_FLAGS, "--no-index", "--", "/dev/null", name],
                    ok_codes=(0, 1))
         if res.stdout:
             parts.append(res.stdout)
@@ -263,7 +287,10 @@ GATE_DENIED_DIRS: tuple[str, ...] = (
 GATE_DENIED_FILES: tuple[str, ...] = (
     ".gitmodules", ".gitattributes", ".gitconfig", ".mcp.json",
 )
-GATE_DENIED_BASENAMES: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md")
+# `.gitattributes` at ANY depth (whole-branch review, 2026-10-21): a nested
+# one applies to its subtree and is read by every later git in the checkout
+# (diff drivers, filters, `-diff`), not only at the root.
+GATE_DENIED_BASENAMES: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md", ".gitattributes")
 
 _DIFF_PATH_LINE = re.compile(
     r"^(?:\+\+\+ b/|--- a/|rename (?:from|to) |copy (?:from|to) )(?P<path>.+?)\s*$")
@@ -317,6 +344,58 @@ def gate_path_denials(diff: str) -> list[str]:
     """The denied paths a gate diff touches (empty = clean). Pure; the
     session refuses the diff before `run_code_review` when non-empty."""
     return [p for p in gate_diff_paths(diff) if gate_path_denied(p)]
+
+
+_HEADER_PREFIXES = ("--- ", "+++ ", "rename from ", "rename to ", "copy from ", "copy to ")
+
+
+def gate_unparseable_headers(diff: str) -> list[str]:
+    """Header lines of a unified diff that name a path the gate parser
+    CANNOT read (whole-branch review, 2026-10-21) — git-quoted paths
+    (`diff --git "a/…" "b/…"`, `+++ "b/…"`: tabs, quotes, control bytes,
+    or non-ASCII when `core.quotePath` is on) and any `diff --git` line the
+    strict regex rejects. Pure. The gate treats a non-empty result as a
+    refusal (`merge_gate_refused reason=unparseable_path`): a path the
+    deny list never saw must not reach a push. Only lines in a file's
+    HEADER (from `diff --git` to the first `@@`) are examined for the
+    `---`/`+++`/`rename`/`copy` forms, because hunk CONTENT may begin
+    with `--- "` (a removed `-- "x"` line) legitimately."""
+    bad: list[str] = []
+    in_header = False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            in_header = True
+            if not _DIFF_GIT_LINE.match(line):
+                bad.append(line)
+            continue
+        if line.startswith("@@") or line.startswith("Binary files "):
+            in_header = False
+            continue
+        if not in_header:
+            continue
+        if line.startswith(_HEADER_PREFIXES):
+            rest = line.split(" ", 1)[1] if line.startswith(("--- ", "+++ ")) \
+                else line.split(" ", 2)[2]
+            if rest.startswith("/dev/null"):
+                continue
+            if rest.startswith('"') or not _DIFF_PATH_LINE.match(line):
+                bad.append(line)
+    return bad
+
+
+def gate_refusal(diff: str) -> tuple[str, list[str]] | None:
+    """Why the gate must refuse `diff` BEFORE a reviewer is spent, or None:
+    `("denied_path", paths)` (deny wins, evaluated first) or
+    `("unparseable_path", header_lines)`. Pure; one call shared by
+    `session._pre_push_gate` and the canary's `gate_dry_run`. The size
+    rule (`MAX_DIFF_CHARS`) is the caller's — it needs the audit fields."""
+    denied = gate_path_denials(diff)
+    if denied:
+        return "denied_path", denied
+    unparseable = gate_unparseable_headers(diff)
+    if unparseable:
+        return "unparseable_path", unparseable
+    return None
 
 
 def head_commit_epoch(cwd: Path) -> int | None:

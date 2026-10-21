@@ -453,6 +453,14 @@ drift that a deploy resolves, not a defect in the change.
 
 ## Nothing caps Codex-lane concurrency at 1 — §4f is an assumption, not code (2026-10-21, T9)
 
+**CLOSED 2026-10-21 (whole-branch review)**: `session._run_executor` now
+awaits `executor.run` under `executor_slot(<registry executor name>)`, an
+`asyncio.Semaphore(EXECUTOR_CONCURRENCY[name])` with `codex_cli = 1`; a
+contended wait audits `executor_slot_wait{executor, waited_s, concurrency}`
+and comes out of the executor's own budget. Two queued Codex jobs now run
+one after the other (`tests/test_pre_push_gate.py::test_two_codex_jobs_serialize_on_the_executor_slot`).
+The paragraph below is the history.
+
 Plan §4f ("one credential, one stream … `codex` concurrency fixed at 1")
 and the executor docstring ("the session/queue keep codex concurrency at 1;
 this module has no pool") describe an invariant no code enforces: the only

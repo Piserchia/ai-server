@@ -104,10 +104,24 @@ def resolve_isolation(
 # ── Git operations ──────────────────────────────────────────────────────────
 
 
-def _run_git(args: list[str], cwd: Path, timeout: int = 120) -> subprocess.CompletedProcess:
+#: `git -c …` pins for every runner-side git command inside a clone a
+#: non-Anthropic job wrote (whole-branch review, 2026-10-21). Whether or not
+#: Codex's `workspace-write` Seatbelt keeps `.git/` read-only (the canary's
+#: `git_dir_protected` check records it), a planted `.git/hooks/*`,
+#: `core.hooksPath` or `core.fsmonitor` must never run as the owner in the
+#: runner's unscrubbed env when the runner adds, commits or pushes.
+UNTRUSTED_GIT_OPTS: tuple[str, ...] = (
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "core.fsmonitor=false",
+)
+
+
+def _run_git(args: list[str], cwd: Path, timeout: int = 120, *,
+             untrusted: bool = False) -> subprocess.CompletedProcess:
+    argv = ["git", *(UNTRUSTED_GIT_OPTS if untrusted else ()), *args]
     try:
         return subprocess.run(
-            ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+            argv, cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         # Never raise on a hung git (network stall). Callers branch on
@@ -274,7 +288,7 @@ def head_sha(path: Path) -> str | None:
     """Full SHA of HEAD in `path`, or None (not a repo / no commits). The
     session records this right after `create_workspace` for a non-Anthropic
     job: it is the base the pre-push gate diffs against (T5, 2026-10-21)."""
-    res = _run_git(["rev-parse", "--verify", "HEAD"], cwd=path, timeout=30)
+    res = _run_git(["rev-parse", "--verify", "HEAD"], cwd=path, timeout=30, untrusted=True)
     if res.returncode != 0:
         return None
     out = res.stdout.strip()
@@ -283,7 +297,7 @@ def head_sha(path: Path) -> str | None:
 
 def current_branch(path: Path) -> str | None:
     """Short branch name checked out in `path`, or None (detached / error)."""
-    res = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path, timeout=30)
+    res = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path, timeout=30, untrusted=True)
     if res.returncode != 0:
         return None
     out = res.stdout.strip()
@@ -322,11 +336,14 @@ def publish_workspace(
       still returned so the audit names the commit.
     - canonical with no remote (`pushes_to_origin=False`): no push;
       `sync_canonical` fetches from the workspace as today.
+    - every git call here runs with `UNTRUSTED_GIT_OPTS` and the push with
+      `--no-verify` (whole-branch review, 2026-10-21): hooks the job may
+      have planted in the clone never run under the runner.
     """
-    res = _run_git(["add", "-A", "--"], cwd=ws.path)
+    res = _run_git(["add", "-A", "--"], cwd=ws.path, untrusted=True)
     if res.returncode != 0:
         return False, f"git add failed: {res.stderr[:300]}", None
-    staged = _run_git(["diff", "--cached", "--quiet"], cwd=ws.path)
+    staged = _run_git(["diff", "--cached", "--quiet"], cwd=ws.path, untrusted=True)
     has_staged = staged.returncode == 1
     if staged.returncode not in (0, 1):
         return False, f"git diff --cached failed: {staged.stderr[:300]}", None
@@ -340,8 +357,8 @@ def publish_workspace(
         args.append("--allow-empty")
     try:
         commit = subprocess.run(
-            ["git", *args], cwd=str(ws.path), input=body, capture_output=True,
-            text=True, timeout=120)
+            ["git", *UNTRUSTED_GIT_OPTS, *args], cwd=str(ws.path), input=body,
+            capture_output=True, text=True, timeout=120)
     except Exception as exc:  # noqa: BLE001 — reported, never raised
         return False, f"git commit failed: {exc}", None
     if commit.returncode != 0:
@@ -354,7 +371,8 @@ def publish_workspace(
     branch = current_branch(ws.path)
     if not branch:
         return False, "git push skipped: detached HEAD in the workspace", sha
-    push = _run_git(["push", "origin", f"{branch}:{branch}"], cwd=ws.path, timeout=180)
+    push = _run_git(["push", "--no-verify", "origin", f"{branch}:{branch}"],
+                    cwd=ws.path, timeout=180, untrusted=True)
     if push.returncode != 0:
         return False, f"git push rejected (not retried, never forced): {push.stderr[:300]}", sha
     return True, f"committed {sha[:8] if sha else '?'} and pushed origin/{branch}", sha

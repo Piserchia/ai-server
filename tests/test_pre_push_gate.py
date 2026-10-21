@@ -1048,3 +1048,303 @@ async def test_empty_description_uses_the_kind_as_commit_subject(harness, descri
 def test_audit_log_docstring_lists_publish_failed_and_merge_gate_refused():
     doc = (REPO / "src" / "audit_log.py").read_text()
     assert "publish_failed" in doc and "merge_gate_refused" in doc
+
+
+# ── Whole-branch review findings (2026-10-21) ─────────────────────────────────
+#
+# 1. A nested `.gitattributes` (`* -diff`, or an external diff driver) must
+#    not blind the gate's diff; `.gitattributes` is denied at ANY depth.
+# 2. A git-quoted path (`core.quotePath`, tabs/quotes/control bytes) must
+#    not slip past the deny list: raw printing for non-ASCII, and any
+#    header the parser cannot read is a refusal (`unparseable_path`).
+# 3. A diff the reviewer would only see part of (> `MAX_DIFF_CHARS`) is
+#    refused before the reviewer runs (`diff_too_large`), never LGTM'd on
+#    a truncated read.
+# 4. Plan §4f: codex concurrency is 1 — a per-executor slot in
+#    `_run_executor`, keyed by the registry's `executor:` name.
+# 5. Runner-side git in a Codex-written clone never runs hooks planted
+#    there (`core.hooksPath` pinned, `push --no-verify`, fsmonitor off).
+
+
+def _hook_dir(tmp_path: Path, marker_dir: Path, names=("pre-push", "post-commit",
+                                                      "pre-commit", "commit-msg")) -> Path:
+    hooks = tmp_path / "planted-hooks"
+    hooks.mkdir(exist_ok=True)
+    marker_dir.mkdir(exist_ok=True)
+    for name in names:
+        h = hooks / name
+        h.write_text(f"#!/bin/sh\ntouch '{marker_dir}/HOOK_{name}'\nexit 0\n")
+        h.chmod(0o755)
+    return hooks
+
+
+class TestGateDiffCannotBeBlinded:
+    def test_nested_gitattributes_cannot_hide_content_and_is_denied(self, clone):
+        base = workspaces.head_sha(clone.path)
+        sub = clone.path / "sub"
+        sub.mkdir()
+        (sub / ".gitattributes").write_text("* -diff\n")
+        (sub / "evil.py").write_text('import os\nos.system("evil")\n')
+        # A tracked file under the attribute too (committed by the job).
+        (clone.path / "keep.py").write_text("x = 2\n")
+        (clone.path / ".gitattributes").write_text("keep.py -diff\n")
+        diff = review.diff_for_gate(clone.path, base)
+        assert 'os.system("evil")' in diff
+        assert "+x = 2" in diff
+        assert "Binary files" not in diff
+        refusal = review.gate_refusal(diff)
+        assert refusal is not None and refusal[0] == "denied_path"
+        assert set(refusal[1]) >= {"sub/.gitattributes", ".gitattributes"}
+
+    def test_external_diff_driver_is_never_invoked(self, clone, tmp_path):
+        base = workspaces.head_sha(clone.path)
+        marker = tmp_path / "EXTDIFF_RAN"
+        _git(["config", "diff.external", f"sh -c 'touch {marker}; echo HIJACKED'"], clone.path)
+        _git(["config", "diff.evil.command", f"sh -c 'touch {marker}; echo HIJACKED'"], clone.path)
+        (clone.path / "sub").mkdir()
+        (clone.path / "sub" / ".gitattributes").write_text("*.py diff=evil\n")
+        (clone.path / "sub" / "evil.py").write_text('os.system("evil")\n')
+        (clone.path / "keep.py").write_text("x = 3\n")
+        diff = review.diff_for_gate(clone.path, base)
+        assert 'os.system("evil")' in diff and "+x = 3" in diff
+        assert "HIJACKED" not in diff
+        assert not marker.exists()
+
+    def test_fsmonitor_and_hooks_in_the_clone_config_do_not_run_for_the_diff(self, clone, tmp_path):
+        base = workspaces.head_sha(clone.path)
+        marker = tmp_path / "FSMON_RAN"
+        _git(["config", "core.fsmonitor", f"sh -c 'touch {marker}'"], clone.path)
+        (clone.path / "keep.py").write_text("x = 4\n")
+        (clone.path / "new.txt").write_text("n\n")
+        diff = review.diff_for_gate(clone.path, base)
+        assert "+x = 4" in diff and "+n" in diff
+        assert not marker.exists()
+
+    @pytest.mark.parametrize("path", ["sub/.gitattributes", "a/b/c/.gitattributes"])
+    def test_gitattributes_denied_at_any_depth(self, path):
+        assert review.gate_path_denied(path)
+
+
+class TestGateQuotedPaths:
+    QUOTED = (
+        'diff --git "a/.github/workflows/\\303\\244.yml" "b/.github/workflows/\\303\\244.yml"\n'
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        '+++ "b/.github/workflows/\\303\\244.yml"\n'
+        "@@ -0,0 +1 @@\n+on: push\n"
+    )
+    TAB = (
+        'diff --git "a/x\\ty.py" "b/x\\ty.py"\n--- "a/x\\ty.py"\n+++ "b/x\\ty.py"\n'
+        "@@ -1 +1 @@\n-1\n+2\n"
+    )
+    CLEAN = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-1\n+2\n"
+    # Hunk CONTENT may legitimately start with `--- "` / `+++ "` (a removed
+    # line `-- "x"`, an added line `++ "y"`): never a refusal.
+    CONTENT_LOOKALIKE = ("diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,2 @@\n"
+                         '--- "hello"\n+++ "there"\n')
+
+    def test_quoted_headers_are_unparseable_not_skipped(self):
+        assert review.gate_unparseable_headers(self.QUOTED)
+        assert review.gate_unparseable_headers(self.TAB)
+        assert review.gate_unparseable_headers(self.CLEAN) == []
+        assert review.gate_unparseable_headers(self.CONTENT_LOOKALIKE) == []
+        assert review.gate_unparseable_headers("") == []
+
+    def test_gate_refusal_fails_closed_on_quoted_paths(self):
+        reason, items = review.gate_refusal(self.QUOTED)
+        assert reason == "unparseable_path" and items and items[0].startswith("diff --git \"")
+        reason, items = review.gate_refusal(self.TAB)
+        assert reason == "unparseable_path" and items
+        assert review.gate_refusal(self.CLEAN) is None
+        assert review.gate_refusal(self.CONTENT_LOOKALIKE) is None
+        # Deny wins over unparseable when both are present.
+        both = TestGatePathDenials.DIFF + self.QUOTED
+        assert review.gate_refusal(both)[0] == "denied_path"
+
+    def test_real_git_prints_non_ascii_raw_so_the_deny_list_sees_it(self, clone):
+        base = workspaces.head_sha(clone.path)
+        wf = clone.path / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "ä.yml").write_text("on: push\n")
+        diff = review.diff_for_gate(clone.path, base)
+        assert ".github/workflows/ä.yml" in diff
+        assert review.gate_refusal(diff) == ("denied_path", [".github/workflows/ä.yml"])
+
+    def test_real_git_tab_in_path_is_refused_as_unparseable(self, clone):
+        base = workspaces.head_sha(clone.path)
+        (clone.path / "x\ty.py").write_text("ok = 1\n")
+        diff = review.diff_for_gate(clone.path, base)
+        reason, items = review.gate_refusal(diff)
+        assert reason == "unparseable_path" and items
+
+
+async def test_unparseable_path_in_diff_is_refused_before_any_reviewer_runs(harness):
+    h = harness
+    h.diff = TestGateQuotedPaths.QUOTED
+    job = _job()
+    with pytest.raises(session.ReviewBlocked) as ei:
+        await session.run_session(job)
+    exc = ei.value
+    assert exc.refused_reason == "unparseable_path"
+    assert exc.verdict == ReviewOutcome.blocker.value
+    assert h.review_calls == [] and h.publish_calls == [] and h.synced == []
+    assert h.cleaned == [(h.created[0], True)]
+    refused = _event(job.id, "merge_gate_refused")
+    assert refused["reason"] == "unparseable_path" and refused["lines"]
+    assert "merge_gate_verdict" not in _kinds(job.id)
+
+
+async def test_oversized_diff_is_refused_not_reviewed_in_part(harness):
+    h = harness
+    h.diff = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n" + ("+x\n" * (review.MAX_DIFF_CHARS // 3 + 1))
+    assert len(h.diff) > review.MAX_DIFF_CHARS
+    job = _job()
+    with pytest.raises(session.ReviewBlocked) as ei:
+        await session.run_session(job)
+    exc = ei.value
+    assert exc.refused_reason == "diff_too_large"
+    assert exc.verdict == ReviewOutcome.changes_requested.value
+    assert "too large" in str(exc)
+    assert h.review_calls == [] and h.publish_calls == [] and h.synced == []
+    assert h.cleaned == [(h.created[0], True)]
+    refused = _event(job.id, "merge_gate_refused")
+    assert refused["reason"] == "diff_too_large"
+    assert refused["diff_chars"] == len(h.diff) and refused["max_chars"] == review.MAX_DIFF_CHARS
+    kinds = _kinds(job.id)
+    assert "merge_gate_verdict" not in kinds and "workspace_published" not in kinds
+    assert "job_completed" not in kinds
+
+
+async def test_diff_at_the_limit_is_still_reviewed(harness):
+    h = harness
+    head = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n"
+    h.diff = head + "+" + "x" * (review.MAX_DIFF_CHARS - len(head) - 2) + "\n"
+    assert len(h.diff) == review.MAX_DIFF_CHARS
+    await session.run_session(_job())
+    assert len(h.review_calls) == 1 and len(h.publish_calls) == 1
+
+
+async def test_main_review_blocked_card_names_the_oversized_diff(main_harness):
+    from src.models import JobStatus
+    from src.runner import main as runner_main
+    exc = session.ReviewBlocked("codex", "gpt-6-luna", verdict="changes_requested",
+                                refused_reason="diff_too_large", diff_chars=60_000)
+    h = main_harness(exc, "codex", task_id=uuid.uuid4())
+    await runner_main._process_job(h.job.id)
+    assert h.escalated == []
+    fin = h.finished[0]
+    assert fin["status"] is JobStatus.failed and fin["terminal_reason"] == "review_blocked"
+    assert fin["review_outcome"] == "changes_requested"
+    assert "60000" in fin["done_payload"]["summary"].replace(",", "")
+    assert "refused" in h.notified[0][2]["text"]
+
+
+# (4) §4f — one credential, one stream.
+
+
+class _SlowExecutor(_FakeExecutor):
+    def __init__(self):
+        super().__init__()
+        self.active = 0
+        self.peak = 0
+        self.release = asyncio.Event()
+
+    async def run(self, job, **kw):
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        self.calls.append({"job": job, **kw})
+        try:
+            await self.release.wait()
+        finally:
+            self.active -= 1
+        return self.result
+
+
+async def test_two_codex_jobs_serialize_on_the_executor_slot(harness, monkeypatch):
+    h = harness
+    h.executor = _SlowExecutor()
+    monkeypatch.setattr(session, "_EXECUTORS", {"codex_cli": h.executor})
+    monkeypatch.setattr(session, "_EXECUTOR_SLOTS", {})
+    assert session.EXECUTOR_CONCURRENCY["codex_cli"] == 1
+    j1, j2 = _job(), _job()
+    t1 = asyncio.create_task(session.run_session(j1))
+    t2 = asyncio.create_task(session.run_session(j2))
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if h.executor.active == 1 and len(h.executor.calls) == 1:
+            break
+    assert h.executor.active == 1 and h.executor.peak == 1 and len(h.executor.calls) == 1
+    h.executor.release.set()
+    await asyncio.gather(t1, t2)
+    assert h.executor.peak == 1 and len(h.executor.calls) == 2
+    # The job that waited says so in its audit log, and its executor budget
+    # shrank by the wait (main's ceiling did not move).
+    waited = [jid for jid in (j1.id, j2.id)
+              if any(e["kind"] == "executor_slot_wait" for e in audit_log.read(str(jid)))]
+    assert len(waited) == 1
+    first, second = h.executor.calls
+    assert second["timeout_s"] <= first["timeout_s"]
+
+
+async def test_executor_slot_is_released_when_the_executor_raises(harness, monkeypatch):
+    h = harness
+    monkeypatch.setattr(session, "_EXECUTOR_SLOTS", {})
+
+    class _Boom(_FakeExecutor):
+        async def run(self, job, **kw):
+            raise FileNotFoundError("codex not found")
+
+    h.executor = _Boom()
+    monkeypatch.setattr(session, "_EXECUTORS", {"codex_cli": h.executor})
+    with pytest.raises(session.ExecutorFailed):
+        await session.run_session(_job())
+    slot = session.executor_slot("codex_cli")
+    assert not slot.locked()
+
+
+def test_executor_slot_is_keyed_by_registry_executor_name():
+    assert session.executor_slot("codex_cli") is session.executor_slot("codex_cli")
+    assert session.executor_slot("codex_cli") is not session.executor_slot("other_cli")
+    assert session.executor_name_for("codex") == "codex_cli"
+    assert session.executor_name_for("anthropic") is None
+
+
+# (5) hooks planted in the clone never run under the runner's git.
+
+
+class TestPublishNeverRunsPlantedHooks:
+    def test_hookspath_in_clone_config_and_git_hooks_dir_are_ignored(self, clone, canonical_repo, tmp_path):
+        markers = tmp_path / "markers"
+        hooks = _hook_dir(tmp_path, markers)
+        _git(["config", "core.hooksPath", str(hooks)], clone.path)
+        # Also the default location, in case hooksPath were ever dropped.
+        git_hooks = clone.path / ".git" / "hooks"
+        git_hooks.mkdir(exist_ok=True)
+        for name in ("pre-push", "post-commit"):
+            p = git_hooks / name
+            p.write_text(f"#!/bin/sh\ntouch '{markers}/GITHOOK_{name}'\nexit 0\n")
+            p.chmod(0o755)
+        fsmon = tmp_path / "FSMON_RAN"
+        _git(["config", "core.fsmonitor", f"sh -c 'touch {fsmon}'"], clone.path)
+
+        base = workspaces.head_sha(clone.path)
+        (clone.path / "keep.py").write_text("x = 2\n")
+        ok, detail, sha = workspaces.publish_workspace(
+            clone, base_sha=base, message="demo: x",
+            trailers=workspaces.provenance_trailers(
+                provider="codex", model_id="m", job_id="j", reviewer="anthropic/r"))
+        assert ok, detail
+        assert sorted(p.name for p in markers.iterdir()) == []
+        assert not fsmon.exists()
+        remote_head = _git(["rev-parse", "main"], canonical_repo.parent / "remote.git").stdout.strip()
+        assert remote_head == sha
+
+    def test_every_runner_git_call_in_the_clone_pins_hooks_off(self):
+        src = (REPO / "src" / "runner" / "workspaces.py").read_text()
+        assert "core.hooksPath=/dev/null" in src and "core.fsmonitor=false" in src
+        assert '"push", "--no-verify"' in src
+        tree = ast.parse(src)
+        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                  and n.name == "publish_workspace")
+        body = ast.get_source_segment(src, fn)
+        assert "untrusted=True" in body and "UNTRUSTED_GIT_OPTS" in body

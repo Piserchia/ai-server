@@ -2,6 +2,11 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — Whole-branch review: `audit_log.py` docstring (additive kinds/fields)
+
+**Agent task**: cross-reference for the runner CHANGELOG entry of the same date (`src/audit_log.py` is the shape of record for audit kinds).
+**Files changed**: `src/audit_log.py` (docstring only) — `merge_gate_refused` gains reasons `unparseable_path` (+`lines`) and `diff_too_large` (+`max_chars`); new kind `executor_slot_wait{executor, waited_s, concurrency}`. No kind renamed or reshaped (C14); `.context/modules/db/CONTEXT.md` kind list updated.
+
 ## 2026-10-21 — T9: docs, registries, runbook (no code change)
 
 **Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under

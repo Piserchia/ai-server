@@ -2927,10 +2927,12 @@ The ChatGPT login in `auth.json` (under `CODEX_HOME`, default `~/.codex`)
 has expired or its refresh token was rotated out from under the runner —
 the usual cause is a second `codex` process (the owner's own terminal, the
 ChatGPT app) refreshing the same `auth.json` — or two Codex JOBS running at
-once: plan §4f assumes one stream per login, but as of 2026-10-21 nothing
-enforces it — the only semaphore is the global `MAX_CONCURRENT_JOBS` (4), so
-two queued `codex/...` jobs WILL run concurrently on the same `auth.json`
-(T9 finding; runner GOTCHAS). The
+once: plan §4f assumes one stream per login; since the 2026-10-21
+whole-branch review `session._run_executor` enforces it with a per-executor
+slot (`EXECUTOR_CONCURRENCY["codex_cli"] = 1`; a queued second job audits
+`executor_slot_wait` and runs after the first), so two Codex JOBS can no
+longer race the refresh token — a second `codex` PROCESS outside the runner
+still can. The
 executor classifies 401 / "login" / `refresh_token` / "unauthorized" as
 `auth_expired`; it is terminal on the lane and never escalated.
 

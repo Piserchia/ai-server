@@ -54,6 +54,7 @@ from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
 from src.runner.reconcile import reconcile_orphaned_jobs, requeue_stranded_queued
 from src.runner.review import (
+    MAX_DIFF_CHARS,
     ReviewOutcome,
     get_git_diff,
     head_commit_epoch,
@@ -650,11 +651,24 @@ async def _process_job(job_id: uuid.UUID) -> None:
         reason = str(exc)
         audit_log.append(str(job_id), "job_failed", error=reason,
                          error_category="review_blocked")
-        if exc.denied_paths:
+        refused = getattr(exc, "refused_reason", None)
+        if refused == "denied_path" or (refused is None and exc.denied_paths):
             card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
                     f"({exc.provider}/{exc.model_id}): it touches denied paths "
                     f"({', '.join(exc.denied_paths)}) — refused before any reviewer "
                     f"ran. Nothing was pushed; the clone is kept.")
+        elif refused == "unparseable_path":
+            card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}): {len(exc.denied_paths)} diff "
+                    f"header(s) name a git-quoted path the gate cannot parse, so the "
+                    f"deny list could not be applied — refused before any reviewer "
+                    f"ran. Nothing was pushed; the clone is kept.")
+        elif refused == "diff_too_large":
+            card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}): {exc.diff_chars} chars exceeds "
+                    f"the reviewer's {MAX_DIFF_CHARS}-char read — a partial "
+                    f"review is never an LGTM. Nothing was pushed; the clone is kept "
+                    f"(split the work or review it by hand).")
         else:
             card = (f"Pre-push review gate: {exc.verdict} on job {str(job_id)[:8]} "
                     f"({exc.provider}/{exc.model_id}, {exc.findings_n} finding(s)"

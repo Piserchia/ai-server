@@ -37,10 +37,11 @@ def canary_factory(*, stdout_fixture: str = "command_and_file.jsonl",
                    write_canary: bool = True, write_env: bool = True,
                    write_output: str | None = "did the thing\n\nTASK_COMPLETE: canary",
                    escape: bool = False, extra_files: tuple[str, ...] = (),
-                   returncode: int = 0):
+                   returncode: int = 0, git_probe: bool = False):
     """Replays `stdout_fixture` and performs the side effects the real CLI
     would: the canary file, the env-names file, the `-o` file, optionally
-    an escape file (a Seatbelt failure) and extra files."""
+    an escape file (a Seatbelt failure), a write into the clone's `.git/`
+    (`git_probe`, the whole-branch-review probe) and extra files."""
     calls: dict = {"exec": [], "version": []}
 
     async def factory(argv: list[str], *, cwd: str, env: dict[str, str]):
@@ -59,6 +60,8 @@ def canary_factory(*, stdout_fixture: str = "command_and_file.jsonl",
             prompt = argv[-1]
             escape_path = codex_cli.escape_path_from_prompt(prompt)
             Path(escape_path).write_text("escaped\n")
+        if git_probe:
+            (clone / codex_cli.CANARY_GIT_PROBE).write_text("planted\n")
         if write_output is not None:
             Path(argv[argv.index("-o") + 1]).write_text(write_output, encoding="utf-8")
         proc = FakeProc(fixture_bytes(stdout_fixture), returncode)
@@ -128,6 +131,7 @@ def test_canary_prompt_names_every_probe_and_the_marker():
     assert codex_cli.CANARY_FILE in prompt
     assert codex_cli.CANARY_LINE in prompt
     assert "/Users/owner/escape.txt" in prompt
+    assert f"touch '{codex_cli.CANARY_GIT_PROBE}'" in prompt   # the .git/ write probe
     assert prompt.rstrip().endswith(codex_cli.CANARY_MARKER)
     # names only — the env file must never carry values into the clone / diff
     assert "cut -d= -f1" in prompt
@@ -276,6 +280,21 @@ async def test_canary_detects_an_escape_outside_the_clone_and_removes_it(root, c
     assert "agent_reported_blocked=False" in report["checks"]["nothing_outside"]["detail"]
 
 
+async def test_canary_detects_a_write_into_the_git_dir(root, clone, codex_bin, escape_path,
+                                                       environ):
+    """Whole-branch review (2026-10-21): if Codex can write `.git/` it can
+    plant hooks or `core.hooksPath`; the canary probes `touch .git/<probe>`
+    and the check fails when the file exists after the run."""
+    report, _ = await run_canary(clone, codex_bin, escape_path, environ, git_probe=True)
+    c = report["checks"]["git_dir_protected"]
+    assert c["ok"] is False and "exists_after_run=True" in c["detail"]
+    assert report["ok"] is False
+    assert not (clone / codex_cli.CANARY_GIT_PROBE).exists()  # recorded, then removed
+    # `.git/` is excluded from the added-files snapshot, so this must NOT
+    # double-report as a stray file.
+    assert report["checks"]["only_expected_files"]["ok"] is True
+
+
 async def test_canary_detects_stray_files_in_the_clone(root, clone, codex_bin, escape_path,
                                                        environ):
     report, _ = await run_canary(clone, codex_bin, escape_path, environ,
@@ -414,6 +433,26 @@ async def test_gate_dry_run_refuses_denied_paths_before_the_reviewer(root, clone
     report = await codex_cli.gate_dry_run(clone, base_sha="abc123", job_id=JOB_ID)
     assert report["verdict"] == "refused"
     assert report["denied_paths"] == [".claude/settings.json"]
+
+
+async def test_gate_dry_run_refuses_quoted_paths_and_oversized_diffs(root, clone, monkeypatch):
+    from src.runner import review
+
+    async def never(*a, **k):
+        pytest.fail("reviewer must not run on a refused diff")
+
+    monkeypatch.setattr(review, "run_code_review", never)
+    quoted = ('diff --git "a/.github/workflows/\\303\\244.yml" "b/.github/workflows/\\303\\244.yml"\n'
+              '--- /dev/null\n+++ "b/.github/workflows/\\303\\244.yml"\n@@ -0,0 +1 @@\n+on: push\n')
+    monkeypatch.setattr(review, "diff_for_gate", lambda cwd, base_sha: quoted)
+    report = await codex_cli.gate_dry_run(clone, base_sha="abc123", job_id=JOB_ID)
+    assert report["verdict"] == "refused" and report["refused_reason"] == "unparseable_path"
+
+    big = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n" + "+x\n" * (review.MAX_DIFF_CHARS // 3 + 1)
+    monkeypatch.setattr(review, "diff_for_gate", lambda cwd, base_sha: big)
+    report = await codex_cli.gate_dry_run(clone, base_sha="abc123", job_id=JOB_ID)
+    assert report["verdict"] == "refused" and report["refused_reason"] == "diff_too_large"
+    assert report["diff_chars"] == len(big)
 
 
 async def test_gate_dry_run_timeout_counts_as_changes_requested(root, clone, monkeypatch):

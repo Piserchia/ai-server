@@ -54,7 +54,7 @@ JSONL files at `volumes/audit_log/<job_id>.jsonl`. Append-only. Event kinds:
 the cross-vendor writer slice (2026-10-21) added `provider_selected`,
 `provider_refused` (T1/T4), `executor_started`, `turn_completed`,
 `executor_error` (T3), `merge_gate_verdict`, `merge_gate_skipped`,
-`merge_gate_refused`, `workspace_published` (T5) and additive fields on
+`merge_gate_refused` (reasons `denied_path` | `unparseable_path` (+`lines`) | `diff_too_large` (+`max_chars`) — the last two added by the 2026-10-21 whole-branch review), `workspace_published` (T5), `executor_slot_wait` (whole-branch review: §4f slot wait, `executor`/`waited_s`/`concurrency`) and additive fields on
 `job_started`/`job_completed` (`provider`, …), `tool_result` (`exit_code`,
 `output`), `workspace_created` (`base_sha`), `post_review_skipped`
 (`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`). Kinds are

@@ -669,6 +669,35 @@ def executor_timeout_s(ceiling_s: float, reserve_s: float = 0.0) -> float:
 #: Anthropic is NOT here (it is the in-process SDK, not an executor module).
 _EXECUTORS: dict[str, Any] = {codex_cli.EXECUTOR_NAME: codex_cli}
 
+#: Plan §4f — "one credential, one stream": how many of an executor's
+#: processes may run at once in this runner, keyed by the registry's
+#: `executor:` name (whole-branch review, 2026-10-21). Codex is 1 because
+#: concurrent streams on one `auth.json` race the refresh-token rotation
+#: (lockout → every later job `auth_expired`). An executor missing here
+#: gets 1 too (fail closed). `main`'s global `MAX_CONCURRENT_JOBS` still
+#: bounds everything; this slot is the per-credential cap under it.
+EXECUTOR_CONCURRENCY: dict[str, int] = {codex_cli.EXECUTOR_NAME: 1}
+_EXECUTOR_SLOTS: dict[str, asyncio.Semaphore] = {}
+
+
+def executor_slot(executor_name: str) -> asyncio.Semaphore:
+    """The per-executor semaphore (created lazily so it binds to the loop
+    that first contends on it; tests reset `_EXECUTOR_SLOTS`)."""
+    slot = _EXECUTOR_SLOTS.get(executor_name)
+    if slot is None:
+        slot = asyncio.Semaphore(EXECUTOR_CONCURRENCY.get(executor_name, 1))
+        _EXECUTOR_SLOTS[executor_name] = slot
+    return slot
+
+
+def executor_name_for(provider: str) -> str | None:
+    """The registry's `executor:` name for a non-Anthropic provider (the
+    `_EXECUTORS` / `EXECUTOR_CONCURRENCY` key), or None."""
+    if provider == models_registry.DEFAULT_PROVIDER:
+        return None
+    entry = models_registry.REGISTRY.provider(provider)
+    return entry.executor if entry is not None else None
+
 
 def executor_for(provider: str) -> Any | None:
     """The executor module for a non-Anthropic provider, or None (Anthropic,
@@ -877,7 +906,8 @@ class ReviewBlocked(RuntimeError):
 
     def __init__(self, provider: str, model_id: str, *, verdict: str,
                  findings_n: int = 0, timed_out: bool = False,
-                 denied_paths: list[str] | None = None):
+                 denied_paths: list[str] | None = None,
+                 refused_reason: str | None = None, diff_chars: int = 0):
         self.provider = provider
         self.model_id = model_id
         self.verdict = verdict
@@ -886,9 +916,21 @@ class ReviewBlocked(RuntimeError):
         # Non-empty = the diff was refused BEFORE a reviewer ran because it
         # touches `review.GATE_DENIED_*` paths (T5 review round 1).
         self.denied_paths = list(denied_paths or [])
-        if self.denied_paths:
+        # Why the gate refused BEFORE any reviewer ran, or None when a
+        # reviewer returned the verdict (whole-branch review, 2026-10-21):
+        # `denied_path` | `unparseable_path` | `diff_too_large`. Mirrors
+        # `merge_gate_refused.reason`.
+        self.refused_reason = refused_reason or ("denied_path" if self.denied_paths else None)
+        self.diff_chars = diff_chars
+        head = f"pre-push review gate refused the diff for {provider}/{model_id}"
+        if self.refused_reason == "denied_path":
             why = f"diff touches denied paths: {', '.join(self.denied_paths)}"
-            head = f"pre-push review gate refused the diff for {provider}/{model_id}"
+        elif self.refused_reason == "unparseable_path":
+            why = (f"diff names {len(self.denied_paths)} path(s) the gate cannot parse "
+                   f"(git-quoted); the deny list could not be applied")
+        elif self.refused_reason == "diff_too_large":
+            why = (f"diff too large: {diff_chars} chars > {review.MAX_DIFF_CHARS}; "
+                   f"the reviewer would only see part of it")
         else:
             why = "reviewer timed out" if timed_out else f"{findings_n} finding(s)"
             head = f"pre-push review gate returned {verdict} for {provider}/{model_id}"
@@ -1543,14 +1585,36 @@ async def _pre_push_gate(
     # runs"): settings/hooks, Codex + Claude instruction files, git
     # hook/config paths, CI workflows. Terminal like a `blocker` verdict —
     # clone kept, nothing committed, pushed or synced.
-    denied = review.gate_path_denials(diff)
-    if denied:
-        audit_log.append(job_id, "merge_gate_refused", belt="pre_push",
-                         reason="denied_path", paths=denied,
-                         diff_chars=len(diff), base_sha=base_sha)
+    refusal = review.gate_refusal(diff)
+    if refusal is not None:
+        reason, items = refusal
+        if reason == "denied_path":
+            audit_log.append(job_id, "merge_gate_refused", belt="pre_push",
+                             reason=reason, paths=items,
+                             diff_chars=len(diff), base_sha=base_sha)
+        else:
+            # A header the parser cannot read (git-quoted path): the deny
+            # list was never applied to it, so fail closed (whole-branch
+            # review, 2026-10-21).
+            audit_log.append(job_id, "merge_gate_refused", belt="pre_push",
+                             reason=reason, lines=[ln[:200] for ln in items],
+                             diff_chars=len(diff), base_sha=base_sha)
         raise ReviewBlocked(ref.provider, ref.model_id,
                             verdict=review.ReviewOutcome.blocker.value,
-                            findings_n=len(denied), denied_paths=denied)
+                            findings_n=len(items), denied_paths=items,
+                            refused_reason=reason, diff_chars=len(diff))
+
+    # The reviewer truncates at `MAX_DIFF_CHARS` and would LGTM a diff it
+    # only saw part of; for the GATE that would push unreviewed bytes to a
+    # canonical repo (whole-branch review, 2026-10-21). Refuse instead —
+    # the clone is kept for the owner, who can split the work.
+    if len(diff) > review.MAX_DIFF_CHARS:
+        audit_log.append(job_id, "merge_gate_refused", belt="pre_push",
+                         reason="diff_too_large", diff_chars=len(diff),
+                         max_chars=review.MAX_DIFF_CHARS, base_sha=base_sha)
+        raise ReviewBlocked(ref.provider, ref.model_id,
+                            verdict=review.ReviewOutcome.changes_requested.value,
+                            refused_reason="diff_too_large", diff_chars=len(diff))
 
     timed_out = False
     try:
@@ -1631,17 +1695,34 @@ async def _run_executor(
     # so without the reserve a long run that produced a diff was cancelled
     # mid-review and mislabelled `timeout` (review round 1).
     ceiling = resolve_session_timeout(job.payload, settings.session_timeout_seconds)
-    timeout_s = executor_timeout_s(ceiling, reserve_s=gate_reserve_s())
+    job_id = job.id if isinstance(job.id, str) else str(job.id)
 
+    # Plan §4f — one credential, one stream (whole-branch review,
+    # 2026-10-21): the per-executor slot serialises this provider's
+    # processes. A wait is audited and comes OUT of the executor's budget
+    # (main's `wait_for` ceiling started before the clone and does not
+    # move), so the executor's own `timeout` reason stays reachable.
+    executor_name = executor_name_for(ref.provider) or ref.provider
+    slot = executor_slot(executor_name)
+    loop = asyncio.get_running_loop()
+    contended = slot.locked()          # a free slot costs the budget nothing
+    wait_started = loop.time()
     try:
-        result = await executor.run(
-            job,
-            cwd=cwd,
-            prompt=build_executor_prompt(system_prompt, job.description),
-            model_id=ref.model_id,
-            sandbox=sandbox,
-            timeout_s=timeout_s,
-        )
+        async with slot:
+            waited_s = (loop.time() - wait_started) if contended else 0.0
+            if contended:
+                audit_log.append(job_id, "executor_slot_wait", executor=executor_name,
+                                 waited_s=round(waited_s, 2),
+                                 concurrency=EXECUTOR_CONCURRENCY.get(executor_name, 1))
+            timeout_s = executor_timeout_s(ceiling - waited_s, reserve_s=gate_reserve_s())
+            result = await executor.run(
+                job,
+                cwd=cwd,
+                prompt=build_executor_prompt(system_prompt, job.description),
+                model_id=ref.model_id,
+                sandbox=sandbox,
+                timeout_s=timeout_s,
+            )
     except (FileNotFoundError, ValueError) as exc:
         # Pre-process infrastructure failures (`CodexNotFound` is a
         # FileNotFoundError; a bad sandbox/prompt/cwd is a ValueError): no
@@ -1649,8 +1730,7 @@ async def _run_executor(
         # the same terminal path as a vendor error instead of letting the
         # generic `except Exception` in main escalate onto an Anthropic
         # model (review round 1, 2026-10-21).
-        audit_log.append(job.id if isinstance(job.id, str) else str(job.id),
-                         "executor_error", terminal_reason="api_error",
+        audit_log.append(job_id, "executor_error", terminal_reason="api_error",
                          message=f"{type(exc).__name__}: {exc}"[:500])
         raise ExecutorFailed(ref.provider, ref.model_id, "api_error",
                              f"{type(exc).__name__}: {exc}") from exc
