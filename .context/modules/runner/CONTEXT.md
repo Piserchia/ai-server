@@ -134,3 +134,4 @@ not a requirement. Rate limits are detected typed-first (`RateLimitEvent` →
 - `ResultMessage.usage` is best-effort — older SDK versions may not populate it.
 - `ClaudeAgentOptions.mcp_servers` is a `dict[str, McpSdkServerConfig]`, not a list. The dict key is the server name used for routing.
 - MCP `@tool` functions receive a single `args: dict` parameter, not keyword args. Always access fields via `args["key"]` or `args.get("key", default)`.
+- The SDK's `subprocess_cli` transport caps each JSON message from the bundled CLI at `_DEFAULT_MAX_BUFFER_SIZE = 1 MiB` unless `ClaudeAgentOptions.max_buffer_size` is set. `_build_options` now sets it to 20 MiB (2026-10-10) after three overflow failures in 48 h; raise it further if long-ToolResult sessions start hitting the ceiling again.
