@@ -14,6 +14,41 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-10-21 — Codex writes files through `Bash`, so the Write/Edit gates do not see them
+
+**Trap**: `learning.should_extract` (and anything else keyed on
+`tool_use.tool_name in ("Write", "Edit")`) decides "this job modified
+files" from tool kinds. The recorded Codex fixture
+(`tests/fixtures/codex/command_and_file.jsonl`) shows the CLI writing a file
+with `printf ... > hello.txt` inside a `command_execution` item, which the
+executor audits as `tool_use{tool_name:"Bash"}` — only `file_change` items
+become `Edit`. The C14 shapes are honoured; the semantic gate silently
+misses most Codex edits.
+
+**Rule**: for non-Anthropic executors, derive "modified files" from
+`git status --porcelain` in the per-job clone (T4/T5), never from tool
+kinds. Related: `ExecResult.model_served` is None unless the stream carried
+a `model` field — do not read a None there as "same as requested".
+
+## 2026-10-21 — `codex exec` blocks on a piped stdin, and a zero exit proves nothing
+
+**Trap**: `codex exec` treats whatever arrives on stdin as additional
+instructions and waits for EOF before starting; a job spawned with
+`stdin=PIPE` (or inheriting the runner's) hangs until the session timeout
+(probe #1, 2026-10-21: 90 s of nothing). Separately, the CLI can exit 0
+with no `turn.completed` event (e.g. an early auth/config failure printed
+to stderr), so "exit code 0 and some stdout" is not a finished turn.
+
+**Rule**: `src/runner/executors/codex_cli.py` always passes
+`stdin=asyncio.subprocess.DEVNULL` and classifies any stream that ends
+without `turn.completed` as `terminal_reason=api_error` whatever the exit
+code. Also: `settings.codex_bin` set to a path that does not exist is
+`CodexNotFound` (fail closed) — it never falls through to PATH or the
+ChatGPT.app bundle, so a typo in `.env` surfaces as a refused job, not a
+different binary. The bundle binary
+(`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`) is
+not on PATH under launchd, which is why discovery ends there.
+
 ## 2026-08-21 — `ResultMessage.is_error` is NOT a reliable "session succeeded" flag
 
 **Trap**: The bundled Claude CLI, on an Anthropic-side 5xx (e.g. 529

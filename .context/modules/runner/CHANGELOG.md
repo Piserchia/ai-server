@@ -2,6 +2,78 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T3: the Codex executor (`src/runner/executors/codex_cli.py`)
+
+**Agent task**: cross-vendor writer slice T3
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; old
+spec §2.4 JSONL mapping, §2.6 EnvScrubber contract).
+**Files changed**:
+- `src/runner/executors/__init__.py` (new) — package for non-Anthropic
+  executor adapters; re-exports `ExecResult`.
+- `src/runner/executors/codex_cli.py` (new) — `run(job, *, cwd, prompt,
+  model_id, sandbox, timeout_s, on_event, process_factory=…) -> ExecResult`
+  and `interrupt(job_id)` (SIGTERM → SIGKILL after `KILL_GRACE_S=1.5`,
+  INV-8). One `codex exec --json --ephemeral --ignore-user-config
+  --skip-git-repo-check --sandbox <read-only|workspace-write> -C <clone>
+  -m <id> -c features.goals=false -c analytics.enabled=false
+  -c otel.metrics_exporter="none" -c sandbox_workspace_write.network_access=false
+  -o <audit_log_dir>/<job_id>.codex-last.md <prompt>` per job, `stdin=DEVNULL`
+  (plan §4d), env = `scrubbed_env()` = exactly `{PATH, HOME, LANG, TMPDIR,
+  CODEX_HOME}`. `settings.codex_run_as_user` set → argv prefixed `sudo -n
+  -u <user> --preserve-env=<allowlist> --`. Binary: `settings.codex_bin`
+  (must exist) → `shutil.which("codex")` → the ChatGPT.app bundle path →
+  `CodexNotFound`. `EventMapper` maps the JSONL stream onto the EXISTING
+  audit kinds (`tool_use` Bash/Edit/WebSearch, `tool_result`, `text`,
+  `thinking` — C14 shapes unchanged, `tool_result` gains `exit_code` +
+  `output`) plus three new kinds `executor_started`, `turn_completed`,
+  `executor_error`; `default_sink` audits every event and publishes a
+  compact view on `jobs:stream:<id>` like `session._handle_message`.
+  Terminal reasons: `ok | rate_limited | auth_expired | api_error | timeout
+  | interrupted`; no `turn.completed` ⇒ `api_error` whatever the exit code
+  (the silent-empty-success trap). Final text of record = the `-o` file,
+  fallback the last `agent_message` (plan §4i). Never commits, pushes,
+  writes `AGENTS.md`, or accepts `danger-full-access`. NOT wired into
+  `run_session` yet — T4 adds the dispatch branch; nothing runs Codex today.
+- `src/config.py` — `codex_run_as_user: str = ""` (env `CODEX_RUN_AS_USER`,
+  D-C; unset by default).
+- `src/audit_log.py` — docstring lists the three new kinds and the two
+  additive `tool_result` fields; existing kinds untouched (C14).
+- `tests/test_codex_executor.py` (54, new) + fixture
+  `tests/fixtures/codex/file_change_and_failure.jsonl` (hand-authored,
+  labelled so in its header; `ok`/`command_and_file` are recorded truth).
+  Pure/fixture style: a process factory is injected — no live `codex`, no
+  network, no SDK.
+
+**Review (code-review T3, 2026-10-21) applied before commit**:
+- `run()` wraps the consume/wait block in `except BaseException` that
+  terminates the child (SIGTERM → SIGKILL) before re-raising — a sink that
+  raises (`audit_log.append` on a full disk) or a stream line over
+  `_STREAM_LINE_LIMIT` no longer orphans `codex exec`.
+- Stale `-o` guard: `out_path.unlink(missing_ok=True)` before the spawn, and
+  the `-o` file is only the text of record once `turn.completed` was seen
+  (job ids are reused on requeue; a `TASK_COMPLETE:` from a previous attempt
+  must not pair with this attempt's `terminal_reason`).
+- D-C run-as-user: `codex_run_as_user` now REQUIRES `codex_home` (else
+  `ValueError` before any process) and forwards the stream home as `HOME`,
+  `TMPDIR=<codex_home>/tmp` and `CODEX_HOME` — never the owner's HOME or
+  0700 TMPDIR. `scrubbed_env` gained a `tmpdir=` override. Still NOT
+  delivered: clone readability for the unprivileged user (the
+  `volumes/workspaces/` clone is `drwx------`; materialisation unbuilt) —
+  D-C stays an owner-gated residual, plan §6/§7.4 amended.
+- `classify_error` uses word-bounded regexes (`\b429\b`, `\b401\b`,
+  `\blog(ged)? in\b`): "140123 input tokens" / "plugin" no longer classify
+  as rate_limited / auth_expired (T6 parks the lane on those classes).
+- `ExecResult.model_served` is None when the stream never reported a model
+  (was: defaulted to the requested id) — T4 stamps `jobs.model_served` from
+  observation only; T10 canary to assert.
+- `probe_cli_version` terminates a hung `--version` process in a `finally`.
+- `build_argv` refuses a prompt beginning with `-` (clap would read it as a
+  flag; no unverified `--` separator added — T10 may verify one).
+- Tests: `tests/test_codex_executor.py` 54 → 67 (sink-raises, stale `-o`,
+  `-o` without `turn.completed`, run-as-user stream home + required
+  `codex_home`, hung probe, classify negatives, `model_served` observed-only,
+  `-`-prompt refusal).
+
 ## 2026-10-21 — T1: job model resolved through the models registry (fail-closed)
 
 **Agent task**: cross-vendor writer slice T1

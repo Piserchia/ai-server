@@ -35,6 +35,7 @@
 | `src/runner/router.py` | Rule-based keyword → skill matcher (incl. `plan` for multi-step asks) | — | runner.session, gateway.telegram_bot (triage) |
 | `src/runner/llm_router.py` | `settings.utility_model` routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
 | `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution | — | runner.session, server-upkeep skill |
+| `src/runner/executors/codex_cli.py` | Codex CLI executor (T3, 2026-10-21): `codex exec --json` per job under Seatbelt, scrubbed env, JSONL → existing audit kinds + `jobs:stream`; `interrupt` SIGTERM→SIGKILL. Not dispatched until T4 | config, db, audit_log | runner.session (T4) |
 | `src/runner/delivery.py` | Project delivery contract enforcement: dev-repo cwd scoping + deploy-authority gate | config, registry.manifest | runner.session, runner.main |
 | `src/runner/guards.py` | PreToolUse guard hooks: workspace write containment + Bash denylist (INV-17) | config, audit_log, claude_agent_sdk | runner.session |
 | `src/runner/agents.py` | SKILL.md → SDK AgentDefinition compilation (frontmatter `subagents:` → in-session delegation) | registry.skills, claude_agent_sdk | runner.session |

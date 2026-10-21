@@ -14,7 +14,7 @@ Kinds used (keep this list honest — update when adding new kinds):
 - provider_refused: {"kind", "ts", "job_id", "provider", "model", "raw", "reason"}  # registry refused `[provider/]model_id` before any process (T1, 2026-10-21)
 - job_cancelled:    {"kind", "ts", "job_id"}
 - tool_use:         {"kind", "ts", "job_id", "tool_name", "tool_use_id", "input"}
-- tool_result:      {"kind", "ts", "job_id", "tool_use_id", "is_error", "result_preview"}
+- tool_result:      {"kind", "ts", "job_id", "tool_use_id", "is_error", "result_preview"}  # + "exit_code", "output" from the Codex executor (additive, T3)
 - text:             {"kind", "ts", "job_id", "text"}             # assistant text blocks
 - thinking:         {"kind", "ts", "job_id", "text"}             # only if thinking is on
 - note:             {"kind", "ts", "job_id", "text"}             # runner-originated notes
@@ -22,6 +22,9 @@ Kinds used (keep this list honest — update when adding new kinds):
 - task_question:    {"kind", "ts", "job_id", "question"}           # skill asks user for input
 - task_complete:    {"kind", "ts", "job_id", "summary"}            # skill declares work done
 - task_choices:     {"kind", "ts", "job_id", "question", "options"} # skill presents structured choices as inline buttons
+- executor_started: {"kind", "ts", "job_id", "executor", "thread_id", "model", "cli_version", "env_keys"}  # non-Anthropic executor process started (T3, 2026-10-21)
+- turn_completed:   {"kind", "ts", "job_id", "usage"}              # one vendor turn finished; usage in SDK key names (T3)
+- executor_error:   {"kind", "ts", "job_id", "terminal_reason", "message"}  # vendor turn.failed/error, timeout or exit without turn.completed (T3)
 
 Also writes a human-readable `<job_id>.summary.md` at job completion (written by the runner,
 not here — it's the last turn the assistant produces).

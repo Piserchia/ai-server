@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     codex_bin: str = ""
     codex_home: str = ""
     codex_sandbox_default: str = "workspace-write"
+    # D-C read-side containment: when set (env CODEX_RUN_AS_USER), the
+    # executor prefixes its argv with `sudo -n -u <user> --` (the sudoers
+    # line is owner work). Unset by default — see plan §6 for the residual.
+    codex_run_as_user: str = ""
 
     # Database
     postgres_dsn: str
