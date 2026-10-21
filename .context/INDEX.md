@@ -95,6 +95,7 @@ projects/<slug>/
 | Understand workspace isolation + guard hooks | `src/runner/workspaces.py` + `src/runner/guards.py` docstrings, SYSTEM.md INV-16..18 |
 | Understand the plan → DAG → evaluate pipeline | `skills/plan/SKILL.md`, `skills/_evaluate/SKILL.md`, `src/runner/plans.py`, SYSTEM.md § Data flow |
 | Understand routing (rules + LLM fallback) | `src/runner/router.py`, `src/runner/llm_router.py` |
+| Add, alias or retire a model id / provider (`[provider/]model_id`) | `models.yml` (repo root), `src/registry/models.py`, `.context/modules/registry/CONTEXT.md` § models; enable a provider via `ROUTER_PROVIDERS_ENABLED` (owner) |
 | Check routing precision / task-event markers | audit events `routing_decision`, `task_plan`, `eval_pass`/`eval_fail` in `volumes/audit_log/` |
 | Read the audit that motivated all of this | `docs/AUDIT_2026-07-12.md` |
 | Understand the management hierarchy (agents-as-org) | `.context/org/ORG.md` (chart + operating model), `.context/org/divisions/<div>/CHARTER.md` (per-division), `docs/superpowers/plans/2026-07-28-management-hierarchy.md` (design + rollout) |

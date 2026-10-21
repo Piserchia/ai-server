@@ -30,6 +30,7 @@ from src.config import settings
 from src.db import CHANNEL_JOB_DONE, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project, Schedule, Task, TaskStatus, TaskTurn
+from src.registry import models as models_registry
 from src.runner import quota
 
 logger = structlog.get_logger()
@@ -113,25 +114,17 @@ def _error_safe(handler):
 
 _FLAG_RE = re.compile(r"--(\w+)=(\S+)")
 
-# Model alias expansion — accepts short names on the command line
-# Aliases for the /task --model=<x> flag; VALID_MODELS (the skill-contract
-# test's allowlist) is derived from the VALUES here, so any model a SKILL.md
-# may reference must appear as a value. Bare-name defaults (opus/sonnet)
-# are left on their established targets — explicit versioned aliases are added
-# for newer models (opus-5, opus-4-8, fable-5) rather than moving the defaults.
-# Retired models never appear here (that would re-admit them to VALID_MODELS);
-# their aliases live in _RETIRED_MODEL_ALIASES and resolve to the replacement.
-_MODEL_ALIASES = {
-    "opus": "claude-opus-4-7",
-    "opus-5": "claude-opus-5",
-    "opus-4-8": "claude-opus-4-8",
-    "opus-4-7": "claude-opus-4-7",
-    "opus-4-6": "claude-opus-4-6",
-    "fable": "claude-fable-5",
-    "fable-5": "claude-fable-5",
-    "sonnet": "claude-sonnet-4-6",
-    "sonnet-4-6": "claude-sonnet-4-6",
-}
+# Model alias expansion — accepts short names on the command line.
+# Fed from the repo-root `models.yml` via the registry (cross-vendor writer
+# slice T1, 2026-10-21): alias → canonical id, bare for Anthropic
+# (`opus` → `claude-opus-4-7`, as before) and `provider/alias` →
+# `provider/model_id` for any other provider, exactly the keys
+# `registry.models.resolve()` accepts. Add or move an alias in models.yml,
+# not here. Retired models never appear in the registry; their aliases live
+# in _RETIRED_MODEL_ALIASES below and resolve to the replacement. A value
+# with no alias passes through raw — the session's registry resolution
+# refuses it fail-closed if it is not a real `[provider/]model_id`.
+_MODEL_ALIASES = models_registry.alias_table()
 
 # Aliases of retired models, typed from muscle memory. Resolved to the current
 # replacement so a retired (or bare, unknown) id never lands in job.payload.

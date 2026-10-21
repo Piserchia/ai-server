@@ -47,6 +47,7 @@ from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_DONE, CHANNEL_JOB_STREAM, async_session, redis
 from src.models import Job, JobKind, Project
+from src.registry import models as models_registry
 from src.registry.skills import (
     SkillConfig,
     SkillFrontmatterError,
@@ -462,11 +463,10 @@ def extract_text_events(final_text: str) -> list[dict[str, Any]]:
 
 # ── Budget accounting (Rec 8) ──────────────────────────────────────────────
 
-# Approximate context windows by model family (input tokens).
-_MODEL_BUDGETS: dict[str, int] = {
-    "claude-sonnet-4-6": 200_000,
-    "claude-opus-4-7": 200_000,
-}
+# Context windows (input tokens) by bare model id, fed from the repo-root
+# `models.yml` via the registry (T1, 2026-10-21). Keyed by `ModelRef.model_id`
+# — the string `options.model` carries — so the lookup below is unchanged.
+_MODEL_BUDGETS: dict[str, int] = models_registry.context_windows()
 _DEFAULT_BUDGET = 200_000
 
 
@@ -583,6 +583,35 @@ def context_budget_fraction(
     return tokens, budget, tokens / budget if budget > 0 else 0.0
 
 
+# Providers this runner can actually execute. T4 replaces this with the
+# dispatch branch (`if provider != "anthropic": codex_cli.run(...)`); until
+# then an enabled-but-unexecutable provider is refused here rather than
+# handing a foreign model id to the Anthropic SDK.
+_EXECUTABLE_PROVIDERS: frozenset[str] = frozenset({"anthropic"})
+
+
+def _resolve_model(payload: dict | None, skill_cfg: SkillConfig | None) -> models_registry.ModelRef:
+    """Pick and validate the job's model: `payload.model > skill.model >
+    settings.default_model`, resolved through the registry (T1, 2026-10-21).
+
+    Pure. Raises `ProviderRefused` (terminal in `main._process_job`, never
+    escalated) when the id is unknown (C12), its provider is not in
+    `settings.router_providers_enabled`, or no executor exists for it. The
+    Anthropic path is unchanged: `ref.model_id` is the same bare string the
+    SDK was handed before.
+    """
+    payload = payload or {}
+    raw = (payload.get("model")
+           or (skill_cfg.model if skill_cfg and skill_cfg.model else "")
+           or settings.default_model)
+    ref = models_registry.resolve_enabled(raw)
+    if ref.provider not in _EXECUTABLE_PROVIDERS:
+        raise models_registry.ProviderRefused(
+            raw, f"no executor for provider {ref.provider!r} in this runner",
+            provider=ref.provider, model_id=ref.model_id)
+    return ref
+
+
 async def _resolve_skill(job: Job) -> tuple[str, SkillConfig | None]:
     """
     Determine the skill for this job:
@@ -690,13 +719,11 @@ def _build_options(
     if skill_cfg and skill_cfg.body.strip():
         system_prompt = f"{system_prompt}\n\n---\n\n# Active skill\n\n{skill_cfg.body}"
 
-    # Model + effort + permission + tools
-    model = (skill_cfg.model if skill_cfg and skill_cfg.model else settings.default_model)
-
-    # Per-request overrides from job.payload take precedence over skill frontmatter
+    # Model + effort + permission + tools. Per-request overrides from
+    # job.payload take precedence over skill frontmatter; the registry
+    # validates the pick (T1) and hands the SDK the bare Anthropic id.
     payload = job.payload or {}
-    if payload.get("model"):
-        model = payload["model"]
+    model = _resolve_model(payload, skill_cfg).model_id
 
     effort = payload.get("effort") or (skill_cfg.effort if skill_cfg else "medium")
     permission_mode = payload.get("permission_mode") or (
@@ -878,6 +905,14 @@ async def _resolve_cwd(job: Job, skill_name: str | None = None) -> Path:
 async def run_session(job: Job) -> dict[str, Any]:
     job_id = str(job.id)
     skill_name, skill_cfg = await _resolve_skill(job)
+
+    # Model/provider validation — before the deploy gate, the workspace clone
+    # and any process, so an unknown or disabled provider never leaves a
+    # clone behind or reaches the SDK (T1, 2026-10-21; C12 fail-closed).
+    # `_build_options` resolves again for the value; this call is the gate.
+    # `ProviderRefused` is terminal in main._process_job, not escalated.
+    _resolve_model(job.payload, skill_cfg)
+
     canonical_cwd, deliv, is_deploy, slug = await _resolve_project(job, skill_name)
 
     # Deploy-authority gate (delivery contract) — before any work, so a

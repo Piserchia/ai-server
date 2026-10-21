@@ -47,6 +47,7 @@ from src.db import (
 )
 from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
+from src.registry import models as models_registry
 from src.registry.skills import load as load_skill
 from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
@@ -471,6 +472,27 @@ async def _process_job(job_id: uuid.UUID) -> None:
             try:
                 await _notify_task(job.task_id, "failed",
                                    text=f"Skill contract failure: {reason}")
+            except Exception:
+                pass
+
+    except models_registry.ProviderRefused as exc:
+        # Unknown `[provider/]model_id`, a provider outside
+        # ROUTER_PROVIDERS_ENABLED, or one with no executor — terminal, NOT
+        # escalated (a bigger model would re-refuse the same policy). Raised
+        # by session._resolve_model before any clone or process exists
+        # (T1, 2026-10-21; C12 fail-closed).
+        reason = str(exc)
+        audit_log.append(str(job_id), "provider_refused",
+                         provider=exc.provider, model=exc.model_id, raw=exc.raw,
+                         reason=exc.reason)
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category="provider_refused")
+        await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}")
+        log.warning("provider refused — job terminal", reason=reason)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed",
+                                   text=f"Provider refused: {reason}")
             except Exception:
                 pass
 

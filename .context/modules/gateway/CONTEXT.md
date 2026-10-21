@@ -45,10 +45,20 @@ the single enqueue/cancel/lookup helper.
 
 `parse_flags()` in `telegram_bot.py` extracts `--model=`, `--effort=`,
 `--permission=`, `--project=`, `--kind=` from the front of a description.
-Model aliases: `opus`, `opus-4-7`, `opus-4-6`, `sonnet`, etc. Retired aliases
-(`haiku`, `haiku-4-5`) resolve to `claude-sonnet-4-6` via `_RETIRED_MODEL_ALIASES`
-and are not part of `VALID_MODELS`.
+Model aliases come from the repo-root `models.yml` via
+`registry.models.alias_table()` (`_MODEL_ALIASES`, T1 2026-10-21): `opus`,
+`opus-4-7`, `opus-4-6`, `sonnet`, etc. → bare Anthropic ids; a non-Anthropic
+alias is keyed `provider/alias`. Retired aliases (`haiku`, `haiku-4-5`)
+resolve to `claude-sonnet-4-6` via `_RETIRED_MODEL_ALIASES` and are not in
+the registry. Any other value (e.g. `codex/gpt-6-luna`) passes through raw;
+the session refuses it fail-closed if the registry or
+`ROUTER_PROVIDERS_ENABLED` does not accept it (parse-time refusal is T7).
 Flags land in `job.payload` and take precedence over skill frontmatter.
+
+`POST /api/jobs` (web) validates `model` through
+`registry.models.resolve_enabled` and stores the canonical form; unknown or
+disabled → **422** `model refused: <reason>`. The dashboard model dropdown
+is rendered from the registry (`web._model_options_html`).
 
 ## Auth
 

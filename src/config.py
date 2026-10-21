@@ -29,6 +29,22 @@ class Settings(BaseSettings):
     utility_model: str = "claude-sonnet-4-6"
     utility_effort: str = "low"
 
+    # Providers (cross-vendor writer slice T1, 2026-10-21). Model ids are
+    # `[provider/]model_id` resolved against the repo-root `models.yml`
+    # (src/registry/models.py); bare ids are Anthropic. These switches are
+    # the fail-closed gate: a provider absent from the CSV is refused before
+    # any process starts. Flipping them is the owner's call (plan §7).
+    router_providers_enabled: str = "anthropic"
+    # Providers allowed on the `code-server` skill set (server-patch,
+    # server-deploy, new-skill, deploy-director, *-redeploy) — D-A, default off.
+    router_code_server_providers: str = "anthropic"
+    # Codex CLI executor (T3): binary path ("" → shutil.which("codex") → the
+    # ChatGPT.app bundle), CODEX_HOME for the login ("" → ~/.codex), and the
+    # Seatbelt sandbox mode passed as `--sandbox`.
+    codex_bin: str = ""
+    codex_home: str = ""
+    codex_sandbox_default: str = "workspace-write"
+
     # Database
     postgres_dsn: str
 

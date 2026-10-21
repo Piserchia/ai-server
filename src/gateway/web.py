@@ -22,6 +22,7 @@ Run: uvicorn src.gateway.web:app --host 127.0.0.1 --port 8080
 from __future__ import annotations
 
 import asyncio
+import html as html_mod
 import json
 import secrets
 import uuid
@@ -40,6 +41,7 @@ from src.config import settings
 from src.db import CHANNEL_JOB_STREAM, KEY_RUNNER_HEARTBEAT, QUEUE_JOBS, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project, Schedule, Task, TaskStatus, TaskTurn
+from src.registry import models as models_registry
 from src.runner import quota, retrospective
 
 app = FastAPI(title="Assistant gateway", version="0.1.0")
@@ -386,7 +388,15 @@ async def create_job(req: CreateJobRequest) -> JobOut:
             detail="kind 'god' is owner-invoked only — use Telegram /god")
     payload = {}
     if req.model:
-        payload["model"] = req.model
+        # Validate at the edge (T1, 2026-10-21): the T0 review found this
+        # path copied any string into payload["model"] and the session
+        # handed it to the SDK unvalidated, so a stale client could still
+        # submit a retired id. The registry is the one allowlist; the
+        # session re-checks (fail-closed) when the job runs.
+        try:
+            payload["model"] = models_registry.resolve_enabled(req.model).canonical
+        except models_registry.ProviderRefused as exc:
+            raise HTTPException(status_code=422, detail=f"model refused: {exc.reason}")
     if req.effort:
         payload["effort"] = req.effort
     if req.permission_mode:
@@ -643,7 +653,24 @@ async def stream_job(job_id: str, request: Request, token: str | None = None):
 # ── Dashboard shell ─────────────────────────────────────────────────────────
 
 
-_INDEX_HTML = """<!DOCTYPE html>
+def _model_options_html(enabled: frozenset[str] | None = None) -> str:
+    """`<option>` rows for the dashboard model dropdown, from the registry
+    (T1, 2026-10-21): enabled providers only (default `anthropic`), in
+    models.yml order, values in the canonical form POST /api/jobs accepts
+    (bare Anthropic ids, `provider/model_id` otherwise)."""
+    enabled = models_registry.enabled_providers() if enabled is None else enabled
+    rows = ['<option value="">default</option>']
+    for provider in models_registry.providers():
+        if provider not in enabled:
+            continue
+        for m in models_registry.list_models(provider):
+            rows.append(
+                f'<option value="{html_mod.escape(m.ref.canonical, quote=True)}">'
+                f'{html_mod.escape(m.label)}</option>')
+    return "\n      ".join(rows)
+
+
+_INDEX_TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
   <title>Assistant</title>
@@ -685,9 +712,7 @@ _INDEX_HTML = """<!DOCTYPE html>
   <form id="submit-form">
     <input type="text" name="description" placeholder="describe a task..." required>
     <select name="model">
-      <option value="">default</option>
-      <option value="claude-sonnet-4-6">sonnet 4.6</option>
-      <option value="claude-opus-4-7">opus 4.7</option>
+      {{MODEL_OPTIONS}}
     </select>
     <select name="effort">
       <option value="">default</option>
@@ -844,6 +869,11 @@ _INDEX_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+# Rendered once at import: the dropdown reflects the registry and the
+# enabled-provider setting as loaded, which is what a settings change plus
+# restart already implies everywhere else.
+_INDEX_HTML = _INDEX_TEMPLATE.replace("{{MODEL_OPTIONS}}", _model_options_html())
 
 
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(_check_auth)])

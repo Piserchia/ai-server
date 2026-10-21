@@ -1,10 +1,14 @@
 # Registry module
 
-**Paths:** `src/registry/skills.py`, `src/registry/manifest.py`
+**Paths:** `src/registry/skills.py`, `src/registry/manifest.py`, `src/registry/models.py`
 
 ## Purpose
 
-Parsers for the two pieces of external declarative configuration:
+Parsers for the three pieces of external declarative configuration:
+
+- `src/registry/models.py` — loads the repo-root `models.yml` (providers,
+  model ids, aliases, context windows) and resolves `[provider/]model_id`
+  everywhere a model id enters the system (T1, 2026-10-21).
 
 - `src/registry/skills.py` — loads `skills/<n>/SKILL.md`, extracts YAML
   frontmatter (model, effort, permission_mode, tools, escalation rules) and
@@ -30,6 +34,36 @@ Parsers for the two pieces of external declarative configuration:
   `subagents` (skills exposed as in-session SDK subagents — compiled by
   `runner.agents.build_subagents`), `isolation` (`none | workspace | host`;
   retired `container` parses and runs as workspace)
+
+### models (2026-10-21, cross-vendor writer slice T1; old spec §2.5)
+
+- Grammar: `[provider/]model_id`; a bare id is `anthropic/<id>`. Unknown
+  provider or model → `ProviderRefused` (C12: fail closed, never a default).
+  `models.yml` is data, not a restraint: `settings.router_providers_enabled`
+  (default `anthropic`) decides what may run.
+- `resolve(raw) -> ModelRef` — alias or id → `ModelRef(provider, model_id)`;
+  `.canonical` is bare for Anthropic, `provider/model_id` otherwise (what
+  `job.payload["model"]` carries); `.qualified` always `provider/model_id`.
+- `resolve_enabled(raw)` — `resolve()` plus the enabled-provider check; the
+  form every entry point uses (`gateway.web` POST, `runner.session`).
+- `split_model_ref(raw) -> (provider, model_id)` — pure, no lookup; `""` →
+  `("", "")`. Backs `SkillConfig.provider` / `.model_id`.
+- `alias_table() -> {alias: canonical}` — bare keys for Anthropic aliases,
+  `provider/alias` otherwise, exactly what `resolve()` accepts (feeds
+  `telegram_bot._MODEL_ALIASES`). `context_windows() -> {model_id: int}`
+  (feeds `session._MODEL_BUDGETS`). `list_models(provider=None)` in yml
+  order; `providers()`; `VALID_MODELS` (bare ids, the skill-contract
+  allowlist); `enabled_providers()`.
+- `Registry.load(path)` / `Registry.from_dict(data)` — explicit instances
+  for tests; `RegistryError` on a missing or malformed file (raised at
+  import for the default `DEFAULT_PATH = <repo>/models.yml` — next to the
+  code, not under `settings.server_root`).
+- `ProviderRefused(raw, reason, provider=, model_id=)` — `ValueError`;
+  handled terminally in `runner.main._process_job`
+  (`error_category=provider_refused`, audit `provider_refused`, no
+  escalation) and as HTTP 422 in `gateway.web`.
+- `SkillConfig.provider` / `.model_id` — derived from the raw `model`
+  string; loading never validates (the job does).
 
 ### manifest
 
@@ -59,13 +93,16 @@ Parsers for the two pieces of external declarative configuration:
 
 ## Dependencies
 
-- `src.config` — for settings.skills_dir and settings.projects_dir
+- `src.config` — for settings.skills_dir, settings.projects_dir and
+  settings.router_providers_enabled
 - `yaml` (PyYAML)
 
 ## Testing
 
-None yet (Phase 1). Phase 2: `tests/test_skills_registry.py`,
-`tests/test_manifest.py` with valid + invalid fixtures.
+`tests/test_models_registry.py` (registry, every consumer path),
+`tests/test_skill_contracts.py` (every SKILL.md resolves),
+`tests/test_registry_failclosed.py`, `tests/test_manifest.py`,
+`tests/test_delivery.py`.
 
 ## Gotchas
 

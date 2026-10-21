@@ -2,6 +2,34 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T1: alias table, dashboard dropdown and POST /api/jobs fed by the models registry
+
+**Agent task**: cross-vendor writer slice T1
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/gateway/telegram_bot.py` — `_MODEL_ALIASES = registry.models.alias_table()`
+  (same keys and targets as the hand-written table after T0; add or move an
+  alias in `models.yml` now). `_RETIRED_MODEL_ALIASES` and `parse_flags`
+  unchanged: `--model=opus` → `claude-opus-4-7`, `--model=haiku` →
+  `claude-sonnet-4-6`, and a qualified `--model=codex/gpt-6-luna` passes
+  through raw for the session's registry check (parse-time refusal with a
+  reason is T7).
+- `src/gateway/web.py` — `POST /api/jobs` resolves `req.model` through
+  `registry.models.resolve_enabled` and stores the canonical form in
+  `payload["model"]`; an unknown id, unknown provider or disabled provider
+  is **HTTP 422** `model refused: <reason>` (closes the T0-review hole where
+  a stale client could still submit `claude-haiku-4-5-20251001`). The
+  dashboard `<select name="model">` is rendered from the registry at import
+  (`_model_options_html()`: enabled providers only, yml order, canonical
+  values; grouping by provider is T7). `_INDEX_HTML` is now built from
+  `_INDEX_TEMPLATE` via a `{{MODEL_OPTIONS}}` sentinel.
+**Tests**: `tests/test_models_registry.py` §5 (alias table equality,
+`parse_flags` pass-through) and §11 (422 on retired id / unknown provider /
+disabled provider, alias canonicalised into payload, no-model path
+unchanged, dropdown contents). `tests/test_web_god_gate.py`,
+`tests/test_telegram_commands.py`, `tests/test_pure_functions.py` unchanged
+and green.
+
 ## 2026-10-21 — T0: Haiku 4.5 retired from the alias table and dashboard
 
 - `telegram_bot._MODEL_ALIASES`: `haiku` / `haiku-4-5` keys removed, so

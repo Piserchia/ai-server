@@ -10,7 +10,8 @@ Why JSONL files, not a DB table:
 Kinds used (keep this list honest — update when adding new kinds):
 - job_started:      {"kind", "ts", "job_id", "description", "payload"}
 - job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no cost (subscription auth)
-- job_failed:       {"kind", "ts", "job_id", "error"}
+- job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused
+- provider_refused: {"kind", "ts", "job_id", "provider", "model", "raw", "reason"}  # registry refused `[provider/]model_id` before any process (T1, 2026-10-21)
 - job_cancelled:    {"kind", "ts", "job_id"}
 - tool_use:         {"kind", "ts", "job_id", "tool_name", "tool_use_id", "input"}
 - tool_result:      {"kind", "ts", "job_id", "tool_use_id", "is_error", "result_preview"}

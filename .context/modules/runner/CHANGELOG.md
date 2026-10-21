@@ -2,6 +2,42 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T1: job model resolved through the models registry (fail-closed)
+
+**Agent task**: cross-vendor writer slice T1
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/config.py` — `router_providers_enabled: str = "anthropic"`,
+  `router_code_server_providers: str = "anthropic"`, `codex_bin: str = ""`,
+  `codex_home: str = ""`, `codex_sandbox_default: str = "workspace-write"`.
+  Fail-closed defaults; flipping them is the owner's call (plan §7).
+- `src/runner/session.py` — `_resolve_model(payload, skill_cfg) ->
+  ModelRef` (pure): `payload.model > skill.model > settings.default_model`,
+  resolved via `registry.models.resolve_enabled`; raises `ProviderRefused`
+  on an unknown id (C12), a provider outside `router_providers_enabled`, or
+  a provider with no executor in this runner (`_EXECUTABLE_PROVIDERS =
+  {anthropic}` — interim until T4 adds the dispatch branch). `run_session`
+  calls it right after `_resolve_skill`, BEFORE the deploy gate and the
+  workspace clone, so a refusal never leaves a clone behind or reaches the
+  SDK; `_build_options` uses `ref.model_id` — the same bare Anthropic id as
+  before, so the Anthropic path is behaviourally identical.
+  `_MODEL_BUDGETS` is now `registry.models.context_windows()`.
+- `src/runner/main.py` — `_process_job` handles `ProviderRefused`
+  terminally: audit `provider_refused{provider, model, raw, reason}` +
+  `job_failed error_category=provider_refused`, task notified, NO
+  escalation (a policy refusal would re-refuse on a bigger model).
+- `src/audit_log.py` — docstring lists the `provider_refused` kind and
+  `job_failed.error_category`; existing kinds untouched (C14).
+**Why**: T0's review found `job.payload["model"]` reached the SDK
+unvalidated (a stale client or old schedule payload could still name the
+retired Haiku id), and the slice needs one place that says which provider
+a job belongs to before T4 can dispatch on it.
+**Tests**: `tests/test_models_registry.py` §9–10 (precedence, retired id,
+unknown pin, disabled provider, enabled-without-executor, unknown default,
+AST check that the main handler fails the job and never escalates).
+`tests/test_context_budget.py`, `tests/test_haiku_retirement.py` unchanged
+and green.
+
 ## 2026-10-21 — T0: Haiku 4.5 retirement; utility classifiers read `settings.utility_model`
 
 **Agent task**: cross-vendor writer slice T0

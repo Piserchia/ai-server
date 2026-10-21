@@ -2,6 +2,43 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T1: models registry and provider-qualified ids
+
+**Agent task**: cross-vendor writer slice T1
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; old
+spec §2.5).
+**Files changed**:
+- `models.yml` (repo root, new) — the one list of providers, model ids,
+  labels, aliases and context windows: the six Anthropic ids the gateway
+  alias table carried after T0 (same aliases, same targets), plus codex
+  `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra` (chatgpt-openai.md §1). Data,
+  not a restraint — listing a provider enables nothing.
+- `src/registry/models.py` (new) — `Registry.load(path)` / `from_dict`
+  (shape-validated; `RegistryError` at import on a bad file),
+  `split_model_ref(raw)` (pure, TOTAL `[provider/]model_id` split, bare →
+  `anthropic/`; never raises — review fix: `a/b/c` → `("a", "b/c")` and
+  `resolve()` refuses the remainder, so `SkillConfig.provider` cannot blow
+  up at load on a malformed frontmatter), `resolve(raw) -> ModelRef` (alias resolution; raises
+  `ProviderRefused` on empty / malformed / unknown provider / unknown
+  model — C12 fail-closed, never a default), `resolve_enabled(raw)` (plus
+  `settings.router_providers_enabled`), `alias_table()`,
+  `context_windows()`, `list_models(provider)`, `providers()`,
+  `VALID_MODELS` (bare ids across providers), `enabled_providers()`.
+  `ModelRef.canonical` is bare for Anthropic and `provider/model_id`
+  otherwise, so every existing payload / frontmatter / `resolved_model`
+  string is unchanged.
+- `src/registry/skills.py` — `SkillConfig.provider` / `.model_id` derived
+  properties (pure split, no lookup, so `load()`/`list_all()` never fail on
+  an unknown provider — the job fails). `model` stays the raw string.
+**Consumers moved onto the registry**: `gateway.telegram_bot._MODEL_ALIASES`,
+`gateway.web` (POST `/api/jobs` validation + dashboard dropdown),
+`runner.session` (`_resolve_model`, `_MODEL_BUDGETS`),
+`tests/test_skill_contracts.py` (`VALID_MODELS`).
+**Tests**: `tests/test_models_registry.py` (parse table, aliases, every
+refusal, all 72 frontmatters + 31 escalation targets resolve,
+`VALID_MODELS` == today's set ∪ codex ids, yml shape rules, settings
+defaults, session precedence + refusals, main handler, web 4xx + dropdown).
+
 ## 2026-10-21 — T0 review fix: `load`/`list_all` accept an explicit `skills_dir`
 
 **Agent task**: cross-vendor writer slice T0, reviewer finding (major) on

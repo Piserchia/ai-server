@@ -61,6 +61,22 @@ class SkillConfig:
     division: str = ""                 # executive | delivery | platform-ops | knowledge | atlas
     privilege_class: str = ""          # read-only | content | guarded-writer | prod-operator | break-glass
 
+    # Derived from `model` (cross-vendor writer slice T1, 2026-10-21; old
+    # spec §2.5). `model` stays the raw frontmatter string — bare ids are
+    # Anthropic, `codex/<id>` names another provider. These are a pure, TOTAL
+    # split with NO registry lookup and no raise — unknown provider or a
+    # malformed id (`a/b/c`) still loads: the JOB fails (C12) when
+    # `runner.session` resolves the pin.
+    @property
+    def provider(self) -> str:
+        from src.registry.models import split_model_ref
+        return split_model_ref(self.model)[0]
+
+    @property
+    def model_id(self) -> str:
+        from src.registry.models import split_model_ref
+        return split_model_ref(self.model)[1]
+
 
 class SkillFrontmatterError(ValueError):
     """A SKILL.md frontmatter block exists but cannot be parsed.

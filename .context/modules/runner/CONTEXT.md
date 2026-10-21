@@ -60,11 +60,13 @@ Four async tasks running in one process:
 - `reconcile.requeue_stranded_queued() -> int` — startup hook (after `reconcile_orphaned_jobs`, before the job loop): re-RPUSHes every `queued` row absent from the Redis list (audit event `queued_requeued`). Pure helper `stranded_queued_ids(rows, redis_ids)`. Added 2026-08-31 (F2.3) alongside the slot-before-BLPOP job-loop change (`_run_with_held_slot`), which stops NEW strandings from happening.
 - `session.SkillResolutionError` / `registry.skills.SkillFrontmatterError` — raised when an explicit kind's skill is missing or its frontmatter is corrupt; `main._process_job` handles it terminally (error_category `skill_contract`, no escalation). Added 2026-08-31 (F1.6) — previously such jobs silently ran on registry defaults.
 - `mcp_dispatch` — `enqueue_job` rejects `kind='god'` and strips `isolation`/`permission_mode`/`permission` from payloads (`_sanitize_payload`, pure). Added 2026-08-31 (F1.3).
+- `session._resolve_model(payload, skill_cfg) -> registry.models.ModelRef` — pure: `payload.model > skill.model > settings.default_model`, resolved through the models registry (`[provider/]model_id`, bare = Anthropic). Raises `registry.models.ProviderRefused` on an unknown id (C12), a provider outside `settings.router_providers_enabled`, or one with no executor in this runner (`_EXECUTABLE_PROVIDERS`; T4 replaces that check with the dispatch branch). Called at the top of `run_session` — before the deploy gate and the workspace clone — and again in `_build_options` for the value; `main._process_job` handles it terminally (audit `provider_refused`, `error_category=provider_refused`, no escalation). Added 2026-10-21 (cross-vendor writer slice T1).
 
 ## Dependencies
 
 - `src.config`, `src.db`, `src.models`, `src.audit_log`
 - `src.registry.skills` — frontmatter parser for SKILL.md
+- `src.registry.models` — `[provider/]model_id` resolution against `models.yml` (T1, 2026-10-21)
 - `claude_agent_sdk` — the brain
 
 ## Configuration
@@ -72,8 +74,13 @@ Four async tasks running in one process:
 All via `src.config.settings`:
 - `MAX_CONCURRENT_JOBS` (default 4 since P1 — workspace isolation removed the shared-checkout collision risk)
 - `SESSION_TIMEOUT_SECONDS` (default 1800)
-- `DEFAULT_MODEL` (global fallback when skill doesn't specify)
+- `DEFAULT_MODEL` (global fallback when skill doesn't specify; must resolve in `models.yml`)
 - `QUOTA_PAUSE_MINUTES` (default 60 when reset time is unknown)
+- `ROUTER_PROVIDERS_ENABLED` (CSV, default `anthropic`) — providers a job may
+  resolve to; anything else is refused fail-closed before any process (T1).
+  `ROUTER_CODE_SERVER_PROVIDERS` (default `anthropic`), `CODEX_BIN`,
+  `CODEX_HOME`, `CODEX_SANDBOX_DEFAULT` (`workspace-write`) are read by the
+  Codex executor / dispatch (T3/T4) — declared in T1, not yet consumed.
 
 (Container settings removed 2026-07-27 with the docker lane — guard hooks
 carry the containment duty now; `docs/SDK_MIGRATION_2026-07-27.md`.)
