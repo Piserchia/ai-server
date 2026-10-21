@@ -50,8 +50,16 @@ Defined as named constants in `src/db.py`, not inline strings:
 
 JSONL files at `volumes/audit_log/<job_id>.jsonl`. Append-only. Event kinds:
 `job_started`, `text`, `tool_use`, `tool_result`, `thinking`, `job_completed`,
-`job_failed`, `job_cancelled`, `job_requeued_for_quota`, `job_held` (T6), `note`
-(the full list with field shapes is the `src/audit_log.py` docstring).
+`job_failed`, `job_cancelled`, `job_requeued_for_quota`, `job_held` (T6), `note`;
+the cross-vendor writer slice (2026-10-21) added `provider_selected`,
+`provider_refused` (T1/T4), `executor_started`, `turn_completed`,
+`executor_error` (T3), `merge_gate_verdict`, `merge_gate_skipped`,
+`merge_gate_refused`, `workspace_published` (T5) and additive fields on
+`job_started`/`job_completed` (`provider`, …), `tool_result` (`exit_code`,
+`output`), `workspace_created` (`base_sha`), `post_review_skipped`
+(`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`). Kinds are
+a parsing contract (C14): add, never rename or reshape. The full list with
+field shapes is the `src/audit_log.py` docstring.
 
 Plus `volumes/audit_log/<job_id>.summary.md` — human-readable one-paragraph
 summary, written at job completion (the final text message from Claude).

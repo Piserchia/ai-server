@@ -2,6 +2,51 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed** (docs only):
+- `.context/modules/runner/CONTEXT.md` — the two pre-dispatch notes left by
+  T1/T3 ("declared in T1, not yet consumed", "not called by `run_session`
+  until T4") replaced with the shipped state; Configuration now documents
+  `ROUTER_CODE_SERVER_PROVIDERS` as D-A's one setting (skill-name rule +
+  canonical-path rule), `CODEX_BIN` discovery order + fail-closed misconfig,
+  `CODEX_HOME`, `CODEX_SANDBOX_DEFAULT`, `CODEX_RUN_AS_USER` (unusable until
+  materialisation, §6 D-C) and `QUOTA_PAUSE_MINUTES` on the lane pause;
+  Testing lists `test_codex_executor` / `test_provider_dispatch` /
+  `test_quota` / `test_cross_vendor_docs`; Key invariants gains INV-21's
+  implemented profile (the SYSTEM.md row itself is T8/owner).
+- `.context/SYSTEM.md` — "Model router" workstream line: BUILT 2026-10-21,
+  ships dark, INV-21 row deferred to T8. Module-graph rows were already added
+  by T1/T3/T4.
+- `.context/INDEX.md` — "Additions 2026-10-21" block (what ships, the owner
+  runbook, debugging a Codex job, where to change what, what was not built,
+  the protected bundle) + the 2026-09-25 spec row's "deferred, not planned"
+  caveated with the reopening.
+- `docs/README.md` — row for the slice plan; the 2026-09-25 spec row caveated.
+- `docs/TROUBLESHOOTING.md` — five symptoms: `provider_refused` (reason
+  table, one row per rule), "codex not found" (`CODEX_BIN` discovery), the
+  `codex exec` hang (stdin / silent 429), `auth_expired` (`codex login
+  --device-auth` into the runner's `CODEX_HOME`), `job_held` (lane pause,
+  `/resume codex`). The T5 `review_blocked` entry already existed.
+- `docs/superpowers/specs/2026-10-05-observability-and-trading-unblock-design.md`
+  §14 items 1, 9, 10 — annotated "reopened 2026-10-21 by this slice" with
+  exactly which half shipped. (The plan header names the 2026-09-25 spec's
+  §14; that section is "Open questions" — the fifteen deferred items live in
+  the cut spec's §14. Noted in the plan's T9 section.)
+- `.context/modules/runner/skills/GOTCHAS.md` — entry: nothing caps Codex-lane
+  concurrency at 1 (plan §4f is an assumption; only the global
+  `MAX_CONCURRENT_JOBS` semaphore exists) — found while writing the
+  `auth_expired` symptom; recorded in plan §6 as residual, follow-up is a
+  per-provider `asyncio.Semaphore(1)` with its own test.
+- `tests/test_cross_vendor_docs.py` (new, 33 collected) — the T9 docs
+  contract as pure file-content checks: every `src/runner/executors/*.py`
+  named in this CONTEXT (the protected `lint_docs.py` only globs the top
+  level), SYSTEM.md rows, INDEX/README rows + caveats, the five TROUBLESHOOTING
+  headings, cut-spec annotations, no stale notes here, db CONTEXT lists the
+  slice's audit kinds, each module CHANGELOG records T9, the plan's T9 note.
+**Tests**: suite green, lint clean (numbers in the plan's T9 note).
+
 ## 2026-10-21 — T7: `provider` in INDEX.jsonl entries
 
 **Agent task**: cross-vendor writer slice T7

@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under
+`src/gateway/` changed. Docs that describe gateway behaviour were touched:
+- `docs/TROUBLESHOOTING.md` — the new `provider_refused` symptom states that
+  the web `POST /api/jobs` (HTTP 422) and `/task --model=` (`ModelFlagRefused`
+  reply) run the same registry resolution at submit time, so a job that got as
+  far as `provider_refused` came from a schedule payload or a stale client;
+  the new `job_held` symptom documents `/resume <provider>`, the per-lane
+  `/status` lines and `GET /api/quota`'s `providers` map (all T6/T7).
+- `.context/INDEX.md` "Additions 2026-10-21" — points at the gateway CONTEXT
+  for the provider surfaces.
+`.context/modules/gateway/CONTEXT.md` was already current from T7 and is
+unchanged.
+
 ## 2026-10-21 — T7: provider everywhere the owner looks
 
 **Agent task**: cross-vendor writer slice T7

@@ -2,6 +2,18 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under
+`src/` changed.
+- `.context/modules/db/CONTEXT.md` § Audit log — lists the kinds the slice
+  added (`provider_selected`, `provider_refused`, `executor_started`,
+  `turn_completed`, `executor_error`, `merge_gate_verdict`,
+  `merge_gate_skipped`, `merge_gate_refused`, `workspace_published`) and the
+  additive fields on existing kinds, with the C14 rule (add, never rename or
+  reshape); `src/audit_log.py`'s docstring remains the shape of record and
+  `tests/test_cross_vendor_docs.py` checks the two agree on those names.
+
 ## 2026-10-21 — T6: quota key constants
 
 **Agent task**: cross-vendor writer slice T6. **Files changed**:

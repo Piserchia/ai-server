@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under
+`src/registry/` changed; `.context/modules/registry/CONTEXT.md` was already
+current from T1 and is unchanged. Cross-references added elsewhere:
+- `.context/INDEX.md` "Additions 2026-10-21" — the "add, alias or retire a
+  model id / provider" row from T1 now sits beside a block that says where
+  the executor, dispatch, gate and lane pause live.
+- `docs/TROUBLESHOOTING.md` `provider_refused` symptom — one table row per
+  `ProviderRefused` reason the registry raises (`empty model id`, `unknown
+  provider`, `unknown model … for provider`, `provider … is not enabled`),
+  with the bare-id gotcha spelled out (`gpt-6-luna` is `anthropic/gpt-6-luna`
+  and unknown; write `codex/gpt-6-luna`).
+
 ## 2026-10-21 — T1: models registry and provider-qualified ids
 
 **Agent task**: cross-vendor writer slice T1

@@ -203,5 +203,13 @@ Live workstreams as of 2026-08-31:
 - **Isolation/queue debt** — F1/F2 remediation landed 2026-08-31; remaining:
   privilege_class backfill vs charters, server-side INV-22 code deny,
   INV-13 fail-closed restore (owner decision).
-- **Model router** — plan APPROVED 2026-08-17 (INV-21); implementation R0
-  not started.
+- **Model router** — plan APPROVED 2026-08-17 (INV-21); the 2026-09-25
+  multi-model spec was cut 2026-10-05, then its Codex-executor slice was
+  BUILT 2026-10-21 on branch `multi-model/cross-vendor-writer`
+  (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md`: registry
+  + `models.yml`, migration 007, `executors/codex_cli.py`, dispatch, pre-push
+  Anthropic gate, per-provider quota keys, surfaces). Ships dark —
+  `ROUTER_PROVIDERS_ENABLED=anthropic` refuses every non-Anthropic job until
+  the owner flips it (plan §7). The INV-21 row above is still the 08-17
+  wording: its implemented-profile rewrite is part of the owner-merged
+  protected bundle (plan T8), not this slice.

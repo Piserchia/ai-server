@@ -450,3 +450,18 @@ no:cacheprovider`. pydantic-settings still reads `.env` for everything else
 (`postgres_dsn` etc.); only the shell variable now takes precedence. Any
 skill-contract failure that disappears under this invocation is dev/prod
 drift that a deploy resolves, not a defect in the change.
+
+## Nothing caps Codex-lane concurrency at 1 — §4f is an assumption, not code (2026-10-21, T9)
+
+Plan §4f ("one credential, one stream … `codex` concurrency fixed at 1")
+and the executor docstring ("the session/queue keep codex concurrency at 1;
+this module has no pool") describe an invariant no code enforces: the only
+semaphore is `main._job_loop`'s global `asyncio.Semaphore(MAX_CONCURRENT_JOBS)`
+(default 4), and neither `session._run_executor` nor `codex_cli.run` holds a
+per-provider lock. Two queued `codex/<id>` jobs therefore run at once on the
+same `auth.json`, which is the refresh-token rotation lockout §4f names
+(symptom: every later job `terminal_reason=auth_expired`, fix is an owner
+`codex login --device-auth`). Until a per-provider `asyncio.Semaphore(1)`
+(keyed by `models.yml` provider, acquired in `_run_executor`) lands with its
+test, do not schedule two Codex routines in the same window and do not
+`/task` a second Codex job while one runs. Recorded in plan §6 as residual.
