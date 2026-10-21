@@ -2,6 +2,43 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T10: live canary entry points + first real `codex exec` run
+
+**Agent task**: cross-vendor writer slice T10 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5 T10, §8).
+**Files changed**:
+- `src/runner/executors/codex_cli.py` — new section: `main()` CLI
+  (`--canary <clone>` / `--gate-dry-run <clone>`), `run_canary()`,
+  `check_canary()` (the nine T10 assertions as `{name: {ok, detail}}`),
+  `check_kind_sequence()`, `build_canary_prompt()`, `canary_environ()` (a
+  sentinel value under every denied name), `is_denied_env_name()`,
+  `gate_dry_run()` (`review.diff_for_gate` → `gate_path_denials` →
+  `run_code_review`, verdict only, no publish/sync; lazy `review` import),
+  `_refuse_clone()` (exit 3 under this repo / the production checkout /
+  any `volumes/`, or while `settings.server_root` is the production path).
+  Nothing in `run()`/`EventMapper` changed; `tests/test_codex_executor.py`
+  untouched and green.
+- `scripts/codex-canary.sh` (new) — seed repo + clone under `CANARY_ROOT`
+  (refused under the repo / prod / volumes), `PIPENV_DONT_LOAD_ENV=1
+  SERVER_ROOT=<root>/fake-server-root`, runs the canary then the gate
+  dry-run; exit 2 = did not run (rate-limited / login lapsed), never retried.
+- `tests/fixtures/codex/sandbox_denied.jsonl` (recorded) +
+  `tests/test_codex_canary.py` (new, 48): fixture-driven canary (the factory
+  replays `command_and_file.jsonl` and performs that run's side effects),
+  each check's failure mode, gate dry-run with a stubbed reviewer, `main()`
+  exit codes and location refusals.
+**Live result (plan §8)**: PASS — 9.42 s, 65,359 in / 405 out tokens, not
+rate-limited, 0 denied env names of 33 visible, escape `touch ~/…` blocked by
+Seatbelt, `-o` written outside the clone under `workspace-write` (T3 (g)
+verified), `model_served` not reported by this build; gate dry-run
+`changes_requested` (6 findings, 28.1 s, opus-4-7) — correct for a diff that
+adds two canary files.
+**Finding (residual, plan §6)**: a Seatbelt-denied command emits NO
+`command_execution` item on codex-cli 0.162.0-alpha.17.2 — the audit log
+under-reports attempts; and `/bin/zsh -lc` sources the owner's rc files, so
+the child's env is the scrubbed allowlist PLUS whatever those files export.
+**Docs**: runner CONTEXT (entry points + test), SYSTEM.md (row + script),
+runner GOTCHAS (3 entries), TROUBLESHOOTING (1 symptom).
+
 ## 2026-10-21 — T9: docs, registries, runbook (no code change)
 
 **Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).

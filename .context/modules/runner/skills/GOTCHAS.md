@@ -465,3 +465,44 @@ same `auth.json`, which is the refresh-token rotation lockout §4f names
 (keyed by `models.yml` provider, acquired in `_run_executor`) lands with its
 test, do not schedule two Codex routines in the same window and do not
 `/task` a second Codex job while one runs. Recorded in plan §6 as residual.
+
+## A Seatbelt-denied Codex command is invisible in the audit log (2026-10-21, T10)
+
+On codex-cli 0.162.0-alpha.17.2 a `command_execution` that the sandbox
+denies emits NO `item.started`/`item.completed` in the `--json` stream —
+the agent sees the exact error (`touch: …: Operation not permitted`) and may
+mention it in an `agent_message`, but the audit log shows no `tool_use`,
+`review._summarize_tool_usage` counts one fewer Bash call, and the Telegram
+stream never shows the attempt. Recorded as
+`tests/fixtures/codex/sandbox_denied.jsonl`. The DENIAL holds (nothing was
+written); what is lost is the record of the ATTEMPT. Consequence: do not
+read "no tool_use for X" in a Codex job's audit as "X was never tried"; the
+pre-push gate reviews the diff, which is the evidence that survives. The
+canary records `touch_in_stream` and `agent_reported_blocked` side by side
+for this reason.
+
+## `scrubbed_env()` bounds the runner, not the login shell Codex spawns (2026-10-21, T10)
+
+Codex runs every command through `/bin/zsh -lc`, a LOGIN shell that sources
+the owner's `~/.zprofile` and `~/.zshrc`. The live canary handed the child
+exactly `{PATH, HOME, LANG, TMPDIR, CODEX_HOME}` and the command still saw
+33 names: 8 `CODEX_*` set by the CLI plus 20 from the rc files
+(`HOMEBREW_*`, `PYENV_*`, `PAGER`, `GH_PAGER`, …). None is in the deny set
+today, but an `export SOME_TOKEN=` in a shell rc file WOULD reach a Codex
+job despite the scrub. Keep secrets in `.env` (never forwarded), never in
+rc files; `scripts/codex-canary.sh` fails its `env_scrub` check on any
+denied NAME, so re-run it after touching shell rc files.
+
+## Running the Codex canary from the dev checkout (2026-10-21, T10)
+
+`scripts/codex-canary.sh` must run with `PIPENV_DONT_LOAD_ENV=1` and
+`SERVER_ROOT=<scratch>/fake-server-root` (it sets both): the audit log and
+the `-o` file go under `settings.audit_log_dir`, and the dev `.env` points
+that at PRODUCTION; `codex_cli.main` additionally refuses (exit 3) while
+`settings.server_root` is the production path, or when the clone is under
+this repo, the production checkout or any `volumes/`. Put `CANARY_ROOT`
+under the session scratch directory. Exit 2 means Codex did not run
+(rate-limited / login lapsed) — record it in plan §8, do not loop. Note
+`python -m src.runner.executors.codex_cli` works but runpy warns that the
+package `__init__` already imported the module (it then executes twice);
+the script imports `main` from a one-line entry file instead.

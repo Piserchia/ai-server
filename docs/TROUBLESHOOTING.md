@@ -3092,6 +3092,37 @@ Both are medium-risk skill/orchestration changes; neither is a `server-patch`.
 When you hit a new failure, append a section here in this shape:
 
 ```markdown
+## Symptom: a Codex job's audit log shows fewer `tool_use` events than commands the agent says it ran (or none for a command it reports as "blocked")
+
+### Diagnostic
+
+```bash
+grep -c '"kind": "tool_use"' volumes/audit_log/<job_id>.jsonl
+grep '"kind": "text"' volumes/audit_log/<job_id>.jsonl | grep -iE 'not permitted|blocked|denied'
+```
+
+### Root cause
+
+codex-cli 0.162.0-alpha.17.2 emits no `command_execution` item for a
+command the Seatbelt sandbox denies (`workspace-write` → a write outside the
+clone, or any network call): the command runs, fails with "Operation not
+permitted", and only the agent's own `agent_message` may mention it
+(recorded 2026-10-21 by the T10 canary — `tests/fixtures/codex/
+sandbox_denied.jsonl`). The denial itself holds; the audit log under-reports
+the ATTEMPT.
+
+### Fix
+
+Nothing to repair in the job. Read the agent's text events for the attempt,
+and treat the pre-push gate's diff (`merge_gate_verdict`, the reviewed
+commit in the kept clone) as the evidence of what the job actually changed.
+
+### Prevention
+
+Re-run `scripts/codex-canary.sh` after a Codex CLI upgrade; if the denied
+`touch` starts appearing as `tool_use`/`tool_result`, update the fixture and
+drop this entry. Plan §6 (T10 residual) tracks it.
+
 ## Symptom: <what the user sees>
 
 ### Diagnostic

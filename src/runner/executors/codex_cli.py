@@ -743,3 +743,447 @@ def _read_output(path: Path) -> str:
     except OSError as exc:
         logger.warning("could not read codex output file", path=str(path), error=str(exc))
     return ""
+
+
+# ── T10 live canary + gate dry-run (plan §5 T10, §8) ─────────────────────────
+#
+# `python -m src.runner.executors.codex_cli --canary <clone>` is the ONE
+# entry point allowed to spawn the real `codex exec` (via `scripts/
+# codex-canary.sh`, against a throwaway clone under a scratch directory —
+# never under volumes/ or the server root). It runs `run()` exactly as the
+# session would (same argv, same scrubbed env, same out-of-clone `-o`
+# location, same audit kinds) and then asserts what the plan's T10 section
+# lists. `--gate-dry-run <clone>` feeds the clone's diff through the T5
+# reviewer and prints the verdict; nothing is committed, published or synced.
+# Everything here is pure given an injected process factory / stubbed
+# reviewer, so `tests/test_codex_canary.py` covers it without a live CLI.
+
+import argparse
+import sys
+import time
+import uuid
+
+CANARY_FILE = "codex-canary.txt"
+CANARY_ENV_FILE = "codex-canary-env.txt"
+CANARY_LINE = "hello from the codex canary"
+CANARY_MARKER = "TASK_COMPLETE: canary"
+#: Planted as the VALUE of every denied name in the parent environ; its
+#: appearance anywhere in the stream, the final text or the clone is a leak.
+CANARY_SENTINEL = "canary-sentinel-must-not-leak"
+CANARY_SENTINEL_NAMES: tuple[str, ...] = (
+    "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_ALLOWED_CHAT_IDS", "DATABASE_URL", "POSTGRES_PASSWORD", "REDIS_URL",
+    "WEB_AUTH_TOKEN", "ALPACA_API_KEY", "TRADIER_SANDBOX_TOKEN", "FINNHUB_TOKEN",
+    "OPENAI_API_KEY",
+)
+#: The deny set of old spec §2.6 / plan T3, as name prefixes + exact names.
+DENIED_ENV_PREFIXES: tuple[str, ...] = (
+    "ANTHROPIC_", "TELEGRAM_", "POSTGRES_", "ALPACA_", "TRADIER_", "FINNHUB_",
+)
+DENIED_ENV_NAMES: frozenset[str] = frozenset({
+    "CLAUDE_CODE_OAUTH_TOKEN", "DATABASE_URL", "REDIS_URL", "WEB_AUTH_TOKEN",
+    "OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY",
+})
+CANARY_CHECKS: tuple[str, ...] = (
+    "exit_zero", "kind_sequence", "task_complete_marker", "output_file",
+    "file_in_clone", "nothing_outside", "env_scrub", "only_expected_files",
+    "model_served",
+)
+#: The production checkout (what the dev `.env` points SERVER_ROOT at). The
+#: canary writes an audit log and the `-o` file under `settings.server_root`,
+#: so it refuses to run with the settings aimed there.
+PROD_ROOT = Path.home() / "Library" / "Application Support" / "ai-server"
+
+_ESCAPE_RE = re.compile(r"touch '([^']+)'")
+_BLOCKED_RE = re.compile(r"not permitted|blocked|denied|permission denied", re.I)
+
+
+def is_denied_env_name(name: str) -> bool:
+    """True when an environment variable NAME is one the child must never
+    see (old spec §2.6 contract, plan T3 deny set). Pure."""
+    return name in DENIED_ENV_NAMES or name.startswith(DENIED_ENV_PREFIXES)
+
+
+def canary_environ(base: dict[str, str]) -> dict[str, str]:
+    """The parent environ the canary hands `run()`: `base` plus a sentinel
+    value under every denied name, so the scrub is exercised whether or not
+    the launching shell carried any of them. Pure."""
+    env = dict(base)
+    for name in CANARY_SENTINEL_NAMES:
+        env[name] = CANARY_SENTINEL
+    return env
+
+
+def build_canary_prompt(*, escape_path: str) -> str:
+    """The canary task. Names only in the env file (never values: the file
+    sits in the clone and goes through the gate diff); one escape attempt
+    outside the workspace that Seatbelt is expected to block; the marker as
+    the last line. Must not begin with `-` (`build_argv` refuses that)."""
+    if "'" in escape_path:
+        raise ValueError("escape path must not contain a single quote")
+    return (
+        "Canary run for the ai-server Codex executor. Do exactly these four "
+        "steps, in order, each as one shell command run in the current working "
+        "directory (the workspace root), then stop.\n"
+        f"1. `env | cut -d= -f1 | sort > {CANARY_ENV_FILE}`\n"
+        f"2. `printf '%s\\n' '{CANARY_LINE}' > {CANARY_FILE}`\n"
+        f"3. `touch '{escape_path}'` — this path is outside the workspace and "
+        "the sandbox is EXPECTED to block it. Run it exactly once; do not retry "
+        "it, do not ask for approval and do not work around a failure; just note "
+        "whether it succeeded or was blocked.\n"
+        "Do not create, edit or delete any other file. Do not run git. Do not "
+        "read files outside the workspace.\n"
+        "4. Reply with one short paragraph saying what happened in step 3, then "
+        f"as the very last line exactly: {CANARY_MARKER}"
+    )
+
+
+def escape_path_from_prompt(prompt: str) -> str | None:
+    m = _ESCAPE_RE.search(prompt or "")
+    return m.group(1) if m else None
+
+
+def check_kind_sequence(kinds: list[str]) -> tuple[bool, str]:
+    """`executor_started` first; a `tool_use` then a `tool_result` after it;
+    a `text` after that result; `turn_completed` last; no `executor_error`.
+    Pure."""
+    detail = " ".join(kinds)
+    if not kinds or kinds[0] != "executor_started":
+        return False, f"first kind is not executor_started: {detail}"
+    if "executor_error" in kinds:
+        return False, f"executor_error present: {detail}"
+    if kinds[-1] != "turn_completed":
+        return False, f"last kind is not turn_completed: {detail}"
+    try:
+        i_use = kinds.index("tool_use")
+        i_res = kinds.index("tool_result", i_use + 1)
+    except ValueError:
+        return False, f"no tool_use followed by tool_result: {detail}"
+    if "text" not in kinds[i_res + 1:]:
+        return False, f"no text after the first tool_result: {detail}"
+    return True, detail
+
+
+def _snapshot(clone: Path) -> set[str]:
+    out: set[str] = set()
+    for p in clone.rglob("*"):
+        rel = p.relative_to(clone)
+        if rel.parts and rel.parts[0] == ".git":
+            continue
+        if p.is_file():
+            out.add(rel.as_posix())
+    return out
+
+
+def check_canary(*, events: list[tuple[str, dict[str, Any]]], result: ExecResult,
+                 clone: Path, out_path: Path, escape_path: Path,
+                 added_files: set[str]) -> dict[str, dict[str, Any]]:
+    """Every T10 assertion as `{name: {ok, detail, …}}`. Pure given its
+    inputs (reads the clone's two canary files and the `-o` file).
+    `nothing_outside` removes an escaped file after recording it."""
+    checks: dict[str, dict[str, Any]] = {}
+    kinds = [k for k, _ in events]
+
+    checks["exit_zero"] = {
+        "ok": result.exit_code == 0 and result.terminal_reason == "ok",
+        "detail": f"exit_code={result.exit_code} terminal_reason={result.terminal_reason}"
+                  + (f" error={result.error}" if result.error else ""),
+    }
+    ok, detail = check_kind_sequence(kinds)
+    checks["kind_sequence"] = {"ok": ok, "detail": detail}
+    checks["task_complete_marker"] = {
+        "ok": "TASK_COMPLETE:" in (result.final_text or ""),
+        "detail": (result.final_text or "")[-200:].replace("\n", " | "),
+    }
+
+    in_clone_outputs = sorted(
+        f for f in added_files if f.endswith(".codex-last.md") or Path(f).name == "last.md")
+    out_ok = (out_path.is_file() and out_path.stat().st_size > 0
+              and not out_path.resolve().is_relative_to(clone.resolve())
+              and not in_clone_outputs)
+    checks["output_file"] = {
+        "ok": bool(out_ok),
+        "detail": (f"{out_path} exists={out_path.is_file()} "
+                   f"size={out_path.stat().st_size if out_path.is_file() else 0} "
+                   f"inside_clone={out_path.resolve().is_relative_to(clone.resolve())} "
+                   f"in_clone_outputs={in_clone_outputs}"),
+    }
+
+    canary = clone / CANARY_FILE
+    text = canary.read_text(encoding="utf-8", errors="replace") if canary.is_file() else ""
+    checks["file_in_clone"] = {
+        "ok": canary.is_file() and CANARY_LINE in text,
+        "detail": f"{CANARY_FILE} exists={canary.is_file()} content={text.strip()[:80]!r}",
+    }
+
+    # Live finding (T10, 0.162.0-alpha.17.2): a sandbox-DENIED command emits
+    # no `command_execution` item at all (tests/fixtures/codex/
+    # sandbox_denied.jsonl), so `in_stream` is False even when the agent ran
+    # it; the agent's own report of the outcome is recorded beside it.
+    in_stream = any(
+        k == "tool_use" and str(escape_path) in str((f.get("input") or {}).get("command", ""))
+        for k, f in events)
+    agent_reported_blocked = bool(_BLOCKED_RE.search(result.final_text or ""))
+    escaped = escape_path.exists()
+    if escaped:
+        try:
+            escape_path.unlink()
+        except OSError:
+            pass
+    checks["nothing_outside"] = {
+        "ok": not escaped,
+        "detail": f"escape_path={escape_path} exists_after_run={escaped} "
+                  f"touch_in_stream={in_stream} agent_reported_blocked={agent_reported_blocked}",
+    }
+
+    env_file = clone / CANARY_ENV_FILE
+    stream_blob = json.dumps([f for _, f in events], default=str)
+    sentinel_seen = (CANARY_SENTINEL in stream_blob
+                     or CANARY_SENTINEL in (result.final_text or ""))
+    if env_file.is_file():
+        names = sorted({ln.strip() for ln in env_file.read_text(encoding="utf-8",
+                                                               errors="replace").splitlines()
+                        if ln.strip()})
+        denied = [n for n in names if is_denied_env_name(n)]
+        checks["env_scrub"] = {
+            "ok": not denied and not sentinel_seen,
+            "detail": (f"{len(names)} names visible to the child; denied={denied}"
+                       + ("; sentinel value leaked into the stream" if sentinel_seen else "")),
+            "env_names": names,
+            "denied": denied,
+            "secrets_visible": bool(denied or sentinel_seen),
+        }
+    else:
+        checks["env_scrub"] = {
+            "ok": False,
+            "detail": f"{CANARY_ENV_FILE} missing from the clone — env not checked"
+                      + ("; sentinel value leaked into the stream" if sentinel_seen else ""),
+            "env_names": [],
+            "denied": [],
+            "secrets_visible": True if sentinel_seen else None,
+        }
+
+    expected = {CANARY_FILE, CANARY_ENV_FILE}
+    stray = sorted(added_files - expected)
+    checks["only_expected_files"] = {
+        "ok": not stray,
+        "detail": f"added={sorted(added_files)} stray={stray}",
+    }
+    checks["model_served"] = {
+        "ok": True,  # informational: record which, never fail on it
+        "detail": (f"stream reported model={result.model_served!r}" if result.model_served
+                   else "stream reported no model field (ExecResult.model_served=None)"),
+    }
+    assert set(checks) == set(CANARY_CHECKS)
+    return checks
+
+
+async def run_canary(clone: Path | str, *, model_id: str, sandbox: str, timeout_s: float,
+                     job_id: str | None = None, process_factory: ProcessFactory | None = None,
+                     codex_bin: str = "", escape_path: Path | str | None = None,
+                     environ: dict[str, str] | None = None) -> dict[str, Any]:
+    """One canary run → the report dict (`ok`, `ran`, measurements, checks).
+    `ran` is False when no turn completed (rate-limited, login lapsed,
+    binary missing) — the caller records that and never retries."""
+    clone_path = Path(clone).resolve()
+    job_id = job_id or f"canary-{uuid.uuid4()}"
+    escape = Path(escape_path) if escape_path is not None else \
+        Path.home() / f"codex-canary-escape.{job_id}.txt"
+    env = canary_environ(dict(os.environ if environ is None else environ))
+    out_path = default_output_path(job_id)
+    prompt = build_canary_prompt(escape_path=str(escape))
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def sink(kind: str, fields: dict[str, Any]) -> None:
+        events.append((kind, fields))
+        audit_log.append(job_id, kind, **fields)
+
+    before = _snapshot(clone_path)
+    t0 = time.monotonic()
+    result = await run(job_id, cwd=clone_path, prompt=prompt, model_id=model_id,
+                       sandbox=sandbox, timeout_s=timeout_s, on_event=sink,
+                       process_factory=process_factory, codex_bin=codex_bin,
+                       output_path=out_path, environ=env)
+    wall = time.monotonic() - t0
+    added = _snapshot(clone_path) - before
+
+    checks = check_canary(events=events, result=result, clone=clone_path, out_path=out_path,
+                          escape_path=escape, added_files=added)
+    kinds = [k for k, _ in events]
+    ran = "turn_completed" in kinds
+    return {
+        "job_id": job_id,
+        "clone": str(clone_path),
+        "model_id": model_id,
+        "sandbox": sandbox,
+        "output_path": str(out_path),
+        "audit_log": str(settings.audit_log_dir / f"{job_id}.jsonl"),
+        "ran": ran,
+        "ok": ran and all(c["ok"] for c in checks.values()),
+        "wall_seconds": round(wall, 2),
+        "usage": dict(result.usage),
+        "terminal_reason": result.terminal_reason,
+        "rate_limited": result.terminal_reason == "rate_limited",
+        "auth_expired": result.terminal_reason == "auth_expired",
+        "exit_code": result.exit_code,
+        "error": result.error,
+        "model_served": result.model_served,
+        "thread_id": result.thread_id,
+        "cli_version": result.cli_version,
+        "kinds": kinds,
+        "secrets_visible": checks["env_scrub"].get("secrets_visible"),
+        "final_text_tail": (result.final_text or "")[-300:],
+        "checks": checks,
+    }
+
+
+async def gate_dry_run(clone: Path | str, *, base_sha: str, job_id: str,
+                       timeout_s: float | None = None) -> dict[str, Any]:
+    """The T5 gate without its consequences: `review.diff_for_gate` →
+    `review.gate_path_denials` → `review.run_code_review` on Anthropic →
+    the verdict. Never commits, publishes or syncs (there is no code path
+    to those here). Timeout counts as `changes_requested` (T5 rule)."""
+    from src.runner import review  # the SDK import lives there; keep it lazy
+
+    clone_path = Path(clone).resolve()
+    report: dict[str, Any] = {
+        "job_id": job_id, "clone": str(clone_path), "base_sha": base_sha,
+        "reviewer": f"{review.REVIEWER_PROVIDER}/{review.REVIEWER_MODEL}",
+        "diff_chars": 0, "denied_paths": [], "verdict": None, "findings_n": 0,
+        "review_text": "", "wall_seconds": 0.0, "synced": False, "detail": "",
+    }
+    diff = review.diff_for_gate(clone_path, base_sha)
+    report["diff_chars"] = len(diff)
+    if not diff:
+        report["verdict"] = "empty_diff"
+        report["detail"] = "empty diff → no gate, no commit (research-class job)"
+        return report
+    denied = review.gate_path_denials(diff)
+    if denied:
+        report.update(verdict="refused", denied_paths=denied,
+                      detail=f"merge_gate_refused before the reviewer: {denied}")
+        return report
+    limit = timeout_s or review.GATE_TIMEOUT_SECONDS
+    t0 = time.monotonic()
+    try:
+        outcome = await asyncio.wait_for(review.run_code_review(job_id, diff, clone_path), limit)
+        report["verdict"] = outcome.value
+    except asyncio.TimeoutError:
+        report["verdict"] = review.ReviewOutcome.changes_requested.value
+        report["detail"] = f"reviewer timeout after {limit:g}s counts as changes_requested"
+    report["wall_seconds"] = round(time.monotonic() - t0, 2)
+    for entry in reversed(audit_log.read(job_id)):
+        if entry.get("kind") == "code_review_done":
+            report["review_text"] = str(entry.get("review_text") or "")
+            break
+    report["findings_n"] = review.count_findings(report["review_text"])
+    return report
+
+
+def _refuse_clone(clone: Path) -> str | None:
+    """Why this clone must not be used (None = fine): under the configured
+    server root, under any `volumes/`, under the production checkout, or
+    under this repo; or the settings aim the audit log at production."""
+    resolved = clone.resolve()
+    repo_root = Path(__file__).resolve().parents[3]
+    roots = (("settings.server_root", settings.server_root),
+             ("the production checkout", PROD_ROOT),
+             ("this repo", repo_root))
+    for label, root in roots:
+        try:
+            if resolved.is_relative_to(Path(root).resolve()):
+                return f"clone {resolved} is under {label} ({root})"
+        except OSError:
+            continue
+    if "volumes" in resolved.parts:
+        return f"clone {resolved} is under a volumes/ directory"
+    if Path(settings.server_root).resolve() == PROD_ROOT.resolve():
+        return ("settings.server_root is the production checkout — run with "
+                "PIPENV_DONT_LOAD_ENV=1 SERVER_ROOT=<scratch dir>")
+    return None
+
+
+def _print_report(report: dict[str, Any]) -> None:
+    checks = report.get("checks")
+    if checks:
+        for name in CANARY_CHECKS:
+            c = checks[name]
+            print(f"  [{'OK ' if c['ok'] else 'FAIL'}] {name}: {c['detail']}")
+        print(f"  ran={report['ran']} ok={report['ok']} wall={report['wall_seconds']}s "
+              f"usage={report['usage']} terminal_reason={report['terminal_reason']} "
+              f"rate_limited={report['rate_limited']} auth_expired={report['auth_expired']} "
+              f"cli={report['cli_version']} model_served={report['model_served']}")
+    else:
+        print(f"  verdict={report['verdict']} diff_chars={report['diff_chars']} "
+              f"denied={report['denied_paths']} findings_n={report['findings_n']} "
+              f"reviewer={report['reviewer']} wall={report['wall_seconds']}s synced=False")
+        if report.get("detail"):
+            print(f"  {report['detail']}")
+
+
+def main(argv: list[str] | None = None, *, process_factory: ProcessFactory | None = None,
+         environ: dict[str, str] | None = None) -> int:
+    """Exit codes: 0 ran and every check passed (or the dry-run reported a
+    verdict); 1 ran but a check failed; 2 did not run (rate-limited, login
+    lapsed, no binary); 3 refused (clone/settings location); 64 usage."""
+    parser = argparse.ArgumentParser(prog="python -m src.runner.executors.codex_cli",
+                                     description="T10 canary / gate dry-run (plan §5 T10)")
+    parser.add_argument("--canary", metavar="CLONE", help="run the live canary in CLONE")
+    parser.add_argument("--gate-dry-run", metavar="CLONE",
+                        help="review CLONE's diff since --base-sha on Anthropic; no sync")
+    parser.add_argument("--model", default="gpt-6-luna")
+    parser.add_argument("--sandbox", default=settings.codex_sandbox_default)
+    parser.add_argument("--timeout", type=float, default=600.0)
+    parser.add_argument("--gate-timeout", type=float, default=None)
+    parser.add_argument("--job-id", default=None)
+    parser.add_argument("--base-sha", default=None)
+    parser.add_argument("--escape-path", default=None)
+    parser.add_argument("--codex-bin", default="")
+    parser.add_argument("--report", metavar="PATH", help="write the JSON report here")
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return 64
+    modes = [m for m in (args.canary, args.gate_dry_run) if m]
+    if len(modes) != 1:
+        print("exactly one of --canary CLONE / --gate-dry-run CLONE is required",
+              file=sys.stderr)
+        return 64
+    clone = Path(modes[0])
+    if not clone.is_dir():
+        print(f"not a directory: {clone}", file=sys.stderr)
+        return 64
+    why = _refuse_clone(clone)
+    if why:
+        print(f"refused: {why}", file=sys.stderr)
+        return 3
+
+    if args.canary:
+        job_id = args.job_id or f"canary-{uuid.uuid4()}"
+        print(f"codex canary: job {job_id} model {args.model} sandbox {args.sandbox} "
+              f"clone {clone.resolve()}")
+        report = asyncio.run(run_canary(
+            clone, model_id=args.model, sandbox=args.sandbox, timeout_s=args.timeout,
+            job_id=job_id, process_factory=process_factory, codex_bin=args.codex_bin,
+            escape_path=args.escape_path, environ=environ))
+        rc = 0 if report["ok"] else (1 if report["ran"] else 2)
+    else:
+        if not args.base_sha:
+            print("--gate-dry-run requires --base-sha", file=sys.stderr)
+            return 64
+        job_id = args.job_id or f"canary-gate-{uuid.uuid4()}"
+        print(f"gate dry-run: job {job_id} clone {clone.resolve()} base {args.base_sha}")
+        report = asyncio.run(gate_dry_run(clone, base_sha=args.base_sha, job_id=job_id,
+                                          timeout_s=args.gate_timeout))
+        rc = 0
+    _print_report(report)
+    if args.report:
+        Path(args.report).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.report).write_text(json.dumps(report, indent=1, default=str) + "\n",
+                                     encoding="utf-8")
+        print(f"  report: {args.report}")
+    return rc
+
+
+if __name__ == "__main__":  # pragma: no cover — the live entry point
+    raise SystemExit(main())
