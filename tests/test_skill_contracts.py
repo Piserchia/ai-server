@@ -11,19 +11,26 @@ Run: pipenv run pytest tests/test_skill_contracts.py -v
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from src.config import settings
 from src.gateway.telegram_bot import (
-    _MODEL_ALIASES,
     _VALID_EFFORTS,
     _VALID_PERMISSIONS,
 )
+from src.registry import models as models_registry
+from src.registry.models import VALID_MODELS
 from src.registry.skills import SkillConfig, list_all
 
-VALID_MODELS = set(_MODEL_ALIASES.values())
+# Assert the checked-out tree, not `settings.skills_dir`: the dev `.env`
+# points SERVER_ROOT at the production checkout, so reading through settings
+# validated prod's skills against this tree's alias table (red on every
+# dev-branch frontmatter change until deploy — seen on T0, 2026-10-21).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_SKILLS = _REPO_ROOT / "skills"
 
-ALL_SKILLS = list_all()
+ALL_SKILLS = list_all(_REPO_SKILLS)
 SKILL_IDS = [s.name for s in ALL_SKILLS]
 
 
@@ -43,8 +50,13 @@ class TestSkillContracts:
         assert skill.name and skill.name.strip()
 
     def test_model_valid(self, skill: SkillConfig):
-        # "" is allowed — means "use settings.default_model".
-        assert skill.model == "" or skill.model in VALID_MODELS, (
+        # "" is allowed — means "use settings.default_model". Otherwise the
+        # `[provider/]model_id` must resolve through the registry (T1,
+        # 2026-10-21) — a bare non-Anthropic id is refused there (C12).
+        if skill.model == "":
+            return
+        ref = models_registry.resolve(skill.model)   # raises ProviderRefused
+        assert ref.model_id in VALID_MODELS, (
             f"{skill.name}: model {skill.model!r} not in {sorted(VALID_MODELS)}"
         )
 
@@ -64,7 +76,7 @@ class TestSkillContracts:
 
     def test_context_files_exist(self, skill: SkillConfig):
         for cf in skill.context_files:
-            assert (settings.server_root / cf).exists(), (
+            assert (_REPO_ROOT / cf).exists(), (
                 f"{skill.name}: context_file {cf!r} does not exist"
             )
 
@@ -73,7 +85,7 @@ class TestSkillContracts:
         model = on_failure.get("model")
         effort = on_failure.get("effort")
         if model is not None:
-            assert model in VALID_MODELS, (
+            assert models_registry.resolve(model).model_id in VALID_MODELS, (
                 f"{skill.name}: escalation model {model!r} invalid"
             )
         if effort is not None:

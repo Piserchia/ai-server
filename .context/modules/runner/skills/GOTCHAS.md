@@ -11,8 +11,170 @@
 > This file is seeded empty. Claude sessions working in this module should
 > append here when they learn something reusable (see `.context/PROTOCOL.md`).
 
+## 2026-10-21 — Per-provider lane holds: what holds a job and what does not (T6)
+
+**Pattern.** A paused NON-Anthropic lane does not stop the job loop (only
+the global `quota:paused_until` does). Its jobs are held in
+`main._process_job` BEFORE the row is flipped to `running`: no DB write,
+no slot, no process; the id comes back at the queue TAIL after
+`hold_delay(until, now)` (≤ 30 s) from a slot-free task. Three traps:
+
+1. **The lane is decided by the `resolved_provider` stamp first, then by
+   `preresolve_provider`** — which uses the RULE router only. A task-kind
+   job whose Codex-pinned skill came from the LLM router is NOT held on its
+   first pop (it runs, the executor hits the 429, the session's stamp is
+   written, and every later pop holds it). Do not "fix" this by calling
+   the LLM router in the hold path: it is not cheap and the hold runs on
+   every pop of every job.
+2. **`job_held` is written once per (job, pause window)** (`_held_audited`,
+   in-process memory). A held job cycles every 30 s; auditing each cycle
+   would write ~120 lines per job per hour. A runner restart re-audits
+   once — that is fine.
+3. **A held job sits as `status=queued` with no Redis entry for up to 30 s.**
+   Graceful shutdown cancels the delayed pushes (they RPUSH immediately in
+   `finally`); a crash leaves it to `requeue_stranded_queued()` at the next
+   startup. Do not add a "queued row with no Redis entry = bug" check that
+   fires inside that window.
+
+Lifting a lane by hand is `/resume <provider>`; bare `/resume` is still the
+global pause only. Tests: `tests/test_quota.py` (TestHeldJob,
+TestCodexRateLimited).
+
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
+
+## A Codex job that passed the pre-push gate can still FAIL with `publish after LGTM failed: git push rejected` (2026-10-21, T5)
+
+`workspaces.publish_workspace` makes ONE push attempt and never rebases or
+forces: if the remote moved between the clone and the push (another job,
+the owner's laptop), the reviewed commit stays in the KEPT clone
+(`volumes/workspaces/<job8>-<name>/`, audit `workspace_published{ok:false,
+commit}`), the job ends `terminal_reason=publish_failed` (`job_failed
+error_category=publish_failed`; review round 1 — it was `api_error`, which
+hid "approved but rejected" behind vendor errors) and nothing is synced. A
+rebase would change the base of a diff Anthropic already
+approved, so it is deliberately not automated. Recovery is the owner's:
+`git -C <clone> pull --rebase origin <branch> && git push`, or re-run the
+job. Also: the gate's diff is `git diff <base_sha>` + untracked, so a job
+that `git commit`s on its own is reviewed all the same and gets an empty
+provenance commit (trailers) on top — never an amend. The commit is made
+with `--no-verify` (a clone has no hooks anyway; a canonical's
+`core.hooksPath` would otherwise run the owner's hooks on a job's behalf).
+
+## A Codex diff touching `.claude/`, `AGENTS.md`, `CLAUDE.md`, `.github/` … is refused with NO reviewer run (`merge_gate_refused`) (2026-10-21, T5 review round 1)
+
+`review.gate_path_denials` runs before `run_code_review`: any path under
+`.claude/ .codex/ .git/ .githooks/ .github/`, the files `.gitmodules
+.gitattributes .gitconfig .mcp.json`, or any `AGENTS.md`/`CLAUDE.md` fails
+the job as `ReviewBlocked(verdict="blocker", denied_paths=[…])` — audit
+`merge_gate_refused{reason=denied_path, paths}`, no `code_review_done`, no
+`merge_gate_verdict`. These files are *instructions or executable config*
+for the next agent that opens the checkout (Claude Code hooks run as the
+owner; Codex reads AGENTS.md; every Anthropic project session loads
+CLAUDE.md), so a prompt-injected job must not be able to push them through
+one reviewer's judgement. Legit edits to them go through an Anthropic lane.
+Related: the reviewer itself now runs with `setting_sources=[]` — it would
+otherwise have loaded the clone's `.claude/settings.json` hooks before
+reading the diff. Also: a slug-less `codex/…` job (generic task, router
+miss, missing project dir) is `ProviderRefused` naming D-A *by canonical
+path* — its canonical is `settings.server_root`, i.e. this repo, and the
+publish path would push to `origin/main`; `ROUTER_CODE_SERVER_PROVIDERS`
+is the only way through.
+
+## Non-Anthropic lanes do not run belt 2 (`post_review`) — look at `merge_gate_verdict` instead (2026-10-21, T5)
+
+`main._maybe_review` audits `post_review_skipped{reason=pre_push_gate}` for
+every non-Anthropic job: the pre-push gate (same fixed Anthropic reviewer,
+same `run_code_review`) already graded the diff before the push, and its
+verdict is stamped as `jobs.review_outcome` and audited as
+`merge_gate_verdict`. `/status` and the retrospective read the column as
+usual; the `reason` differs from the Anthropic lanes' `stale_head|no_diff|
+timeout` so the two belts never get conflated in sweeps.
+
+
+## A schedule row's `{"model": "codex/…"}` is refused when the skill pins an Anthropic model (2026-10-21)
+
+`session.lane_refusal` honours a `payload.model` that moves an
+Anthropic-pinned skill to another provider ONLY from an owner origin
+(`created_by` = `telegram:*`, `web`, `cli`). The scheduler's `created_by` is
+`scheduler`, so a schedule payload override of e.g. `atlas-report`
+(`model: claude-opus-4-8`) fails with `provider_refused … only the owner
+(telegram/web/cli) may override it`. That is by design (plan T4: an
+autonomous origin — scheduler, escalation, dispatch MCP, event trigger —
+must not be able to retarget a pinned skill onto a vendor lane). To
+"schedule routines using other agents": pin `model: codex/<id>` in the
+skill's own frontmatter (then `reason=pin`), or schedule a skill with no
+`model:` pin. The refusal audit names the origin and the pin.
+
+## Non-Anthropic lanes keep their clone and never ff-sync (T4, 2026-10-21)
+
+After a successful Codex job `run_session` does NOT call
+`workspaces.sync_canonical` and passes `keep=True` to
+`cleanup_workspace` — the executor cannot push (network off, no
+credentials), so the edits sit uncommitted in
+`volumes/workspaces/<job>…` until the T5 pre-push Anthropic gate commits
+and syncs them. Until T5 lands, a completed Codex job's work is only in
+that clone (audit `note` names the path); `server-upkeep` prunes old
+workspaces, so do not expect it to survive a week. Also: `learning`'s
+Write/Edit gate will not fire for Codex jobs (its writes are audited as
+`Bash` `command_execution`); decide modified files from `git status
+--porcelain` in the clone. And `post_review` (belt 2, `_maybe_review`) is a
+`stale_head` no-op for every completed Codex job until T5: it resolves the
+CANONICAL cwd, whose HEAD predates the job because nothing was synced, so
+each such job logs `post_review_skipped reason=stale_head` plus the
+"canonical sync failed or nothing committed" WARNING — expected noise, not
+a fault; T5 must either point `_maybe_review` at the kept clone for
+non-Anthropic providers or make the pre-push gate the review of record.
+
+## Non-Anthropic failures are terminal on every path — do not "fix" the missing escalation (review round 1, 2026-10-21)
+
+A Codex job that times out at main's ceiling, crashes before the executor
+process starts (`CodexNotFound`, bad sandbox), or dies in a generic
+exception stamps `terminal_reason=timeout|api_error`, audits a `note`, and
+STOPS — `main._non_anthropic_lane(job)` short-circuits `_maybe_escalate`
+in the `asyncio.TimeoutError` and generic `Exception` branches. This is
+deliberate (T4 note 4): the skill's `on_failure` target is an Anthropic
+model, and escalating would silently re-run the job on another vendor.
+The 2026-08-07 "timeouts must escalate" contract
+(`tests/test_timeout_escalation.py`) still holds for Anthropic jobs and for
+jobs that died before the session stamped `resolved_provider`. T6 adds the
+per-provider `rate_limited` hold + front-requeue, which is the retry story
+for these lanes.
+
+## 2026-10-21 — Codex writes files through `Bash`, so the Write/Edit gates do not see them
+
+**Trap**: `learning.should_extract` (and anything else keyed on
+`tool_use.tool_name in ("Write", "Edit")`) decides "this job modified
+files" from tool kinds. The recorded Codex fixture
+(`tests/fixtures/codex/command_and_file.jsonl`) shows the CLI writing a file
+with `printf ... > hello.txt` inside a `command_execution` item, which the
+executor audits as `tool_use{tool_name:"Bash"}` — only `file_change` items
+become `Edit`. The C14 shapes are honoured; the semantic gate silently
+misses most Codex edits.
+
+**Rule**: for non-Anthropic executors, derive "modified files" from
+`git status --porcelain` in the per-job clone (T4/T5), never from tool
+kinds. Related: `ExecResult.model_served` is None unless the stream carried
+a `model` field — do not read a None there as "same as requested".
+
+## 2026-10-21 — `codex exec` blocks on a piped stdin, and a zero exit proves nothing
+
+**Trap**: `codex exec` treats whatever arrives on stdin as additional
+instructions and waits for EOF before starting; a job spawned with
+`stdin=PIPE` (or inheriting the runner's) hangs until the session timeout
+(probe #1, 2026-10-21: 90 s of nothing). Separately, the CLI can exit 0
+with no `turn.completed` event (e.g. an early auth/config failure printed
+to stderr), so "exit code 0 and some stdout" is not a finished turn.
+
+**Rule**: `src/runner/executors/codex_cli.py` always passes
+`stdin=asyncio.subprocess.DEVNULL` and classifies any stream that ends
+without `turn.completed` as `terminal_reason=api_error` whatever the exit
+code. Also: `settings.codex_bin` set to a path that does not exist is
+`CodexNotFound` (fail closed) — it never falls through to PATH or the
+ChatGPT.app bundle, so a typo in `.env` surfaces as a refused job, not a
+different binary. The bundle binary
+(`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`) is
+not on PATH under launchd, which is why discovery ends there.
 
 ## 2026-08-21 — `ResultMessage.is_error` is NOT a reliable "session succeeded" flag
 
@@ -270,3 +432,104 @@ Consumers should treat a truncated review as PARTIAL findings: the governor
 (or a fix session) should re-run a review on the actual diff rather than
 assume the visible issues are the complete list. Follow-up worth routing:
 store the full text to a sidecar file and keep the event as a pointer.
+
+## `pipenv run pytest` ignores a shell `SERVER_ROOT` — the dev `.env` wins (2026-10-21)
+
+Tests that read the skill tree (`test_skill_contracts`, anything via
+`settings.skills_dir`) resolve it from `settings.server_root`, which the dev
+checkout's `.env` points at the PRODUCTION tree. Exporting
+`SERVER_ROOT="$PWD"` in the shell does NOT fix it: `pipenv run` loads the
+project `.env` on top of the shell environment (the "Loading .env environment
+variables..." line), so the override is silently replaced. Symptom seen during
+T0 (Haiku retirement): `skills/project-update-poll/SKILL.md` already said
+sonnet in the dev tree, yet `test_model_valid[project-update-poll]` failed
+because it was reading prod's still-Haiku copy against the dev alias table.
+
+**Fix**: `PIPENV_DONT_LOAD_ENV=1 SERVER_ROOT="$PWD" pipenv run pytest -q -p
+no:cacheprovider`. pydantic-settings still reads `.env` for everything else
+(`postgres_dsn` etc.); only the shell variable now takes precedence. Any
+skill-contract failure that disappears under this invocation is dev/prod
+drift that a deploy resolves, not a defect in the change.
+
+## Nothing caps Codex-lane concurrency at 1 — §4f is an assumption, not code (2026-10-21, T9)
+
+**CLOSED 2026-10-21 (whole-branch review)**: `session._run_executor` now
+awaits `executor.run` under `executor_slot(<registry executor name>)`, an
+`asyncio.Semaphore(EXECUTOR_CONCURRENCY[name])` with `codex_cli = 1`; a
+contended wait audits `executor_slot_wait{executor, waited_s, concurrency}`
+and comes out of the executor's own budget. Two queued Codex jobs now run
+one after the other (`tests/test_pre_push_gate.py::test_two_codex_jobs_serialize_on_the_executor_slot`).
+The paragraph below is the history.
+
+Plan §4f ("one credential, one stream … `codex` concurrency fixed at 1")
+and the executor docstring ("the session/queue keep codex concurrency at 1;
+this module has no pool") describe an invariant no code enforces: the only
+semaphore is `main._job_loop`'s global `asyncio.Semaphore(MAX_CONCURRENT_JOBS)`
+(default 4), and neither `session._run_executor` nor `codex_cli.run` holds a
+per-provider lock. Two queued `codex/<id>` jobs therefore run at once on the
+same `auth.json`, which is the refresh-token rotation lockout §4f names
+(symptom: every later job `terminal_reason=auth_expired`, fix is an owner
+`codex login --device-auth`). Until a per-provider `asyncio.Semaphore(1)`
+(keyed by `models.yml` provider, acquired in `_run_executor`) lands with its
+test, do not schedule two Codex routines in the same window and do not
+`/task` a second Codex job while one runs. Recorded in plan §6 as residual.
+
+## A Seatbelt-denied Codex command is invisible in the audit log (2026-10-21, T10)
+
+On codex-cli 0.162.0-alpha.17.2 a `command_execution` that the sandbox
+denies emits NO `item.started`/`item.completed` in the `--json` stream —
+the agent sees the exact error (`touch: …: Operation not permitted`) and may
+mention it in an `agent_message`, but the audit log shows no `tool_use`,
+`review._summarize_tool_usage` counts one fewer Bash call, and the Telegram
+stream never shows the attempt. Recorded as
+`tests/fixtures/codex/sandbox_denied.jsonl`. The DENIAL holds (nothing was
+written); what is lost is the record of the ATTEMPT. Consequence: do not
+read "no tool_use for X" in a Codex job's audit as "X was never tried"; the
+pre-push gate reviews the diff, which is the evidence that survives. The
+canary records `touch_in_stream` and `agent_reported_blocked` side by side
+for this reason.
+
+## `scrubbed_env()` bounds the runner, not the login shell Codex spawns (2026-10-21, T10)
+
+Codex runs every command through `/bin/zsh -lc`, a LOGIN shell that sources
+the owner's `~/.zprofile` and `~/.zshrc`. The live canary handed the child
+exactly `{PATH, HOME, LANG, TMPDIR, CODEX_HOME}` and the command still saw
+33 names: 8 `CODEX_*` set by the CLI plus 20 from the rc files
+(`HOMEBREW_*`, `PYENV_*`, `PAGER`, `GH_PAGER`, …). None is in the deny set
+today, but an `export SOME_TOKEN=` in a shell rc file WOULD reach a Codex
+job despite the scrub. Keep secrets in `.env` (never forwarded), never in
+rc files; `scripts/codex-canary.sh` fails its `env_scrub` check on any
+denied NAME, so re-run it after touching shell rc files.
+
+## Running the Codex canary from the dev checkout (2026-10-21, T10)
+
+`scripts/codex-canary.sh` must run with `PIPENV_DONT_LOAD_ENV=1` and
+`SERVER_ROOT=<scratch>/fake-server-root` (it sets both): the audit log and
+the `-o` file go under `settings.audit_log_dir`, and the dev `.env` points
+that at PRODUCTION; `codex_cli.main` additionally refuses (exit 3) while
+`settings.server_root` is the production path, or when the clone is under
+this repo, the production checkout or any `volumes/`. Put `CANARY_ROOT`
+under the session scratch directory. Exit 2 means Codex did not run
+(rate-limited / login lapsed) — record it in plan §8, do not loop. Note
+`python -m src.runner.executors.codex_cli` works but runpy warns that the
+package `__init__` already imported the module (it then executes twice);
+the script imports `main` from a one-line entry file instead.
+
+## `git diff --no-ext-diff` does NOT disable textconv (2026-10-21)
+
+`--no-ext-diff` only skips `diff.external` / `diff.<drv>.command`. A
+`diff.<drv>.textconv` configured in the clone's `.git/config` and bound by a
+`.gitattributes` line still runs and replaces the blob the diff is computed
+from — an empty converter yields a hunk with no `+` lines at all. The gate
+needs `--no-textconv` as well (`review.GATE_DIFF_FLAGS`), on both
+`diff <base>` and `diff --no-index`. Verified on git 2.53.0.
+
+## Path deny lists must casefold on this host (2026-10-21)
+
+The canonical checkouts and every agent that opens them live on
+case-insensitive APFS: `.CLAUDE/settings.json` written by a job IS
+`.claude/settings.json` to Claude Code, `agents.md` IS `AGENTS.md` to Codex.
+`review.gate_path_denied` compares with `str.casefold()`; any future path
+allow/deny rule here must too (fail closed — a false positive on a
+case-sensitive box only costs a refusal).
+

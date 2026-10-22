@@ -14,6 +14,21 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-10-21 — `parse_flags` raises on an unknown `--model`; handlers must use `_parse_flags_or_reply`
+
+**Symptom**: a new command handler that calls `parse_flags(raw)` directly and
+is wrapped in `_error_safe` will, on `/cmd --model=typo …`, reply "Retrying…
+(ModelFlagRefused)", retry, then dispatch a self-diagnose job — because since
+T7 `parse_flags` resolves `--model` through the models registry and raises
+`ModelFlagRefused` instead of passing an unknown id through.
+
+**Fix**: handlers call `parsed = await _parse_flags_or_reply(update, raw)` and
+return on `None`. It catches the parse-time refusal AND the
+`ROUTER_PROVIDERS_ENABLED` refusal (`resolve_enabled`), replies with the
+reason in plain text (never Markdown — the raw value is user input) and
+creates nothing. Loud-on-misuse is deliberate: a bare unknown id must never
+reach `job.payload` for the session to fail later.
+
 ## 2026-04-20 — Telegram Markdown escaping required for all interpolated DB strings
 
 Any string value read from the database (job titles, project names, user input) that is interpolated into a Telegram `parse_mode="MarkdownV2"` message must be escaped with `telegram.helpers.escape_markdown(value, version=2)` before insertion. Unescaped characters like `.`, `-`, `(`, `)`, `!` trigger a `BadRequest: Can't parse entities` error from Telegram's API. This is especially easy to miss when the field looks like plain text in the DB but contains punctuation at runtime.

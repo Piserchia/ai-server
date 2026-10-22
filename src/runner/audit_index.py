@@ -56,6 +56,10 @@ class IndexEntry:
     job_id: str
     skill: str
     model: str
+    # Which provider lane ran the job, from `job_started.provider` (additive
+    # since T4, 2026-10-21). None for audit logs written before that — a
+    # pre-007 entry is never guessed to be Anthropic (T7).
+    provider: str | None
     effort: str
     status: str
     user_rating: int | None
@@ -108,6 +112,7 @@ def build_index_entry(
     """
     skill = ""
     model = ""
+    provider: str | None = None
     effort = ""
     status = ""
     user_rating: int | None = None
@@ -127,6 +132,7 @@ def build_index_entry(
         if kind == "job_started":
             skill = evt.get("skill", "")
             model = evt.get("model", "")
+            provider = evt.get("provider") or None
             effort = evt.get("effort", "")
         elif kind == "job_completed":
             status = "completed"
@@ -149,6 +155,7 @@ def build_index_entry(
         job_id=job_id,
         skill=skill,
         model=model,
+        provider=provider,
         effort=effort,
         status=status or "unknown",
         user_rating=user_rating,
@@ -220,8 +227,13 @@ def search_index(
     skill: str | None = None,
     status: str | None = None,
     keyword: str | None = None,
+    provider: str | None = None,
 ) -> list[dict]:
-    """Search the index. Returns matching entries. Pure function over file content."""
+    """Search the index. Returns matching entries. Pure function over file content.
+
+    `provider` (T7, 2026-10-21) matches the lane the job ran on; entries
+    written before the field existed have no `provider` key and never match
+    a provider filter."""
     if not index_path.exists():
         return []
 
@@ -239,6 +251,8 @@ def search_index(
             if skill and entry.get("skill") != skill:
                 continue
             if status and entry.get("status") != status:
+                continue
+            if provider and entry.get("provider") != provider:
                 continue
             if keyword and keyword.lower() not in [k.lower() for k in entry.get("keywords", [])]:
                 # Also check error_first_line

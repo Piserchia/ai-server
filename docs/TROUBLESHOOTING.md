@@ -2802,6 +2802,231 @@ Job status is not proof of output. Watchdogs must check artifacts:
 schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
 open follow-up.
 
+## Symptom: a `--model=codex/...` job (or a schedule carrying `{"model": "codex/..."}`) fails at once with `error_category=provider_refused` — no clone, no process, no DM summary
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "(provider_selected|provider_refused)"' volumes/audit_log/<job_id>.jsonl
+grep -E '^ROUTER_(PROVIDERS_ENABLED|CODE_SERVER_PROVIDERS)=' "$HOME/Library/Application Support/ai-server/.env"
+```
+
+### Root cause
+
+Every model id is resolved through `src/registry/models.py` against
+`models.yml` and the lane rules in `src/runner/session.py` BEFORE the deploy
+gate and the workspace clone (T1/T4/T5, 2026-10-21). The refusal is fail-closed
+(C12) and terminal: `provider_refused{provider, model, raw, reason}` +
+`job_failed error_category=provider_refused`, no escalation. The `reason`
+field is one of:
+
+| `reason` starts with | meaning | what to do |
+|---|---|---|
+| `unknown provider '…'` / `unknown model '…' for provider '…'` / `empty model id` | the id is not in `models.yml` (a bare `gpt-6-luna` is `anthropic/gpt-6-luna` and unknown — write `codex/gpt-6-luna`) | fix the flag / skill `model:` / schedule payload; add the id to `models.yml` only if the vendor doc confirms it |
+| `provider 'codex' is not enabled (ROUTER_PROVIDERS_ENABLED='anthropic')` | the default — the slice ships dark | owner flips `ROUTER_PROVIDERS_ENABLED=anthropic,codex` in prod `.env` + restarts runner and bot (plan §7.1); until then this is correct behaviour |
+| `no executor for provider '…' in this runner` | `models.yml` names an `executor:` this build has no module for | deploy the build that carries it; never edit `models.yml` to point at another executor |
+| `isolation tier '…': non-Anthropic executors run on the 'workspace' tier only` | the skill is `isolation: host`/`none` | pin the skill to Anthropic or make it workspace-isolated |
+| `skill '…' declares subagents (…)` / `skill '…' needs MCP (…)` | capability the Codex lane does not have | run on Anthropic |
+| `skill '…' is in the code-server set; provider 'codex' is not in ROUTER_CODE_SERVER_PROVIDERS` | D-A: `server-patch`, `server-deploy`, `new-skill`, `deploy-director`, `atlas-redeploy`, `project-redeploy` are Anthropic-only | expected; lifting it is plan §7.4–7.6, owner-only |
+| `job has no project slug, so its canonical is the server root` / `canonical … is the server root` / `… inside the server root but not a project` | D-A by path (T5 review): a generic task, a router miss or a missing project dir resolves to THIS repo | give the job a project (`/task <slug>: …` or a project-scoped skill), or run it on Anthropic |
+| `payload model override to 'codex/…' on a job from 'schedule:…'`: skill pins … | a non-owner origin (schedule, dispatch MCP, event) may not override an Anthropic-pinned skill | pin `model: codex/<id>` in the skill's frontmatter, or schedule an unpinned skill (runner GOTCHAS) |
+| `the codex lane needs a git canonical for the pre-push review gate` | the project is a copied (non-git) canonical | run on Anthropic; the gate diffs a clone |
+
+### Fix
+
+Per the table. For the web dropdown and `/task --model=`, the same resolution
+runs at submit time (HTTP 422 / a reply naming the reason), so a job that got
+as far as `provider_refused` came from a schedule payload or a stale client.
+
+### Prevention
+
+`tests/test_models_registry.py` resolves every skill frontmatter and escalation
+target; `tests/test_provider_dispatch.py` covers each lane rule. Add the case
+there before changing a rule.
+
+## Symptom: a `codex/...` job fails with `terminal_reason=api_error` and the audit log shows an `executor_error` whose message starts with `CodexNotFound:` — "codex not found"
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "(executor_started|executor_error)"' volumes/audit_log/<job_id>.jsonl
+grep '^CODEX_BIN=' "$HOME/Library/Application Support/ai-server/.env"
+ls -l /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex; which codex
+```
+
+### Root cause
+
+`executors.codex_cli.discover_binary` tries, in order: `settings.codex_bin`
+(`CODEX_BIN`) → `shutil.which("codex")` → the ChatGPT.app bundle
+`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`. A
+configured `CODEX_BIN` that does not exist is `CodexNotFound` outright — it
+never falls through to PATH (fail closed). Launchd's PATH is frozen, so on
+prod the bundle path is the realistic default and `which codex` in a shell
+proves nothing about the runner. The error is terminal on the lane
+(`ExecutorFailed(..., "api_error")`), never escalated to Anthropic.
+
+### Fix
+
+Set `CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`
+(or wherever `codex --version` answers) in prod `.env`, or leave it empty and
+make sure the ChatGPT app is installed; restart the runner. Requeue the job.
+
+### Prevention
+
+`tests/test_codex_executor.py` pins the discovery order. Do not symlink the
+bundle binary onto PATH for launchd — a ChatGPT app update moves it; the
+executor already knows the bundle path.
+
+## Symptom: a `codex/...` job sits in `running` with an `executor_started` event and nothing after it until `terminal_reason=timeout` — `codex exec` hangs
+
+### Diagnostic
+
+```bash
+ps -o pid,ppid,etime,command -ax | grep -E 'codex(-cli)? exec' | grep -v grep
+grep -c '"kind": "' volumes/audit_log/<job_id>.jsonl     # only job_started + executor_started?
+```
+
+### Root cause
+
+`codex exec` reads a piped **stdin** as additional instructions and blocks
+until EOF (the 2026-10-21 probe hung 90 s). The executor always spawns with
+`stdin=DEVNULL` (plan §4d), so a hang from the runner means something is
+wrapping the invocation — or the hang is a hand-run `codex exec` from a shell
+without `</dev/null`. The second hang class
+is the first turn itself: a slow or rate-limited first turn can show no events
+for minutes before `turn.failed` → `rate_limited` (the recorded fixtures carry
+no retry events; T10 measures this on the Free plan). The runner's
+ceiling still applies — `main`'s `wait_for` fires `terminal_reason=timeout`
+on the lane, `session.interrupt` → `codex_cli.interrupt` sends SIGTERM then
+SIGKILL after 1.5 s (INV-8), the job is NOT escalated to Anthropic.
+
+### Fix
+
+Kill the stray process if the runner's SIGKILL missed it (`kill -9 <pid>`).
+Reproduce by hand with the exact argv from `executor_started` and
+`</dev/null`; if it completes, the hang was stdin. Requeue the job.
+
+### Prevention
+
+Never add a stdin feed to `build_argv`'s spawn; `tests/test_codex_executor.py`
+asserts `stdin=DEVNULL`. For `CODEX_RUN_AS_USER` (not yet usable, plan §6
+D-C), the sudoers rule must not use `requiretty`.
+
+## Symptom: every `codex/...` job fails with `terminal_reason=auth_expired` (`executor_error` message mentions 401 / "log in" / refresh_token)
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "executor_error"' volumes/audit_log/<job_id>.jsonl | tail -1
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}" /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex login status
+```
+
+### Root cause
+
+The ChatGPT login in `auth.json` (under `CODEX_HOME`, default `~/.codex`)
+has expired or its refresh token was rotated out from under the runner —
+the usual cause is a second `codex` process (the owner's own terminal, the
+ChatGPT app) refreshing the same `auth.json` — or two Codex JOBS running at
+once: plan §4f assumes one stream per login; since the 2026-10-21
+whole-branch review `session._run_executor` enforces it with a per-executor
+slot (`EXECUTOR_CONCURRENCY["codex_cli"] = 1`; a queued second job audits
+`executor_slot_wait` and runs after the first), so two Codex JOBS can no
+longer race the refresh token — a second `codex` PROCESS outside the runner
+still can. The
+executor classifies 401 / "login" / `refresh_token` / "unauthorized" as
+`auth_expired`; it is terminal on the lane and never escalated.
+
+### Fix
+
+Owner-only (auth config, never a job): re-login into the home the runner
+uses —
+
+```bash
+CODEX_HOME="<the CODEX_HOME from prod .env, or ~/.codex>" \
+  /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex login --device-auth
+```
+
+then requeue. If the owner's interactive `codex` shares that home, provision
+the dedicated stream home (plan §7.2) so the two never contend.
+
+### Prevention
+
+Keep `CODEX_HOME` pointed at a stream home no human session uses. Until a
+per-provider concurrency cap lands (plan §6 residual, 2026-10-21), do not
+schedule two Codex routines in the same window and do not `/task` a second
+Codex job while one is running. The T10 canary asserts a working login before
+any scheduled routine is pinned to the lane.
+
+## Symptom: a `codex/...` job stays `queued` and the audit log shows repeated `job_held{provider: "codex", reason, until}` while Anthropic jobs run normally
+
+### Diagnostic
+
+```bash
+redis-cli GET quota:provider:codex:paused_until; redis-cli GET quota:provider:codex:last_reason
+grep -E '"kind": "(job_held|job_requeued_for_quota)"' volumes/audit_log/<job_id>.jsonl
+```
+
+### Root cause
+
+A previous Codex job hit `rate_limited` (Free-plan 429 / "slow_down" / usage
+limit). Per T6, that pauses ONLY the Codex lane
+(`quota:provider:codex:paused_until`, `QUOTA_PAUSE_MINUTES` ahead — the
+stream carries no reset time) and LPUSHes the hit job to the front; every
+later Codex job is held inside the fetch transaction, never marked running,
+and RPUSHed to the TAIL after ≤ 30 s (plan §4g — the documented exception to
+INV-12's front requeue). `job_held` is written once per (job, pause window).
+The global `quota:paused_until` is never touched by this path.
+
+### Fix
+
+Wait for `until`, or `/resume codex` in Telegram (lifts the lane; bare
+`/resume` still lifts only the Anthropic/global pause). `/status` lists each
+paused lane; `GET /api/quota` carries a `providers` map.
+
+### Prevention
+
+Measure the Free plan's rate-limit rate on the canary (plan §7.3, §8) before
+scheduling more than one Codex routine; the Plus tier decision rests on it.
+
+## Symptom: a `codex/...` job fails with `Review blocked: pre-push review gate returned changes_requested|blocker|error` (error_category `review_blocked`)
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "(merge_gate_verdict|code_review_done|workspace_published)"' volumes/audit_log/<job_id>.jsonl
+ls volumes/workspaces/ | grep <job8>      # the clone is KEPT with the un-pushed diff
+```
+
+### Root cause
+
+Every non-Anthropic (Codex) job's clone diff is reviewed by the fixed
+Anthropic reviewer BEFORE the runner commits and pushes (T5, 2026-10-21;
+INV-21(c)). Anything but LGTM — including a reviewer timeout (600 s, counted
+as `changes_requested`) or `error` (the reviewer could not run) — fails the
+job on the lane: nothing is committed, pushed or ff-synced, no escalation,
+`jobs.review_outcome` carries the verdict. There is no switch to bypass it.
+
+### Fix
+
+Read `code_review_done.review_text` in the audit log for the findings. Either
+re-run the job with the findings in the description, or finish the work from
+the kept clone yourself (`git -C volumes/workspaces/<job8>-<name> diff`). A
+`workspace_published{ok:false}` after an LGTM is a different case
+(`error_category=publish_failed`, review round 1): the push was rejected
+(remote moved) — `git pull --rebase && git push` from the clone, see runner
+GOTCHAS. A `merge_gate_refused{reason=denied_path, paths}` with NO
+`code_review_done` means the diff touched a denied path (`.claude/`,
+`.codex/`, `.git*`/`.github/`, `AGENTS.md`, `CLAUDE.md`, `.mcp.json`) and
+was refused before any reviewer ran — make that edit on an Anthropic lane.
+A `provider_refused` whose reason names **D-A** means the job's canonical
+resolved to the server root (no project slug / missing project dir): Codex
+may not write to this repo unless `ROUTER_CODE_SERVER_PROVIDERS` lists it.
+
+### Prevention
+
+Pin smaller tasks to the Codex lane; the gate is one Anthropic session's
+judgement over the whole diff, and a 50k-char diff is truncated for review.
+
 ## Adding entries to this file
 ## Symptom: `atlas-momo-research` hits `session_timeout` at 60 min while the engineer probe is still running
 
@@ -2869,6 +3094,37 @@ Both are medium-risk skill/orchestration changes; neither is a `server-patch`.
 When you hit a new failure, append a section here in this shape:
 
 ```markdown
+## Symptom: a Codex job's audit log shows fewer `tool_use` events than commands the agent says it ran (or none for a command it reports as "blocked")
+
+### Diagnostic
+
+```bash
+grep -c '"kind": "tool_use"' volumes/audit_log/<job_id>.jsonl
+grep '"kind": "text"' volumes/audit_log/<job_id>.jsonl | grep -iE 'not permitted|blocked|denied'
+```
+
+### Root cause
+
+codex-cli 0.162.0-alpha.17.2 emits no `command_execution` item for a
+command the Seatbelt sandbox denies (`workspace-write` → a write outside the
+clone, or any network call): the command runs, fails with "Operation not
+permitted", and only the agent's own `agent_message` may mention it
+(recorded 2026-10-21 by the T10 canary — `tests/fixtures/codex/
+sandbox_denied.jsonl`). The denial itself holds; the audit log under-reports
+the ATTEMPT.
+
+### Fix
+
+Nothing to repair in the job. Read the agent's text events for the attempt,
+and treat the pre-push gate's diff (`merge_gate_verdict`, the reviewed
+commit in the kept clone) as the evidence of what the job actually changed.
+
+### Prevention
+
+Re-run `scripts/codex-canary.sh` after a Codex CLI upgrade; if the denied
+`touch` starts appearing as `tool_use`/`tool_result`, update the fixture and
+drop this entry. Plan §6 (T10 residual) tracks it.
+
 ## Symptom: <what the user sees>
 
 ### Diagnostic

@@ -1,0 +1,5 @@
+# Recorded 2026-10-21 on codex-cli 0.162.0-alpha.17.2 (ChatGPT.app bundle), ChatGPT Free login, `codex exec --json --ephemeral --ignore-user-config --sandbox read-only -m gpt-6-luna`, prompt "Reply with exactly the single word: ok". Lines beginning with # are not events.
+{"type":"thread.started","thread_id":"01a16019-ede8-73e0-aec7-444f3d42c81f"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}
+{"type":"turn.completed","usage":{"input_tokens":15407,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}

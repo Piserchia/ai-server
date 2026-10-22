@@ -11,7 +11,12 @@ JSONL audit log on disk.
 
 - `jobs` — one unit of work. Includes `resolved_skill`, `resolved_model`,
   `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id`,
-  `task_id` for the auto-tuning loop and multi-turn interaction.
+  `task_id` for the auto-tuning loop and multi-turn interaction. Since
+  migration 007 (2026-10-21) also `resolved_provider` ("anthropic" |
+  "codex"), `terminal_reason` (executor outcome) and `model_served` (the id
+  the provider reports back) — all nullable; pre-007 rows carry
+  `resolved_provider='anthropic'` only where `resolved_model` is a
+  `claude-*` id.
 - `schedules` — cron recipes that enqueue jobs.
 - `projects` — registry of hosted projects.
 - `proposals` — tuning/doc proposals emitted by `review-and-improve`.
@@ -38,12 +43,23 @@ Defined as named constants in `src/db.py`, not inline strings:
 - `CHANNEL_JOB_STREAM = "jobs:stream"` → per-job: `"jobs:stream:<id>"`
 - `CHANNEL_JOB_DONE = "jobs:done"` → per-job: `"jobs:done:<id>"`
 - `CHANNEL_JOB_CANCEL = "jobs:cancel"`
+- `KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"` / `KEY_QUOTA_LAST_REASON = "quota:last_reason"` — the GLOBAL (= Anthropic) pause pair (INV-12)
+- `KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"` → `quota:provider:<p>:paused_until` / `:last_reason` — one pair per non-Anthropic provider lane (T6, 2026-10-21); never written for `anthropic`
 
 ## Audit log
 
 JSONL files at `volumes/audit_log/<job_id>.jsonl`. Append-only. Event kinds:
 `job_started`, `text`, `tool_use`, `tool_result`, `thinking`, `job_completed`,
-`job_failed`, `job_cancelled`, `job_requeued_for_quota`, `note`.
+`job_failed`, `job_cancelled`, `job_requeued_for_quota`, `job_held` (T6), `note`;
+the cross-vendor writer slice (2026-10-21) added `provider_selected`,
+`provider_refused` (T1/T4), `executor_started`, `turn_completed`,
+`executor_error` (T3), `merge_gate_verdict`, `merge_gate_skipped`,
+`merge_gate_refused` (reasons `denied_path` | `unparseable_path` (+`lines`) | `diff_too_large` (+`max_chars`) — the last two added by the 2026-10-21 whole-branch review), `workspace_published` (T5), `executor_slot_wait` (whole-branch review: §4f slot wait, `executor`/`waited_s`/`concurrency`) and additive fields on
+`job_started`/`job_completed` (`provider`, …), `tool_result` (`exit_code`,
+`output`), `workspace_created` (`base_sha`), `post_review_skipped`
+(`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`). Kinds are
+a parsing contract (C14): add, never rename or reshape. The full list with
+field shapes is the `src/audit_log.py` docstring.
 
 Plus `volumes/audit_log/<job_id>.summary.md` — human-readable one-paragraph
 summary, written at job completion (the final text message from Claude).
@@ -60,6 +76,13 @@ Migrations under `alembic/versions/`. Never edit existing ones — new file per 
   adds `task_id` FK column to `jobs`.
 - `004_task_thread_message_id.py` — 2026-04-20. Adds `thread_message_id`
   (BigInteger) to `tasks` for Telegram thread-based interaction.
+- `005_task_plan.py` — 2026-07-12. Adds `plan` (JSON) to `tasks`.
+- `006_job_status_constraint.py` — 2026-08-31. Repairs illegal statuses and
+  adds the `ck_jobs_status_valid` CHECK on `jobs.status`.
+- `007_provider_columns.py` — 2026-10-21. Adds nullable `resolved_provider`,
+  `terminal_reason`, `model_served` to `jobs`; backfills
+  `resolved_provider='anthropic'` for `claude-*` rows. Round-tripped on
+  SQLite in `tests/test_migrations.py` (layer 1b).
 
 To add a migration after editing `src/models.py`:
 ```bash

@@ -140,7 +140,7 @@ class TestFlagParser:
     def test_model_alias_expansion(self) -> None:
         assert parse_flags("--model=opus x")[1]["model"] == "claude-opus-4-7"
         assert parse_flags("--model=sonnet x")[1]["model"] == "claude-sonnet-4-6"
-        assert parse_flags("--model=haiku x")[1]["model"] == "claude-haiku-4-5-20251001"
+        assert parse_flags("--model=haiku x")[1]["model"] == "claude-sonnet-4-6"  # retired alias → utility model (T0, 2026-10-21)
         assert parse_flags("--model=opus-4-6 x")[1]["model"] == "claude-opus-4-6"
 
     def test_invalid_effort_dropped(self) -> None:

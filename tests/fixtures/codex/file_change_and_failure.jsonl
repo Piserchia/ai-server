@@ -1,0 +1,10 @@
+# HAND-AUTHORED 2026-10-21 (NOT recorded) from docs/research/llm-landscape-2026-09/chatgpt-openai.md §3 (item types: reasoning, web search, file change; `turn.failed`) and §7 (`429 slow_down` / usage-limit failure shape). The two recorded fixtures (ok.jsonl, command_and_file.jsonl) never produced these item types on the Free login, so their shapes follow the `codex exec --json` schema the research cites and must be re-verified against a recorded run before T10's canary trusts them. Lines beginning with # are not events.
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-00000000c0de"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"Look up the asyncio subprocess API first, then edit the module and add a test."}}
+{"type":"item.started","item":{"id":"item_1","type":"web_search","query":"python asyncio create_subprocess_exec stdin DEVNULL"}}
+{"type":"item.completed","item":{"id":"item_1","type":"web_search","query":"python asyncio create_subprocess_exec stdin DEVNULL"}}
+{"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"src/example.py","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"src/example.py","kind":"update"},{"path":"tests/test_example.py","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Edited src/example.py and added tests/test_example.py; running the tests next."}}
+{"type":"turn.failed","error":{"message":"429 slow_down: You have hit your usage limit. Try again in 3 hours."}}

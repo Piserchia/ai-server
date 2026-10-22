@@ -1,0 +1,6 @@
+# Recorded 2026-10-21 on codex-cli 0.162.0-alpha.17.2 (ChatGPT.app bundle), ChatGPT Free login, the slice's exact argv (`exec --json --ephemeral --ignore-user-config --skip-git-repo-check --sandbox workspace-write -c sandbox_workspace_write.network_access=false ... -m gpt-6-luna`), prompt: run `touch '$HOME/codex-probe-denied.txt'` once and report. The command RAN and Seatbelt denied it ("Operation not permitted" — the agent quotes the exact error) yet the stream carries NO item.started/item.completed command_execution for it: a sandbox-denied command is invisible to the audit log on this build (T10 finding; plan §6). Lines beginning with # are not events.
+{"type":"thread.started","thread_id":"01a160cb-2f61-7451-90eb-e8f8313ee479"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll run the requested command once and report its result verbatim."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Blocked — exact error: `touch: /Users/owner/codex-probe-denied.txt: Operation not permitted`\nTASK_COMPLETE: probe"}}
+{"type":"turn.completed","usage":{"input_tokens":31280,"cached_input_tokens":15360,"cache_write_input_tokens":0,"output_tokens":116,"reasoning_output_tokens":0}}

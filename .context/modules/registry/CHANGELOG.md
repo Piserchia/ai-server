@@ -2,6 +2,75 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under
+`src/registry/` changed; `.context/modules/registry/CONTEXT.md` was already
+current from T1 and is unchanged. Cross-references added elsewhere:
+- `.context/INDEX.md` "Additions 2026-10-21" — the "add, alias or retire a
+  model id / provider" row from T1 now sits beside a block that says where
+  the executor, dispatch, gate and lane pause live.
+- `docs/TROUBLESHOOTING.md` `provider_refused` symptom — one table row per
+  `ProviderRefused` reason the registry raises (`empty model id`, `unknown
+  provider`, `unknown model … for provider`, `provider … is not enabled`),
+  with the bare-id gotcha spelled out (`gpt-6-luna` is `anthropic/gpt-6-luna`
+  and unknown; write `codex/gpt-6-luna`).
+
+## 2026-10-21 — T1: models registry and provider-qualified ids
+
+**Agent task**: cross-vendor writer slice T1
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; old
+spec §2.5).
+**Files changed**:
+- `models.yml` (repo root, new) — the one list of providers, model ids,
+  labels, aliases and context windows: the six Anthropic ids the gateway
+  alias table carried after T0 (same aliases, same targets), plus codex
+  `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra` (chatgpt-openai.md §1). Data,
+  not a restraint — listing a provider enables nothing.
+- `src/registry/models.py` (new) — `Registry.load(path)` / `from_dict`
+  (shape-validated; `RegistryError` at import on a bad file),
+  `split_model_ref(raw)` (pure, TOTAL `[provider/]model_id` split, bare →
+  `anthropic/`; never raises — review fix: `a/b/c` → `("a", "b/c")` and
+  `resolve()` refuses the remainder, so `SkillConfig.provider` cannot blow
+  up at load on a malformed frontmatter), `resolve(raw) -> ModelRef` (alias resolution; raises
+  `ProviderRefused` on empty / malformed / unknown provider / unknown
+  model — C12 fail-closed, never a default), `resolve_enabled(raw)` (plus
+  `settings.router_providers_enabled`), `alias_table()`,
+  `context_windows()`, `list_models(provider)`, `providers()`,
+  `VALID_MODELS` (bare ids across providers), `enabled_providers()`.
+  `ModelRef.canonical` is bare for Anthropic and `provider/model_id`
+  otherwise, so every existing payload / frontmatter / `resolved_model`
+  string is unchanged.
+- `src/registry/skills.py` — `SkillConfig.provider` / `.model_id` derived
+  properties (pure split, no lookup, so `load()`/`list_all()` never fail on
+  an unknown provider — the job fails). `model` stays the raw string.
+**Consumers moved onto the registry**: `gateway.telegram_bot._MODEL_ALIASES`,
+`gateway.web` (POST `/api/jobs` validation + dashboard dropdown),
+`runner.session` (`_resolve_model`, `_MODEL_BUDGETS`),
+`tests/test_skill_contracts.py` (`VALID_MODELS`).
+**Tests**: `tests/test_models_registry.py` (parse table, aliases, every
+refusal, all 72 frontmatters + 31 escalation targets resolve,
+`VALID_MODELS` == today's set ∪ codex ids, yml shape rules, settings
+defaults, session precedence + refusals, main handler, web 4xx + dropdown).
+
+## 2026-10-21 — T0 review fix: `load`/`list_all` accept an explicit `skills_dir`
+
+**Agent task**: cross-vendor writer slice T0, reviewer finding (major) on
+`tests/test_skill_contracts.py`.
+**Files changed**:
+- `src/registry/skills.py` — `load(name, skills_dir=None)` and
+  `list_all(skills_dir=None)`. Default is still `settings.skills_dir`, so
+  every runtime caller (`session`, `agents`, `main`, `llm_router`) is
+  unchanged. When a dir is passed, `context_files` are validated relative to
+  that dir's parent instead of `settings.server_root`.
+**Why**: the dev checkout's `.env` points `SERVER_ROOT` at the production
+tree, so `test_skill_contracts` was validating prod's skills against the dev
+alias table and went red on every dev-branch frontmatter change until deploy
+(T0 hit this with `project-update-poll`'s Haiku → Sonnet move). The test now
+calls `list_all(<repo>/skills)` and asserts the checked-out tree.
+**Tests**: `tests/test_skill_contracts.py` (reads the repo tree),
+`tests/test_agents.py`, `tests/test_registry_failclosed.py` unchanged and green.
+
 ## 2026-09-13 — atlas-firm-rollup: preload .context/PROJECT_PROTOCOL.md (review-and-improve proposal 2b51e8b1)
 
 **Agent task**: apply the `review-and-improve` context-files proposal

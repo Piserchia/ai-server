@@ -1,0 +1,68 @@
+# models.yml — provider / model registry (cross-vendor writer slice T1, 2026-10-21).
+#
+# Loaded by src/registry/models.py. Every place the server accepts, lists or
+# budgets a model id reads this file: the /task --model alias table, the
+# dashboard dropdown, the session context-budget table, the skill-contract
+# allowlist, and the fail-closed validation of skill pins, job payloads and
+# POST /api/jobs.
+#
+# Grammar (old spec §2.5): `[provider/]model_id`. A bare id means `anthropic/`.
+# An unknown provider or model FAILS the job (C12) — never a default. Aliases
+# are short names for `/task --model=<alias>`; non-Anthropic aliases are only
+# honoured qualified (`codex/<alias>`), never bare.
+#
+# This file is DATA, not a restraint: which providers may run at all is
+# settings.router_providers_enabled (default `anthropic`), and the
+# protected-path rules (T8) are the owner's. Adding a model here does not
+# enable it anywhere. Provider names and model ids are lowercase.
+#
+# context_window: input tokens, used only for the context-budget estimate
+# (`context_budget_used` audit event). Anthropic ids keep today's 200k.
+
+providers:
+  anthropic:
+    executor: sdk-anthropic
+    models:
+      # First two are the dashboard's historical options, in that order.
+      claude-sonnet-4-6:
+        label: sonnet 4.6
+        context_window: 200000
+        aliases: [sonnet, sonnet-4-6]
+      claude-opus-4-7:
+        label: opus 4.7
+        context_window: 200000
+        aliases: [opus, opus-4-7]
+      claude-opus-4-8:
+        label: opus 4.8
+        context_window: 200000
+        aliases: [opus-4-8]
+      claude-opus-5:
+        label: opus 5
+        context_window: 200000
+        aliases: [opus-5]
+      claude-opus-4-6:
+        label: opus 4.6
+        context_window: 200000
+        aliases: [opus-4-6]
+      claude-fable-5:
+        label: fable 5
+        context_window: 200000
+        aliases: [fable, fable-5]
+
+  codex:
+    # OpenAI Codex CLI (`codex exec --json`), ChatGPT login. Ids from
+    # docs/research/llm-landscape-2026-09/chatgpt-openai.md §1. The executor
+    # ships in T3; until T4 wires dispatch, any codex id is refused at the
+    # session with reason "no executor", and by default refused earlier
+    # because `codex` is not in ROUTER_PROVIDERS_ENABLED.
+    executor: codex_cli
+    models:
+      gpt-6-luna:
+        label: gpt-6 luna (budget)
+        context_window: 1050000
+      gpt-6-sol:
+        label: gpt-6 sol (workhorse)
+        context_window: 1050000
+      gpt-6-astra:
+        label: gpt-6 astra (flagship)
+        context_window: 1050000
