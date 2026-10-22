@@ -2,6 +2,123 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under
+`src/gateway/` changed. Docs that describe gateway behaviour were touched:
+- `docs/TROUBLESHOOTING.md` — the new `provider_refused` symptom states that
+  the web `POST /api/jobs` (HTTP 422) and `/task --model=` (`ModelFlagRefused`
+  reply) run the same registry resolution at submit time, so a job that got as
+  far as `provider_refused` came from a schedule payload or a stale client;
+  the new `job_held` symptom documents `/resume <provider>`, the per-lane
+  `/status` lines and `GET /api/quota`'s `providers` map (all T6/T7).
+- `.context/INDEX.md` "Additions 2026-10-21" — points at the gateway CONTEXT
+  for the provider surfaces.
+`.context/modules/gateway/CONTEXT.md` was already current from T7 and is
+unchanged.
+
+## 2026-10-21 — T7: provider everywhere the owner looks
+
+**Agent task**: cross-vendor writer slice T7
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/gateway/telegram_bot.py` — `parse_flags` resolves `--model=` THROUGH
+  the registry: alias tables first (unchanged), then
+  `registry.models.resolve(...).canonical`, so the stored value is always
+  the canonical `[provider/]model_id`; an unknown provider or model raises
+  the new `ModelFlagRefused(raw, reason)` (a `ValueError`) at parse time
+  instead of passing the raw string through. `/task`, `/chat` and `/god`
+  go through `_parse_flags_or_reply`, which also applies
+  `resolve_enabled` (ROUTER_PROVIDERS_ENABLED) and answers a refusal with
+  the registry's reason plus the accepted list (`_model_flag_help`), as
+  plain text — no Task row, no job, same rule as the web's 422. `/jobs`
+  rows carry `` `provider/model` `` after the skill (`_lane_label`: pure;
+  pre-007 rows show the model alone, queued rows nothing). The done/failed
+  DM is `_deliver_done` → `_done_dm_text` (pure) and appends the lane plus a
+  non-`ok` `terminal_reason`, read from the job ROW (`_job_lane`; the
+  session stamps the provider before the process starts, so every terminal
+  path has it) — a lookup failure degrades to the pre-T7 text. The task
+  "details" card names the lane the same way.
+- `src/gateway/web.py` — `JobOut` + `resolved_provider`, `model_served`,
+  `terminal_reason` (additive, None on pre-007 rows; `_serialize` reads them
+  with `getattr(..., None)` so older row stand-ins still serialize). Jobs
+  table gains a **Provider** column (title = served model / non-ok reason);
+  the page's `esc()` helper now also escapes `"` and `'` because that
+  `title=""` is the first attribute-context use of it (review minor).
+  The model `<select>` is grouped: one `<optgroup label="<provider>">` per
+  ENABLED provider, `default` outside any group, models.yml order.
+- Tests: `tests/test_telegram_commands.py` (+22: parse-time refusals with
+  reasons, canonical storage, `_lane_label`, `_done_dm_text`, handler-level
+  refusal creates nothing / enabled id enqueues canonical, `/jobs` rows,
+  `_deliver_done` row lookup + DB-error degradation), `tests/test_web.py`
+  (new, 9: JobOut fields, `/api/jobs` rows, Provider column, optgroups).
+  Existing T1/T0 gateway tests untouched and green.
+
+## 2026-10-21 — T6: per-provider quota on the surfaces
+
+**Agent task**: cross-vendor writer slice T6
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/gateway/web.py` — `GET /api/quota` keeps `{paused, reset_at, reason}`
+  (the global = Anthropic pause) and ADDS `providers: {<p>: {paused,
+  reset_at, reason}}` for every non-Anthropic registry provider. The
+  dashboard banner also renders each paused lane ("<p> lane paused — its
+  jobs are held").
+- `src/gateway/telegram_bot.py` — `/status` opens with one line per paused
+  provider lane (`_paused_lane_lines()`: name, reset HH:MM UTC, reason,
+  the `/resume <p>` hint); nothing when no lane is paused. `/resume`
+  without an argument is unchanged (global pause); `/resume <provider>`
+  lifts ONE lane via `quota.clear_provider` and never touches the global
+  key; an unknown provider name is refused with the known list.
+- Tests: `tests/test_quota.py` (web shape + paused lane; `/status` with
+  and without a paused lane; `/resume codex` vs bare `/resume`; unknown /
+  not-paused provider).
+- Review round (code-review T6, lgtm): literal `\u2014` escape in a
+  `cmd_status` comment replaced with a plain dash. No behaviour change.
+
+## 2026-10-21 — T1: alias table, dashboard dropdown and POST /api/jobs fed by the models registry
+
+**Agent task**: cross-vendor writer slice T1
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/gateway/telegram_bot.py` — `_MODEL_ALIASES = registry.models.alias_table()`
+  (same keys and targets as the hand-written table after T0; add or move an
+  alias in `models.yml` now). `_RETIRED_MODEL_ALIASES` and `parse_flags`
+  unchanged: `--model=opus` → `claude-opus-4-7`, `--model=haiku` →
+  `claude-sonnet-4-6`, and a qualified `--model=codex/gpt-6-luna` passes
+  through raw for the session's registry check (parse-time refusal with a
+  reason is T7).
+- `src/gateway/web.py` — `POST /api/jobs` resolves `req.model` through
+  `registry.models.resolve_enabled` and stores the canonical form in
+  `payload["model"]`; an unknown id, unknown provider or disabled provider
+  is **HTTP 422** `model refused: <reason>` (closes the T0-review hole where
+  a stale client could still submit `claude-haiku-4-5-20251001`). The
+  dashboard `<select name="model">` is rendered from the registry at import
+  (`_model_options_html()`: enabled providers only, yml order, canonical
+  values; grouping by provider is T7). `_INDEX_HTML` is now built from
+  `_INDEX_TEMPLATE` via a `{{MODEL_OPTIONS}}` sentinel.
+**Tests**: `tests/test_models_registry.py` §5 (alias table equality,
+`parse_flags` pass-through) and §11 (422 on retired id / unknown provider /
+disabled provider, alias canonicalised into payload, no-model path
+unchanged, dropdown contents). `tests/test_web_god_gate.py`,
+`tests/test_telegram_commands.py`, `tests/test_pure_functions.py` unchanged
+and green.
+
+## 2026-10-21 — T0: Haiku 4.5 retired from the alias table and dashboard
+
+- `telegram_bot._MODEL_ALIASES`: `haiku` / `haiku-4-5` keys removed, so
+  `VALID_MODELS` (derived from the VALUES) no longer admits
+  `claude-haiku-4-5-20251001` in any SKILL.md. New `_RETIRED_MODEL_ALIASES`
+  maps those two aliases to `claude-sonnet-4-6`; `parse_flags` consults it
+  after `_MODEL_ALIASES` so `--model=haiku` typed from muscle memory lands on
+  the replacement instead of leaking a bare `haiku` string into
+  `job.payload.model`. Retired models must never be re-added to
+  `_MODEL_ALIASES` (that re-admits them to the skill-contract allowlist).
+- `web.py`: dashboard model `<select>` drops the `haiku 4.5` option.
+- Plan: `docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` T0.
+  Tests: `tests/test_haiku_retirement.py`, `tests/test_pure_functions.py`
+  (`test_model_alias_expansion` now expects sonnet for `haiku`).
+
 ## 2026-08-31 — /task --kind=god rejected; httpx log noise cut (EVALUATION_2026-08-30 F1/F7)
 
 - `telegram_bot`: `/task --kind=god` now replies with an error pointing at

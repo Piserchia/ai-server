@@ -4,8 +4,8 @@ Learning extractor hook. Runs after successful non-chat, non-internal jobs.
 Pipeline:
 1. `should_extract(audit_entries)` (pure function): only run the classifier if
    the job actually modified files (tool_use: Write or Edit events present).
-   Chat/read-only jobs skip extraction entirely, saving Haiku tokens.
-2. `extract_learning(parent_job, audit_entries, summary)`: one-turn Haiku call
+   Chat/read-only jobs skip extraction entirely, saving utility-model tokens.
+2. `extract_learning(parent_job, audit_entries, summary)`: one-turn `settings.utility_model` call
    that returns a LearningProposal. JSON-structured output. Returns
    had_learning=False when no learning was found.
 3. `maybe_extract_and_enqueue(...)`: the full pipeline entry point called from
@@ -85,7 +85,7 @@ def list_installed_modules(modules_dir: Path) -> list[str]:
 
 
 def parse_learning_response(text: str) -> LearningProposal:
-    """Parse the Haiku classifier's JSON response. Tolerant of surrounding text
+    """Parse the utility classifier's JSON response. Tolerant of surrounding text
     and markdown fences. Returns a no-learning proposal if parsing fails."""
     if not text or not text.strip():
         return LearningProposal(had_learning=False)
@@ -237,7 +237,7 @@ async def extract_learning(
     summary: str,
     module_list: list[str],
 ) -> LearningProposal:
-    """Run the Haiku classifier. Returns a proposal (possibly had_learning=False).
+    """Run the utility-model classifier. Returns a proposal (possibly had_learning=False).
 
     Never raises — on any SDK error, returns had_learning=False.
     """
@@ -255,8 +255,8 @@ async def extract_learning(
     options = ClaudeAgentOptions(
         cwd=str(settings.server_root),
         system_prompt=CLASSIFIER_SYSTEM_PROMPT,
-        model="claude-haiku-4-5-20251001",
-        effort="low",
+        model=settings.utility_model,
+        effort=settings.utility_effort,
         permission_mode="plan",  # read-only; classifier does not need to act
         allowed_tools=[],
         max_turns=2,

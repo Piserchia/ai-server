@@ -45,8 +45,34 @@ the single enqueue/cancel/lookup helper.
 
 `parse_flags()` in `telegram_bot.py` extracts `--model=`, `--effort=`,
 `--permission=`, `--project=`, `--kind=` from the front of a description.
-Model aliases: `opus`, `opus-4-7`, `opus-4-6`, `sonnet`, `haiku`, etc.
-Flags land in `job.payload` and take precedence over skill frontmatter.
+Model aliases come from the repo-root `models.yml` via
+`registry.models.alias_table()` (`_MODEL_ALIASES`, T1 2026-10-21): `opus`,
+`opus-4-7`, `opus-4-6`, `sonnet`, etc. → bare Anthropic ids; a non-Anthropic
+alias is keyed `provider/alias`. Retired aliases (`haiku`, `haiku-4-5`)
+resolve to `claude-sonnet-4-6` via `_RETIRED_MODEL_ALIASES` and are not in
+the registry. Whatever the alias tables yield is then resolved through
+`registry.models.resolve()` and stored **canonical** (bare Anthropic id,
+`provider/model_id` otherwise); an unknown provider or model raises
+`ModelFlagRefused(raw, reason)` at parse time (T7, 2026-10-21) — never a raw
+pass-through. Handlers call `_parse_flags_or_reply(update, raw)`, which adds
+the `resolve_enabled` (`ROUTER_PROVIDERS_ENABLED`) check and replies with the
+reason + accepted list on refusal, creating no Task and no job. Flags land in
+`job.payload` and take precedence over skill frontmatter.
+
+Provider surfaces (T7): `/jobs` rows and the task "details" card show
+`` `provider/model` `` (`_lane_label(provider, model, terminal_reason)` —
+pure; model alone for pre-007 rows, nothing while queued, `· <reason>`
+appended when not `ok`); the done/failed DM (`_deliver_done` →
+`_done_dm_text`) reads the lane from the job row (`_job_lane`), degrading to
+the pre-T7 text on any lookup failure.
+
+`POST /api/jobs` (web) validates `model` through
+`registry.models.resolve_enabled` and stores the canonical form; unknown or
+disabled → **422** `model refused: <reason>`. The dashboard model dropdown
+is rendered from the registry (`web._model_options_html`), one `<optgroup>`
+per enabled provider (T7). `JobOut` carries the 007 columns
+`resolved_provider`, `model_served`, `terminal_reason` (additive, None on
+pre-007 rows) and the jobs table has a Provider column.
 
 ## Auth
 
@@ -63,7 +89,7 @@ Flags land in `job.payload` and take precedence over skill frontmatter.
 ## Dependencies
 
 - `src.config`, `src.db`, `src.models`, `src.audit_log`
-- `src.runner.quota` (read-only: is_paused, clear)
+- `src.runner.quota` (is_paused, clear; T6: is_provider_paused, paused_providers, clear_provider — `GET /api/quota` adds `providers: {<p>: {paused, reset_at, reason}}` for non-Anthropic registry providers; `/status` lists each paused lane; `/resume <provider>` lifts one lane, bare `/resume` the global pause)
 - `fastapi`, `python-telegram-bot`
 
 ## Testing

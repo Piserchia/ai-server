@@ -23,6 +23,31 @@ class Settings(BaseSettings):
 
     # Models
     default_model: str = "claude-sonnet-4-6"
+    # Utility model for the one-turn, fail-open classifiers (LLM router,
+    # learning extractor). Was a hard-coded Haiku 4.5 pin until that model's
+    # retirement window opened 2026-10-15 (T0, 2026-10-21).
+    utility_model: str = "claude-sonnet-4-6"
+    utility_effort: str = "low"
+
+    # Providers (cross-vendor writer slice T1, 2026-10-21). Model ids are
+    # `[provider/]model_id` resolved against the repo-root `models.yml`
+    # (src/registry/models.py); bare ids are Anthropic. These switches are
+    # the fail-closed gate: a provider absent from the CSV is refused before
+    # any process starts. Flipping them is the owner's call (plan §7).
+    router_providers_enabled: str = "anthropic"
+    # Providers allowed on the `code-server` skill set (server-patch,
+    # server-deploy, new-skill, deploy-director, *-redeploy) — D-A, default off.
+    router_code_server_providers: str = "anthropic"
+    # Codex CLI executor (T3): binary path ("" → shutil.which("codex") → the
+    # ChatGPT.app bundle), CODEX_HOME for the login ("" → ~/.codex), and the
+    # Seatbelt sandbox mode passed as `--sandbox`.
+    codex_bin: str = ""
+    codex_home: str = ""
+    codex_sandbox_default: str = "workspace-write"
+    # D-C read-side containment: when set (env CODEX_RUN_AS_USER), the
+    # executor prefixes its argv with `sudo -n -u <user> --` (the sudoers
+    # line is owner work). Unset by default — see plan §6 for the residual.
+    codex_run_as_user: str = ""
 
     # Database
     postgres_dsn: str
@@ -60,7 +85,7 @@ class Settings(BaseSettings):
     quota_pause_minutes: int = 60
 
     # Intent pipeline (P2/P3)
-    # LLM routing fallback for asks the regex rules don't match (Haiku, 1 turn).
+    # LLM routing fallback for asks the regex rules don't match (utility_model, 1 turn).
     llm_router_enabled: bool = True
     # Plans auto-approve: the plan is posted to Telegram with a Cancel button
     # and execution starts immediately. Set false to require explicit approval.

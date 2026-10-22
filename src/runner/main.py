@@ -47,11 +47,14 @@ from src.db import (
 )
 from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
+from src.registry import models as models_registry
 from src.registry.skills import load as load_skill
+from src.runner import router
 from src.runner.events import event_loop
 from src.runner.learning import maybe_extract_and_enqueue as maybe_extract_learning
 from src.runner.reconcile import reconcile_orphaned_jobs, requeue_stranded_queued
 from src.runner.review import (
+    MAX_DIFF_CHARS,
     ReviewOutcome,
     get_git_diff,
     head_commit_epoch,
@@ -184,6 +187,15 @@ async def _job_loop() -> None:
         logger.info("draining in-flight jobs", count=len(in_flight))
         await asyncio.gather(*in_flight, return_exceptions=True)
 
+    # Held-lane requeues (T6) sleep without a slot; cancel them so each id
+    # is RPUSHed NOW instead of sitting as a queued row with no Redis entry
+    # until the next startup's requeue_stranded_queued().
+    pending_holds = list(_held_requeues)
+    if pending_holds:
+        for t in pending_holds:
+            t.cancel()
+        await asyncio.gather(*pending_holds, return_exceptions=True)
+
 
 async def _run_with_held_slot(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None:
     """Run one job on a semaphore slot the job loop already acquired."""
@@ -203,28 +215,11 @@ async def _run_with_held_slot(sem: asyncio.Semaphore, job_id: uuid.UUID) -> None
 # once, then drop for good.
 
 # Delay before each SELECT attempt; first is immediate, sleeps total ~2s.
-# Hard ceiling on per-job session-timeout extension. A payload can raise the
-# global default for a legitimately heavy session (atlas-momo-research cycles
-# — three cycle-2 attempts died at the 30-min ceiling, 2026-08-11) but can
-# never disable the ceiling entirely.
-SESSION_TIMEOUT_CAP_SECONDS = 5400
-
-
-def resolve_session_timeout(payload: dict | None, default: int,
-                            cap: int = SESSION_TIMEOUT_CAP_SECONDS) -> int:
-    """Effective session timeout for a job. Pure function.
-
-    `payload.session_timeout_seconds` overrides the global default, clamped
-    to [60, cap]; missing or unparseable values fall back to the default.
-    """
-    try:
-        raw = (payload or {}).get("session_timeout_seconds")
-        if raw is None:
-            return default
-        val = int(raw)
-    except (TypeError, ValueError, OverflowError):
-        return default
-    return max(60, min(val, cap))
+# Per-job session timeout: defined in `session.py` since T4 (the executor
+# branch needs the same ceiling and session must not import main); the names
+# stay importable from here for existing callers and tests.
+SESSION_TIMEOUT_CAP_SECONDS = session_mod.SESSION_TIMEOUT_CAP_SECONDS
+resolve_session_timeout = session_mod.resolve_session_timeout
 
 
 _JOB_FETCH_DELAYS: tuple[float, ...] = (0.0, 0.2, 0.3, 0.5, 1.0)
@@ -317,6 +312,142 @@ async def _refetch_job(job_id: uuid.UUID, fallback: Job, log) -> Job:
         return fallback
 
 
+def _non_anthropic_lane(job) -> str | None:
+    """The job's non-Anthropic provider, or None. Pure read of the
+    `resolved_provider` stamp `session.run_session` writes BEFORE the process
+    starts, so a timed-out or crashed non-Anthropic job is still
+    recognisable afterwards. Used by the timeout and generic failure
+    branches of `_process_job` to skip `_maybe_escalate`: the skill's
+    `on_failure` target is an Anthropic model, and re-running a Codex job
+    there is a vendor switch this slice does not make (T4 note 4; review
+    round 1, 2026-10-21). An unstamped job (died before the session's
+    stamp) is treated as Anthropic — the pre-T4 behaviour."""
+    provider = getattr(job, "resolved_provider", None)
+    if not provider or provider == models_registry.DEFAULT_PROVIDER:
+        return None
+    return provider
+
+
+# ── Per-provider lane holds (cross-vendor writer slice T6, 2026-10-21) ──────
+#
+# The global pause (Anthropic, INV-12) stops the loop before BLPOP. A paused
+# NON-Anthropic lane must not: its jobs are HELD — never marked running, never
+# a process — and requeued at the TAIL (plan §4g) after a bounded delay so the
+# loop neither spins on one held id nor pins a concurrency slot on it. The
+# delayed RPUSH runs as its own task (no slot); `_job_loop` cancels them on
+# shutdown so they push at once, and `requeue_stranded_queued()` heals the
+# crash case at the next startup.
+
+#: Longest a held job waits before it is re-offered to the loop (and the
+#: lane re-checked). Bounded so a manual `/resume <provider>` is felt soon.
+HOLD_RECHECK_SECONDS: float = 30.0
+
+#: In-flight delayed requeues (kept so the tasks are not GC'd; drained on shutdown).
+_held_requeues: set[asyncio.Task] = set()
+
+#: job_id → ISO `until` of the pause window last audited as `job_held`, so a
+#: job cycling every HOLD_RECHECK_SECONDS writes ONE audit line per window.
+_held_audited: dict[str, str] = {}
+
+
+def preresolve_provider(
+    kind: str,
+    description: str,
+    payload: dict | None,
+    *,
+    load=None,
+    route=None,
+) -> str | None:
+    """Cheap guess at the job's provider BEFORE the session: the same
+    precedence as `session.resolve_model_choice` (`payload.model > skill pin
+    > settings.default_model`) with the same kind→skill mapping as
+    `session._resolve_skill`, minus the LLM router fallback (not cheap; a
+    task-kind job with no rule match pre-resolves to the default). Pure
+    given `load`/`route`. Never raises and never refuses: `None` means "could
+    not tell" and the job proceeds to the session, which raises the real
+    `ProviderRefused` / `SkillResolutionError` with its audit. The enabled
+    set is NOT consulted here — this answers WHICH lane, not whether it may
+    run. `load`/`route` default to the module-level `load_skill` /
+    `router.route` at CALL time (not definition time) so a test's
+    `monkeypatch.setattr(main, "load_skill", ...)` is honoured."""
+    load = load or load_skill
+    route = route or router.route
+    payload = payload or {}
+    try:
+        raw = payload.get("model") or ""
+        if not raw:
+            skill_name = ""
+            if kind == "task":
+                skill_name = route(description) or ""
+            elif kind:
+                skill_name = kind if kind.startswith("_") else kind.replace("_", "-")
+            cfg = load(skill_name) if skill_name else None
+            raw = (getattr(cfg, "model", "") or "") if cfg is not None else ""
+        if not raw:
+            raw = settings.default_model
+        return models_registry.resolve(raw).provider
+    except Exception:
+        return None
+
+
+def hold_delay(until: datetime | None, now: datetime) -> float:
+    """Seconds to park a held job: the remaining pause window, capped at
+    `HOLD_RECHECK_SECONDS`, never negative. Pure."""
+    if until is None:
+        return HOLD_RECHECK_SECONDS
+    return max(0.0, min(HOLD_RECHECK_SECONDS, (until - now).total_seconds()))
+
+
+async def _requeue_held(job_id: str, delay: float) -> None:
+    try:
+        await asyncio.sleep(delay)
+    finally:
+        # Also on cancellation (shutdown): push now rather than strand.
+        try:
+            await redis.rpush(QUEUE_JOBS, job_id)
+        except Exception:
+            logger.exception("held requeue failed — startup reconcile re-pushes it",
+                             job_id=job_id)
+
+
+def _schedule_held_requeue(job_id: str, delay: float) -> asyncio.Task:
+    task = asyncio.create_task(_requeue_held(job_id, delay), name=f"held_requeue:{job_id[:8]}")
+    _held_requeues.add(task)
+    task.add_done_callback(_held_requeues.discard)
+    return task
+
+
+async def _hold_if_provider_paused(job: Job, log) -> bool:
+    """True when the job's provider lane is paused and the job was held
+    (audited, delayed tail requeue scheduled). The caller must then NOT mark
+    it running. The provider is the session's `resolved_provider` stamp from
+    an earlier attempt (a job requeued after a Codex `rate_limited`) else
+    the cheap pre-resolution. Never raises: a Redis blip fails OPEN to the
+    session — if the lane really is red the executor's own 429 re-pauses it."""
+    job_id = str(job.id)
+    provider = (getattr(job, "resolved_provider", None)
+                or preresolve_provider(job.kind, job.description, job.payload))
+    if not provider or provider == models_registry.DEFAULT_PROVIDER:
+        return False
+    try:
+        paused, until, reason = await quota.is_provider_paused(provider)
+    except Exception:
+        log.warning("provider pause check failed — running the job", provider=provider)
+        return False
+    if not paused:
+        _held_audited.pop(job_id, None)
+        return False
+    until_iso = until.isoformat() if until else ""
+    if _held_audited.get(job_id) != until_iso:
+        audit_log.append(job_id, "job_held", provider=provider, reason=reason[:200],
+                         until=until_iso)
+        _held_audited[job_id] = until_iso
+        log.info("job held — provider lane paused", provider=provider, until=until_iso,
+                 reason=reason[:80])
+    _schedule_held_requeue(job_id, hold_delay(until, datetime.now(timezone.utc)))
+    return True
+
+
 async def _process_job(job_id: uuid.UUID) -> None:
     job: Job | None = None
     for delay in _JOB_FETCH_DELAYS:
@@ -329,6 +460,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
             if job is not None:
                 _requeued_missing_ids.discard(str(job_id))
                 if job.status != JobStatus.queued.value:
+                    return
+                # T6: a paused provider lane holds the job here — before it
+                # is ever marked running (no DB write, no slot held, no
+                # process); it returns to the queue tail after a bounded
+                # delay. Anthropic is never held here (global pause gates
+                # the loop before BLPOP).
+                if await _hold_if_provider_paused(job, logger.bind(job_id=str(job_id))):
                     return
                 job.status = JobStatus.running.value
                 job.started_at = datetime.now(timezone.utc)
@@ -378,7 +516,13 @@ async def _process_job(job_id: uuid.UUID) -> None:
             timeout=resolve_session_timeout(
                 job.payload, settings.session_timeout_seconds),
         )
-        await _finish_job(job_id, JobStatus.completed, result=result)
+        await _finish_job(
+            job_id, JobStatus.completed, result=result,
+            provider=result.get("provider"),
+            terminal_reason=result.get("terminal_reason"),
+            model_served=result.get("model_served"),
+            review_outcome=result.get("review_outcome"),
+        )
         log.info("job completed")
 
         # Refresh the ORM instance before the post-steps: resolved_skill is
@@ -474,6 +618,122 @@ async def _process_job(job_id: uuid.UUID) -> None:
             except Exception:
                 pass
 
+    except models_registry.ProviderRefused as exc:
+        # Unknown `[provider/]model_id`, a provider outside
+        # ROUTER_PROVIDERS_ENABLED, or one with no executor — terminal, NOT
+        # escalated (a bigger model would re-refuse the same policy). Raised
+        # by session._resolve_model before any clone or process exists
+        # (T1, 2026-10-21; C12 fail-closed).
+        reason = str(exc)
+        audit_log.append(str(job_id), "provider_refused",
+                         provider=exc.provider, model=exc.model_id, raw=exc.raw,
+                         reason=exc.reason)
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category="provider_refused")
+        await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}",
+                          provider=exc.provider, terminal_reason="provider_refused")
+        log.warning("provider refused — job terminal", reason=reason)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed",
+                                   text=f"Provider refused: {reason}")
+            except Exception:
+                pass
+
+    except session_mod.ReviewBlocked as exc:
+        # The pre-push Anthropic review gate (T5, 2026-10-21; INV-21(c))
+        # did not LGTM a non-Anthropic job's diff — terminal, NOT escalated
+        # (re-running on an Anthropic model would be a vendor switch, and
+        # the verdict is about this diff). Nothing was committed, pushed or
+        # synced; the clone is kept with the diff for the owner. The
+        # verdict is stamped as `review_outcome` so /status and the
+        # retrospective read it like a post-review verdict.
+        reason = str(exc)
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category="review_blocked")
+        refused = getattr(exc, "refused_reason", None)
+        if refused == "denied_path" or (refused is None and exc.denied_paths):
+            card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}): it touches denied paths "
+                    f"({', '.join(exc.denied_paths)}) — refused before any reviewer "
+                    f"ran. Nothing was pushed; the clone is kept.")
+        elif refused == "unparseable_path":
+            card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}): {len(exc.denied_paths)} diff "
+                    f"header(s) name a git-quoted path the gate cannot parse, so the "
+                    f"deny list could not be applied — refused before any reviewer "
+                    f"ran. Nothing was pushed; the clone is kept.")
+        elif refused == "diff_too_large":
+            card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}): {exc.diff_chars} chars exceeds "
+                    f"the reviewer's {MAX_DIFF_CHARS}-char read — a partial "
+                    f"review is never an LGTM. Nothing was pushed; the clone is kept "
+                    f"(split the work or review it by hand).")
+        else:
+            card = (f"Pre-push review gate: {exc.verdict} on job {str(job_id)[:8]} "
+                    f"({exc.provider}/{exc.model_id}, {exc.findings_n} finding(s)"
+                    f"{', reviewer timed out' if exc.timed_out else ''}). "
+                    f"Nothing was pushed; the clone is kept — see the audit log's "
+                    f"code_review_done for the findings.")
+        await _finish_job(job_id, JobStatus.failed, error=f"Review blocked: {reason}",
+                          provider=exc.provider, terminal_reason="review_blocked",
+                          review_outcome=exc.verdict,
+                          done_payload={"summary": card})
+        log.warning("pre-push review gate blocked — job terminal",
+                    provider=exc.provider, verdict=exc.verdict,
+                    findings=exc.findings_n)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed", text=card)
+            except Exception:
+                pass
+
+    except session_mod.ExecutorFailed as exc:
+        reason = str(exc)
+        if exc.terminal_reason == "rate_limited":
+            # The vendor throttled THIS lane (T6, 2026-10-21): pause only
+            # that provider's key — never `quota:paused_until`, which is the
+            # Anthropic/global pause — and requeue at the FRONT like the
+            # Anthropic path (INV-12). The next pop finds the lane paused and
+            # holds the job to the tail (plan §4g) until the window passes.
+            # The stream carries no reset time → settings.quota_pause_minutes.
+            # Not failed, not escalated, no task DM (same as QuotaExhausted).
+            until = await quota.pause_provider(exc.provider, None, reason)
+            await redis.lpush(QUEUE_JOBS, str(job_id))
+            async with session_scope() as s:
+                await s.execute(
+                    update(Job).where(Job.id == job_id).values(
+                        status=JobStatus.queued.value,
+                        error_message=(f"queued for {exc.provider} quota reset "
+                                       f"({reason[:100]})"),
+                    )
+                )
+            audit_log.append(str(job_id), "job_requeued_for_quota", reason=reason[:200],
+                             provider=exc.provider, until=until.isoformat())
+            log.warning("executor rate limited — provider lane paused, job requeued",
+                        provider=exc.provider, until=until.isoformat())
+            return
+
+        # Any other non-`ok` end (auth_expired, api_error, timeout,
+        # interrupted) — terminal, NOT escalated: the skill's escalation
+        # target is an Anthropic model, and silently re-running the job on
+        # another vendor is a routing decision this slice does not make
+        # (T4, 2026-10-21). The executor already audited `executor_error`;
+        # the clone is kept like any failed job.
+        audit_log.append(str(job_id), "job_failed", error=reason,
+                         error_category=exc.terminal_reason)
+        await _finish_job(job_id, JobStatus.failed, error=f"Executor failed: {reason}",
+                          provider=exc.provider, terminal_reason=exc.terminal_reason,
+                          model_served=exc.model_served)
+        log.warning("executor failed — job terminal", provider=exc.provider,
+                    terminal_reason=exc.terminal_reason, reason=reason)
+        if job.task_id:
+            try:
+                await _notify_task(job.task_id, "failed",
+                                   text=f"Executor failed: {reason}")
+            except Exception:
+                pass
+
     except delivery.DeployRefused as exc:
         # Delivery-contract violation — terminal, NOT escalated (retrying a
         # policy refusal would just re-violate it).
@@ -513,42 +773,72 @@ async def _process_job(job_id: uuid.UUID) -> None:
     except asyncio.TimeoutError:
         audit_log.append(str(job_id), "job_failed", error="session_timeout",
                          error_category="timeout")
-        await _finish_job(job_id, JobStatus.failed, error="Session timed out")
-        log.warning("job timeout")
-
-        # Timeouts escalate like any other failure. This branch used to
-        # return without _maybe_escalate, making every session timeout a
-        # silent dead end system-wide (no retry, no self-diagnose) — found
-        # by the atlas-momo-research smoke run 2026-08-07, which timed out
-        # and produced no escalation child. Same refetch rationale as the
-        # generic branch: the session may have stamped resolved_skill.
+        # Refetch BEFORE the terminal stamp: the session stamps
+        # `resolved_provider` (and resolved_skill) in its own transaction,
+        # and the lane decision below reads it.
         job = await _refetch_job(job_id, job, log)
-        try:
-            await _maybe_escalate(job)
-        except Exception:
-            log.exception("escalation attempt failed (non-fatal)")
+        lane = _non_anthropic_lane(job)
+        if lane:
+            # Main's deadline won over the executor's (its child was killed
+            # by the cancellation) — stamp the typed terminal reason the
+            # executor would have, and stop: no Anthropic escalation off a
+            # non-Anthropic lane (review round 1, 2026-10-21).
+            await _finish_job(job_id, JobStatus.failed, error="Session timed out",
+                              provider=lane, terminal_reason="timeout")
+            audit_log.append(str(job_id), "note",
+                             text=f"{lane} lane timed out — terminal, not escalated "
+                                  f"(no vendor switch onto Anthropic)")
+            log.warning("job timeout — non-Anthropic lane, terminal", provider=lane)
+        else:
+            await _finish_job(job_id, JobStatus.failed, error="Session timed out")
+            log.warning("job timeout")
+
+            # Timeouts escalate like any other failure. This branch used to
+            # return without _maybe_escalate, making every session timeout a
+            # silent dead end system-wide (no retry, no self-diagnose) — found
+            # by the atlas-momo-research smoke run 2026-08-07, which timed out
+            # and produced no escalation child. Same refetch rationale as the
+            # generic branch: the session may have stamped resolved_skill.
+            try:
+                await _maybe_escalate(job)
+            except Exception:
+                log.exception("escalation attempt failed (non-fatal)")
 
     except Exception as exc:
         from src.runner.audit_index import categorize_error
         err_str = str(exc)[:500]
         audit_log.append(str(job_id), "job_failed", error=err_str,
                          error_category=categorize_error(err_str))
-        await _finish_job(job_id, JobStatus.failed, error=err_str)
         log.exception("job failed")
 
         # Refresh the ORM instance here too — the session may have stamped
-        # resolved_skill before dying, and _maybe_escalate's level-0 path
-        # reads it for the skill-declared escalation config (same detached-
-        # instance staleness as the completed branch; without this, level-0
-        # escalation silently jumped to self-diagnose for task-kind jobs).
+        # resolved_skill (and resolved_provider) before dying, and
+        # _maybe_escalate's level-0 path reads it for the skill-declared
+        # escalation config (same detached-instance staleness as the
+        # completed branch; without this, level-0 escalation silently
+        # jumped to self-diagnose for task-kind jobs).
         job = await _refetch_job(job_id, job, log)
+        lane = _non_anthropic_lane(job)
+        if lane:
+            # Anything the ExecutorFailed handler above did not already
+            # type (an infrastructure error around the executor) — terminal
+            # on the lane it ran on, never escalated onto Anthropic
+            # (review round 1, 2026-10-21).
+            await _finish_job(job_id, JobStatus.failed, error=err_str,
+                              provider=lane, terminal_reason="api_error")
+            audit_log.append(str(job_id), "note",
+                             text=f"{lane} lane failed — terminal, not escalated "
+                                  f"(no vendor switch onto Anthropic)")
+            log.warning("job failed — non-Anthropic lane, terminal", provider=lane)
+        else:
+            await _finish_job(job_id, JobStatus.failed, error=err_str)
 
-        # Escalation: if the skill declares on_failure, enqueue a retry with
-        # the escalated model/effort. One level only, guarded by a payload flag.
-        try:
-            await _maybe_escalate(job)
-        except Exception:
-            log.exception("escalation attempt failed (non-fatal)")
+            # Escalation: if the skill declares on_failure, enqueue a retry with
+            # the escalated model/effort. One level only, guarded by a payload flag.
+            try:
+                await _maybe_escalate(job)
+            except Exception:
+                log.exception("escalation attempt failed (non-fatal)")
 
 
 async def _maybe_review(job: Job, result: dict) -> None:
@@ -576,6 +866,19 @@ async def _maybe_review(job: Job, result: dict) -> None:
 
     trigger = skill_cfg.post_review.get("trigger", "never")
     if trigger == "never":
+        return
+
+    lane = _non_anthropic_lane(job)
+    if lane:
+        # Non-Anthropic lanes are reviewed BEFORE anything is pushed (the
+        # pre-push gate, T5, 2026-10-21) by the same fixed Anthropic
+        # reviewer; its verdict is already stamped as `review_outcome`. A
+        # second pass here would grade the same diff twice — and the
+        # stale-head guard below would skip it anyway until the gate's
+        # commit lands. The gate is the review of record for these lanes.
+        audit_log.append(str(job.id), "post_review_skipped",
+                         reason="pre_push_gate", provider=lane,
+                         verdict=(result or {}).get("review_outcome"))
         return
 
     # Resolve the cwd the session actually worked in (delivery-aware): for a
@@ -1266,13 +1569,57 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             )
 
 
+def _terminal_values(
+    status: JobStatus,
+    *,
+    result: dict | None,
+    error: str | None,
+    provider: str | None = None,
+    terminal_reason: str | None = None,
+    model_served: str | None = None,
+    review_outcome: str | None = None,
+) -> dict:
+    """The column values a terminal transition writes. Pure.
+
+    The provider columns (migration 007: `resolved_provider`,
+    `terminal_reason`, `model_served`) are written only when known, so a
+    path that does not know them (timeout, generic failure) leaves what the
+    session stamped at start untouched (T4, 2026-10-21).
+    """
+    values: dict = dict(
+        status=status.value,
+        result=result,
+        error_message=error,
+        completed_at=datetime.now(timezone.utc),
+    )
+    if provider is not None:
+        values["resolved_provider"] = provider
+    if terminal_reason is not None:
+        values["terminal_reason"] = terminal_reason
+    if model_served is not None:
+        values["model_served"] = model_served
+    if review_outcome is not None:
+        # The pre-push gate's verdict (T5); the Anthropic post-review
+        # stamps this column itself in `_maybe_review`.
+        values["review_outcome"] = review_outcome
+    return values
+
+
 async def _finish_job(
     job_id: uuid.UUID,
     status: JobStatus,
     *,
     result: dict | None = None,
     error: str | None = None,
+    provider: str | None = None,
+    terminal_reason: str | None = None,
+    model_served: str | None = None,
+    review_outcome: str | None = None,
+    done_payload: dict | None = None,
 ) -> None:
+    """Terminal transition + `jobs:done` publish. `done_payload` overrides
+    the published payload (the done DM's text) — used by the review-blocked
+    path so the DM names the verdict instead of a bare "failed"."""
     async with session_scope() as s:
         # INV-9: never overwrite a user cancellation. The cancel listener may set
         # `cancelled` in the race window before a session finishes; without this
@@ -1285,18 +1632,19 @@ async def _finish_job(
             update(Job)
             .where(Job.id == job_id)
             .where(Job.status != JobStatus.cancelled.value)
-            .values(
-                status=status.value,
-                result=result,
-                error_message=error,
-                completed_at=datetime.now(timezone.utc),
-            )
+            .values(**_terminal_values(
+                status, result=result, error=error, provider=provider,
+                terminal_reason=terminal_reason, model_served=model_served,
+                review_outcome=review_outcome))
         )
         if result_proxy.rowcount == 0:
             logger.info("finish suppressed — job already in a protected terminal state",
                         job_id=str(job_id)[:8], attempted=status.value)
             return
-    payload = {"summary": (result or {}).get("summary", "")} if result else {}
+    if done_payload is not None:
+        payload = dict(done_payload)
+    else:
+        payload = {"summary": (result or {}).get("summary", "")} if result else {}
     await session_mod.publish_done(str(job_id), status.value, payload=payload)
 
     # Incremental audit index update (B2)

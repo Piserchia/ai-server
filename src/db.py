@@ -55,6 +55,16 @@ KEY_EVENTS_BREAKER = "events:breaker"             # SET by the event loop when m
 TTL_EVENTS_BREAKER = 1800                         # breaker TTL (s): 30 min pause, then auto-reset
                                                   # (2026-07-30 incident: ~17 self-diagnose jobs
                                                   # spawned into a broken substrate)
+KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"     # GLOBAL (= Anthropic) pause: ISO reset time, or
+                                                  # absent. The job loop stops BLPOPing while set;
+                                                  # the job that hit it is LPUSHed to the FRONT (INV-12)
+KEY_QUOTA_LAST_REASON = "quota:last_reason"       # text of the signal that set the global pause
+KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"     # per-provider lane pause (T6, 2026-10-21):
+                                                  # + "<provider>:paused_until" / "<provider>:last_reason".
+                                                  # Never written for anthropic (that is the global pair).
+                                                  # A job on a paused lane is held: NOT run, RPUSHed to
+                                                  # the TAIL after a bounded delay (plan §4g), while the
+                                                  # loop keeps draining every other lane.
 
 
 @asynccontextmanager

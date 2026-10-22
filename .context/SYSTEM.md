@@ -30,18 +30,19 @@
 | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
 | `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
-| `src/runner/session.py` | Skill/isolation resolution + one in-process SDK session per job (guard hooks + subagents wired here) | config, db, models, audit_log, registry.skills, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, context.module_graph | runner.main |
-| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks + deploy-authority gate | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, runner.delivery, gateway.jobs, registry.skills, audit_log | (entry point) |
+| `src/runner/session.py` | Skill/isolation resolution + one session per job: in-process SDK for Anthropic (guard hooks + subagents wired here), else dispatch to the registry-named executor module (T4, 2026-10-21; fail-closed lane rules before the clone) | config, db, models, audit_log, registry.skills, registry.models, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, runner.executors.codex_cli, runner.review, context.module_graph | runner.main |
+| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks + deploy-authority gate | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, runner.delivery, gateway.jobs, registry.skills, registry.models, audit_log | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher (incl. `plan` for multi-step asks) | — | runner.session, gateway.telegram_bot (triage) |
-| `src/runner/llm_router.py` | Haiku routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
-| `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution | — | runner.session, server-upkeep skill |
+| `src/runner/llm_router.py` | `settings.utility_model` routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
+| `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution; runner-side commit+push for non-Anthropic lanes after the pre-push gate (T5) | — | runner.session, server-upkeep skill |
+| `src/runner/executors/codex_cli.py` | Codex CLI executor (T3, 2026-10-21): `codex exec --json` per job under Seatbelt, scrubbed env, JSONL → existing audit kinds + `jobs:stream`; `interrupt` SIGTERM→SIGKILL. Dispatched by `runner.session._run_executor` since T4. `main()` = T10 canary / gate dry-run entry points (`scripts/codex-canary.sh`) | config, db, audit_log, runner.review (lazy, gate dry-run only) | runner.session, scripts/codex-canary.sh |
 | `src/runner/delivery.py` | Project delivery contract enforcement: dev-repo cwd scoping + deploy-authority gate | config, registry.manifest | runner.session, runner.main |
 | `src/runner/guards.py` | PreToolUse guard hooks: workspace write containment + Bash denylist (INV-17) | config, audit_log, claude_agent_sdk | runner.session |
 | `src/runner/agents.py` | SKILL.md → SDK AgentDefinition compilation (frontmatter `subagents:` → in-session delegation) | registry.skills, claude_agent_sdk | runner.session |
 | `src/runner/plans.py` | Plan validation + subtask DAG spawn/promotion/cascade | config, db, models, audit_log | runner.main, gateway.telegram_bot (manual approve) |
-| `src/runner/quota.py` | Detect rate limits, pause/resume queue | config, db | runner.session, runner.main |
+| `src/runner/quota.py` | Detect rate limits; global (Anthropic) queue pause + per-provider lane pauses `quota:provider:<p>:*` (T6, 2026-10-21) | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
-| `src/runner/review.py` | Code-review sub-agent; evaluates diffs post-session | config, audit_log, claude_agent_sdk | runner.main |
+| `src/runner/review.py` | Code-review sub-agent; evaluates diffs post-session (Anthropic belt 2) and PRE-push for non-Anthropic lanes (T5 gate: `diff_for_gate`, fixed reviewer) | config, audit_log, claude_agent_sdk | runner.main, runner.session |
 | `src/runner/events.py` | Event-trigger rules engine (4th async task) | db, models, gateway.jobs | runner.main |
 | `src/runner/mcp_projects.py` | MCP server: project tools (list, get, logs, restart) | config, db, models | runner.session |
 | `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool (task/parent linkage + depends_on deferral) | gateway.jobs, db, models | runner.session |
@@ -49,13 +50,14 @@
 | `src/runner/audit_index.py` | Build INDEX.jsonl for fast job lookup by skill/status/keyword | config | server-upkeep skill, self-diagnose skill |
 | `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats + context consumption) | config, db, models | review-and-improve skill, gateway.web |
 | `src/runner/proposals.py` | Proposal tracking helpers (pure + async DB ops); dedup/merge-stamping in review-and-improve + server-patch. NOTE: there is no `/proposals` Telegram command yet — pending server-code proposals have no user-facing surface (EVALUATION_2026-07-28 U-backlog) | db, models | review-and-improve skill, server-patch skill |
-| `src/runner/learning.py` | Post-session Haiku classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
+| `src/runner/learning.py` | Post-session `settings.utility_model` classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
 | `src/context/module_graph.py` | Parse SYSTEM.md module graph; dependency detection + import validation | — | runner.session, scripts/lint_docs.py |
-| `src/registry/skills.py` | Load SKILL.md frontmatter | config | runner.session |
+| `src/registry/skills.py` | Load SKILL.md frontmatter (`SkillConfig.provider`/`.model_id` derived via registry.models) | config, registry.models | runner.session |
+| `src/registry/models.py` | Provider/model registry from repo-root `models.yml`: `[provider/]model_id` parse + alias resolution, fail-closed `ProviderRefused` (T1, 2026-10-21) | config | registry.skills, runner.session, runner.main, gateway.web, gateway.telegram_bot |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
 | `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
-| `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes (+ per-project delivery contract on /api/projects) | config, db, models, gateway.jobs, audit_log, runner.retrospective, runner.delivery | (entry point) |
-| `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards | config, db, models, gateway.jobs, audit_log, runner.router, runner.plans | (entry point) |
+| `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes (+ per-project delivery contract on /api/projects) | config, db, models, gateway.jobs, audit_log, registry.models, runner.retrospective, runner.delivery | (entry point) |
+| `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards | config, db, models, gateway.jobs, audit_log, registry.models, runner.router, runner.plans | (entry point) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
 | `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
 | `scripts/schedule-monitor.sh` | Schedule-adherence watchdog: DARK/NEVER_RAN/STUCK/FAILURE_STREAK findings → owner DM; writes `volumes/telemetry/schedule_adherence.json` | runner.schedule_adherence, curl | — (daily 07:15 launchd timer, out-of-band) |
@@ -64,6 +66,7 @@
 | `scripts/seed-module-skills.sh` | Ensure every `.context/modules/<x>/` has `skills/{GOTCHAS,PATTERNS,DEBUG}.md` stubs | — | bootstrap.sh + test_doc_lint.py |
 | `scripts/lint_docs.py` | Validate registries vs actual files; catches stale docs | context.module_graph | tests/test_doc_lint.py |
 | `scripts/sync-learnings.sh` | Publish runtime doc drift → origin/runtime-learnings (plumbing; prod-side) | git | — (hourly launchd timer) |
+| `scripts/codex-canary.sh` | T10 live canary of the Codex executor: throwaway clone under `CANARY_ROOT` (never the repo / prod / volumes), real `codex exec` via `codex_cli.main --canary`, then the Anthropic gate dry-run; results → plan §8 | runner.executors.codex_cli, git, pipenv | — (manual; the one place that spawns the real CLI) |
 
 ## Data flow
 
@@ -117,7 +120,7 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 | INV-9 | Job status transitions are valid; a user `cancelled` is never overwritten by a trailing finish (the cancel-race) | `_finish_job` guards `WHERE status != 'cancelled'` + rowcount check |
 | INV-10 | Skills in `plan` mode cannot write files | SDK-level permission_mode |
 | INV-11 | Audit logs are append-only | filesystem O_APPEND in `audit_log.append` |
-| INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front | `runner/main.py:_process_job` |
+| INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front (global/Anthropic only; a paused non-Anthropic lane holds its jobs to the TAIL — T6, plan §4g) | `runner/main.py:_process_job` |
 | INV-13 | Code-touching skills require a `code-review` sub-agent LGTM **in-session, before push** (that is the merge gate). `main._maybe_review` is a SECOND belt that runs post-session, after the push, and only FLAGS: it stamps `review_outcome` (job stays `completed`) and on blocker/error emits `post_review_flagged` + a task DM — it does NOT park or fail the job. (Behavior weakened 2026-08-05; row corrected to match 2026-08-31 — restoring a fail-closed pre-push gate in code is an open owner decision, see EVALUATION_2026-08-30 F4.3.) | in-session `code-review` subagent per skill SKILL.md; `main._maybe_review` + `review.run_code_review` (flag-only) |
 | INV-14 | Project slugs unique; port allocations never reused | `registry/manifest.py` + `projects/_ports.yml` |
 | INV-15 | On startup the runner reconciles orphaned `running` jobs (fail-only) AND re-queues `queued` rows with no Redis entry, before consuming the queue; the job loop holds a concurrency slot before BLPOP so ids are never parked in-process | `runner/reconcile.py` + `runner/main.py:main`/`_job_loop` |
@@ -201,5 +204,13 @@ Live workstreams as of 2026-08-31:
 - **Isolation/queue debt** — F1/F2 remediation landed 2026-08-31; remaining:
   privilege_class backfill vs charters, server-side INV-22 code deny,
   INV-13 fail-closed restore (owner decision).
-- **Model router** — plan APPROVED 2026-08-17 (INV-21); implementation R0
-  not started.
+- **Model router** — plan APPROVED 2026-08-17 (INV-21); the 2026-09-25
+  multi-model spec was cut 2026-10-05, then its Codex-executor slice was
+  BUILT 2026-10-21 on branch `multi-model/cross-vendor-writer`
+  (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md`: registry
+  + `models.yml`, migration 007, `executors/codex_cli.py`, dispatch, pre-push
+  Anthropic gate, per-provider quota keys, surfaces). Ships dark —
+  `ROUTER_PROVIDERS_ENABLED=anthropic` refuses every non-Anthropic job until
+  the owner flips it (plan §7). The INV-21 row above is still the 08-17
+  wording: its implemented-profile rewrite is part of the owner-merged
+  protected bundle (plan T8), not this slice.

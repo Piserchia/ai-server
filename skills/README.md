@@ -9,7 +9,7 @@ any supporting files (templates, examples, prompts).
 ---
 name: <slug>
 description: <one sentence>
-model: claude-sonnet-4-6 | claude-opus-4-7 | claude-haiku-4-5-20251001
+model: claude-sonnet-4-6 | claude-opus-4-7
 effort: low | medium | high | xhigh | max
 permission_mode: default | acceptEdits | bypassPermissions | plan
 required_tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion]

@@ -15,6 +15,7 @@ Two layers:
 from __future__ import annotations
 
 import os
+import sqlite3
 import subprocess
 import uuid
 from pathlib import Path
@@ -96,3 +97,170 @@ def test_migrations_apply_cleanly(monkeypatch):
             raise
     finally:
         subprocess.run(["dropdb", "--if-exists", test_db], capture_output=True)
+
+
+# ── Layer 1b: migration 007 round-trip on in-memory SQLite (no DB server) ───
+#
+# alembic/env.py is async-Postgres only (no aiosqlite in the lockfile), so the
+# 007 module is driven directly through `Operations.context` on a sync SQLite
+# engine. The fixture builds the minimal pre-007 `jobs` shape — including the
+# 006 CHECK on status — seeds rows, and round-trips upgrade → downgrade.
+
+_PRE_007_JOBS_DDL = (
+    "CREATE TABLE jobs ("
+    " id VARCHAR(36) PRIMARY KEY,"
+    " status VARCHAR(32) NOT NULL,"
+    " resolved_model VARCHAR(64),"
+    " CONSTRAINT ck_jobs_status_valid CHECK (status IN ('queued', 'deferred',"
+    " 'running', 'awaiting_user', 'completed', 'failed', 'cancelled'))"
+    ")"
+)
+
+_SEED_ROWS = [
+    ("j-anthropic", "completed", "claude-opus-4-7"),
+    ("j-anthropic-2", "failed", "claude-sonnet-4-6"),
+    ("j-codex", "completed", "gpt-6-luna"),
+    ("j-unresolved", "queued", None),
+]
+
+_NEW_COLUMNS = {"resolved_provider", "terminal_reason", "model_served"}
+
+
+def _migration_module(rev: str):
+    from alembic.script import ScriptDirectory
+    script = ScriptDirectory.from_config(_alembic_config())
+    return script.get_revision(rev).module
+
+
+def _run_migration(engine, fn) -> None:
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    with engine.begin() as conn:
+        ctx = MigrationContext.configure(connection=conn)
+        with Operations.context(ctx):
+            fn()
+
+
+def _jobs_columns(engine) -> dict:
+    from sqlalchemy import inspect
+    return {c["name"]: c for c in inspect(engine).get_columns("jobs")}
+
+
+def _jobs_table_sql(engine) -> str:
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        return conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'")
+        ).scalar_one()
+
+
+@pytest.fixture
+def pre_007_engine():
+    from sqlalchemy import create_engine, text
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text(_PRE_007_JOBS_DDL))
+        for jid, status, model in _SEED_ROWS:
+            conn.execute(
+                text("INSERT INTO jobs (id, status, resolved_model) VALUES (:i, :s, :m)"),
+                {"i": jid, "s": status, "m": model},
+            )
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+def test_chain_head_is_007_revising_006():
+    from alembic.script import ScriptDirectory
+    script = ScriptDirectory.from_config(_alembic_config())
+    assert script.get_heads() == ["007"]
+    assert script.get_revision("007").down_revision == "006"
+
+
+def test_job_model_declares_provider_columns():
+    from sqlalchemy import String
+    from src.models import Job
+    cols = Job.__table__.c
+    expected = {"resolved_provider": 32, "terminal_reason": 32, "model_served": 64}
+    for name, length in expected.items():
+        col = cols[name]
+        assert isinstance(col.type, String) and col.type.length == length, \
+            f"{name}: expected String({length}), got {col.type!r}"
+        assert col.nullable is True, f"{name} must be nullable (additive, pre-007 rows)"
+
+
+def test_007_upgrade_adds_columns_and_backfills_anthropic(pre_007_engine):
+    from sqlalchemy import text
+    mod = _migration_module("007")
+    assert not _NEW_COLUMNS & set(_jobs_columns(pre_007_engine))
+
+    _run_migration(pre_007_engine, mod.upgrade)
+
+    cols = _jobs_columns(pre_007_engine)
+    assert _NEW_COLUMNS <= set(cols)
+    for name in _NEW_COLUMNS:
+        assert cols[name]["nullable"] is True
+
+    with pre_007_engine.connect() as conn:
+        rows = dict(conn.execute(
+            text("SELECT id, resolved_provider FROM jobs")
+        ).all())
+    assert rows == {
+        "j-anthropic": "anthropic",
+        "j-anthropic-2": "anthropic",
+        "j-codex": None,        # backfill is LIKE 'claude-%' only — never a default
+        "j-unresolved": None,
+    }
+    with pre_007_engine.connect() as conn:
+        untouched = conn.execute(text(
+            "SELECT count(*) FROM jobs WHERE terminal_reason IS NOT NULL "
+            "OR model_served IS NOT NULL"
+        )).scalar_one()
+    assert untouched == 0
+
+
+def test_007_columns_match_orm_declaration(pre_007_engine):
+    from src.models import Job
+    _run_migration(pre_007_engine, _migration_module("007").upgrade)
+    cols = _jobs_columns(pre_007_engine)
+    for name in _NEW_COLUMNS:
+        orm = Job.__table__.c[name]
+        assert cols[name]["type"].length == orm.type.length, name
+        assert cols[name]["nullable"] == orm.nullable, name
+
+
+@pytest.mark.skipif(
+    sqlite3.sqlite_version_info < (3, 35),
+    reason="downgrade uses native ALTER TABLE ... DROP COLUMN (SQLite >= 3.35)",
+)
+def test_007_downgrade_round_trip_leaves_status_check_intact(pre_007_engine):
+    from sqlalchemy import text
+    mod = _migration_module("007")
+    before_sql = _jobs_table_sql(pre_007_engine)
+    assert "ck_jobs_status_valid" in before_sql
+
+    _run_migration(pre_007_engine, mod.upgrade)
+    assert "ck_jobs_status_valid" in _jobs_table_sql(pre_007_engine)
+    _run_migration(pre_007_engine, mod.downgrade)
+
+    assert not _NEW_COLUMNS & set(_jobs_columns(pre_007_engine))
+    assert "ck_jobs_status_valid" in _jobs_table_sql(pre_007_engine)
+    with pre_007_engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT id, status, resolved_model FROM jobs ORDER BY id")
+        ).all()
+    assert sorted(tuple(r) for r in rows) == sorted(_SEED_ROWS)
+    # The CHECK still enforces: an invented status is rejected after the round-trip.
+    from sqlalchemy.exc import IntegrityError
+    with pytest.raises(IntegrityError):
+        with pre_007_engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO jobs (id, status) VALUES ('j-bad', 'succeeded')"
+            ))
+
+
+def test_007_source_never_touches_status_constraint():
+    src = (REPO / "alembic" / "versions" / "007_provider_columns.py").read_text()
+    assert "ck_jobs_status_valid" not in src
+    assert "drop_constraint" not in src and "create_check_constraint" not in src

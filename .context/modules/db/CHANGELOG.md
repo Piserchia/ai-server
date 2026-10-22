@@ -2,6 +2,66 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — Whole-branch review: `audit_log.py` docstring (additive kinds/fields)
+
+**Agent task**: cross-reference for the runner CHANGELOG entry of the same date (`src/audit_log.py` is the shape of record for audit kinds).
+**Files changed**: `src/audit_log.py` (docstring only) — `merge_gate_refused` gains reasons `unparseable_path` (+`lines`) and `diff_too_large` (+`max_chars`); new kind `executor_slot_wait{executor, waited_s, concurrency}`. No kind renamed or reshaped (C14); `.context/modules/db/CONTEXT.md` kind list updated.
+
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under
+`src/` changed.
+- `.context/modules/db/CONTEXT.md` § Audit log — lists the kinds the slice
+  added (`provider_selected`, `provider_refused`, `executor_started`,
+  `turn_completed`, `executor_error`, `merge_gate_verdict`,
+  `merge_gate_skipped`, `merge_gate_refused`, `workspace_published`) and the
+  additive fields on existing kinds, with the C14 rule (add, never rename or
+  reshape); `src/audit_log.py`'s docstring remains the shape of record and
+  `tests/test_cross_vendor_docs.py` checks the two agree on those names.
+
+## 2026-10-21 — T6: quota key constants
+
+**Agent task**: cross-vendor writer slice T6. **Files changed**:
+- `src/db.py` — `KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"` and
+  `KEY_QUOTA_LAST_REASON = "quota:last_reason"` (the GLOBAL = Anthropic
+  pair `runner.quota` had inlined; same strings, INV-12 unchanged) and
+  `KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"` (+ `<p>:paused_until` /
+  `<p>:last_reason` — one pair per non-Anthropic provider, never written
+  for `anthropic`). No schema change.
+
+## 2026-10-21 — T2: migration 007-lite, provider columns on jobs
+
+**Agent task**: cross-vendor writer slice T2
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `alembic/versions/007_provider_columns.py` (new, revises 006) — additive,
+  nullable: `jobs.resolved_provider` String(32), `jobs.terminal_reason`
+  String(32), `jobs.model_served` String(64). Backfill
+  `resolved_provider='anthropic' WHERE resolved_model LIKE 'claude-%'`;
+  every other row stays NULL (C12: never a default). `jobs.status` and its
+  006 CHECK are not touched. Downgrade drops the three columns.
+- `src/models.py` — the same three columns on `Job`, all nullable. Nothing
+  writes them yet: T4 stamps `resolved_provider` / `terminal_reason` /
+  `model_served` from the dispatch branch; T7 surfaces them.
+- `tests/test_migrations.py` — new SQLite layer (1b): the 007 module is
+  loaded via `ScriptDirectory` and run under `Operations.context` on an
+  in-memory sync SQLite engine (env.py is async-Postgres only; no aiosqlite),
+  against a pre-007 `jobs` fixture carrying the 006 CHECK. Asserts head =
+  007 revising 006, the ORM widths, backfill (claude-* → anthropic, codex /
+  NULL untouched), reflected types == ORM, upgrade → downgrade round-trip
+  with the CHECK still enforcing, and that the 007 source never names
+  `ck_jobs_status_valid`.
+
+**Why**: the executor dispatch (T4) and quota keys (T6) need a per-job
+provider of record and a typed terminal reason; "-lite" because the old
+spec's 007 (cost / cache-tier / origin observability columns) stays with
+Observability Phase 1.
+
+**How to verify**: `pipenv run pytest -q -p no:cacheprovider
+tests/test_migrations.py`; on deploy `alembic upgrade head` then
+`psql assistant -c "\\d jobs"` shows the three columns.
+
+
 ## 2026-07-31 — Event-loop circuit breaker key/TTL constants
 
 **Files changed**: `src/db.py` — `KEY_EVENTS_BREAKER = "events:breaker"` and

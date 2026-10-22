@@ -99,6 +99,15 @@ class Job(Base):
     resolved_skill: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     resolved_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolved_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Provider provenance (migration 007, cross-vendor writer slice). All
+    # nullable: pre-007 rows were backfilled to 'anthropic' only where
+    # resolved_model is a claude-* id; the runner stamps new rows (T4).
+    resolved_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # ^ registry provider key: "anthropic" | "codex"
+    terminal_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # ^ how the executor ended: completed | rate_limited | auth_expired | api_error | …
+    model_served: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ^ the model id the provider reports it actually served (may differ from the pin)
 
     # Quality signals
     user_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)  # 1-5

@@ -1,3 +1,47 @@
+## 2026-10-19 — GOTCHA: 3 inbox-count learnings (recipe correction from job 98081219)
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — three entries inserted before
+  the F-08 NAV-source scope entry: (1) inbox count is INBOX.md unchecked lines,
+  not `stage=="inbox"` (corrects the 2026-10-17 recipe; measured 5 stacked F-04
+  dispatches, job ids 0236ae66/bf1fd342/9e5ad071/c04795c2/9d52f12e); (2) when the
+  INBOX queue is non-empty a freed slot belongs to drain not generation — dispatch
+  FIFO citing the INBOX line as binding pre-registration text; (3) the capacity
+  ceiling is OWNER-PARKED SLOTS (A-0011/A-0014, 18/13 days), not over-production —
+  escalate DECISION-REQUESTs by id in every Telegram summary until they clear.
+**Why**: the alpha-scout session (job 98081219) measured these findings under the
+  read-only guard profile and cannot write them itself; this server-patch is the
+  sanctioned route.
+**Side effects**: None — documentation-only change.
+
+## 2026-10-18 — GOTCHA: correct stale "virgin open families" entry
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — one entry appended
+**Why**: The 2026-10-05 entry listed F-04/F-06/F-07 as the three virgin
+  families with "no lesson check beyond the family's own stated caveat."
+  Since then, F-06 was entered (A-0016/A-0017/A-0018, all NO-GO) and
+  F-07 was entered (A-0019 NO-GO, A-0020 in triage). LESSONS.md now
+  records critical constraints for both: F-06's RSI-2 differentiation
+  rule was tightened from Jaccard-overlap to PAYOFF-at-card-stage, its
+  "exclude disclosure days" escape hatch is closed, and F-07's nine-sleeve
+  monthly expression is dead on power (wider cross-section required).
+  Only F-04 remains virgin. The stale entry now steers future scouts
+  toward F-06/F-07 as lesson-free ground when they are not; the new entry
+  supersedes it with current facts and the binding lesson constraints.
+**Side effects**: None — documentation-only change.
+
+## 2026-10-17 — GOTCHA: free capacity slot ≠ license to generate when INBOX non-empty
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — one entry added
+**Why**: 5 consecutive F-04 scout runs each filed a new idea while prior
+  INBOX cards sat unreviewed, wasting job slots. The gotcha documents the
+  rule: count `inbox` stage ideas alongside non-terminal active ideas before
+  deciding to generate; treat `inbox_count + active_non_terminal >=
+  max_active_ideas` as "pipeline full — do not file."
+**Side effects**: None — documentation-only change.
+
 ## 2026-10-09 — Preload `.context/SYSTEM.md` via context_files
 
 **Files created**: none
