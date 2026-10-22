@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Status: PROPOSED — awaiting the owner's "go" (§7 row 0 is the entry set).** This is the 2026-09-25 P0
+> **Status: GO — Tier A approved by the owner 2026-10-21** ("go Tier A, D-P1-7 yes, merge the protected bundle"). D2/D3 were not stated and stay open (§7 row 0 b/c); the D6 first-half PR is not required for Tier A (its consumer is E1, Tier B); the protected bundle merged and pushed as `2fb6012`. Building on branch `observability/phase-1`. This is the 2026-09-25 P0
 > plan (`docs/superpowers/plans/2026-09-25-multi-model-platform-p0.md`, 21 tasks, ≈10.7k lines of verbatim
 > code) **re-cut against the tree at `b47ebf9`**, where the Codex cross-vendor writer slice
 > (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md`) has landed and been deployed. Nothing
@@ -347,7 +347,7 @@ The failure modes the spec implies that no task's tests would otherwise exercise
 |---|---|---|---|
 | **0** | **Phase-1 entry set (spec §9 Entry cell; §12 runbook rows 0, 1, 1a)**: (a) **D1** — "go": say whether Phase 1 only (Tier A, or Tier A + B) or Phases 1–2 are approved; (b) **D2** — the alpha-lab `budget.yaml` cap proposal (LOOP.md §7) filed, or the word "deferred" with the reason — this plan only records the decision (the idle auditor goes off in E5 either way); (c) **D3** — spend posture in one line (spec default "trim cadence via D2"); (d) **D6 first half merged** — PR adding `.claude/settings.json`, `.claude/settings.local.json`, `scripts/install-dev-hooks.sh` + its path list to MISSION §M (spec §6/§11: the only containment the settings-channel refusal has left); (e) `WEB_AUTH_TOKEN` — set (scout); verify `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/jobs` → `401`; (f) `sudo pmset -a autorestart 1` (currently `0`). **If you choose to start Tier A before (d) merges, say so: E1's containment is absent until it lands (recorded deviation).** | before A1 | 30 |
 | 1 | Decide any D-P1 default you want changed (§3) — especially D-P1-2 (`max_turns`), D-P1-6 (atlas dump sizing), D-P1-12 (bingo observe arm) | before A1 / C1 / E1 | 5 |
-| 2 | **D-P1-7 explicit yes/no**: the four swing rows get `env_required: ["TRADIER_SANDBOX_TOKEN"]` in `seed-schedules.sh` (they defer with one DM/day until row 6 is done) | before D1 | 2 |
+| 2 | **D-P1-7 explicit yes/no**: the four swing rows get `env_required: ["TRADIER_SANDBOX_TOKEN"]` in `seed-schedules.sh` (they defer with one DM/day until row 6 is done) — **YES, owner 2026-10-21** | before D1 | 2 |
 | 3 | R2: create bucket `ai-server-backups` + API token (card-on-file account; free ≤ 10 GB-month), then `rclone config` a remote named exactly **`r2`** (rclone 1.74.3 is installed; zero remotes today) | before C1's accept check | 25 |
 | 4 | Seal key: `mkdir -p ~/.config/ai-server && openssl rand -base64 48 > ~/.config/ai-server/backup-seal.key && chmod 600 …`; copy to the password manager | before C1's accept check | 5 |
 | 5 | `bash scripts/install-launchd.sh timers-only` on prod after C1 (and after B4/E10 for their timers); the **full** `bash scripts/install-launchd.sh` once after C1 and again after E7 (restarts runner/web/bot — outside market hours) | after C1 / E7 deploy | 5 |
@@ -355,7 +355,7 @@ The failure modes the spec implies that no task's tests would otherwise exercise
 | 7 | D4 confirmations: Max tier, usage credits $0 / auto-reload off / spend limit $0, "Help improve Claude" off, Devin's bundled `claude` on your own `/login` | Phase-1 exit | 12 |
 | 8 | Ollama: delete the three stale weights (14 GB, untouched 6 months; spec D5 = yes) unless overridden — runbook §6 | any time | 10 |
 | 9 | Deploy after each tier: push `origin/main` (autopilot) or `/task deploy server`; after D1's deploy run `bash scripts/seed-schedules.sh` on prod once | per tier | 5 |
-| 10 | Merge `multi-model/protected-bundle` (slice T8) — unrelated to this plan, still awaiting one word | any time | 5 |
+| 10 | ~~Merge `multi-model/protected-bundle` (slice T8)~~ — **done 2026-10-21** (owner approved; merged + pushed as `2fb6012`, gates green) | — | — |
 | 11 | Retire or relocate bingo's PostToolUse hook (`projects/baseball-bingo/.claude/settings.json` → project tooling or delete) through the bingo repo's own delivery path (P0 runbook §12; C1 runbook §8). Until then bingo jobs run under E1's observe arm with one DM/day; once gone, the arm flips to refuse (§9) | any time; Phase-1 exit at the latest | 10 |
 
 `NOTIFY_OUTBOX` needs no `.env` entry (default `True` after A6). **Kill switch** (owner or god only; jobs cannot flip it): set `NOTIFY_OUTBOX=0` in prod `.env`, then `launchctl kickstart -k gui/$UID/com.assistant.bot` — bot only; the runner never reads the switch (D-P1-10). Re-enable: remove the line, kickstart the bot.
