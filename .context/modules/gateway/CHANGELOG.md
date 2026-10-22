@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A2: every launch persists its origin (`jobs.origin_*`, `tasks.origin_*`); the bot stamps `tasks.awaiting_since`
+
+**Agent task**: Observability Phase 1 re-cut plan A2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4 + Task 3b's `JobOut` fields).
+**Files changed**:
+- `src/gateway/jobs.py` — `enqueue_job` gains keyword-only `origin_channel=None, origin_ref=None, origin_thread=None`. When `origin_channel` is omitted both channel and ref are derived from `created_by` via A1's `origin_from_created_by` (an explicit `origin_ref` still wins); an explicit `origin_channel` is taken as-is and its ref is NOT derived (the web launch is `web`/NULL, matching 008's backfill CASE) and must be one of `ORIGIN_CHANNELS` (`ValueError` otherwise — review round 1; the vocabulary is fixed by 008's CASE and `models.py`, not widened per caller). An empty `origin_channel` derives like an omitted one; empty `origin_ref` / `origin_thread` land as NULL; ref/thread clipped to 64 (every declared channel already fits the 16-char column).
+- `src/gateway/telegram_bot.py` — the two `Task(...)` constructors (`_create_task_with_job`, `cmd_god`) and the six owner-facing `enqueue_job` sites (`_create_task_with_job`, `_handle_plain_text`, `cmd_chat`, `cmd_god`, `_handle_thread_reply`, `choice`) pass `origin_channel="telegram", origin_ref=str(chat_id)`; the thread-reply and choice continuations also pass `origin_thread=str(task.thread_message_id)`. After the root reply is sent, `_create_task_with_job` and `cmd_god` persist `origin_thread=str(reply.message_id)` on BOTH the Task (beside the kept `thread_message_id`) and the Job — two `sql_update` calls in the one session. The self-diagnose enqueue (`bot-error-handler`) stays derived (`system`). `tasks.awaiting_since` is cleared (`None`) on the active transitions (thread reply, `approve_plan`, `choice`) and set to now on `reopen` (new `from datetime import datetime, timezone`). `_job_to_chat` is still populated everywhere it was (A6 retires its use).
+- `src/gateway/web.py` — `create_job` passes `origin_channel="web"` (ref NULL); `JobOut`/`_serialize` gain `origin_channel`, `origin_ref`, `queue_wait_ms` through the existing `getattr(..., None)` idiom (additive; JSON consumers see extra keys only). `_check_auth` and every route decorator untouched.
+- `tests/test_origin.py` (+26: `TestEnqueueSignature` drives `enqueue_job` against a recording session + fake redis; `TestAwaitingSince`; `test_queue_wait_ms`; the AST pins; `TestCancelledGuard` behavioural + AST), `tests/test_web.py` (+2 `TestJobOutOriginFields`), `tests/test_telegram_commands.py` (+3 `TestLaunchOrigin` incl. `test_web_and_telegram_launches_persist_origin`, which compiles the recorded `sql_update` statements and asserts `origin_thread` lands on `tasks` AND `jobs`).
+- `.context/modules/gateway/CONTEXT.md` — `enqueue_job` signature; the helpers are no longer "uncalled".
+
+**Why**: spec §0 bullet 2 — the in-process `_job_to_chat` dict was the only job→chat binding (lost on every bot restart) and web launches had none at all; A4's `build_job_notice` and A6's delivery read the persisted columns instead. `awaiting_since` gives stuck asks an age (spec §2.3).
+
+**Side effects**: every new Job row from these producers carries `origin_channel ∈ {telegram, web}`; everything else derives (`scheduler` from the runner's own `_tick_schedules`, `system` for the long tail). Rows older than this commit are covered by 008's backfill. No behaviour change for the legacy `tasks:notify` / `jobs:done` consumers.
+
+**Gotchas discovered**: `plans.spawn_plan_jobs` and the deferred branch of `mcp_dispatch` build `Job(...)` directly and bypass `enqueue_job`, so their rows carry NULL `origin_channel` / `origin_ref` / `origin_thread` — the channel is NOT derived for them (an earlier draft of this entry claimed it was; corrected in review round 1). Deliberately not expanded into `plans.py` / `mcp_dispatch.py`; A4/A5 must treat NULL as `system` or inherit through `parent_job_id` / `task_id`. Recorded in `.context/modules/runner/skills/GOTCHAS.md`.
+
 ## 2026-10-21 — A1: `ORIGIN_CHANNELS` + `origin_from_created_by` born in `jobs.py` (uncalled; wired in A2)
 
 **Agent task**: Observability Phase 1 re-cut plan A1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4's pure part).

@@ -533,3 +533,29 @@ case-insensitive APFS: `.CLAUDE/settings.json` written by a job IS
 allow/deny rule here must too (fail closed — a false positive on a
 case-sensitive box only costs a refusal).
 
+
+## Plan-DAG and deferred dispatch-mcp children carry NO persisted origin (2026-10-21, A2; corrected in review round 1)
+
+Two producers build `Job(...)` directly and never go through
+`gateway.jobs.enqueue_job`, so their rows land with `origin_channel`,
+`origin_ref` and `origin_thread` all NULL (migration 008's backfill only
+covers rows that existed when it ran; nothing derives a channel for new
+rows):
+
+- `plans.spawn_plan_jobs` (`src/runner/plans.py`) — `created_by` is
+  `telegram:<chat>` from the bot's `approve_plan` path and `plan:<job8>` from
+  the runner's auto-approve path; the row keeps `task_id`, not
+  `parent_job_id`.
+- the **deferred** branch of `mcp_dispatch` (`depends_on` set) — `created_by
+  = dispatch-mcp`, with `task_id` and `parent_job_id`. Its non-deferred
+  branch DOES call `enqueue_job` and derives `system` / `dispatch-mcp`.
+
+Deliberately NOT expanded into `plans.py` / `mcp_dispatch.py` in A2 (scope).
+Consumers (A4's notice builder, A5's channel inheritance) must treat a NULL
+`origin_channel` as `system` **or** inherit the parent's channel/thread via
+`parent_job_id` → `task_id` (`tasks.origin_*`); a child's card then still
+lands under the parent's thread. Stamping `origin_channel, origin_ref =
+origin_from_created_by(created_by)` on the two direct constructors is a
+2-line change if a later task wants the columns populated — do it as a
+named task with the GOTCHA updated, never by threading a message id through
+the plan payload.

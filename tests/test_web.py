@@ -131,3 +131,25 @@ class TestModelSelectGroupedByProvider:
 
     def test_served_page_is_grouped(self):
         assert '<optgroup label="anthropic">' in web._INDEX_HTML
+
+
+class TestJobOutOriginFields:
+    """A2: `JobOut`/`_serialize` expose the 008 origin + queue-wait columns
+    (additive, `getattr(..., None)` like the 007 trio)."""
+
+    def test_jobout_carries_origin_and_queue_wait(self):
+        assert {"origin_channel", "origin_ref", "queue_wait_ms"} <= set(web.JobOut.model_fields)
+        out = web._serialize(_job(origin_channel="telegram", origin_ref="123456789",
+                                  queue_wait_ms=2500)).model_dump()
+        assert out["origin_channel"] == "telegram"
+        assert out["origin_ref"] == "123456789"
+        assert out["queue_wait_ms"] == 2500
+        # Nothing that was there before moved.
+        assert out["resolved_provider"] == "codex" and out["terminal_reason"] == "ok"
+
+    def test_pre_008_row_serializes_none(self):
+        # The `_job()` stand-in carries none of the three attributes.
+        out = web._serialize(_job()).model_dump()
+        assert out["origin_channel"] is None
+        assert out["origin_ref"] is None
+        assert out["queue_wait_ms"] is None

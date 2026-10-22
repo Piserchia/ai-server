@@ -20,6 +20,7 @@ import logging
 import re
 import traceback
 import uuid
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import select, update as sql_update
@@ -308,6 +309,8 @@ async def _create_task_with_job(
         description=description,
         created_by=f"telegram:{chat_id}",
         chat_id=chat_id,
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     async with async_session() as s:
         s.add(task)
@@ -329,6 +332,8 @@ async def _create_task_with_job(
         payload=flags or None,
         created_by=f"telegram:{chat_id}",
         task_id=task.id,
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     _job_to_chat[str(job.id)] = chat_id
 
@@ -340,9 +345,14 @@ async def _create_task_with_job(
         parse_mode="Markdown",
         reply_markup=keyboard,
     )
+    # The root reply's id is the thread every later card posts under: the
+    # legacy column AND origin_thread on both rows (A2, migration 008).
     async with async_session() as s:
         await s.execute(sql_update(Task).where(Task.id == task.id).values(
-            thread_message_id=reply.message_id))
+            thread_message_id=reply.message_id,
+            origin_thread=str(reply.message_id)))
+        await s.execute(sql_update(Job).where(Job.id == job.id).values(
+            origin_thread=str(reply.message_id)))
         await s.commit()
 
 
@@ -400,6 +410,8 @@ async def _handle_plain_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
             text,
             kind=JobKind.chat.value,
             created_by=f"telegram:{chat_id}",
+            origin_channel="telegram",
+            origin_ref=str(chat_id),
         )
         _job_to_chat[str(job.id)] = chat_id
         await update.message.reply_text(f"Thinking... ({str(job.id)[:8]})")
@@ -431,6 +443,8 @@ async def cmd_chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         kind=JobKind.chat.value,
         payload=flags or None,
         created_by=f"telegram:{chat_id}",
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     _job_to_chat[str(job.id)] = chat_id
     await update.message.reply_text(f"Thinking... ({str(job.id)[:8]})")
@@ -456,7 +470,8 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     # Create task (same as /task but with kind="god")
-    task = Task(description=description, created_by=f"telegram:{chat_id}", chat_id=chat_id)
+    task = Task(description=description, created_by=f"telegram:{chat_id}", chat_id=chat_id,
+                origin_channel="telegram", origin_ref=str(chat_id))
     async with async_session() as s:
         s.add(task)
         await s.commit()
@@ -471,6 +486,8 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         kind="god",
         payload=flags or None,
         created_by=f"telegram:{chat_id}",
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     async with async_session() as s:
         await s.execute(sql_update(Job).where(Job.id == job.id).values(task_id=task.id))
@@ -486,7 +503,10 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
     async with async_session() as s:
         await s.execute(sql_update(Task).where(Task.id == task.id).values(
-            thread_message_id=reply.message_id))
+            thread_message_id=reply.message_id,
+            origin_thread=str(reply.message_id)))
+        await s.execute(sql_update(Job).where(Job.id == job.id).values(
+            origin_thread=str(reply.message_id)))
         await s.commit()
 
 
@@ -901,6 +921,7 @@ async def _handle_thread_reply(update: Update, _: ContextTypes.DEFAULT_TYPE) -> 
         await s.execute(
             sql_update(Task).where(Task.id == task.id).values(
                 status=TaskStatus.active.value,
+                awaiting_since=None,
             )
         )
         await s.commit()
@@ -930,6 +951,9 @@ async def _handle_thread_reply(update: Update, _: ContextTypes.DEFAULT_TYPE) -> 
         kind=continuation_kind,
         payload=continuation_payload,
         created_by=f"telegram:{chat_id}",
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
+        origin_thread=str(task.thread_message_id) if task.thread_message_id else None,
     )
     async with async_session() as s:
         await s.execute(
@@ -1042,7 +1066,7 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
                            content="User approved the plan; spawning subtasks."))
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
-                    status=TaskStatus.active.value)
+                    status=TaskStatus.active.value, awaiting_since=None)
             )
             await s.commit()
         await query.edit_message_reply_markup(reply_markup=None)
@@ -1053,7 +1077,8 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         async with async_session() as s:
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
-                    status=TaskStatus.awaiting_user.value)
+                    status=TaskStatus.awaiting_user.value,
+                    awaiting_since=datetime.now(timezone.utc))
             )
             await s.commit()
         await query.edit_message_reply_markup(reply_markup=None)
@@ -1125,6 +1150,7 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
                     status=TaskStatus.active.value,
+                    awaiting_since=None,
                 )
             )
             await s.commit()
@@ -1133,6 +1159,9 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             kind=JobKind.task.value,
             payload=None,
             created_by=f"telegram:{chat_id}",
+            origin_channel="telegram",
+            origin_ref=str(chat_id),
+            origin_thread=str(task.thread_message_id) if task.thread_message_id else None,
         )
         async with async_session() as s:
             await s.execute(

@@ -15,14 +15,24 @@ the single enqueue/cancel/lookup helper.
 
 ## Public interface
 
-- `enqueue_job(description, kind, payload, project_id, created_by) -> Job`
+- `enqueue_job(description, *, kind, payload, project_id, created_by, task_id,
+  parent_job_id, origin_channel=None, origin_ref=None, origin_thread=None) -> Job`
+  — A2 (2026-10-21): when `origin_channel` is omitted, channel and ref are
+  derived from `created_by` via `origin_from_created_by` (an explicit
+  `origin_ref` still wins); an explicit channel is taken as-is and its ref is
+  NOT derived (web = `web`/NULL) and must be one of `ORIGIN_CHANNELS`
+  (`ValueError` otherwise). An empty `origin_channel` derives like an
+  omitted one; empty `origin_ref` / `origin_thread` → NULL; ref/thread
+  clipped to 64. The Telegram launch sites pass `telegram`/`<chat id>`
+  (+ `origin_thread` = the root reply's message id, persisted on both the
+  Task and the Job once the reply exists); `POST /api/jobs` passes `web`.
 - `ORIGIN_CHANNELS = ("telegram", "web", "cli", "scheduler", "system")` and
   `origin_from_created_by(created_by) -> (origin_channel, origin_ref | None)`
   — pure (Observability Phase 1 A1, 2026-10-21): the fallback origin for
   producers that pass none; arm-for-arm the same mapping as migration 008's
   `_BACKFILL_ORIGIN` CASE (`telegram:<chat>` → telegram/<chat>, `web`,
   `scheduler`, everything else → system/<created_by>; refs clipped to 64, an
-  empty ref is `None`). **Uncalled until A2** wires them into `enqueue_job`.
+  empty ref is `None`). Called by `enqueue_job` since A2.
 - `cancel_job(job_id)` — publishes to `jobs:cancel`
 - `find_job_by_prefix(prefix) -> Job | None` — accepts 8-char prefix or full UUID
 - FastAPI: `/health`, `/api/jobs` (GET/POST), `/api/jobs/{id}` (GET/DELETE),

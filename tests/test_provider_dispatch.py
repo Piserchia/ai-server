@@ -794,7 +794,9 @@ async def test_main_anthropic_timeout_still_escalates(main_harness):
     h = main_harness(asyncio.TimeoutError(), "anthropic")
     await runner_main._process_job(h.job.id)
     assert len(h.escalated) == 1
-    assert "provider" not in h.finished[0] and "terminal_reason" not in h.finished[0]
+    # A2: the Anthropic timeout site now stamps the typed reason too; the
+    # provider stays unstamped (the session wrote it, not main).
+    assert "provider" not in h.finished[0] and h.finished[0]["terminal_reason"] == "timeout"
     assert "note" not in _kinds(h.job.id)
 
 

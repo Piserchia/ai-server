@@ -105,6 +105,10 @@ class JobOut(BaseModel):
     resolved_provider: str | None = None
     model_served: str | None = None
     terminal_reason: str | None = None
+    # Migration 008 origin + queue wait (Observability Phase 1 A2): additive.
+    origin_channel: str | None = None
+    origin_ref: str | None = None
+    queue_wait_ms: int | None = None
 
 
 class RateRequest(BaseModel):
@@ -133,6 +137,9 @@ def _serialize(job: Job) -> JobOut:
         resolved_provider=getattr(job, "resolved_provider", None),
         model_served=getattr(job, "model_served", None),
         terminal_reason=getattr(job, "terminal_reason", None),
+        origin_channel=getattr(job, "origin_channel", None),
+        origin_ref=getattr(job, "origin_ref", None),
+        queue_wait_ms=getattr(job, "queue_wait_ms", None),
     )
 
 
@@ -421,6 +428,8 @@ async def create_job(req: CreateJobRequest) -> JobOut:
         kind=req.kind,
         payload=payload or None,
         created_by="web",
+        # A2: explicit channel, no ref (NULL — the 008 backfill's `web` arm).
+        origin_channel="web",
     )
     return _serialize(job)
 

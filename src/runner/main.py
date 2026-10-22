@@ -252,6 +252,15 @@ def note_missing_job(job_id_str: str, requeued_once: set[str]) -> str:
     return "requeue"
 
 
+def queue_wait_ms(created_at: datetime | None, started_at: datetime | None) -> int | None:
+    """Pure. Milliseconds a job sat between enqueue and the running flip
+    (jobs.queue_wait_ms, migration 008 — Observability Phase 1 A2); None
+    when either stamp is missing, never negative (clock skew)."""
+    if created_at is None or started_at is None:
+        return None
+    return max(0, int((started_at - created_at).total_seconds() * 1000))
+
+
 async def _preflight_check(job: Job, log) -> str | None:
     """Validate job config before running a session. Returns error string or None.
 
@@ -470,6 +479,10 @@ async def _process_job(job_id: uuid.UUID) -> None:
                     return
                 job.status = JobStatus.running.value
                 job.started_at = datetime.now(timezone.utc)
+                # getattr: the ORM row always has created_at; the row
+                # stand-ins the _process_job test harnesses build do not.
+                job.queue_wait_ms = queue_wait_ms(getattr(job, "created_at", None),
+                                                  job.started_at)
                 await s.commit()
         if job is not None:
             break
@@ -500,8 +513,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
     preflight_error = await _preflight_check(job, log)
     if preflight_error:
         audit_log.append(str(job_id), "job_failed", error=preflight_error,
-                         error_category="preflight")
-        await _finish_job(job_id, JobStatus.failed, error=preflight_error)
+                         error_category="preflight", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=preflight_error,
+                          terminal_reason="error")
         log.warning("preflight failed", reason=preflight_error)
         if job.task_id:
             try:
@@ -608,8 +622,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # model would hit the same broken contract (2026-08-31).
         reason = str(exc)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="skill_contract")
-        await _finish_job(job_id, JobStatus.failed, error=f"Skill contract: {reason}")
+                         error_category="skill_contract", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=f"Skill contract: {reason}",
+                          terminal_reason="error")
         log.warning("skill resolution failed — job terminal", reason=reason)
         if job.task_id:
             try:
@@ -629,7 +644,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
                          provider=exc.provider, model=exc.model_id, raw=exc.raw,
                          reason=exc.reason)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="provider_refused")
+                         error_category="provider_refused", terminal_reason="provider_refused")
         await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}",
                           provider=exc.provider, terminal_reason="provider_refused")
         log.warning("provider refused — job terminal", reason=reason)
@@ -650,7 +665,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # retrospective read it like a post-review verdict.
         reason = str(exc)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="review_blocked")
+                         error_category="review_blocked", terminal_reason="review_blocked")
         refused = getattr(exc, "refused_reason", None)
         if refused == "denied_path" or (refused is None and exc.denied_paths):
             card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
@@ -721,7 +736,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # (T4, 2026-10-21). The executor already audited `executor_error`;
         # the clone is kept like any failed job.
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category=exc.terminal_reason)
+                         error_category=exc.terminal_reason, terminal_reason=exc.terminal_reason)
         await _finish_job(job_id, JobStatus.failed, error=f"Executor failed: {reason}",
                           provider=exc.provider, terminal_reason=exc.terminal_reason,
                           model_served=exc.model_served)
@@ -739,8 +754,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # policy refusal would just re-violate it).
         reason = str(exc)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="deploy_refused")
-        await _finish_job(job_id, JobStatus.failed, error=f"Deploy refused: {reason}")
+                         error_category="deploy_refused", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=f"Deploy refused: {reason}",
+                          terminal_reason="error")
         log.warning("deploy refused by delivery contract", reason=reason)
         if job.task_id:
             try:
@@ -760,8 +776,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
         guidance = (f"{reason}. This deploy needs you to trigger it — "
                     f"reply `redeploy {slug}` to run it yourself.")
         audit_log.append(str(job_id), "job_failed", error=guidance,
-                         error_category="deploy_needs_approval")
-        await _finish_job(job_id, JobStatus.failed, error=guidance)
+                         error_category="deploy_needs_approval", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=guidance,
+                          terminal_reason="error")
         log.info("auto-deploy declined (human-approval, autonomous trigger)", reason=reason)
         if job.task_id:
             try:
@@ -772,11 +789,18 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
     except asyncio.TimeoutError:
         audit_log.append(str(job_id), "job_failed", error="session_timeout",
-                         error_category="timeout")
+                         error_category="timeout", terminal_reason="timeout")
         # Refetch BEFORE the terminal stamp: the session stamps
         # `resolved_provider` (and resolved_skill) in its own transaction,
         # and the lane decision below reads it.
         job = await _refetch_job(job_id, job, log)
+        if job.status == JobStatus.cancelled.value:
+            # Owner cancelled mid-flight (INV-9 keeps the row `cancelled`;
+            # _finish_job's WHERE would suppress the stamp anyway). Never
+            # escalate it — _maybe_escalate has no cancelled guard and
+            # would enqueue a retry the owner just killed (A2, 2026-10-21).
+            log.info("job timeout on a cancelled job — not escalated")
+            return
         lane = _non_anthropic_lane(job)
         if lane:
             # Main's deadline won over the executor's (its child was killed
@@ -790,7 +814,8 @@ async def _process_job(job_id: uuid.UUID) -> None:
                                   f"(no vendor switch onto Anthropic)")
             log.warning("job timeout — non-Anthropic lane, terminal", provider=lane)
         else:
-            await _finish_job(job_id, JobStatus.failed, error="Session timed out")
+            await _finish_job(job_id, JobStatus.failed, error="Session timed out",
+                              terminal_reason="timeout")
             log.warning("job timeout")
 
             # Timeouts escalate like any other failure. This branch used to
@@ -807,8 +832,10 @@ async def _process_job(job_id: uuid.UUID) -> None:
     except Exception as exc:
         from src.runner.audit_index import categorize_error
         err_str = str(exc)[:500]
+        # "api_error" is the Anthropic lane's untyped failure reason until
+        # B3 maps the exception class (`terminal_reason_for_exception`).
         audit_log.append(str(job_id), "job_failed", error=err_str,
-                         error_category=categorize_error(err_str))
+                         error_category=categorize_error(err_str), terminal_reason="api_error")
         log.exception("job failed")
 
         # Refresh the ORM instance here too — the session may have stamped
@@ -818,6 +845,12 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # completed branch; without this, level-0 escalation silently
         # jumped to self-diagnose for task-kind jobs).
         job = await _refetch_job(job_id, job, log)
+        if job.status == JobStatus.cancelled.value:
+            # A /cancel that interrupts the session before its first API
+            # call surfaces here; the row is already `cancelled` — see the
+            # timeout branch's guard (A2, 2026-10-21).
+            log.info("job failed after cancel — not escalated")
+            return
         lane = _non_anthropic_lane(job)
         if lane:
             # Anything the ExecutorFailed handler above did not already
@@ -831,7 +864,8 @@ async def _process_job(job_id: uuid.UUID) -> None:
                                   f"(no vendor switch onto Anthropic)")
             log.warning("job failed — non-Anthropic lane, terminal", provider=lane)
         else:
-            await _finish_job(job_id, JobStatus.failed, error=err_str)
+            await _finish_job(job_id, JobStatus.failed, error=err_str,
+                              terminal_reason="api_error")
 
             # Escalation: if the skill declares on_failure, enqueue a retry with
             # the escalated model/effort. One level only, guarded by a payload flag.
@@ -1018,7 +1052,7 @@ async def _maybe_escalate(job: Job) -> None:
     if current_level >= 3:
         # Terminal — cascade failure to any deferred dependents, notify user
         if job.task_id:
-            from src.models import Task, TaskStatus
+            from src.models import TaskStatus
             try:
                 from src.runner import plans as plans_mod
                 cascaded = await plans_mod.fail_dependents_of(job)
@@ -1027,11 +1061,9 @@ async def _maybe_escalate(job: Job) -> None:
                                    job_id=str(job.id)[:8])
             except Exception:
                 logger.exception("dependency cascade failed (non-fatal)")
-            async with session_scope() as s:
-                await s.execute(
-                    update(Task).where(Task.id == job.task_id).values(
-                        status=TaskStatus.failed.value)
-                )
+            # Routed through _set_task_status (updated_at + awaiting_since
+            # cleared) so the runner keeps one writer of tasks.status (A2).
+            await _set_task_status(job.task_id, TaskStatus.failed.value)
             from src.db import redis as _redis
             await _redis.publish("tasks:notify", json.dumps({
                 "task_id": str(job.task_id),
@@ -1176,12 +1208,26 @@ async def _record_task_turn(task_id, role: str, content: str, job_id=None) -> No
         ))
 
 
+_AWAITING_STATUSES = ("awaiting_user", "pending_approval")
+
+
+def awaiting_since_for(status: str, now: datetime) -> datetime | None:
+    """Pure. Stamp when a task starts waiting on the owner; clear otherwise
+    (tasks.awaiting_since, migration 008 — stuck asks finally have an age)."""
+    return now if status in _AWAITING_STATUSES else None
+
+
 async def _set_task_status(task_id, status: str) -> None:
+    """The one writer of tasks.status from the runner: stamps/clears
+    `awaiting_since` with the same clock read as `updated_at`. The bot's own
+    transitions (thread reply, approve, choice, reopen) do the same inline."""
     from src.models import Task
+    now = datetime.now(timezone.utc)
     async with session_scope() as s:
         await s.execute(
             update(Task).where(Task.id == task_id).values(
-                status=status, updated_at=datetime.now(timezone.utc))
+                status=status, updated_at=now,
+                awaiting_since=awaiting_since_for(status, now))
         )
 
 
@@ -1405,12 +1451,7 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
 
     # Update task status
     if choices_event:
-        async with session_scope() as s:
-            await s.execute(
-                update(Task)
-                .where(Task.id == job.task_id)
-                .values(status=TaskStatus.awaiting_user.value, updated_at=datetime.now(timezone.utc))
-            )
+        await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
         await redis.publish(
             "tasks:notify",
             json.dumps({
@@ -1421,12 +1462,7 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
             }),
         )
     elif question:
-        async with session_scope() as s:
-            await s.execute(
-                update(Task)
-                .where(Task.id == job.task_id)
-                .values(status=TaskStatus.awaiting_user.value, updated_at=datetime.now(timezone.utc))
-            )
+        await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
         # Notify user via Redis (Telegram bot listens)
         await redis.publish(
             "tasks:notify",
@@ -1491,12 +1527,16 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                 "auto-continue sentinel detected — stopping at pending_approval",
                 task_id=str(job.task_id)[:8], job_id=str(job.id)[:8],
             )
+            _now = datetime.now(timezone.utc)
             async with session_scope() as s:
+                # Shared session with the TaskTurn insert below, so this
+                # stays inline rather than going through _set_task_status;
+                # it stamps awaiting_since itself (A2).
                 await s.execute(
                     update(Task)
                     .where(Task.id == job.task_id)
                     .values(status=TaskStatus.pending_approval.value,
-                            updated_at=datetime.now(timezone.utc))
+                            updated_at=_now, awaiting_since=_now)
                 )
                 from sqlalchemy import func as sqlfunc
                 max_turn = await s.execute(
@@ -1692,6 +1732,8 @@ async def _tick_schedules() -> None:
                 schedule_id=sched.id,
                 status=JobStatus.queued.value,
                 created_by="scheduler",
+                origin_channel="scheduler",
+                origin_ref=sched.name[:64],
             )
             s.add(job)
             await s.flush()

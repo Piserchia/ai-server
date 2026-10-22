@@ -10,7 +10,7 @@ Why JSONL files, not a DB table:
 Kinds used (keep this list honest — update when adding new kinds):
 - job_started:      {"kind", "ts", "job_id", "description", "payload"}  # + "provider" (additive, T4 2026-10-21)
 - job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no cost (subscription auth); + "provider", "model_served", "terminal_reason" (additive, T4)
-- job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused|review_blocked (T5)|<executor terminal_reason: rate_limited|auth_expired|api_error|timeout|interrupted (T4)|publish_failed (T5: LGTM but the runner's push was rejected)>
+- job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # + "terminal_reason" on every branch (additive, A2 2026-10-21: error|timeout|api_error|provider_refused|review_blocked|<executor terminal_reason>); category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused|review_blocked (T5)|<executor terminal_reason: rate_limited|auth_expired|api_error|timeout|interrupted (T4)|publish_failed (T5: LGTM but the runner's push was rejected)>
 - provider_selected: {"kind", "ts", "job_id", "provider", "model", "reason"}  # which provider/model the job resolved to; reason ∈ payload|pin|default (T4, 2026-10-21)
 - provider_refused: {"kind", "ts", "job_id", "provider", "model", "raw", "reason"}  # registry or lane rule refused `[provider/]model_id` before any clone or process (T1/T4, 2026-10-21)
 - job_cancelled:    {"kind", "ts", "job_id"}
