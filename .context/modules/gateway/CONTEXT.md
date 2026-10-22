@@ -15,7 +15,24 @@ the single enqueue/cancel/lookup helper.
 
 ## Public interface
 
-- `enqueue_job(description, kind, payload, project_id, created_by) -> Job`
+- `enqueue_job(description, *, kind, payload, project_id, created_by, task_id,
+  parent_job_id, origin_channel=None, origin_ref=None, origin_thread=None) -> Job`
+  — A2 (2026-10-21): when `origin_channel` is omitted, channel and ref are
+  derived from `created_by` via `origin_from_created_by` (an explicit
+  `origin_ref` still wins); an explicit channel is taken as-is and its ref is
+  NOT derived (web = `web`/NULL) and must be one of `ORIGIN_CHANNELS`
+  (`ValueError` otherwise). An empty `origin_channel` derives like an
+  omitted one; empty `origin_ref` / `origin_thread` → NULL; ref/thread
+  clipped to 64. The Telegram launch sites pass `telegram`/`<chat id>`
+  (+ `origin_thread` = the root reply's message id, persisted on both the
+  Task and the Job once the reply exists); `POST /api/jobs` passes `web`.
+- `ORIGIN_CHANNELS = ("telegram", "web", "cli", "scheduler", "system")` and
+  `origin_from_created_by(created_by) -> (origin_channel, origin_ref | None)`
+  — pure (Observability Phase 1 A1, 2026-10-21): the fallback origin for
+  producers that pass none; arm-for-arm the same mapping as migration 008's
+  `_BACKFILL_ORIGIN` CASE (`telegram:<chat>` → telegram/<chat>, `web`,
+  `scheduler`, everything else → system/<created_by>; refs clipped to 64, an
+  empty ref is `None`). Called by `enqueue_job` since A2.
 - `cancel_job(job_id)` — publishes to `jobs:cancel`
 - `find_job_by_prefix(prefix) -> Job | None` — accepts 8-char prefix or full UUID
 - FastAPI: `/health`, `/api/jobs` (GET/POST), `/api/jobs/{id}` (GET/DELETE),
@@ -38,7 +55,25 @@ the single enqueue/cancel/lookup helper.
 - Telegram admin commands: `/chat`, `/resume`, `/schedule`, `/projects`
 - Thread-based interaction: plain text replies in task threads auto-route as continuations
 - Inline keyboard buttons: approve, cancel, rate, view details, structured choices
-- CallbackQueryHandler: parses `action:task_prefix[:extra]` callback data
+- CallbackQueryHandler: parses `action:task_prefix[:extra]` callback data.
+  `jd:<job8>` (A6, 2026-10-21) is a JOB-level callback — the FailedCard's
+  `[Details]` button — handled before the task lookup: replies with
+  `format_job_status(job)` as plain text (no `parse_mode`), or `Job not found.`
+- `format_job_status(job) -> str` — pure (A6): `Job <8> — <status>`, kind,
+  lane (`lane_label`, provider/model), terminal reason, turns, tokens, api
+  time, list-equivalent cost, origin, 300-char error, 600-char summary;
+  ≤ 4000 chars, never Markdown-safe by design (sent without `parse_mode`).
+- `_lane_label` is a thin alias of `src.notify.outbox.lane_label` since A6
+  (one definition for the done DM, `/jobs` and the outbox cards).
+- `quota_paused_text(reset_at, reason, source)` (A3) and
+  `provider_paused_text(provider, reset_at, reason)` (A6) — pure bodies of
+  the `quota_paused` notice for the global Anthropic pause and for a
+  non-Anthropic lane respectively.
+- Outbox delivery (A6): `_drain_outbox(app, *, legacy_mode) -> (sent,
+  failed, skipped)` and `_outbox_listener(app, *, legacy_mode)`
+  (`_OUTBOX_POLL_SECONDS = 30`); `_handle_done_message(app, channel, data)
+  -> bool` is the per-message gate of the legacy `jobs:done` listener. See
+  "Notifications back to user".
 - MessageHandler: detects replies to task threads via `thread_message_id` lookup
 
 ## Flag parsing
@@ -72,7 +107,12 @@ disabled → **422** `model refused: <reason>`. The dashboard model dropdown
 is rendered from the registry (`web._model_options_html`), one `<optgroup>`
 per enabled provider (T7). `JobOut` carries the 007 columns
 `resolved_provider`, `model_served`, `terminal_reason` (additive, None on
-pre-007 rows) and the jobs table has a Provider column.
+pre-007 rows), the 008 origin trio (A2) and the 008 result-capture columns
+`input_tokens, output_tokens, cache_read_tokens, cache_write_1h_tokens,
+cache_write_5m_tokens, num_turns, duration_api_ms, cost_usd_list,
+sdk_cost_usd, cli_version` (B3; `getattr(..., None)`, the two cost columns
+as floats). The jobs table has a Provider column and a Cost · Turns column
+(`cost_usd_list` + `num_turns`; `sdk_cost_usd` in the title).
 
 ## Auth
 
@@ -81,15 +121,50 @@ pre-007 rows) and the jobs table has a Provider column.
 
 ## Notifications back to user
 
-- Telegram bot subscribes to `jobs:done:*` channels; DMs the submitter when
-  their job completes. The submitter→chat_id mapping is held in memory (lost
-  on bot restart — acceptable tradeoff vs adding a Redis key per job).
-- Quota state change (pause/resume) → periodic notifier DMs all allowed chat IDs.
+- **Outbox (A6, 2026-10-21; D-P1-10)**: the runner always writes a
+  `notifications` row (A5) and always publishes the legacy channels; the bot
+  decides which renderer sends. `_outbox_listener` ALWAYS runs
+  (`release_stuck_sending()` at startup and before every drain — ≤ 30 s
+  after a dead drainer's 5-min lease expires — subscribe `notify:outbox`,
+  drain on every nudge and at least every 30 s — a bot restart loses no DM).
+  `/status <prefix>` replies with `format_job_status` (the outbox job-card
+  footer). With
+  `settings.notify_outbox` **on** (the default since A6) it delivers every
+  row (claim → `render_telegram` → `send_via_bot` → `mark_sent` /
+  `mark_failed` with backoff; token-free `last_error`) and the legacy
+  renderers below are gated off. With `NOTIFY_OUTBOX=0` (kill switch,
+  bot-only restart) the listener runs in `legacy_mode`: job/task rows are
+  marked `skipped`, the ops kinds (`quota_*`, `schedule_deferred`,
+  `ops_alert`, …) are still delivered, and the legacy renderers send the
+  job/task cards.
+- Legacy `jobs:done:*` renderer (`_handle_done_message` → `_deliver_done`):
+  DMs the submitter when their job completes, only while the outbox is off;
+  the in-memory submitter→chat_id entry (`_job_to_chat`) is popped either
+  way. Legacy `tasks:notify` renderer (`_task_notifier`): same gate.
+- What the owner sees (A5–A7): every job card (completion for
+  telegram/web/cli-born jobs without a task, every failure incl. scheduled
+  ones) carries a `[Details]` button (`jd:<job8>` → `format_job_status`,
+  plain text), and `/status <prefix>` is the pull-side equivalent at any
+  time. Out-of-band alerts from the launchd scripts (`healthcheck-all.sh`,
+  `schedule-monitor.sh`) do NOT pass through this listener: they go
+  `python -m src.notify send` (direct HTTP + a `sent`/`failed` row) with a
+  raw-curl fallback, so they arrive even when the bot is the thing that is
+  down. Diagnosis of a missing DM: `docs/TROUBLESHOOTING.md` "no
+  completion/failure DM".
+- Quota state change (pause/resume) → `_quota_notifier` writes a
+  `quota_paused` / `quota_resumed` OPS row per lane (the global Anthropic
+  pause and every enabled non-Anthropic lane via `quota.is_provider_paused`),
+  delivered in both switch positions. The Anthropic pause body is the pure
+  `quota_paused_text(reset_at, reason, source)`; its reset line says
+  `(vendor)` only when a `RateLimitEvent` carried the time
+  (`quota.last_source()`), else `(estimated)` (A3, 2026-10-21). A lane body is
+  `provider_paused_text(...)` and names `/resume <provider>`.
 
 ## Dependencies
 
 - `src.config`, `src.db`, `src.models`, `src.audit_log`
-- `src.runner.quota` (is_paused, clear; T6: is_provider_paused, paused_providers, clear_provider — `GET /api/quota` adds `providers: {<p>: {paused, reset_at, reason}}` for non-Anthropic registry providers; `/status` lists each paused lane; `/resume <provider>` lifts one lane, bare `/resume` the global pause)
+- `src.notify.outbox` (A6: `OPS_NOTICE_KINDS`, `lane_label`, `build_ops_notice`, `enqueue_notice`, `pending_notices`, `claim_notice`, `mark_sent`, `mark_failed`, `mark_skipped`, `release_stuck_sending`) and `src.notify.telegram` (`render_telegram`, `send_via_bot`, `TelegramSendError`)
+- `src.runner.quota` (is_paused, clear, last_source (A3); T6: is_provider_paused, paused_providers, clear_provider — `GET /api/quota` adds `providers: {<p>: {paused, reset_at, reason}}` for non-Anthropic registry providers; `/status` lists each paused lane; `/resume <provider>` lifts one lane, bare `/resume` the global pause)
 - `fastapi`, `python-telegram-bot`
 
 ## Testing

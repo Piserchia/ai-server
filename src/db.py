@@ -45,6 +45,8 @@ QUEUE_JOBS = "jobs:queue"                         # RPUSH from gateways, BLPOP f
 CHANNEL_JOB_STREAM = "jobs:stream"                # pub: jobs:stream:<job_id>
 CHANNEL_JOB_DONE = "jobs:done"                    # pub: jobs:done:<job_id>
 CHANNEL_JOB_CANCEL = "jobs:cancel"                # pub: jobs:cancel (body = job_id)
+CHANNEL_NOTIFY_OUTBOX = "notify:outbox"           # pub: body = notifications.id (A4; the bot
+                                                  # drains on the nudge + a 30 s poll)
 KEY_RUNNER_HEARTBEAT = "heartbeat:runner"         # SET by runner each loop = epoch seconds (liveness)
 TTL_RUNNER_HEARTBEAT = 900                        # heartbeat TTL (s): a dead runner's key expires
                                                   # instead of sitting stale forever (15 min ≫ the
@@ -59,12 +61,21 @@ KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"     # GLOBAL (= Anthropic) pause: 
                                                   # absent. The job loop stops BLPOPing while set;
                                                   # the job that hit it is LPUSHed to the FRONT (INV-12)
 KEY_QUOTA_LAST_REASON = "quota:last_reason"       # text of the signal that set the global pause
+KEY_QUOTA_LAST_SOURCE = "quota:last_source"       # A3 (2026-10-21): "vendor" when the global
+                                                  # pause's reset time came from a RateLimitEvent,
+                                                  # else "estimated"; deleted with the pair
 KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"     # per-provider lane pause (T6, 2026-10-21):
                                                   # + "<provider>:paused_until" / "<provider>:last_reason".
                                                   # Never written for anthropic (that is the global pair).
                                                   # A job on a paused lane is held: NOT run, RPUSHed to
                                                   # the TAIL after a bounded delay (plan §4g), while the
                                                   # loop keeps draining every other lane.
+KEY_SCHEDULE_GAP_NOTIFIED_PREFIX = "schedule:gap_notified:"  # D1 (2026-10-21): + "<slug>:<YYYY-MM-DD>".
+                                                  # SET NX by the scheduler AFTER the schedule_deferred
+                                                  # ops notice was inserted (a dropped insert does not
+                                                  # burn the day) → one provisioning_gap DM per project
+                                                  # per UTC day; the audit record is written every time.
+TTL_SCHEDULE_GAP_NOTIFIED = 129600                # 36 h: outlives the UTC day it names, then expires.
 
 
 @asynccontextmanager

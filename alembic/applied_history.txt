@@ -1,0 +1,18 @@
+# alembic/applied_history.txt — every revision that has been applied to prod,
+# oldest first, APPEND-ONLY (spec §9 rollback rule; re-cut plan §4 + A1).
+# One revision id per line (001_initial … 007_provider_columns,
+# 008_p0_observability). tests/test_migrations.py (layer 1c) asserts each id
+# has a script on disk and that the on-disk chain base→head equals this
+# list, so a `git revert` that deletes a migration file fails the pytest
+# gate in `server-deploy` instead of breaking `alembic upgrade head` on
+# prod. Removing a line is a deliberate, reviewed act that is legal ONLY
+# after `alembic downgrade -1` ran on prod. Every migration commit appends
+# its id here.
+001
+002
+003
+004
+005
+006
+007
+008

@@ -131,3 +131,51 @@ class TestModelSelectGroupedByProvider:
 
     def test_served_page_is_grouped(self):
         assert '<optgroup label="anthropic">' in web._INDEX_HTML
+
+
+class TestJobOutOriginFields:
+    """A2: `JobOut`/`_serialize` expose the 008 origin + queue-wait columns
+    (additive, `getattr(..., None)` like the 007 trio)."""
+
+    def test_jobout_carries_origin_and_queue_wait(self):
+        assert {"origin_channel", "origin_ref", "queue_wait_ms"} <= set(web.JobOut.model_fields)
+        out = web._serialize(_job(origin_channel="telegram", origin_ref="123456789",
+                                  queue_wait_ms=2500)).model_dump()
+        assert out["origin_channel"] == "telegram"
+        assert out["origin_ref"] == "123456789"
+        assert out["queue_wait_ms"] == 2500
+        # Nothing that was there before moved.
+        assert out["resolved_provider"] == "codex" and out["terminal_reason"] == "ok"
+
+    def test_pre_008_row_serializes_none(self):
+        # The `_job()` stand-in carries none of the three attributes.
+        out = web._serialize(_job()).model_dump()
+        assert out["origin_channel"] is None
+        assert out["origin_ref"] is None
+        assert out["queue_wait_ms"] is None
+
+
+def test_jobout_carries_token_and_cost_columns():
+    """B3: the 008 result-capture columns are on `JobOut`/`_serialize`
+    (getattr idiom; the two cost columns serialise as floats)."""
+    from decimal import Decimal
+    cols = {"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_1h_tokens",
+            "cache_write_5m_tokens", "num_turns", "duration_api_ms", "cost_usd_list",
+            "sdk_cost_usd", "cli_version"}
+    assert cols <= set(web.JobOut.model_fields)
+    out = web._serialize(_job(
+        input_tokens=1200, output_tokens=300, cache_read_tokens=5000,
+        cache_write_1h_tokens=800, cache_write_5m_tokens=0, num_turns=4,
+        duration_api_ms=15000, cost_usd_list=Decimal("3.4850"), sdk_cost_usd=3.49,
+        cli_version="2.1.139")).model_dump()
+    assert (out["input_tokens"], out["output_tokens"], out["cache_read_tokens"],
+            out["cache_write_1h_tokens"], out["cache_write_5m_tokens"]) == (1200, 300, 5000, 800, 0)
+    assert out["num_turns"] == 4 and out["duration_api_ms"] == 15000
+    assert out["cost_usd_list"] == 3.485 and isinstance(out["cost_usd_list"], float)
+    assert out["sdk_cost_usd"] == 3.49
+    assert out["cli_version"] == "2.1.139"
+    # A pre-008 row (the stand-in carries none of them) serialises None.
+    out = web._serialize(_job()).model_dump()
+    assert all(out[c] is None for c in cols)
+    # The jobs table shows cost + turns from the row.
+    assert "r.cost_usd_list" in web._INDEX_HTML and "r.num_turns" in web._INDEX_HTML

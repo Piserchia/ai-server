@@ -87,6 +87,11 @@ class TestParseCallback:
         assert prefix is None
         assert extra is None
 
+    def test_job_details_callback_parses(self):
+        # A6: the FailedCard's [Details] button — the prefix is a JOB id.
+        from src.gateway.telegram_bot import _parse_callback
+        assert _parse_callback("jd:abcdef12") == ("jd", "abcdef12", None)
+
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -409,3 +414,106 @@ class TestDoneDmLookup:
         jid = str(_uuid.uuid4())
         await tg._deliver_done(SimpleNamespace(bot=bot), 1, jid, {"status": "completed"})
         assert bot.send_message.await_args.args[1] == f"Job `{jid[:8]}` *completed*\n\n💡 `/rate {jid[:8]} 1-5`"
+
+
+# ── A2: every launch persists its origin ──────────────────────────────────
+#
+# Observability Phase 1 re-cut plan A2. A Telegram launch stamps
+# origin_channel="telegram" / origin_ref=<chat id> on BOTH the Task row and
+# the enqueue call, and the bot's root reply id as origin_thread on both rows
+# once the reply exists; a web launch passes origin_channel="web" and no ref
+# (NULL, matching migration 008's backfill CASE).
+
+from sqlalchemy.dialects import postgresql
+
+
+class _RecordingDB(_FakeDB):
+    def __init__(self, rows=()):
+        super().__init__(rows)
+        self.executed = []
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        return await super().execute(stmt)
+
+
+def _update_params(stmt) -> tuple[str, dict]:
+    return stmt.table.name, dict(stmt.compile(dialect=postgresql.dialect()).params)
+
+
+def _tg_update_with_reply(text: str, *, chat_id: int = 1, message_id: int = 777) -> SimpleNamespace:
+    reply = SimpleNamespace(message_id=message_id)
+    msg = SimpleNamespace(text=text, reply_text=AsyncMock(return_value=reply))
+    return SimpleNamespace(effective_chat=SimpleNamespace(id=chat_id), message=msg)
+
+
+class TestLaunchOrigin:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+        self.db = _RecordingDB()
+        monkeypatch.setattr(tg, "async_session", self.db)
+        self.enqueue = AsyncMock(return_value=SimpleNamespace(id=_uuid.uuid4()))
+        monkeypatch.setattr(tg, "enqueue_job", self.enqueue)
+
+    async def test_web_and_telegram_launches_persist_origin(self, monkeypatch):
+        # /task → Task row + enqueue both carry telegram/<chat>, then the root
+        # reply's message id lands as origin_thread on the Task AND the Job.
+        upd = _tg_update_with_reply("/task fix it", chat_id=424242, message_id=777)
+        await tg.cmd_task(upd, SimpleNamespace(args=["fix", "it"]))
+        task = next(o for o in self.db.added if isinstance(o, tg.Task))
+        assert (task.origin_channel, task.origin_ref) == ("telegram", "424242")
+        assert task.chat_id == 424242                      # kept (keep columns, stop depending)
+        kw = self.enqueue.await_args.kwargs
+        assert (kw["origin_channel"], kw["origin_ref"]) == ("telegram", "424242")
+        assert kw["created_by"] == "telegram:424242"
+        threads = {tbl: p.get("origin_thread") for tbl, p in map(_update_params, self.db.executed)
+                   if "origin_thread" in p}
+        assert threads == {"tasks": "777", "jobs": "777"}
+        tasks_update = next(p for tbl, p in map(_update_params, self.db.executed) if tbl == "tasks")
+        assert tasks_update["thread_message_id"] == 777    # the legacy column is still written
+
+        # /chat (no Task row) carries the same origin on the enqueue.
+        self.enqueue.reset_mock()
+        upd = _tg_update_with_reply("/chat hello", chat_id=424242)
+        await tg.cmd_chat(upd, SimpleNamespace(args=["hello"]))
+        kw = self.enqueue.await_args.kwargs
+        assert (kw["origin_channel"], kw["origin_ref"]) == ("telegram", "424242")
+
+        # Web: POST /api/jobs passes origin_channel="web" and NO ref.
+        from fastapi.testclient import TestClient
+        from src.gateway import web
+        web_enqueue = AsyncMock(return_value=SimpleNamespace(
+            id=_uuid.uuid4(), kind="task", description="fix it", status="queued",
+            resolved_skill=None, resolved_model=None, resolved_effort=None,
+            user_rating=None, review_outcome=None, created_at=__import__("datetime").datetime.now(),
+            started_at=None, completed_at=None, result=None, error_message=None,
+            created_by="web", origin_channel="web", origin_ref=None))
+        monkeypatch.setattr(web, "enqueue_job", web_enqueue)
+        web.app.dependency_overrides[web._check_auth] = lambda: None
+        try:
+            body = TestClient(web.app).post("/api/jobs", json={"description": "fix it"}).json()
+        finally:
+            web.app.dependency_overrides.pop(web._check_auth, None)
+        kw = web_enqueue.await_args.kwargs
+        assert kw["created_by"] == "web" and kw["origin_channel"] == "web"
+        assert kw.get("origin_ref") is None and kw.get("origin_thread") is None
+        assert body["origin_channel"] == "web" and body["origin_ref"] is None
+
+    async def test_god_launch_persists_origin_on_both_rows(self):
+        upd = _tg_update_with_reply("/god do it", chat_id=7, message_id=901)
+        await tg.cmd_god(upd, SimpleNamespace(args=["do", "it"]))
+        task = next(o for o in self.db.added if isinstance(o, tg.Task))
+        assert (task.origin_channel, task.origin_ref) == ("telegram", "7")
+        kw = self.enqueue.await_args.kwargs
+        assert kw["kind"] == "god" and (kw["origin_channel"], kw["origin_ref"]) == ("telegram", "7")
+        threads = [(tbl, p["origin_thread"]) for tbl, p in map(_update_params, self.db.executed)
+                   if "origin_thread" in p]
+        assert sorted(threads) == [("jobs", "901"), ("tasks", "901")]
+
+    async def test_plain_text_chat_carries_origin(self):
+        upd = _tg_update_with_reply("what time is it?", chat_id=5)
+        await tg._handle_plain_text(upd, None)
+        kw = self.enqueue.await_args.kwargs
+        assert kw["kind"] == "chat"
+        assert (kw["origin_channel"], kw["origin_ref"]) == ("telegram", "5")

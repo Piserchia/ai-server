@@ -46,7 +46,9 @@ Manifest schema (see projects/<slug>/manifest.yml):
     created_at: str (ISO date)
 
 Tolerance: unknown top-level keys (mission, platforms, web_strategy,
-env_required, services, …) are IGNORED, not fatal. Before 2026-07-27 the loader
+services, …) are IGNORED, not fatal. `env_required` is READ since 2026-10-21
+(D1): the scheduler's provisioning_gap pre-check defers a due row whose
+project .env lacks a declared name (names only — never a value). Before 2026-07-27 the loader
 constructed `Manifest(**data)` directly and raised TypeError on every live
 manifest (they all carry extra keys) — so the Python loader was dead and only
 the yq-based shell scripts worked. `from_dict` now filters to known fields.
@@ -225,6 +227,14 @@ class Manifest:
     git: GitConfig = field(default_factory=GitConfig)
     delivery: Delivery = field(default_factory=Delivery)
     dependencies: dict[str, str] = field(default_factory=dict)
+    # Owner-provisioned environment keys the project needs to do real work.
+    # Read since 2026-10-21 (D1, spec §8.3): the scheduler pre-checks them
+    # against the project's canonical .env and DEFERS a due row rather than
+    # running a session that cannot succeed. Ignored before that date, so a
+    # project that lists a name it never actually needed will now defer —
+    # which is the point, but it means additions are reviewed. Never a
+    # value, only a name. Not validated: the loader stays fail-open.
+    env_required: list[str] = field(default_factory=list)
     created_at: str | None = None
 
     def validate(self) -> None:
@@ -244,18 +254,35 @@ class Manifest:
         """Build a Manifest from parsed YAML, tolerating unknown top-level keys.
 
         Extra keys the shell tooling reads directly (mission, platforms,
-        web_strategy, env_required, services, …) are ignored here rather than
-        fatal — the pre-2026-07-27 loader constructed `Manifest(**data)` and
-        raised TypeError on every real manifest.
+        web_strategy, services, …) are ignored here rather than fatal — the
+        pre-2026-07-27 loader constructed `Manifest(**data)` and raised
+        TypeError on every real manifest. `env_required` is read (D1,
+        2026-10-21) and str-coerced like `Delivery.env_files`; a bare string
+        is one name; anything non-iterable is dropped, never fatal.
         """
         data = dict(data)
         on_update = OnUpdate(**(data.pop("on_update", {}) or {}))
         git = GitConfig(**(data.pop("git", {}) or {}))
         delivery = _resolve_delivery(data.pop("delivery", None), data)
+        env_required = coerce_env_names(data.pop("env_required", None))
 
         known = {f.name for f in fields(cls)}
         kwargs = {k: v for k, v in data.items() if k in known}
-        return cls(on_update=on_update, git=git, delivery=delivery, **kwargs)
+        return cls(on_update=on_update, git=git, delivery=delivery,
+                   env_required=env_required, **kwargs)
+
+
+def coerce_env_names(raw: Any) -> list[str]:
+    """Pure. `env_required` as a list of names: a str is one name, a list is
+    str-coerced, None/empty/junk → []. Shared with the scheduler's payload
+    reader so the manifest and `job_payload.env_required` agree."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    if isinstance(raw, (list, tuple)):
+        return [str(e) for e in raw if e is not None and str(e)]
+    return []
 
 
 def _resolve_delivery(raw: dict[str, Any] | None, data: dict[str, Any]) -> Delivery:

@@ -7,7 +7,7 @@
 Persistence layer. SQLAlchemy async engine, Redis client, ORM models, and the
 JSONL audit log on disk.
 
-## Schema (6 tables)
+## Schema (7 tables)
 
 - `jobs` — one unit of work. Includes `resolved_skill`, `resolved_model`,
   `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id`,
@@ -16,7 +16,23 @@ JSONL audit log on disk.
   "codex"), `terminal_reason` (executor outcome) and `model_served` (the id
   the provider reports back) — all nullable; pre-007 rows carry
   `resolved_provider='anthropic'` only where `resolved_model` is a
-  `claude-*` id.
+  `claude-*` id. Since migration 008 (Observability Phase 1, 2026-10-21)
+  17 more nullable columns: persisted origin `origin_channel` (telegram |
+  web | cli | scheduler | system), `origin_ref`, `origin_thread`;
+  `queue_wait_ms`; the result-capture columns `input_tokens`,
+  `output_tokens`, `cache_read_tokens`, `cache_write_1h_tokens`,
+  `cache_write_5m_tokens`, `num_turns`, `duration_api_ms`, `cost_usd_list`
+  (runner-computed, `pricing.py`) and `sdk_cost_usd` (the SDK's figure —
+  two columns, never one; `scripts/cost-reconcile.py --db` sums both per
+  served model against the JSONL ledger, B4), `cli_version` (**the lane's
+  CLI**: the Anthropic SDK's bundled CLI on the Anthropic lane, the Codex
+  CLI's version on the Codex lane — distinct from the `executor_started`
+  audit record's `cli_version` field, which is the Codex executor's own
+  stamp of the same value at process start); and `lane`, `task_class`,
+  `first_event_at` reserved for Phase 3 (NULL until then). 008 backfills
+  the token columns from `result->'usage'` and origin from `created_by`;
+  turns/cost/API duration are not backfillable and stay NULL on pre-008
+  rows. No `priority`/`executor`/`sensitivity` column, by design.
 - `schedules` — cron recipes that enqueue jobs.
 - `projects` — registry of hosted projects.
 - `proposals` — tuning/doc proposals emitted by `review-and-improve`.
@@ -24,8 +40,32 @@ JSONL audit log on disk.
   active → awaiting_user → pending_approval → completed. Persists `chat_id`
   for Telegram DM delivery across bot restarts. `thread_message_id` stores
   the Telegram message ID of the bot's root reply for thread-based interaction.
+  Since migration 008 also the nullable origin binding `origin_channel`,
+  `origin_ref`, `origin_thread` (new code reads these first and falls back to
+  `chat_id`/`thread_message_id`, which are kept) and `awaiting_since` (set
+  when status enters awaiting_user/pending_approval, cleared on
+  active/completed — stamped by A2).
 - `task_turns` — individual turns in a task conversation. role: user |
   assistant | system. Links to job_id for assistant turns.
+- `notifications` — the owner-DM outbox (Observability Phase 1, migration
+  008; ORM `Notification`). Columns `id, notice_kind, subject_type (job |
+  task | schedule | ops), subject_id, severity (info | warn | critical),
+  body, actions (JSONB), channel (default telegram), target (chat id; NULL →
+  owner), thread, external_ref (Telegram message_id once sent), status
+  (pending | sending | sent | failed | skipped), attempts, last_error,
+  next_attempt_at, sent_at, created_at`. Indexes `ix_notifications_status`,
+  `ix_notifications_created_at`, partial `ix_notifications_pending` on
+  `(status, created_at) WHERE status = 'pending'`. Written by the runner
+  (`enqueue_notice`, always `pending` + a `notify:outbox` nudge — A5) and by
+  `python -m src.notify send` (the launchd alerters `healthcheck-all.sh` /
+  `schedule-monitor.sh` and, later, the canary: direct HTTP first, then the
+  row as `sent` or `failed`, never `pending` — A7); drained by the bot's
+  `_outbox_listener` (A6) or `python -m src.notify drain`. The table is the
+  alert history. `settings.notify_outbox` (`NOTIFY_OUTBOX`, default True
+  since A6) is read by the bot (`legacy_mode = not notify_outbox`) and by
+  `drain` ONLY — the runner, `outbox.py` and the scripts never read it
+  (D-P1-10): with the switch off, job/task rows are marked `skipped`
+  (`last_error = legacy_mode`) and the ops kinds are still delivered.
   Fields: `id`, `proposed_by_job_id` (FK→jobs, CASCADE), `target_file`,
   `change_type` ('default-model'|'context-files'|'frontmatter-tweak'|'doc-update'),
   `rationale`, `proposed_at`, `applied_pr_url`, `applied_at`, `outcome`
@@ -43,7 +83,9 @@ Defined as named constants in `src/db.py`, not inline strings:
 - `CHANNEL_JOB_STREAM = "jobs:stream"` → per-job: `"jobs:stream:<id>"`
 - `CHANNEL_JOB_DONE = "jobs:done"` → per-job: `"jobs:done:<id>"`
 - `CHANNEL_JOB_CANCEL = "jobs:cancel"`
+- `CHANNEL_NOTIFY_OUTBOX = "notify:outbox"` — body = `notifications.id`; a nudge only (A4, 2026-10-21): the bot's outbox listener also polls every 30 s, so a lost publish delays nothing past that. Producers never read `settings.notify_outbox` (D-P1-10) — the bot and `python -m src.notify drain` do
 - `KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"` / `KEY_QUOTA_LAST_REASON = "quota:last_reason"` — the GLOBAL (= Anthropic) pause pair (INV-12)
+- `KEY_QUOTA_LAST_SOURCE = "quota:last_source"` — `"vendor"` when the global pause's reset time came from a `RateLimitEvent`, else `"estimated"` (A3, 2026-10-21); written/deleted with the pair, never for a provider lane
 - `KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"` → `quota:provider:<p>:paused_until` / `:last_reason` — one pair per non-Anthropic provider lane (T6, 2026-10-21); never written for `anthropic`
 
 ## Audit log
@@ -57,7 +99,15 @@ the cross-vendor writer slice (2026-10-21) added `provider_selected`,
 `merge_gate_refused` (reasons `denied_path` | `unparseable_path` (+`lines`) | `diff_too_large` (+`max_chars`) — the last two added by the 2026-10-21 whole-branch review), `workspace_published` (T5), `executor_slot_wait` (whole-branch review: §4f slot wait, `executor`/`waited_s`/`concurrency`) and additive fields on
 `job_started`/`job_completed` (`provider`, …), `tool_result` (`exit_code`,
 `output`), `workspace_created` (`base_sha`), `post_review_skipped`
-(`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`). Kinds are
+(`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`); the
+notify outbox (A4, 2026-10-21) added `notice_queued`, `notice_sent`,
+`notice_failed` on job-subject notices (`src/notify/outbox.py`; JSONL only,
+not mirrored to `jobs:stream`); D1 (2026-10-21) added `schedule_deferred`
+(`schedule_id`, `schedule`, `reason: provisioning_gap`, `missing`, `project`,
+`env_file`) in a SEPARATE per-schedule stream,
+`volumes/audit_log/schedules/<schedule_id>.jsonl`
+(`audit_log.append_schedule_event` / `read_schedule_events`; a subdirectory
+so `runner/audit_index.rebuild_index` never indexes it as a job). Kinds are
 a parsing contract (C14): add, never rename or reshape. The full list with
 field shapes is the `src/audit_log.py` docstring.
 
@@ -83,6 +133,24 @@ Migrations under `alembic/versions/`. Never edit existing ones — new file per 
   `terminal_reason`, `model_served` to `jobs`; backfills
   `resolved_provider='anthropic'` for `claude-*` rows. Round-tripped on
   SQLite in `tests/test_migrations.py` (layer 1b).
+- `008_p0_observability.py` — 2026-10-21 (Observability Phase 1, A1). Adds
+  17 nullable `jobs` columns, 4 nullable `tasks` columns and the
+  `notifications` outbox (+ 3 indexes). Three Postgres-only backfills
+  (tokens from `result->'usage'`, job origin from `created_by`, task origin
+  from `chat_id`/`thread_message_id`) are guarded by
+  `op.get_bind().dialect.name == "postgresql"` so the SQLite layer-1b
+  harness round-trips the module with the backfills skipped. `jobs.status`
+  and its 006 CHECK untouched.
+
+`alembic/applied_history.txt` (born with 008) is the append-only manifest of
+revisions applied to prod, one id per line. `tests/test_migrations.py`
+layer 1c asserts every listed id has a script on disk and that the on-disk
+chain base→head equals the list, so a `git revert` that deletes a migration
+file fails the pytest gate instead of breaking `alembic upgrade head` on
+prod. **Every migration commit appends its id in the same commit.** Rollback
+rule: revert application code by path, never the migration file; if a
+migration itself must go, `alembic downgrade -1` on prod FIRST, then remove
+the file and its manifest line together.
 
 To add a migration after editing `src/models.py`:
 ```bash

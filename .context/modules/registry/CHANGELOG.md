@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — D1: `Manifest.env_required` is READ (was ignored since the loader was born)
+
+**Agent task**: Observability Phase 1 re-cut plan D1 (P0 plan Task 21 Step 3).
+**Files changed**: `src/registry/manifest.py` — `Manifest.env_required: list[str]` (default `[]`), populated by `from_dict` through the new pure `coerce_env_names` (str-coerced like `Delivery.env_files`; a bare string is one name; `None`/junk → `[]`), shared with `runner.main.schedule_env_required` for `job_payload.env_required`; the module and `from_dict` docstrings no longer list `env_required` among the ignored keys. `tests/test_manifest.py` — `test_env_required_is_read`, the loader-tolerance comment updated. `.context/modules/registry/CONTEXT.md` — the field and its consumer.
+**Why**: the scheduler's `provisioning_gap` pre-check (`runner.main`, D1) consumes it; nothing could pre-check on a field the loader dropped.
+**Side effects**: adding a name to a project's `env_required` can now DEFER that project's schedule rows until the key is in its canonical `.env` (INV-3 names exempt). Still no validation and still fail-open — a bad entry must not make a manifest unloadable, or the project's deploy path goes down with it.
+**Gotchas discovered**: the live atlas manifest declares `ANTHROPIC_API_KEY` (absent from its `.env` by design) — the runner's `PROVISIONING_EXEMPT` is what makes reading this field safe.
+
 ## 2026-10-21 — T9: docs, registries, runbook (no code change)
 
 **Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under

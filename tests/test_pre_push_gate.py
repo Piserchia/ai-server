@@ -42,6 +42,7 @@ from src.registry import models as reg
 from src.registry.skills import SkillConfig
 from src.runner import review, session, workspaces
 from src.runner.executors.codex_cli import ExecResult
+from src.runner.result_capture import ResultCapture
 from src.runner.review import ReviewOutcome
 
 REPO = Path(__file__).resolve().parents[1]
@@ -346,7 +347,9 @@ def harness(tmp_path, monkeypatch):
 
     async def fake_run_in_process(job_id, prompt, options):
         h.sdk_calls.append((job_id, prompt, options))
-        return "SDK did it.\nTASK_COMPLETE: via the SDK", {"input_tokens": 3}
+        # B3: the 3-tuple — the typed capture rides beside the usage dict.
+        return ("SDK did it.\nTASK_COMPLETE: via the SDK", {"input_tokens": 3},
+                ResultCapture(usage={"input_tokens": 3}))
 
     def fake_diff(cwd, base_sha):
         h.diff_calls = getattr(h, "diff_calls", []) + [(cwd, base_sha)]

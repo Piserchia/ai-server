@@ -1,6 +1,6 @@
 # Hosting module
 
-**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/backup.sh`, `Caddyfile`, `Caddyfile.d/`
+**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/schedule-monitor.sh`, `scripts/backup.sh`, `scripts/restore-drill.sh`, `scripts/cost-reconcile-run.sh` (+ the CLI it wraps, `scripts/cost-reconcile.py`), `scripts/install-launchd.sh`, `Caddyfile`, `Caddyfile.d/`, `docs/runbooks/2026-10-21-phase1-ops-hygiene.md` (the owner runbook for the by-hand ops steps); timer-script invariants are pinned by `tests/test_scripts_syntax.py` (`bash -n`, no `pipenv run` under launchd, `TIMER_SCRIPTS` = every `install_timer` call, `ALERTER_SCRIPTS` = notify-first with the curl fallback, the backup/drill/installer/runbook pins from C1)
 
 ## Purpose
 
@@ -13,13 +13,82 @@ Multi-project hosting on a single public domain via:
 ## Public interface
 
 - `register-project.sh <slug> [--dry-run]` — add/update a project's hosting config. Reads `projects/<slug>/manifest.yml`, generates Caddy snippet + launchd plist(s) + DB row.
-- `healthcheck-all.sh` — probe all projects (runs on 5-min timer via launchd)
+- `healthcheck-all.sh` — probe all projects (runs on 5-min timer via launchd);
+  also the runner-liveness backstop, the swing watchdog and the deploy
+  autopilot. Its owner alerts go `notify_send` → `"$VENV_PY" -m src.notify
+  send --kind ops_alert --severity critical` (direct Telegram HTTP + a
+  `notifications` row as alert history) and fall back to the raw curl when
+  there is no usable venv python or the CLI did not deliver (A7,
+  2026-10-21). `VENV_PY`: plist export → `pipenv --venv` → virtualenvs glob,
+  guarded by `import src.config` from the project root; never `pipenv run`.
 - `schedule-monitor.sh` — schedule-adherence watchdog (daily 07:15 timer
   `com.assistant.schedule-monitor`; out-of-band — the scheduler must not
-  watchdog itself; new timers require one `install-launchd.sh` run on prod)
+  watchdog itself; new timers require one `install-launchd.sh` run on prod).
+  `send_dm` is notify-first with the curl fallback (severity `warn`), and
+  the run counts the last 24 h of `schedule_deferred` records under
+  `volumes/audit_log/schedules/` (D1's provisioning-gap stream) as a
+  `FINDING deferred:` line + `deferred_24h=<n>` in the Sunday summary (A7).
+- `cost-reconcile-run.sh` — weekly cost reconcile (Monday 07:30 local, timer
+  `com.assistant.cost-reconcile`; Observability Phase 1 B4, 2026-10-21;
+  D-P1-8: a launchd timer, not a schedule row — one `install-launchd.sh` run
+  on prod installs it). `cd "$PROJECT_DIR"` first, then the §4 interpreter
+  order (`VENV_PY` export → `pipenv --venv` → `~/.local/share/virtualenvs/
+  <basename>-*`, guarded by `import src.config`; no interpreter = a `FATAL`
+  log line + an owner DM, never a silent fallback), then
+  `"$VENV_PY" scripts/cost-reconcile.py --windows 30,7 --db --seed-lane-budgets`
+  appending to `volumes/logs/cost-reconcile.log`. The CLI's exit code is
+  the signal: `1` = 5-minute cache writes seen (the usage-credits signature,
+  spec §2.8; RESERVED — the CLI exits 1 for nothing else) → `send_alert`
+  "Check claude.ai billing"; `3` = the run itself failed (the `--db` leg
+  could not reach Postgres, an unexpected crash — `... failed:` line +
+  traceback in the log), `2` = no audit dir → "weekly run failed (rc=N),
+  read the log". `send_alert` is notify-first
+  (`"$VENV_PY" -m src.notify send --kind ops_alert --severity warn`) with
+  the raw-curl fallback, like `schedule-monitor.sh`'s `send_dm`. The seed it
+  writes (`volumes/telemetry/lane_budget_seed.json`, trailing-7-d × 1.2,
+  approximated lanes) is printed as a table for the owner to paste into
+  `LANE_WEEKLY_BUDGET_JSON` at Phase 3 — nothing reads it in Phase 1.
 - `setup-tunnel.sh` — one-time: create/update Cloudflare named tunnel (interactive, needs browser)
 - `setup-caddy.sh` — one-time: install Caddy + base Caddyfile + launchd service
-- `backup.sh` — nightly (04:00 via `com.assistant.backup`): pg_dump + audit-log/log snapshot → `volumes/backups/backup-<date>.tar.gz`, then off-site replication to Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`. Off-site push is guarded — absent `rclone`/`r2:` remote or a failed upload never fails the local backup. `server-upkeep` alerts if the newest remote object is > 48h old.
+- `backup.sh` — nightly (04:00 via `com.assistant.backup`): `pg_dump assistant`
+  (plain) + audit-log/log snapshot + config snapshot + the **sealed secrets
+  bundle** `secrets.tar.enc` (C1, 2026-10-21: the server `.env`, the atlas
+  canonical `.env` at `~/Documents/repos/atlas/.env` (`ATLAS_ENV` overrides),
+  `~/.cloudflared/{config.yml,cert.pem,*.json}`; `openssl enc -aes-256-cbc
+  -pbkdf2 -iter 200000` with `BACKUP_SEAL_KEY` → `~/.config/ai-server/
+  backup-seal.key`; no key = `seal SKIP`, never fatal; the plain `.env` never
+  enters the tarball) → `volumes/backups/backup-<date>.tar.gz`; **atlas dump**
+  (D-P1-6): `pg_dump -Fc atlas` → `volumes/backups/atlas-<date>.dump` beside
+  the tarball when `pg_database` has the DB (`atlas dump OK (<size>)` /
+  `WARN atlas dump failed` / `atlas dump SKIP`), local keep 7 d. Off-site to
+  Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`: the tarball nightly +
+  `rclone delete --min-age 60d --include 'backup-*.tar.gz'`, the atlas dump
+  on **Sundays only** + `--min-age 35d --include 'atlas-*'`; guarded — absent
+  `rclone`/`r2:` remote (`offsite SKIP`) or a failed upload never fails the
+  local backup. Local retention 60 d for tarballs (`-mtime +60`). Every step
+  after `pg_dump assistant` is `if …; else log; fi` under `set -euo pipefail`.
+  `server-upkeep` alerts if the newest remote object is > 48h old.
+- `restore-drill.sh [tarball]` — OWNER-RUN on prod (C1; the Phase-1 exit
+  criterion "the restore drill passes"): restores the newest tarball's
+  `db.sql` into `restore_drill_assistant` and the newest `atlas-*.dump`
+  (`pg_restore --no-owner --no-privileges`) into `restore_drill_atlas`,
+  counts `jobs` rows and the first atlas base table, unseals the bundle
+  (names counted, values never printed), checks the off-site copy; prints
+  one `PASS`/`WARN`/`FAIL` line per leg + a verdict, exit 0 (WARNs allowed)
+  / 1 (any FAIL), one `restore-drill … result=` line in `backup.log`; drops
+  both throwaways on exit. WARN = no dump / no bundle / no key / no `r2:`;
+  FAIL = a DB leg will not restore, 0 jobs, or a present key cannot unseal.
+  PATH is appended (not prepended) so the operator's shell — and the test's
+  fake pg tools — win. First run on this host before runbook §2/§3: PASS
+  with two WARNs.
+- `install-launchd.sh [timers-only|uninstall]` — services + timers; `timers-only`
+  (C1) re-renders and reloads only the timer plists (no runner/web/bot
+  restart). `install_timer` writes an `EnvironmentVariables` dict (`PATH`
+  with `${VENV_DIR}/bin`, `VENV_PY`, `DISABLE_ERROR_REPORTING=1`,
+  `DISABLE_TELEMETRY=1`; never a credential). Every `ProgramArguments`
+  string escapes `&&` as `&amp;&amp;` (a raw `&&` is not XML — 10 of 14
+  prod plists failed `plutil -p`); timer plists pick it up on `timers-only`,
+  service plists on the next full install.
 
 ## Manifest schema
 

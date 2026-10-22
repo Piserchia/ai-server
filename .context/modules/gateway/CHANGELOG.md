@@ -2,6 +2,109 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-22 — Whole-tier review applied: stuck `sending` rows released before every drain; `/status <prefix>`; the quota-notice fan-out narrowing recorded
+
+**Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").
+**Files changed**:
+- `src/gateway/telegram_bot.py` — `_release_stuck()` (non-fatal `release_stuck_sending()`) runs at listener startup AND at the top of every loop iteration before `_drain_outbox` (≤ 30 s after a dead drainer's 5-min lease expires). Before: once at startup only, so (1) a row claimed just before a bot restart (every deploy) was still inside its lease at startup and never released until the NEXT restart, and (2) a `mark_sent`/`mark_failed` failure after the Telegram call stranded the row in `sending` for good — the exit criterion "a bot restart loses no DM" did not hold for a row mid-send. At-least-once: a kill between the Telegram call and `mark_sent` yields one duplicate DM. `cmd_status(update, ctx)`: with an argument, `find_job_by_prefix(ctx.args[0]) → format_job_status` (plain text, no `parse_mode`; `"Job not found."`) — the `/status <job8>` footer on every outbox job card pointed at a form that did not exist. `format_job_status` docstring updated.
+- `tests/test_notify_bot.py` — `test_releases_stuck_rows_then_drains_on_nudge_and_poll` runs two iterations and asserts a release precedes each drain (3 releases); `TestStatusWithPrefix` (2).
+- `.context/modules/gateway/CONTEXT.md` (listener wording, `/status <prefix>`), `skills/GOTCHAS.md` (the one-time deploy-window loss), `docs/TROUBLESHOOTING.md` (`sending` bullet, deploy-window bullet).
+**Why**: review findings (one major, two minors).
+**Side effects**: one indexed `UPDATE notifications … WHERE status = 'sending' AND next_attempt_at <= now()` per listener iteration (`ix_notifications_status`). **A6 narrowing, recorded here**: `_quota_notifier` now writes one `quota_paused` / `quota_resumed` row with `target=None` → delivered to `allowed_chat_ids[0]` only; the pre-A6 loop DM'd every chat in `TELEGRAM_ALLOWED_CHAT_IDS`. Single-owner deployments see no difference.
+**Gotchas discovered**: the per-iteration release and the startup release are the same helper; a test that counts `release` events must account for startup + one per `get_message` return.
+
+## 2026-10-21 — D1: `/status` lists each schedule row the provisioning pre-check deferred
+
+**Agent task**: Observability Phase 1 re-cut plan D1 (`telegram_bot.py` slice).
+**Files changed**: `src/gateway/telegram_bot.py` — `_deferred_schedule_lines()` (best-effort; one `⏸ deferred: <name> (provisioning_gap: \`KEY\`)` line per unpaused `Schedule` whose newest `schedule_deferred` record in `volumes/audit_log/schedules/<id>.jsonl` covers its latest cron slot, via `schedule_adherence.latest_deferral` / `is_deferred`), folded into `cmd_status`'s ops lines beside the paused-lane lines; imports `src.audit_log` and `runner.schedule_adherence` (SYSTEM.md Depends-on updated). `tests/test_provisioning_gap.py::TestStatusLine`.
+**Why**: the DM is once per project per day; `/status` is where the owner sees which rows are currently deferred and on which key.
+**Side effects**: none when nothing is deferred (`tests/test_quota.py::TestTelegramSurfaces` unchanged). A failure reading the streams logs a warning and shows no line — `/status` never breaks on it.
+**Gotchas discovered**: keys are rendered in backticks — a bare `TRADIER_SANDBOX_TOKEN` under `parse_mode="Markdown"` italicises `_SANDBOX_`.
+
+## 2026-10-21 — B3: `JobOut` carries the 008 result-capture columns; jobs table shows Cost · Turns
+
+**Agent task**: Observability Phase 1 re-cut plan B3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6), the `web.py` slice — edits inside `JobOut`/`_serialize` and the jobs-table renderer only; `_check_auth` and every route decorator untouched.
+**Files changed**:
+- `src/gateway/web.py` — `JobOut` gains `input_tokens, output_tokens, cache_read_tokens, cache_write_1h_tokens, cache_write_5m_tokens, num_turns, duration_api_ms, cost_usd_list, sdk_cost_usd, cli_version` (all Optional, None on rows stamped before B3); `_serialize` fills them with the `getattr(job, …, None)` idiom (the row stand-ins older tests build lack the attributes) and `_opt_float` turns the two `numeric(10,4)` Decimals into floats for JSON; the jobs table gains a `Cost · Turns` column (`$<cost_usd_list>` · `<num_turns>t`, `sdk_cost_usd` in the title) between Status and Description.
+- `.context/modules/gateway/CONTEXT.md` — the `JobOut` paragraph names the new columns and the table column.
+- `tests/test_web.py` — `test_jobout_carries_token_and_cost_columns`.
+
+**Why**: the plan's Accept line — `/api/jobs/{id}` shows the row's tokens / cost / turns / CLI version after the first deployed job on each lane.
+
+**Side effects**: dashboard JSON consumers see extra keys only; the table has one more column.
+
+**Gotchas discovered**: none.
+
+## 2026-10-21 — A7 (docs only): Notifications section names `[Details]` / `/status` and the out-of-band alert path; `_job_to_chat` gotcha closed
+
+**Agent task**: Observability Phase 1 re-cut plan A7, Docs-1 bucket (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `.context/modules/gateway/CONTEXT.md` — "Notifications back to user" gains the owner-facing summary (which cards carry `[Details]`, `/status <prefix>` as the pull side, the launchd alerters' `python -m src.notify send` path that bypasses the bot) and points at the new TROUBLESHOOTING checklist.
+- `.context/modules/gateway/skills/GOTCHAS.md` — the 2026-04-20 "done-listener mapping lost on bot restart" gotcha is closed by the outbox (A5/A6); the entry says in which mode it still applies.
+
+**Why**: the A6 section described the mechanism; the owner-felt behaviour and the diagnosis path were the plan's Docs-1 bucket, assigned to A7.
+
+**Side effects**: none (no code).
+
+**Gotchas discovered**: none.
+
+## 2026-10-21 — A6: the bot delivers the notifications outbox; `[Details]`; `format_job_status`; quota notices via the outbox; `NOTIFY_OUTBOX` on
+
+**Agent task**: Observability Phase 1 re-cut plan A6 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 7 minus Step 3b).
+**Files changed**:
+- `src/gateway/telegram_bot.py` — `_OUTBOX_POLL_SECONDS = 30`; `_drain_outbox(app, *, legacy_mode) -> (sent, failed, skipped)` claims each pending row (`claim_notice`; rowcount 0 → counted `skipped`, never sent twice beside `python -m src.notify drain`), renders it with `src/notify/telegram.py`, `send_via_bot`, then `mark_sent` / `mark_failed` (token-free error text via `_safe_send_error`, backoff from the pre-claim attempts). In `legacy_mode` a row whose kind is not in `OPS_NOTICE_KINDS` is `mark_skipped(…, "legacy_mode")` — the legacy `jobs:done` / `tasks:notify` renderers cover job/task cards — and only the ops kinds are sent. `_outbox_listener(app, *, legacy_mode)`: `release_stuck_sending()` once (failure logged, not fatal), subscribe `notify:outbox`, `get_message(timeout=30)` → drain, so a bot restart loses no DM. `_post_init` ALWAYS starts it with `legacy_mode = not settings.notify_outbox` (D-P1-10: the kill switch keeps the ops notices flowing). `_handle_done_message(app, channel, data) -> bool` is the per-message gate of `_done_listener`: pops `_job_to_chat` either way, returns False with the switch on, else the slice's `_deliver_done` (DM text unchanged). `_task_notifier` gates on `settings.notify_outbox` right after the JSON decode. `_quota_notifier(app, *, poll_seconds=60)` writes `quota_paused` / `quota_resumed` OPS rows through `enqueue_notice(build_ops_notice(…, subject="quota:<lane>"))` instead of direct DMs (delivered in both switch positions), once per state change per lane: the global Anthropic pause (A3's `quota_paused_text`) and, new, every enabled non-Anthropic lane via `quota.is_provider_paused` (pure `provider_paused_text(provider, reset_at, reason)`, names the lane and `/resume <provider>`). `jd:<job8>` branch in `_handle_button` before the task lookup → `format_job_status(job)` reply WITHOUT `parse_mode` (`"Job not found."` otherwise). Pure `format_job_status(job) -> str`: status, kind, lane via `lane_label`, terminal reason, turns, tokens, api time, list-equivalent cost, origin, 300-char error, 600-char summary, ≤ 4000 chars. `_lane_label` is now a thin alias of `notify.outbox.lane_label` (one definition).
+- `src/config.py` — `notify_outbox` default `False` → **`True`** (the consumer exists now). Recorded in the db CHANGELOG.
+- `.context/SYSTEM.md` — `telegram_bot.py` Depends-on += `notify.outbox, notify.telegram`; the two notify rows drop their `(A6)` markers.
+- `.context/modules/gateway/CONTEXT.md` — public interface (`format_job_status`, `provider_paused_text`, `jd:` callback, `_handle_done_message`, the outbox listener), Notifications section, Dependencies.
+- `tests/test_notify_bot.py` (new, 36 collected), `tests/test_telegram_commands.py::TestParseCallback::test_job_details_callback_parses`.
+
+**Why**: spec §9 Phase-1 exit criteria — every human launch (Telegram AND web) DMs on completion/failure, a scheduled failure DMs within 60 s with a `[Details]` button, a bot restart loses no DM, `NOTIFY_OUTBOX=0` + bot kickstart restores today's job/task DMs while a `quota_paused` notice still arrives.
+
+**Gotchas**: `_quota_notifier` keeps `quota.last_source()` and `quota_paused_text(` inline (A3's `tests/test_quota.py::test_notifier_reads_last_source` pins them by source); its first tick after a bot start re-notifies a lane that is already paused (pre-A6 behaviour, kept — the outbox row is the alert history). `_drain_outbox` counts a lost claim as `skipped`, mirroring `python -m src.notify drain`. The `[Details]` reply goes through `query.message.reply_text` (not `edit_message_text`) so the card stays readable.
+
+## 2026-10-21 — A3: the quota_paused DM names the reset time's source
+
+**Agent task**: Observability Phase 1 re-cut plan A3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 7 Step 3b).
+**Files changed**:
+- `src/gateway/telegram_bot.py` — pure `quota_paused_text(reset_at, reason, source) -> str` renders `⏸ Queue paused (subscription quota).\nReset at HH:MM UTC (vendor|estimated).\nReason: <reason[:200]>`; the label is `vendor` ONLY when `reset_at` is a datetime AND `source == "vendor"` (no time → `Reset at unknown (estimated)`, any other source value → `estimated`). `_quota_notifier` renders the body once per state change via `quota_paused_text(reset_at, reason, await quota.last_source())` and sends the same text to every allowed chat (the resume text is unchanged: `▶️ Queue resumed.`).
+- `.context/modules/gateway/CONTEXT.md` (behaviour note + the `src.runner.quota` dependency line).
+
+**Why**: spec §2.8 / review #4 — the owner must be able to tell a vendor-reported reset time from the runner's default window. Every other surface that names a reset time (`/status`, `/api/quota`, the runner log) is left as is and still never says "vendor".
+
+**Side effects**: the pause DM gains a parenthesised label on its second line; the first and third lines are byte-identical to before. `quota.last_source()` is one extra Redis GET per pause transition (not per tick).
+
+**Gotchas discovered**: none.
+
+## 2026-10-21 — A2: every launch persists its origin (`jobs.origin_*`, `tasks.origin_*`); the bot stamps `tasks.awaiting_since`
+
+**Agent task**: Observability Phase 1 re-cut plan A2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4 + Task 3b's `JobOut` fields).
+**Files changed**:
+- `src/gateway/jobs.py` — `enqueue_job` gains keyword-only `origin_channel=None, origin_ref=None, origin_thread=None`. When `origin_channel` is omitted both channel and ref are derived from `created_by` via A1's `origin_from_created_by` (an explicit `origin_ref` still wins); an explicit `origin_channel` is taken as-is and its ref is NOT derived (the web launch is `web`/NULL, matching 008's backfill CASE) and must be one of `ORIGIN_CHANNELS` (`ValueError` otherwise — review round 1; the vocabulary is fixed by 008's CASE and `models.py`, not widened per caller). An empty `origin_channel` derives like an omitted one; empty `origin_ref` / `origin_thread` land as NULL; ref/thread clipped to 64 (every declared channel already fits the 16-char column).
+- `src/gateway/telegram_bot.py` — the two `Task(...)` constructors (`_create_task_with_job`, `cmd_god`) and the six owner-facing `enqueue_job` sites (`_create_task_with_job`, `_handle_plain_text`, `cmd_chat`, `cmd_god`, `_handle_thread_reply`, `choice`) pass `origin_channel="telegram", origin_ref=str(chat_id)`; the thread-reply and choice continuations also pass `origin_thread=str(task.thread_message_id)`. After the root reply is sent, `_create_task_with_job` and `cmd_god` persist `origin_thread=str(reply.message_id)` on BOTH the Task (beside the kept `thread_message_id`) and the Job — two `sql_update` calls in the one session. The self-diagnose enqueue (`bot-error-handler`) stays derived (`system`). `tasks.awaiting_since` is cleared (`None`) on the active transitions (thread reply, `approve_plan`, `choice`) and set to now on `reopen` (new `from datetime import datetime, timezone`). `_job_to_chat` is still populated everywhere it was (A6 retires its use).
+- `src/gateway/web.py` — `create_job` passes `origin_channel="web"` (ref NULL); `JobOut`/`_serialize` gain `origin_channel`, `origin_ref`, `queue_wait_ms` through the existing `getattr(..., None)` idiom (additive; JSON consumers see extra keys only). `_check_auth` and every route decorator untouched.
+- `tests/test_origin.py` (+26: `TestEnqueueSignature` drives `enqueue_job` against a recording session + fake redis; `TestAwaitingSince`; `test_queue_wait_ms`; the AST pins; `TestCancelledGuard` behavioural + AST), `tests/test_web.py` (+2 `TestJobOutOriginFields`), `tests/test_telegram_commands.py` (+3 `TestLaunchOrigin` incl. `test_web_and_telegram_launches_persist_origin`, which compiles the recorded `sql_update` statements and asserts `origin_thread` lands on `tasks` AND `jobs`).
+- `.context/modules/gateway/CONTEXT.md` — `enqueue_job` signature; the helpers are no longer "uncalled".
+
+**Why**: spec §0 bullet 2 — the in-process `_job_to_chat` dict was the only job→chat binding (lost on every bot restart) and web launches had none at all; A4's `build_job_notice` and A6's delivery read the persisted columns instead. `awaiting_since` gives stuck asks an age (spec §2.3).
+
+**Side effects**: every new Job row from these producers carries `origin_channel ∈ {telegram, web}`; everything else derives (`scheduler` from the runner's own `_tick_schedules`, `system` for the long tail). Rows older than this commit are covered by 008's backfill. No behaviour change for the legacy `tasks:notify` / `jobs:done` consumers.
+
+**Gotchas discovered**: `plans.spawn_plan_jobs` and the deferred branch of `mcp_dispatch` build `Job(...)` directly and bypass `enqueue_job`, so their rows carry NULL `origin_channel` / `origin_ref` / `origin_thread` — the channel is NOT derived for them (an earlier draft of this entry claimed it was; corrected in review round 1). Deliberately not expanded into `plans.py` / `mcp_dispatch.py`; A4/A5 must treat NULL as `system` or inherit through `parent_job_id` / `task_id`. Recorded in `.context/modules/runner/skills/GOTCHAS.md`.
+
+## 2026-10-21 — A1: `ORIGIN_CHANNELS` + `origin_from_created_by` born in `jobs.py` (uncalled; wired in A2)
+
+**Agent task**: Observability Phase 1 re-cut plan A1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4's pure part).
+**Files changed**:
+- `src/gateway/jobs.py` — `ORIGIN_CHANNELS = ("telegram", "web", "cli", "scheduler", "system")` and the pure `origin_from_created_by(created_by) -> (origin_channel, origin_ref | None)`: `telegram:<chat>` → `("telegram", <chat>)`, `web` → `("web", None)`, `scheduler` → `("scheduler", None)`, everything else (`dispatch-mcp`, `event-trigger*`, `learning:`, `writeback:`, `escalation*`, `plan:`, `evaluator:`, `eval-fix:`, `auto-continue:`, `bot-error-handler`, `deploy-autopilot`, `owner-*`, …) → `("system", created_by)`; refs clipped to 64 (the `String(64)` column), an empty ref is `None` never `''` (the SQL side's `NULLIF`). `enqueue_job` untouched.
+- `tests/test_origin.py` (new) — `TestOriginFromCreatedBy` (parametrized over the producer vocabulary above incl. bare `telegram:`, whitespace, `''`, `None`), `test_ref_fits_column`, `test_telegram_ref_fits_column`, `test_every_channel_is_declared`.
+- `.context/modules/gateway/CONTEXT.md` — public interface lists the two helpers and that they are uncalled until A2.
+
+**Why**: migration 008's `_BACKFILL_ORIGIN` CASE and this helper must agree arm for arm so backfilled and new rows read the same; `tests/test_migrations.py::test_008_origin_backfill_case_matches_origin_from_created_by` drives the helper over the vocabulary and pins the SQL arms textually (the CASE cannot run on SQLite). Born in A1 so the migration and its Python twin land in one reviewed commit.
+
+**Side effects**: none at runtime — nothing calls either symbol in this commit. A2 wires them into `enqueue_job(..., origin_channel=None, origin_ref=None, origin_thread=None)` and A4's notice builder reads the stamped columns.
+
+**Gotchas discovered**: the `created_by` vocabulary in the tree is wider than the P0 plan's test table (`event-trigger`, `learning:`, `writeback:`, `evaluator:`, `eval-fix:`, `bot-error-handler`, `deploy-autopilot`, `owner-*`); all of it is `system`, which is why the helper has no allow-list and never raises.
+
 ## 2026-10-21 — T9: docs, registries, runbook (no code change)
 
 **Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under

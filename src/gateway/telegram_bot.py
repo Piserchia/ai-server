@@ -20,18 +20,33 @@ import logging
 import re
 import traceback
 import uuid
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import select, update as sql_update
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
+from src import audit_log
 from src.config import settings
-from src.db import CHANNEL_JOB_DONE, async_session, redis
+from src.db import CHANNEL_JOB_DONE, CHANNEL_NOTIFY_OUTBOX, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project, Schedule, Task, TaskStatus, TaskTurn
+from src.notify.outbox import (
+    OPS_NOTICE_KINDS,
+    build_ops_notice,
+    claim_notice,
+    enqueue_notice,
+    lane_label,
+    mark_failed,
+    mark_sent,
+    mark_skipped,
+    pending_notices,
+    release_stuck_sending,
+)
+from src.notify.telegram import TelegramSendError, render_telegram, send_via_bot
 from src.registry import models as models_registry
-from src.runner import quota
+from src.runner import quota, schedule_adherence
 
 logger = structlog.get_logger()
 
@@ -233,19 +248,10 @@ async def _parse_flags_or_reply(update: Update, raw: str) -> tuple[str, dict] | 
     return description, flags
 
 
-def _lane_label(provider: str | None, model: str | None,
-                terminal_reason: str | None = None) -> str:
-    """`provider/model` for the surfaces (T7). Pure. A pre-007 row (model,
-    no provider) shows its model alone — never guessed to be Anthropic; a
-    queued row (neither) shows nothing. A terminal reason other than `ok`
-    is appended so a failed DM says WHY the lane ended."""
-    if provider and model:
-        lane = f"{provider}/{model}"
-    else:
-        lane = model or provider or ""
-    if lane and terminal_reason and terminal_reason != "ok":
-        lane += f" \u00b7 {terminal_reason}"
-    return lane
+# `provider/model` for the surfaces (T7). Since A6 a thin alias of the one
+# definition in src/notify/outbox.py so the done DM, /jobs and the outbox
+# cards can never disagree.
+_lane_label = lane_label
 
 
 # ── Commands ────────────────────────────────────────────────────────────────
@@ -308,6 +314,8 @@ async def _create_task_with_job(
         description=description,
         created_by=f"telegram:{chat_id}",
         chat_id=chat_id,
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     async with async_session() as s:
         s.add(task)
@@ -329,6 +337,8 @@ async def _create_task_with_job(
         payload=flags or None,
         created_by=f"telegram:{chat_id}",
         task_id=task.id,
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     _job_to_chat[str(job.id)] = chat_id
 
@@ -340,9 +350,14 @@ async def _create_task_with_job(
         parse_mode="Markdown",
         reply_markup=keyboard,
     )
+    # The root reply's id is the thread every later card posts under: the
+    # legacy column AND origin_thread on both rows (A2, migration 008).
     async with async_session() as s:
         await s.execute(sql_update(Task).where(Task.id == task.id).values(
-            thread_message_id=reply.message_id))
+            thread_message_id=reply.message_id,
+            origin_thread=str(reply.message_id)))
+        await s.execute(sql_update(Job).where(Job.id == job.id).values(
+            origin_thread=str(reply.message_id)))
         await s.commit()
 
 
@@ -400,6 +415,8 @@ async def _handle_plain_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
             text,
             kind=JobKind.chat.value,
             created_by=f"telegram:{chat_id}",
+            origin_channel="telegram",
+            origin_ref=str(chat_id),
         )
         _job_to_chat[str(job.id)] = chat_id
         await update.message.reply_text(f"Thinking... ({str(job.id)[:8]})")
@@ -431,6 +448,8 @@ async def cmd_chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         kind=JobKind.chat.value,
         payload=flags or None,
         created_by=f"telegram:{chat_id}",
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     _job_to_chat[str(job.id)] = chat_id
     await update.message.reply_text(f"Thinking... ({str(job.id)[:8]})")
@@ -456,7 +475,8 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     # Create task (same as /task but with kind="god")
-    task = Task(description=description, created_by=f"telegram:{chat_id}", chat_id=chat_id)
+    task = Task(description=description, created_by=f"telegram:{chat_id}", chat_id=chat_id,
+                origin_channel="telegram", origin_ref=str(chat_id))
     async with async_session() as s:
         s.add(task)
         await s.commit()
@@ -471,6 +491,8 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         kind="god",
         payload=flags or None,
         created_by=f"telegram:{chat_id}",
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
     )
     async with async_session() as s:
         await s.execute(sql_update(Job).where(Job.id == job.id).values(task_id=task.id))
@@ -486,14 +508,26 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
     async with async_session() as s:
         await s.execute(sql_update(Task).where(Task.id == task.id).values(
-            thread_message_id=reply.message_id))
+            thread_message_id=reply.message_id,
+            origin_thread=str(reply.message_id)))
+        await s.execute(sql_update(Job).where(Job.id == job.id).values(
+            origin_thread=str(reply.message_id)))
         await s.commit()
 
 
 @_error_safe
-async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show active tasks with status icons and inline prompts."""
+async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show active tasks with status icons and inline prompts. With an
+    argument — `/status <job prefix>`, the footer every outbox job card
+    carries — reply with `format_job_status` for that job instead (plain
+    text, no parse_mode; same shape as the `[Details]` button)."""
     if await _guard(update) is None:
+        return
+
+    args = getattr(ctx, "args", None) or []
+    if args:
+        job = await find_job_by_prefix(str(args[0]).strip())
+        await update.message.reply_text(format_job_status(job) if job else "Job not found.")
         return
 
     active_statuses = [
@@ -513,7 +547,9 @@ async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     # One line per paused provider LANE (T6, 2026-10-21): a held lane is
     # otherwise invisible - its jobs cycle to the queue tail silently.
     # The global (Anthropic) pause has its own notifier; it is not repeated here.
-    lane_lines = await _paused_lane_lines()
+    # Plus one line per schedule row the provisioning pre-check deferred at
+    # its latest slot (D1): the row ran no session and is not dark.
+    lane_lines = await _paused_lane_lines() + await _deferred_schedule_lines()
 
     if not tasks:
         await update.message.reply_text(
@@ -569,6 +605,28 @@ async def _paused_lane_lines() -> list[str]:
         f"`/resume {_esc_md(name)}` to lift."
         for name, (reset_at, reason) in paused.items()
     ]
+
+
+async def _deferred_schedule_lines() -> list[str]:
+    """Markdown lines, one per unpaused schedule whose newest
+    `schedule_deferred` record (volumes/audit_log/schedules/<id>.jsonl)
+    covers its latest cron slot (D1). Best-effort: never breaks /status."""
+    try:
+        now = datetime.now(timezone.utc)
+        async with async_session() as s:
+            rows = list((await s.execute(
+                select(Schedule).where(Schedule.paused.is_(False)).order_by(Schedule.name)
+            )).scalars().all())
+        lines: list[str] = []
+        for r in rows:
+            at, missing = schedule_adherence.latest_deferral(audit_log.read_schedule_events(r.id))
+            if schedule_adherence.is_deferred(r.cron_expression, at, now):
+                keys = ", ".join(f"`{m}`" for m in missing) or "?"
+                lines.append(f"⏸ deferred: {_esc_md(r.name)} (provisioning_gap: {keys})")
+        return lines
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("deferred-schedule lines skipped", error=str(exc)[:120])
+        return []
 
 
 @_error_safe
@@ -793,6 +851,50 @@ def _parse_callback(data: str) -> tuple[str, str | None, str | None]:
     return action, task_prefix, extra
 
 
+def format_job_status(job) -> str:
+    """Pure. The `[Details]` button (A6) and `/status <prefix>` (the footer
+    on every outbox job card; wired in the 2026-10-22 whole-tier review).
+    Plain text — sent WITHOUT parse_mode: skill names with `_` crash
+    Markdown (TROUBLESHOOTING.md). Lane via the one `lane_label` definition;
+    the terminal reason is its own line, so the lane carries none here."""
+    lines = [f"Job {str(job.id)[:8]} — {job.status}", f"kind: {job.resolved_skill or job.kind}"]
+    lane = lane_label(getattr(job, "resolved_provider", None),
+                      job.model_served or job.resolved_model)
+    if lane:
+        lines.append(f"lane: {lane}")
+    if job.terminal_reason:
+        lines.append(f"terminal: {job.terminal_reason}")
+    if job.num_turns is not None:
+        lines.append(f"turns: {job.num_turns}")
+    if job.output_tokens is not None:
+        lines.append(f"tokens: in {job.input_tokens or 0} · out {job.output_tokens or 0} "
+                     f"· cache-read {job.cache_read_tokens or 0}")
+    if job.duration_api_ms:
+        lines.append(f"api time: {job.duration_api_ms / 1000:.1f}s")
+    if job.cost_usd_list is not None:
+        lines.append(f"list-equiv cost: ${float(job.cost_usd_list):.4f}")
+    if job.origin_channel:
+        ref = f":{job.origin_ref}" if job.origin_ref else ""
+        lines.append(f"origin: {job.origin_channel}{ref}")
+    if job.error_message:
+        lines.append(f"error: {job.error_message[:300]}")
+    summary = job.result.get("summary") if isinstance(job.result, dict) else None
+    if summary:
+        lines.append("")
+        lines.append(summary[:600])
+    return "\n".join(lines)[:4000]
+
+
+def provider_paused_text(provider: str, reset_at: datetime | None, reason: str) -> str:
+    """The quota_paused body for a NON-Anthropic lane (pure; A6). Per-provider
+    pauses (T6) carry no vendor/estimated source — the reset time is the
+    executor's backoff window — so the line is not labelled."""
+    reset_str = reset_at.strftime("%H:%M UTC") if reset_at else "unknown"
+    return (f"⏸ {provider} lane paused until {reset_str} — its jobs are held.\n"
+            f"Reason: {reason[:200] or 'no reason recorded'}\n"
+            f"/resume {provider} to lift.")
+
+
 
 @_error_safe
 async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -901,6 +1003,7 @@ async def _handle_thread_reply(update: Update, _: ContextTypes.DEFAULT_TYPE) -> 
         await s.execute(
             sql_update(Task).where(Task.id == task.id).values(
                 status=TaskStatus.active.value,
+                awaiting_since=None,
             )
         )
         await s.commit()
@@ -930,6 +1033,9 @@ async def _handle_thread_reply(update: Update, _: ContextTypes.DEFAULT_TYPE) -> 
         kind=continuation_kind,
         payload=continuation_payload,
         created_by=f"telegram:{chat_id}",
+        origin_channel="telegram",
+        origin_ref=str(chat_id),
+        origin_thread=str(task.thread_message_id) if task.thread_message_id else None,
     )
     async with async_session() as s:
         await s.execute(
@@ -959,6 +1065,13 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 
     action, task_prefix, extra = _parse_callback(query.data or "")
     if not task_prefix:
+        return
+
+    # Job-level callbacks (A6 outbox cards) — the prefix is a JOB id, not a
+    # task id. Plain text: format_job_status is not Markdown-safe by design.
+    if action == "jd":
+        job = await find_job_by_prefix(task_prefix)
+        await query.message.reply_text(format_job_status(job) if job else "Job not found.")
         return
 
     task = await _find_task_by_prefix(task_prefix)
@@ -1042,7 +1155,7 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
                            content="User approved the plan; spawning subtasks."))
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
-                    status=TaskStatus.active.value)
+                    status=TaskStatus.active.value, awaiting_since=None)
             )
             await s.commit()
         await query.edit_message_reply_markup(reply_markup=None)
@@ -1053,7 +1166,8 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         async with async_session() as s:
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
-                    status=TaskStatus.awaiting_user.value)
+                    status=TaskStatus.awaiting_user.value,
+                    awaiting_since=datetime.now(timezone.utc))
             )
             await s.commit()
         await query.edit_message_reply_markup(reply_markup=None)
@@ -1125,6 +1239,7 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
                     status=TaskStatus.active.value,
+                    awaiting_since=None,
                 )
             )
             await s.commit()
@@ -1133,6 +1248,9 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             kind=JobKind.task.value,
             payload=None,
             created_by=f"telegram:{chat_id}",
+            origin_channel="telegram",
+            origin_ref=str(chat_id),
+            origin_thread=str(task.thread_message_id) if task.thread_message_id else None,
         )
         async with async_session() as s:
             await s.execute(
@@ -1187,6 +1305,28 @@ async def _deliver_done(app: Application, chat_id: int, job_id: str, payload: di
     await app.bot.send_message(chat_id, text, parse_mode="Markdown")
 
 
+async def _handle_done_message(app: Application, channel: str, data: str) -> bool:
+    """One `jobs:done:<id>` message (A6). Legacy renderer: sends only while
+    the outbox is OFF — the runner publishes in both modes (A5 dual-write)
+    and with the switch on the DoneCard comes from `_outbox_listener`. The
+    `_job_to_chat` entry is popped either way so the dict never leaks.
+    Returns True when a DM was sent."""
+    job_id = channel.rsplit(":", 1)[-1]
+    chat_id = _job_to_chat.pop(job_id, None)
+    if not chat_id or settings.notify_outbox:
+        return False
+    try:
+        payload = json.loads(data or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    try:
+        await _deliver_done(app, chat_id, job_id, payload)
+    except Exception:
+        logger.exception("failed to DM result", chat_id=chat_id, job_id=job_id)
+        return False
+    return True
+
+
 async def _done_listener(app: Application) -> None:
     pubsub = redis.pubsub()
     await pubsub.psubscribe(f"{CHANNEL_JOB_DONE}:*")
@@ -1194,19 +1334,7 @@ async def _done_listener(app: Application) -> None:
         async for msg in pubsub.listen():
             if msg.get("type") != "pmessage":
                 continue
-            channel = msg.get("channel", "")
-            job_id = channel.rsplit(":", 1)[-1]
-            chat_id = _job_to_chat.pop(job_id, None)
-            if not chat_id:
-                continue
-            try:
-                payload = json.loads(msg.get("data", "{}"))
-            except json.JSONDecodeError:
-                payload = {}
-            try:
-                await _deliver_done(app, chat_id, job_id, payload)
-            except Exception:
-                logger.exception("failed to DM result", chat_id=chat_id, job_id=job_id)
+            await _handle_done_message(app, msg.get("channel", ""), msg.get("data", "{}"))
     finally:
         await pubsub.punsubscribe(f"{CHANNEL_JOB_DONE}:*")
 
@@ -1214,32 +1342,50 @@ async def _done_listener(app: Application) -> None:
 # ── Quota-pause notifier ────────────────────────────────────────────────────
 
 
-async def _quota_notifier(app: Application) -> None:
-    """Periodically check quota state; Telegram once on pause and once on resume."""
-    last_state: tuple[bool, str] = (False, "")
+def quota_paused_text(reset_at: datetime | None, reason: str, source: str) -> str:
+    """The quota_paused DM body (pure). A reset time is labelled 'vendor' ONLY
+    when a RateLimitEvent carried it (spec §2.8: the SDK emits resets_at on
+    status transitions, never a 5h/7d gauge); the text heuristic and the
+    default pause window are 'estimated'. No time → always 'estimated'."""
+    label = "vendor" if (reset_at is not None and source == "vendor") else "estimated"
+    reset_str = reset_at.strftime("%H:%M UTC") if reset_at else "unknown"
+    return (f"⏸ Queue paused (subscription quota).\nReset at {reset_str} ({label}).\n"
+            f"Reason: {reason[:200]}")
+
+
+async def _quota_notifier(app: Application, *, poll_seconds: float = 60.0) -> None:
+    """Periodically check quota state; one notice on pause and one on resume,
+    per lane. Since A6 the notice is an OPS outbox row (`quota_paused` /
+    `quota_resumed`, delivered in BOTH switch positions — D-P1-10), never a
+    direct DM: the global Anthropic pause (A3: the reset line names its
+    source) and every enabled non-Anthropic lane (T6 `is_provider_paused`,
+    named in the body). `app` is kept for the `_post_init` call shape."""
+    # lane → (paused, reason[:80]); a lane first seen paused notifies once.
+    last_state: dict[str, tuple[bool, str]] = {}
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(poll_seconds)
         try:
-            paused, reset_at, reason = await quota.is_paused()
-            state = (paused, reason[:80])
-            if state == last_state:
-                continue
-            # State changed
-            for chat_id in settings.allowed_chat_ids:
-                try:
-                    if paused:
-                        reset_str = reset_at.strftime("%H:%M UTC") if reset_at else "unknown"
-                        await app.bot.send_message(
-                            chat_id,
-                            f"⏸ Queue paused (subscription quota).\n"
-                            f"Reset at {reset_str}.\n"
-                            f"Reason: {reason[:200]}",
-                        )
-                    else:
-                        await app.bot.send_message(chat_id, "▶️ Queue resumed.")
-                except Exception:
-                    logger.exception("failed to send quota notification")
-            last_state = state
+            lanes: dict[str, tuple[bool, datetime | None, str]] = {
+                models_registry.DEFAULT_PROVIDER: await quota.is_paused(),
+            }
+            for name in sorted(models_registry.enabled_providers()):
+                if name != models_registry.DEFAULT_PROVIDER:
+                    lanes[name] = await quota.is_provider_paused(name)
+            for lane, (paused, reset_at, reason) in lanes.items():
+                state = (paused, reason[:80])
+                if state == last_state.get(lane, (False, "")):
+                    continue
+                if lane == models_registry.DEFAULT_PROVIDER:
+                    text = (quota_paused_text(reset_at, reason, await quota.last_source())
+                            if paused else "▶️ Queue resumed.")
+                else:
+                    text = (provider_paused_text(lane, reset_at, reason)
+                            if paused else f"▶️ {lane} lane resumed.")
+                await enqueue_notice(build_ops_notice(
+                    kind="quota_paused" if paused else "quota_resumed",
+                    severity="warn" if paused else "info",
+                    text=text, subject=f"quota:{lane}"))
+                last_state[lane] = state
         except Exception:
             logger.exception("quota notifier tick failed")
 
@@ -1259,6 +1405,8 @@ async def _task_notifier(app: Application) -> None:
                 data = json.loads(msg.get("data", "{}"))
             except json.JSONDecodeError:
                 continue
+            if settings.notify_outbox:
+                continue     # renderer-side switch (A6): _outbox_listener sends these cards
 
             task_id = data.get("task_id", "")
             notify_type = data.get("type", "")
@@ -1434,10 +1582,108 @@ async def _task_notifier(app: Application) -> None:
         await pubsub.unsubscribe("tasks:notify")
 
 
+# ── Outbox delivery (Observability Phase 1, A6) ─────────────────────────────
+
+_OUTBOX_POLL_SECONDS = 30
+
+
+def _safe_send_error(exc: BaseException) -> str:
+    """Token-free text for `notifications.last_error` (§4 secrets rule).
+    `TelegramSendError` is safe by construction; anything else keeps its
+    type name and message with the bot token redacted. ≤ 300 chars."""
+    text = str(exc) if isinstance(exc, TelegramSendError) else f"{type(exc).__name__}: {exc}"
+    token = settings.telegram_bot_token
+    if token:
+        text = text.replace(token, "[REDACTED]")
+    return text[:300]
+
+
+async def _drain_outbox(app: Application, *, legacy_mode: bool) -> tuple[int, int, int]:
+    """Deliver every pending outbox row once. Returns (sent, failed, skipped).
+    Each row is CLAIMED first (status → sending, attempts+1): a concurrent
+    `python -m src.notify drain` selects the same pending rows, and without
+    the claim both would send the DM. In `legacy_mode` (NOTIFY_OUTBOX=0,
+    D-P1-10) job/task rows are marked `skipped` — the legacy `jobs:done` /
+    `tasks:notify` renderers cover them — and only the OPS kinds (quota,
+    schedule_deferred, ops_alert, …), which have no legacy path, are sent.
+    `skipped` counts both those rows and rows another drainer claimed."""
+    ids = settings.allowed_chat_ids
+    if not ids:
+        return 0, 0, 0
+    owner = ids[0]
+    sent = failed = skipped = 0
+    for row in await pending_notices(limit=20):
+        attempts_before = row.attempts          # claim bumps it; mark_failed re-derives from this
+        if not await claim_notice(row.id):
+            skipped += 1                        # someone else has it
+            continue
+        if legacy_mode and row.notice_kind not in OPS_NOTICE_KINDS:
+            await mark_skipped(row.id, "legacy_mode")
+            skipped += 1
+            continue
+        try:
+            ref = await send_via_bot(app.bot, render_telegram(row, owner_chat_id=owner))
+            await mark_sent(row.id, str(ref), subject_type=row.subject_type, subject_id=row.subject_id)
+            sent += 1
+        except Exception as exc:  # noqa: BLE001 — recorded on the row, retried with backoff
+            err = _safe_send_error(exc)
+            await mark_failed(row.id, err, attempts_so_far=attempts_before,
+                              subject_type=row.subject_type, subject_id=row.subject_id)
+            failed += 1
+            logger.warning("outbox delivery failed", notice_id=str(row.id), error=err[:120])
+    return sent, failed, skipped
+
+
+async def _release_stuck() -> None:
+    """Rows a drainer left `sending` past their 5-min lease go back to
+    `pending`. Non-fatal: a DB blip here must not skip the drain."""
+    try:
+        released = await release_stuck_sending()
+        if released:
+            logger.warning("outbox: released stuck sending rows", count=released)
+    except Exception:
+        logger.exception("outbox: release_stuck_sending failed (continuing)")
+
+
+async def _outbox_listener(app: Application, *, legacy_mode: bool) -> None:
+    """Drain on every `notify:outbox` nudge and at least every 30 s. The poll
+    is what makes a bot restart lossless: rows written while we were down
+    are still `pending` (exit criterion 'bot restart loses no DM'). Rows a
+    crashed drainer left `sending` past their lease are released at startup
+    AND before every drain (≤ 30 s after the lease expires): a row claimed
+    just before a restart is still inside its lease at startup, and a DB error
+    between the Telegram call and `mark_sent` would otherwise strand it until
+    the next restart (whole-tier review 2026-10-22; at-least-once — that one
+    shape can yield a duplicate DM). Runs in BOTH switch positions;
+    `legacy_mode` only narrows what it sends."""
+    await _release_stuck()
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(CHANNEL_NOTIFY_OUTBOX)
+    try:
+        while True:
+            try:
+                await pubsub.get_message(ignore_subscribe_messages=True,
+                                         timeout=_OUTBOX_POLL_SECONDS)
+                await _release_stuck()
+                await _drain_outbox(app, legacy_mode=legacy_mode)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("outbox listener iteration failed (continuing)")
+                await asyncio.sleep(2)
+    finally:
+        await pubsub.unsubscribe(CHANNEL_NOTIFY_OUTBOX)
+
+
 async def _post_init(app: Application) -> None:
+    # Every listener always runs (the runner dual-writes). The switch is
+    # renderer-side (D-P1-10): on → the outbox listener delivers every row and
+    # the legacy renderers are gated off; off → legacy_mode, where the
+    # listener still delivers the ops kinds. Flipping it = bot-only restart.
     asyncio.create_task(_done_listener(app))
     asyncio.create_task(_task_notifier(app))
     asyncio.create_task(_quota_notifier(app))
+    asyncio.create_task(_outbox_listener(app, legacy_mode=not settings.notify_outbox))
 
 
 def main() -> None:

@@ -28,10 +28,11 @@
 |---|---|---|---|
 | `src/config.py` | Pydantic settings; no API key, subscription auth | — | Everything |
 | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
-| `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
-| `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
-| `src/runner/session.py` | Skill/isolation resolution + one session per job: in-process SDK for Anthropic (guard hooks + subagents wired here), else dispatch to the registry-named executor module (T4, 2026-10-21; fail-closed lane rules before the clone) | config, db, models, audit_log, registry.skills, registry.models, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, runner.executors.codex_cli, runner.review, context.module_graph | runner.main |
-| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks + deploy-authority gate | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, runner.delivery, gateway.jobs, registry.skills, registry.models, audit_log | (entry point) |
+| `src/models.py` | ORM: Job, Schedule, Project, Proposal, Task, TaskTurn, Notification | — | db, runner, gateway, registry, notify |
+| `src/audit_log.py` | JSONL-per-job audit log + per-schedule streams under `volumes/audit_log/schedules/` (D1: `schedule_deferred`) | config | runner, gateway |
+| `src/runner/session.py` | Skill/isolation resolution + one session per job: in-process SDK for Anthropic (guard hooks + subagents wired here), else dispatch to the registry-named executor module (T4, 2026-10-21; fail-closed lane rules before the clone) | config, db, models, audit_log, registry.skills, registry.models, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, runner.executors.codex_cli, runner.review, context.module_graph, runner.result_capture, runner.pricing | runner.main |
+| `src/runner/result_capture.py` | Typed `ResultMessage` capture (`ResultCapture`, `capture_result_message`), the one `TERMINAL_REASONS` vocabulary (15, D-P1-1) + `API_RETRY_TO_TERMINAL`, `derive_terminal_reason` (Anthropic lane), `served_model_violation` (silent-empty-success check), capture-free `usage_columns` for both lanes, `result_columns`, `terminal_reason_for_exception`, `usage_is_empty` (relocated from session, re-exported there) (B2, 2026-10-21; pure, no SDK import) | runner.pricing | runner.session, runner.main |
+| `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks + deploy-authority gate | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, runner.delivery, gateway.jobs, registry.skills, registry.models, registry.manifest, audit_log, notify.outbox, runner.result_capture | (entry point) |
 | `src/runner/router.py` | Rule-based keyword → skill matcher (incl. `plan` for multi-step asks) | — | runner.session, gateway.telegram_bot (triage) |
 | `src/runner/llm_router.py` | `settings.utility_model` routing fallback when rules miss; audited decisions | claude_agent_sdk, config, registry.skills | runner.session |
 | `src/runner/workspaces.py` | Per-job isolation: workspace clones, canonical ff-sync, tier resolution; runner-side commit+push for non-Anthropic lanes after the pre-push gate (T5) | — | runner.session, server-upkeep skill |
@@ -51,22 +52,29 @@
 | `src/runner/retrospective.py` | Auto-tuning rollup queries (skill performance stats + context consumption) | config, db, models | review-and-improve skill, gateway.web |
 | `src/runner/proposals.py` | Proposal tracking helpers (pure + async DB ops); dedup/merge-stamping in review-and-improve + server-patch. NOTE: there is no `/proposals` Telegram command yet — pending server-code proposals have no user-facing surface (EVALUATION_2026-07-28 U-backlog) | db, models | review-and-improve skill, server-patch skill |
 | `src/runner/learning.py` | Post-session `settings.utility_model` classifier; enqueues `_learning_apply` child jobs when a completed job reveals a reusable learning | claude_agent_sdk, audit_log, config, gateway.jobs, db, models | runner.main |
+| `src/runner/pricing.py` | Claude list-price table (`claude-anthropic.md §4`, as of 2026-09-24), `family_for` longest-prefix matching, **`price_usage` = the single definition of `cost_usd_list`** (each cache-write bucket at its own rate; `None` for alias / unknown / non-Anthropic ids), `cache_write_buckets`, JSONL ledger summary at both windows (`model_served` outranks `job_started.model`; non-Anthropic providers under `unpriced` with the provider named), computed-vs-SDK reconcile, weekly-allowance calibration (epoch or ISO `resets_at`), approximated lane seed (B1, 2026-10-21; pure) | — | runner.result_capture, runner.session, scripts/cost-reconcile.py |
 | `src/context/module_graph.py` | Parse SYSTEM.md module graph; dependency detection + import validation | — | runner.session, scripts/lint_docs.py |
 | `src/registry/skills.py` | Load SKILL.md frontmatter (`SkillConfig.provider`/`.model_id` derived via registry.models) | config, registry.models | runner.session |
 | `src/registry/models.py` | Provider/model registry from repo-root `models.yml`: `[provider/]model_id` parse + alias resolution, fail-closed `ProviderRefused` (T1, 2026-10-21) | config | registry.skills, runner.session, runner.main, gateway.web, gateway.telegram_bot |
-| `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
-| `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
+| `src/registry/manifest.py` | Load project manifest.yml (`env_required` read since D1 for the scheduler pre-check) | config | register-project.sh, healthcheck, runner.main (via runner.delivery) |
+| `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers + `ORIGIN_CHANNELS` / `origin_from_created_by` | db, models | web, telegram_bot, notify.outbox |
 | `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes (+ per-project delivery contract on /api/projects) | config, db, models, gateway.jobs, audit_log, registry.models, runner.retrospective, runner.delivery | (entry point) |
-| `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards | config, db, models, gateway.jobs, audit_log, registry.models, runner.router, runner.plans | (entry point) |
+| `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards; delivers the notifications outbox (A6: claim + `notify:outbox` nudge + 30 s poll, `legacy_mode` when `NOTIFY_OUTBOX=0`), `jd:` [Details] button, quota notices as ops rows | config, db, models, gateway.jobs, audit_log, registry.models, runner.router, runner.plans, runner.schedule_adherence, notify.outbox, notify.telegram | (entry point) |
+| `src/notify/outbox.py` | Notifications outbox (A4, 2026-10-21): `Notice`, kind vocabulary, card eligibility (`should_notify_job`), `lane_label`, job/task/ops builders, `enqueue_notice` (always inserts — the switch is the bot's), claim/lease, retry math, `mark_*` | db, models, audit_log, gateway.jobs | runner.main, gateway.telegram_bot, notify.__main__ |
+| `src/notify/telegram.py` | Telegram renderer (4096 / 64-byte / 8-button limits, no parse_mode), `send_via_bot`, `send_via_http`, `TelegramSendError` (token chokepoint) | — | gateway.telegram_bot, notify.__main__ |
+| `src/notify/__main__.py` | `python -m src.notify send` / `drain` for launchd alerters, the canary and ops; mirrors the bot's legacy_mode | config, notify.outbox, notify.telegram | scripts/healthcheck-all.sh + schedule-monitor.sh, credential canary (E10) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
-| `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
-| `scripts/schedule-monitor.sh` | Schedule-adherence watchdog: DARK/NEVER_RAN/STUCK/FAILURE_STREAK findings → owner DM; writes `volumes/telemetry/schedule_adherence.json` | runner.schedule_adherence, curl | — (daily 07:15 launchd timer, out-of-band) |
-| `scripts/backup.sh` | Nightly pg_dump + audit log + log snapshot | psql, tar | — (launchd timer) |
+| `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at`; runner-liveness backstop, swing watchdog, deploy autopilot; alerts via `notify_send` (A7: `"$VENV_PY" -m src.notify send`, curl fallback) | yq, curl, psql, notify.__main__ (via `$VENV_PY`) | — (5-min launchd timer, out-of-band) |
+| `scripts/schedule-monitor.sh` | Schedule-adherence watchdog: DARK/NEVER_RAN/STUCK/FAILURE_STREAK/DEFERRED findings + last-24 h `schedule_deferred` count (A7) → owner DM via `send_dm` (notify send, curl fallback); writes `volumes/telemetry/schedule_adherence.json` | runner.schedule_adherence, notify.__main__ (via `$VENV_PY`), curl | — (daily 07:15 launchd timer, out-of-band) |
+| `scripts/backup.sh` | Nightly `pg_dump assistant` + audit log + log snapshot + sealed secrets bundle (`openssl`, key outside every backup) → `backup-<date>.tar.gz`; `pg_dump -Fc atlas` beside it (D-P1-6); R2 off-site (tarball nightly, atlas dump Sundays) with 60 d / 35 d pruning; local 60 d / 7 d (C1, 2026-10-21) | psql, pg_dump, tar, openssl, rclone | — (launchd timer) |
+| `scripts/restore-drill.sh` | Owner-run restore drill (C1; Phase-1 exit criterion): newest tarball + `atlas-*.dump` → throwaway `restore_drill_assistant` / `restore_drill_atlas`, row counts, bundle unseal (names only), off-site check; PASS/WARN/FAIL per leg, exit 0/1, one `backup.log` line; throwaways dropped on exit | createdb, psql, pg_restore, dropdb, openssl, rclone | runbook `docs/runbooks/2026-10-21-phase1-ops-hygiene.md` §4 |
 | `scripts/seed-schedules.sh` | Insert canonical schedules into DB | psql | server-deploy skill (step 3b, every deploy) |
 | `scripts/seed-module-skills.sh` | Ensure every `.context/modules/<x>/` has `skills/{GOTCHAS,PATTERNS,DEBUG}.md` stubs | — | bootstrap.sh + test_doc_lint.py |
 | `scripts/lint_docs.py` | Validate registries vs actual files; catches stale docs | context.module_graph | tests/test_doc_lint.py |
 | `scripts/sync-learnings.sh` | Publish runtime doc drift → origin/runtime-learnings (plumbing; prod-side) | git | — (hourly launchd timer) |
 | `scripts/codex-canary.sh` | T10 live canary of the Codex executor: throwaway clone under `CANARY_ROOT` (never the repo / prod / volumes), real `codex exec` via `codex_cli.main --canary`, then the Anthropic gate dry-run; results → plan §8 | runner.executors.codex_cli, git, pipenv | — (manual; the one place that spawns the real CLI) |
+| `scripts/cost-reconcile.py` | Two-window (30 d + 7 d) list-price ledger from the JSONL (spec §2.8 anchor; B4, 2026-10-21): per-model + per-kind step + approximated lanes, computed-vs-SDK reconcile, weekly-allowance calibration, `--db` = `SUM(jobs.cost_usd_list)` / `SUM(jobs.sdk_cost_usd)` per served model vs the JSONL (Postgres opened only then), `--json`, `--seed-lane-budgets [PATH]` (trailing-7-d × 1.2, printed + written, never applied); exit 1 = 5-m cache writes (credits signature, reserved), 2 = no audit dir, 3 = the run itself failed (`--db` leg unreachable / unexpected crash) | config, runner.pricing, db (lazy, `--db` only) | scripts/cost-reconcile-run.sh; hand runs (plan §8 measurements) |
+| `scripts/cost-reconcile-run.sh` | Weekly launchd wrapper (`com.assistant.cost-reconcile`, Mon 07:30; D-P1-8 timer, not a schedule row): cd-first venv resolution (`VENV_PY` → `pipenv --venv` → virtualenvs glob, `import src.config` guard, FATAL logged), runs the CLI with `--windows 30,7 --db --seed-lane-budgets` → `volumes/logs/cost-reconcile.log`, DMs the owner on rc ≠ 0 via `send_alert` (notify send `warn`, curl fallback) | scripts/cost-reconcile.py, notify.__main__ (via `$VENV_PY`), curl | — (weekly launchd timer, out-of-band) |
 
 ## Data flow
 
@@ -90,8 +98,17 @@ Task lifecycle: task_plan → validate → store → spawn subtask DAG (roots
   EVAL_PASS → task auto-closed, evidence DM'd (Reopen button)
   EVAL_FAIL → fix round (≤ max_eval_rounds) → then awaiting_user
                                                         ↓
-Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
-  question, progress)
+Runner: enqueue_notice → `notifications` row (pending) + PUBLISH notify:outbox
+  — ALWAYS, beside the byte-identical legacy jobs:done / tasks:notify
+  (the switch is the bot's, D-P1-10)
+                                                        ↓
+Bot's _outbox_listener (nudge or 30 s poll): claim → render → send →
+  sent | failed (backoff, 5 attempts); the job card carries [Details].
+  NOTIFY_OUTBOX=0 ⇒ the legacy done_listener / task_notifier send the
+  job/task cards (rows marked skipped) and the ops kinds are still delivered.
+Out-of-band (launchd, no bot/runner dependency): healthcheck-all.sh /
+  schedule-monitor.sh → `python -m src.notify send` (direct HTTP + a
+  sent/failed row) → raw-curl fallback
 ```
 
 ## Conventions
@@ -101,9 +118,12 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 - **Audit log is append-only.** Use `audit_log.append(...)`. Never rewrite prior entries.
 - **Redis channels** live in `db.py` as named constants. Don't inline string names.
 - **Error handling**: catch `QuotaExhausted` specifically in the runner; everything else is a failure.
-- **Migrations**: Alembic, six files (`001_initial` … `006_job_status_constraint`).
-  Tables: `jobs`, `schedules`, `projects`, `proposals`, `tasks`, `task_turns`
-  (+ `alembic_version`). `tests/test_migrations.py` keeps the chain consistent.
+- **Migrations**: Alembic, eight files (`001_initial` … `007_provider_columns`,
+  `008_p0_observability`). Tables: `jobs`, `schedules`, `projects`, `proposals`,
+  `tasks`, `task_turns`, `notifications` (+ `alembic_version`).
+  `tests/test_migrations.py` keeps the chain consistent and asserts the on-disk
+  chain equals `alembic/applied_history.txt` (append the id in every migration
+  commit; never revert a migration file without `alembic downgrade -1` on prod first).
 
 ## Invariants (hard rules)
 

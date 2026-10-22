@@ -2,6 +2,103 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-22 — Whole-tier review applied: migration 008 `origin_ref` NULL arm for `web`/`scheduler`; opt-in Postgres test round-trips the downgrade
+
+**Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").
+**Files changed**:
+- `alembic/versions/008_p0_observability.py` — `_BACKFILL_ORIGIN`'s `origin_ref` CASE gains `WHEN created_by IN ('web', 'scheduler') THEN NULL` before the ELSE. Without it the ELSE (`NULLIF(LEFT(created_by, 64), '')`) stamped the literal `web` / `scheduler` as `origin_ref` on every such row (verified by the reviewer on a throwaway DB), while the docstring, `gateway.jobs.origin_from_created_by` and A2's writers give NULL — `format_job_status` would have printed `origin: web:web` for the ~2456 backfilled rows against `origin: web` for new ones, and the acceptance probe (`origin_ref = ''` = 0) passes either way. Pre-deploy edit of the unapplied file: prod is at 007, no new revision. The comment also records the one non-byte-identical corner (`split_part(…, ':', 2)` untrimmed vs Python's `split(':', 1)[1].strip()`; no producer writes such values).
+- `tests/test_migrations.py` — `test_008_origin_backfill_case_matches_origin_from_created_by` pins the new arm and its position before the ELSE; `test_migrations_apply_cleanly` (opt-in `AI_SERVER_RUN_DB_TESTS=1`) now runs `upgrade head → downgrade -1 → upgrade head` — the A1 Accept line as written; the downgrade leg (17 + 4 columns, the table and three indexes) was exercised nowhere on Postgres before. Not run in this session (the dev DSN points at the production cluster); the reviewer ran the same round-trip by hand on a throwaway DB and it is correct.
+- Plan A1 Accept line: `+ origin_channel IN ('web','scheduler') AND origin_ref IS NOT NULL` = 0 and the digit-guard probe (`jsonb_typeof(result->'usage') = 'object' AND input_tokens IS NULL` — the guard is row-level: one non-digit value in any of the six usage keys leaves all five token columns NULL for that row).
+**Why**: review finding (major): backfilled and fresh rows disagreed on `origin_ref`.
+**Side effects**: none at runtime until the deploy applies 008.
+**Gotchas discovered**: a textual CASE pin that checks only `NULLIF` fragments does not prove which arm a value reaches — pin the arm AND its order.
+
+## 2026-10-21 — D1: per-schedule audit streams + the `schedule:gap_notified:` key
+
+**Agent task**: Observability Phase 1 re-cut plan D1.
+**Files changed**: `src/audit_log.py` — `SCHEDULES_SUBDIR`, `schedule_log_path(schedule_id)`, `append_schedule_event(schedule_id, kind, **fields)`, `read_schedule_events(schedule_id, limit=None)`: streams live at `volumes/audit_log/schedules/<schedule_id>.jsonl` (a SUBDIRECTORY — `runner/audit_index.rebuild_index` globs the top level as job logs; `tests/test_provisioning_gap.py::test_deferred_stream_is_not_indexed_as_a_job`); the record key is `schedule_id`, not `job_id`; docstring gains the `schedule_deferred` kind. `src/db.py` — `KEY_SCHEDULE_GAP_NOTIFIED_PREFIX = "schedule:gap_notified:"` (+ `<slug>:<YYYY-MM-DD>`) and `TTL_SCHEDULE_GAP_NOTIFIED = 129600`. `.context/modules/db/CONTEXT.md` — audit-log section lists the kind and the stream location.
+**Why**: a deferral creates no Job, so it has no job log to land in; the schedule-scoped stream is the record `schedule-monitor.sh` (A7) counts and `schedule_adherence` / `/status` read.
+**Side effects**: a new directory under `volumes/audit_log/` on the first deferral; no schema change (C14 — existing kinds untouched).
+**Gotchas discovered**: none.
+
+## 2026-10-21 — B4 (docs only): `jobs.cli_version` is the lane's CLI, `executor_started.cli_version` the Codex audit field
+
+**Agent task**: Observability Phase 1 re-cut plan B4 Docs-2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**: `.context/modules/db/CONTEXT.md` — the 008 column list now disambiguates the two `cli_version`s and says what the two cost columns are reconciled by (`scripts/cost-reconcile.py --db`).
+**Why**: B3 stamps `jobs.cli_version` on both lanes (the bundled Anthropic CLI, `2.1.139`, or the Codex CLI's version) while T3's `executor_started` audit record carries its own `cli_version` field — same name, two sources.
+**Side effects**: none.
+**Gotchas discovered**: none.
+
+## 2026-10-21 — B2 (comment only): `jobs.terminal_reason` vocabulary pointer in `src/models.py`
+
+**Agent task**: Observability Phase 1 re-cut plan B2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**: `src/models.py` — the `terminal_reason` column comment says `ok` (the value the runner stamps) instead of `completed` and points at `src/runner/result_capture.py::TERMINAL_REASONS` (15 values, D-P1-1). No column, type or migration change.
+**Why**: the ORM comment was the only place that still named a `completed` terminal reason; the vocabulary now has one definition.
+**Side effects**: none.
+
+## 2026-10-21 — A7 (docs only): `notifications` writers/readers and who reads `notify_outbox`
+
+**Agent task**: Observability Phase 1 re-cut plan A7, Docs-1 bucket (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `.context/modules/db/CONTEXT.md` — the `notifications` bullet now names every writer (runner `enqueue_notice` → `pending`; `python -m src.notify send` from the launchd alerters → `sent`/`failed` directly), every drainer, and states that `settings.notify_outbox` is read by the bot and `drain` only (D-P1-10), with the `skipped`/`legacy_mode` semantics.
+
+**Why**: the origin columns and `CHANNEL_NOTIFY_OUTBOX` were already documented by A1/A4; the missing piece was the alert-history contract for rows the bot never touches.
+
+**Side effects**: none (no code).
+
+**Gotchas discovered**: none.
+
+## 2026-10-21 — A6: `settings.notify_outbox` default → True
+
+**Agent task**: Observability Phase 1 re-cut plan A6 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `src/config.py` — `notify_outbox` ships `True` now that the bot's `_outbox_listener` consumes the rows (was `False` since A4). `NOTIFY_OUTBOX=0` is the kill switch (D-P1-10): it changes which bot renderer sends job/task cards — never what the runner publishes or writes — and the listener keeps delivering the ops kinds in `legacy_mode`. Flipping it needs a bot-only restart (`launchctl kickstart -k gui/$UID/com.assistant.bot`).
+
+**Why**: spec §9 switch cell for Phase 1; the consumer landed in the same commit.
+
+## 2026-10-21 — A4: `CHANNEL_NOTIFY_OUTBOX` + `settings.notify_outbox` (ships False)
+
+**Agent task**: Observability Phase 1 re-cut plan A4 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `src/db.py` — `CHANNEL_NOTIFY_OUTBOX = "notify:outbox"` (pub: body = `notifications.id`; the bot's outbox listener drains on the nudge + a 30 s poll).
+- `src/config.py` — `notify_outbox: bool = False` (env `NOTIFY_OUTBOX`), after `max_eval_rounds`. The switch is the BOT's (D-P1-10): read only by `src/gateway/telegram_bot.py` and `src/notify/__main__.py`; the runner and `src/notify/outbox.py` never read it (producers always write the row). A6 flips the default to True in the commit that lands the listener.
+- `.context/modules/db/CONTEXT.md` — the channel in the Redis constants list; `notice_queued` / `notice_sent` / `notice_failed` in the audit-kind list.
+
+**Why**: the outbox row is the durable record; the channel is only a nudge (delivery survives a lost publish via the poll). The switch lives in `config` because both the bot and the CLI read it out-of-process.
+
+**Side effects**: none until A5 (producers) and A6 (listener) land.
+
+**Gotchas discovered**: none.
+
+## 2026-10-21 — A3: `KEY_QUOTA_LAST_SOURCE` beside the global quota pair
+
+**Agent task**: Observability Phase 1 re-cut plan A3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `src/db.py` — `KEY_QUOTA_LAST_SOURCE = "quota:last_source"`: `"vendor"` when the global (Anthropic) pause's reset time came from a `RateLimitEvent`, else `"estimated"`. Written by `quota.pause_queue`, read by `quota.last_source`, deleted with the pair (`clear`, auto-resume, corrupt value). Never written for a per-provider lane.
+- `.context/modules/db/CONTEXT.md` (Redis keys list).
+
+**Why**: the label is state the bot reads out-of-process, so it lives next to `quota:paused_until` / `quota:last_reason` under the same contract.
+
+**Side effects**: none for existing readers; one more key under the `quota:` namespace.
+
+**Gotchas discovered**: none.
+
+## 2026-10-21 — A1: migration 008 (Observability Phase 1 columns, task origin, notifications outbox) + alembic applied-history manifest
+
+**Agent task**: Observability Phase 1 re-cut plan A1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 1 + Task 18(a), re-cut against the slice's 007).
+**Files changed**:
+- `alembic/versions/008_p0_observability.py` (new) — revision `008` revising `007`. 17 nullable `jobs` columns (`cli_version`, `lane`, `origin_channel`, `origin_ref`, `origin_thread`, `queue_wait_ms`, `first_event_at`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_1h_tokens`, `cache_write_5m_tokens`, `num_turns`, `duration_api_ms`, `cost_usd_list`, `sdk_cost_usd`, `task_class`), 4 nullable `tasks` columns (`origin_channel`, `origin_ref`, `origin_thread`, `awaiting_since`), table `notifications` (17 columns) with `ix_notifications_status`, `ix_notifications_created_at` and the partial `ix_notifications_pending`. Three backfills (tokens from `result->'usage'`, job origin from `created_by`, task origin from `chat_id`/`thread_message_id`) run only under `if op.get_bind().dialect.name == "postgresql":`.
+- `alembic/applied_history.txt` (new) — append-only manifest `001` … `008`, one revision id per line.
+- `src/models.py` — `Numeric` import; the 17 `Job` columns after `review_outcome`; the 4 `Task` columns before `created_at`; `class Notification` after `TaskTurn`; docstring `Six tables` → `Seven`, `tokens_used` → `input_tokens/output_tokens`.
+- `tests/test_migrations.py` — `test_chain_head_is_007_revising_006` retargeted to `test_head_is_008_revising_007` (via `get_current_head()`); chain floor `>= 5` → `>= 8`; `pre_008_engine` fixture (jobs with the 007 columns + `created_by`/`result`, tasks with `chat_id`/`thread_message_id`, the 006 CHECK); layer 1b-008: `test_008_is_additive_and_leaves_status_check_alone`, `test_models_declare_every_008_column`, `test_008_round_trip_on_sqlite_skips_backfills`, `test_008_backfill_sql_is_dialect_guarded` (AST: every `op.execute` in `upgrade()` sits under the postgresql guard, exactly three), `test_008_origin_backfill_case_matches_origin_from_created_by`; layer 1c: `test_every_revision_in_applied_history_exists_on_disk`, `test_applied_history_matches_disk_chain`, `test_applied_history_ends_at_current_head`.
+- `.context/modules/db/CONTEXT.md` — schema 6 → 7 tables, the 008 columns on `jobs`/`tasks`, the `notifications` row, migration list + the manifest rule; `.context/SYSTEM.md` — migrations line (eight files, `notifications` table, manifest rule).
+
+**Why**: columns first so every later Phase-1 task (A2 origin stamps, A4–A6 outbox, B3 result capture) is a small write. 008, not 007: the slice's `007_provider_columns.py` already holds `resolved_provider`/`terminal_reason`/`model_served`, so 008 does NOT re-add them (`op.add_column` would raise `DuplicateColumn` on prod) and the P0 plan's "`resolved_provider` absent" assertion is dropped — the column exists with a backfill and stays. The manifest is born in the same commit as 008 so the layer-1c gate never goes red twice.
+
+**Side effects**: `jobs.status` and its 006 CHECK untouched (done-ness and the terminal reason are columns). `lane`/`task_class`/`first_event_at` stay NULL until Phase 3. Both cost columns, `num_turns` and `duration_api_ms` stay NULL on pre-008 rows (session.py never kept them in `result`; inventing a figure from tokens would put an unaudited number in the column B4's reconcile checks). Codex rows have flat usage and no nested `cache_creation` bucket → 1h/5m NULL, correct. `notifications.actions` is `JSONB().with_variant(JSON(), "sqlite")` and `created_at` defaults to `sa.func.now()` (→ `now()` on Postgres, `CURRENT_TIMESTAMP` on SQLite) so the SQLite layer-1b harness round-trips the DDL. Rollback rule (re-cut plan §4): revert application code by path, never this file; `alembic downgrade -1` on prod BEFORE removing it, and drop its manifest line in the same commit. Nothing writes the new columns yet (A2/B3 stamp them); the ORM `Notification` has no reader until A4.
+
+**Gotchas discovered**: `jobs.result` is JSONB in the DB (001) although models.py declares `JSON` — `->>` works either way; the token backfill guards every value with a digit regex so one odd row cannot fail the migration. On SQLAlchemy 2.0 `sqlalchemy.dialects.postgresql.UUID` IS `sqltypes.UUID`, so the migration's `UUID(as_uuid=True)` compiles on SQLite (CHAR(32)) — no variant needed. `test_migrations_apply_cleanly` (opt-in, throwaway Postgres DB) passed against 008.
+
 ## 2026-10-21 — Whole-branch review: `audit_log.py` docstring (additive kinds/fields)
 
 **Agent task**: cross-reference for the runner CHANGELOG entry of the same date (`src/audit_log.py` is the shape of record for audit kinds).

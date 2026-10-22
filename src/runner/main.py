@@ -28,7 +28,9 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import structlog
 from croniter import croniter
@@ -39,15 +41,19 @@ from src.config import settings
 from src.db import (
     CHANNEL_JOB_CANCEL,
     KEY_RUNNER_HEARTBEAT,
+    KEY_SCHEDULE_GAP_NOTIFIED_PREFIX,
     QUEUE_JOBS,
     TTL_RUNNER_HEARTBEAT,
+    TTL_SCHEDULE_GAP_NOTIFIED,
     async_session,
     redis,
     session_scope,
 )
 from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
+from src.notify.outbox import build_job_notice, build_ops_notice, build_task_notice, enqueue_notice
 from src.registry import models as models_registry
+from src.registry.manifest import Manifest, coerce_env_names
 from src.registry.skills import load as load_skill
 from src.runner import router
 from src.runner.events import event_loop
@@ -62,6 +68,7 @@ from src.runner.review import (
     run_code_review,
 )
 from src.runner import delivery, quota, session as session_mod, writeback
+from src.runner.result_capture import terminal_reason_for_exception, usage_columns
 
 logger = structlog.get_logger()
 _shutdown = asyncio.Event()
@@ -250,6 +257,15 @@ def note_missing_job(job_id_str: str, requeued_once: set[str]) -> str:
         return "drop"
     requeued_once.add(job_id_str)
     return "requeue"
+
+
+def queue_wait_ms(created_at: datetime | None, started_at: datetime | None) -> int | None:
+    """Pure. Milliseconds a job sat between enqueue and the running flip
+    (jobs.queue_wait_ms, migration 008 — Observability Phase 1 A2); None
+    when either stamp is missing, never negative (clock skew)."""
+    if created_at is None or started_at is None:
+        return None
+    return max(0, int((started_at - created_at).total_seconds() * 1000))
 
 
 async def _preflight_check(job: Job, log) -> str | None:
@@ -470,6 +486,10 @@ async def _process_job(job_id: uuid.UUID) -> None:
                     return
                 job.status = JobStatus.running.value
                 job.started_at = datetime.now(timezone.utc)
+                # getattr: the ORM row always has created_at; the row
+                # stand-ins the _process_job test harnesses build do not.
+                job.queue_wait_ms = queue_wait_ms(getattr(job, "created_at", None),
+                                                  job.started_at)
                 await s.commit()
         if job is not None:
             break
@@ -500,8 +520,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
     preflight_error = await _preflight_check(job, log)
     if preflight_error:
         audit_log.append(str(job_id), "job_failed", error=preflight_error,
-                         error_category="preflight")
-        await _finish_job(job_id, JobStatus.failed, error=preflight_error)
+                         error_category="preflight", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=preflight_error,
+                          terminal_reason="error")
         log.warning("preflight failed", reason=preflight_error)
         if job.task_id:
             try:
@@ -522,6 +543,12 @@ async def _process_job(job_id: uuid.UUID) -> None:
             terminal_reason=result.get("terminal_reason"),
             model_served=result.get("model_served"),
             review_outcome=result.get("review_outcome"),
+            # B3: the token/cost subset the session already stamped at its
+            # one-site UPDATE, re-written on the terminal transition from
+            # the same result dict (same values; both lanes).
+            usage=result.get("usage"),
+            num_turns=result.get("num_turns"),
+            cost_usd_list=result.get("cost_usd_list"),
         )
         log.info("job completed")
 
@@ -589,7 +616,8 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
     except quota.QuotaExhausted as exc:
         # Pause the queue, requeue this job at the front so it retries after reset
-        await quota.pause_queue(exc.reset_at, exc.reason)
+        await quota.pause_queue(exc.reset_at, exc.reason,
+                                source=getattr(exc, "source", "estimated"))
         await redis.lpush(QUEUE_JOBS, str(job_id))
         async with session_scope() as s:
             await s.execute(
@@ -608,8 +636,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # model would hit the same broken contract (2026-08-31).
         reason = str(exc)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="skill_contract")
-        await _finish_job(job_id, JobStatus.failed, error=f"Skill contract: {reason}")
+                         error_category="skill_contract", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=f"Skill contract: {reason}",
+                          terminal_reason="error")
         log.warning("skill resolution failed — job terminal", reason=reason)
         if job.task_id:
             try:
@@ -629,7 +658,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
                          provider=exc.provider, model=exc.model_id, raw=exc.raw,
                          reason=exc.reason)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="provider_refused")
+                         error_category="provider_refused", terminal_reason="provider_refused")
         await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}",
                           provider=exc.provider, terminal_reason="provider_refused")
         log.warning("provider refused — job terminal", reason=reason)
@@ -650,7 +679,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # retrospective read it like a post-review verdict.
         reason = str(exc)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="review_blocked")
+                         error_category="review_blocked", terminal_reason="review_blocked")
         refused = getattr(exc, "refused_reason", None)
         if refused == "denied_path" or (refused is None and exc.denied_paths):
             card = (f"Pre-push review gate refused the diff on job {str(job_id)[:8]} "
@@ -721,7 +750,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # (T4, 2026-10-21). The executor already audited `executor_error`;
         # the clone is kept like any failed job.
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category=exc.terminal_reason)
+                         error_category=exc.terminal_reason, terminal_reason=exc.terminal_reason)
         await _finish_job(job_id, JobStatus.failed, error=f"Executor failed: {reason}",
                           provider=exc.provider, terminal_reason=exc.terminal_reason,
                           model_served=exc.model_served)
@@ -739,8 +768,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # policy refusal would just re-violate it).
         reason = str(exc)
         audit_log.append(str(job_id), "job_failed", error=reason,
-                         error_category="deploy_refused")
-        await _finish_job(job_id, JobStatus.failed, error=f"Deploy refused: {reason}")
+                         error_category="deploy_refused", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=f"Deploy refused: {reason}",
+                          terminal_reason="error")
         log.warning("deploy refused by delivery contract", reason=reason)
         if job.task_id:
             try:
@@ -760,8 +790,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
         guidance = (f"{reason}. This deploy needs you to trigger it — "
                     f"reply `redeploy {slug}` to run it yourself.")
         audit_log.append(str(job_id), "job_failed", error=guidance,
-                         error_category="deploy_needs_approval")
-        await _finish_job(job_id, JobStatus.failed, error=guidance)
+                         error_category="deploy_needs_approval", terminal_reason="error")
+        await _finish_job(job_id, JobStatus.failed, error=guidance,
+                          terminal_reason="error")
         log.info("auto-deploy declined (human-approval, autonomous trigger)", reason=reason)
         if job.task_id:
             try:
@@ -772,11 +803,18 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
     except asyncio.TimeoutError:
         audit_log.append(str(job_id), "job_failed", error="session_timeout",
-                         error_category="timeout")
+                         error_category="timeout", terminal_reason="timeout")
         # Refetch BEFORE the terminal stamp: the session stamps
         # `resolved_provider` (and resolved_skill) in its own transaction,
         # and the lane decision below reads it.
         job = await _refetch_job(job_id, job, log)
+        if job.status == JobStatus.cancelled.value:
+            # Owner cancelled mid-flight (INV-9 keeps the row `cancelled`;
+            # _finish_job's WHERE would suppress the stamp anyway). Never
+            # escalate it — _maybe_escalate has no cancelled guard and
+            # would enqueue a retry the owner just killed (A2, 2026-10-21).
+            log.info("job timeout on a cancelled job — not escalated")
+            return
         lane = _non_anthropic_lane(job)
         if lane:
             # Main's deadline won over the executor's (its child was killed
@@ -790,7 +828,8 @@ async def _process_job(job_id: uuid.UUID) -> None:
                                   f"(no vendor switch onto Anthropic)")
             log.warning("job timeout — non-Anthropic lane, terminal", provider=lane)
         else:
-            await _finish_job(job_id, JobStatus.failed, error="Session timed out")
+            await _finish_job(job_id, JobStatus.failed, error="Session timed out",
+                              terminal_reason="timeout")
             log.warning("job timeout")
 
             # Timeouts escalate like any other failure. This branch used to
@@ -807,8 +846,15 @@ async def _process_job(job_id: uuid.UUID) -> None:
     except Exception as exc:
         from src.runner.audit_index import categorize_error
         err_str = str(exc)[:500]
+        # B3: the typed reason from the exception class / the category the
+        # session wrote into its error text (`unrecognized_model`, the
+        # api_retry enforcement categories, `rate_limited`, …). One reason
+        # per handler: the audit row and the DB row never disagree.
+        # `categorize_error` keeps its own vocabulary; consumers read
+        # terminal_reason first, error_category as the fallback.
+        reason = terminal_reason_for_exception(exc)
         audit_log.append(str(job_id), "job_failed", error=err_str,
-                         error_category=categorize_error(err_str))
+                         error_category=categorize_error(err_str), terminal_reason=reason)
         log.exception("job failed")
 
         # Refresh the ORM instance here too — the session may have stamped
@@ -818,6 +864,12 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # completed branch; without this, level-0 escalation silently
         # jumped to self-diagnose for task-kind jobs).
         job = await _refetch_job(job_id, job, log)
+        if job.status == JobStatus.cancelled.value:
+            # A /cancel that interrupts the session before its first API
+            # call surfaces here; the row is already `cancelled` — see the
+            # timeout branch's guard (A2, 2026-10-21).
+            log.info("job failed after cancel — not escalated")
+            return
         lane = _non_anthropic_lane(job)
         if lane:
             # Anything the ExecutorFailed handler above did not already
@@ -825,13 +877,14 @@ async def _process_job(job_id: uuid.UUID) -> None:
             # on the lane it ran on, never escalated onto Anthropic
             # (review round 1, 2026-10-21).
             await _finish_job(job_id, JobStatus.failed, error=err_str,
-                              provider=lane, terminal_reason="api_error")
+                              provider=lane, terminal_reason=reason)
             audit_log.append(str(job_id), "note",
                              text=f"{lane} lane failed — terminal, not escalated "
                                   f"(no vendor switch onto Anthropic)")
             log.warning("job failed — non-Anthropic lane, terminal", provider=lane)
         else:
-            await _finish_job(job_id, JobStatus.failed, error=err_str)
+            await _finish_job(job_id, JobStatus.failed, error=err_str,
+                              terminal_reason=reason)
 
             # Escalation: if the skill declares on_failure, enqueue a retry with
             # the escalated model/effort. One level only, guarded by a payload flag.
@@ -1018,7 +1071,7 @@ async def _maybe_escalate(job: Job) -> None:
     if current_level >= 3:
         # Terminal — cascade failure to any deferred dependents, notify user
         if job.task_id:
-            from src.models import Task, TaskStatus
+            from src.models import TaskStatus
             try:
                 from src.runner import plans as plans_mod
                 cascaded = await plans_mod.fail_dependents_of(job)
@@ -1027,19 +1080,15 @@ async def _maybe_escalate(job: Job) -> None:
                                    job_id=str(job.id)[:8])
             except Exception:
                 logger.exception("dependency cascade failed (non-fatal)")
-            async with session_scope() as s:
-                await s.execute(
-                    update(Task).where(Task.id == job.task_id).values(
-                        status=TaskStatus.failed.value)
-                )
-            from src.db import redis as _redis
-            await _redis.publish("tasks:notify", json.dumps({
-                "task_id": str(job.task_id),
-                "type": "failed",
-                "text": f"Task failed after 3 escalation attempts. "
-                        f"Last error: {(job.error_message or 'unknown')[:300]}. "
-                        f"Reply to retry or /clear to abandon.",
-            }))
+            # Routed through _set_task_status (updated_at + awaiting_since
+            # cleared) so the runner keeps one writer of tasks.status (A2).
+            await _set_task_status(job.task_id, TaskStatus.failed.value)
+            await _notify_task(
+                job.task_id, "failed",
+                text=(f"Task failed after 3 escalation attempts. "
+                      f"Last error: {(job.error_message or 'unknown')[:300]}. "
+                      f"Reply to retry or /clear to abandon."),
+            )
         return
 
     if current_level == 0:
@@ -1176,19 +1225,124 @@ async def _record_task_turn(task_id, role: str, content: str, job_id=None) -> No
         ))
 
 
+_AWAITING_STATUSES = ("awaiting_user", "pending_approval")
+
+
+def awaiting_since_for(status: str, now: datetime) -> datetime | None:
+    """Pure. Stamp when a task starts waiting on the owner; clear otherwise
+    (tasks.awaiting_since, migration 008 — stuck asks finally have an age)."""
+    return now if status in _AWAITING_STATUSES else None
+
+
 async def _set_task_status(task_id, status: str) -> None:
+    """The one writer of tasks.status from the runner: stamps/clears
+    `awaiting_since` with the same clock read as `updated_at`. The bot's own
+    transitions (thread reply, approve, choice, reopen) do the same inline."""
     from src.models import Task
+    now = datetime.now(timezone.utc)
     async with session_scope() as s:
         await s.execute(
             update(Task).where(Task.id == task_id).values(
-                status=status, updated_at=datetime.now(timezone.utc))
+                status=status, updated_at=now,
+                awaiting_since=awaiting_since_for(status, now))
         )
 
 
+def effective_origin_channel(own: str | None, parent: str | None) -> str | None:
+    """Pure. Spec §4.2: dispatch-MCP / escalation / self-diagnose / evaluator /
+    writeback children INHERIT the parent's eligibility. A child's own
+    `created_by` (`dispatch-mcp`, `event-trigger*`, `escalation:<job8>`)
+    derives `origin_channel="system"`, which would silence the completion DM
+    of a child the owner launched from Telegram and DM the owner for a child
+    of a schedule row — wrong in both directions. An own human channel
+    always wins; no parent → unchanged."""
+    return parent if (own in (None, "system")) and parent else own
+
+
+def job_notice_kwargs(job: Any) -> dict[str, Any]:
+    """Pure. `build_job_notice(**kwargs)` from a Job row (or any object with
+    the same attributes). `status` is left None for the caller; the lane
+    label reads the 007 columns (`resolved_provider`/`resolved_model`/
+    `model_served`) and `num_turns` (008 — NULL until B3) straight off the
+    row."""
+    result = job.result if isinstance(job.result, dict) else None
+    duration = None
+    if job.started_at and job.completed_at:
+        duration = max(0.0, (job.completed_at - job.started_at).total_seconds())
+    return dict(
+        job_id=str(job.id), status=None, kind=job.kind, resolved_skill=job.resolved_skill,
+        summary=result.get("summary") if result else None,
+        error_message=job.error_message, terminal_reason=job.terminal_reason,
+        origin_channel=job.origin_channel, origin_ref=job.origin_ref,
+        origin_thread=job.origin_thread, created_by=job.created_by, task_id=job.task_id,
+        model_served=job.model_served, resolved_provider=job.resolved_provider,
+        resolved_model=job.resolved_model, num_turns=job.num_turns,
+        duration_seconds=duration,
+    )
+
+
+async def _enqueue_job_notice(job_id: uuid.UUID, status: str) -> None:
+    """Outbox row for a job terminal (DoneCard / FailedCard, spec §4.2). Built
+    from the ROW (`error_message`, `terminal_reason`, …), never from the
+    `jobs:done` payload. A child (`parent_job_id` set) inherits the parent's
+    channel — and with it the parent's `origin_ref`/`origin_thread`, so the
+    card lands in the chat that launched the parent (one extra indexed read,
+    children only)."""
+    async with async_session() as s:
+        job = await s.get(Job, job_id)
+        if job is None:
+            return
+        parent = await s.get(Job, job.parent_job_id) if job.parent_job_id else None
+    kwargs = job_notice_kwargs(job)
+    kwargs["status"] = status
+    if parent is not None:
+        channel = effective_origin_channel(job.origin_channel, parent.origin_channel)
+        if channel != job.origin_channel:
+            kwargs.update(origin_channel=channel, origin_ref=parent.origin_ref,
+                          origin_thread=parent.origin_thread)
+    notice = build_job_notice(**kwargs)
+    if notice is not None:
+        await enqueue_notice(notice)
+
+
+async def _task_target(task_id) -> tuple[str | None, str | None]:
+    """(chat, thread) for a task card: `origin_ref`/`origin_thread` (008)
+    first, the legacy `chat_id`/`thread_message_id` second; (None, None) →
+    the owner chat."""
+    from src.models import Task
+    async with async_session() as s:
+        task = await s.get(Task, task_id)
+    if task is None:
+        return None, None
+    target = task.origin_ref or (str(task.chat_id) if task.chat_id else None)
+    thread = task.origin_thread or (str(task.thread_message_id) if task.thread_message_id else None)
+    return target, thread
+
+
 async def _notify_task(task_id, notify_type: str, **fields) -> None:
+    """The single chokepoint for task lifecycle cards. DUAL-WRITE (D-P1-10):
+    the legacy `tasks:notify` publish is unconditional and byte-identical to
+    before A5, then a durable outbox row + nudge is written UNCONDITIONALLY
+    (the DB read and insert are non-fatal). Which renderer sends is the bot's
+    decision (`telegram_bot._task_notifier` vs the outbox listener, A6) —
+    nothing under src/runner/ reads the kill switch."""
     await redis.publish("tasks:notify", json.dumps({
         "task_id": str(task_id), "type": notify_type, **fields,
     }))
+    if notify_type == "choices" and not fields.get("choices"):
+        return      # parity: the legacy renderer skips a choices card with no options
+    try:
+        target, thread = await _task_target(task_id)
+        notice = build_task_notice(
+            task_id=str(task_id), notify_type=notify_type,
+            text=str(fields.get("text", "") or ""),
+            question=fields.get("question"), choices=fields.get("choices"),
+            target=target, thread=thread,
+        )
+        await enqueue_notice(notice)
+    except Exception:  # noqa: BLE001 — the legacy card already went out
+        logger.exception("task notice enqueue failed (non-fatal)",
+                         task_id=str(task_id)[:8], notify_type=notify_type)
 
 
 async def _handle_plan_event(job: Job, plan: dict) -> None:
@@ -1405,37 +1559,14 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
 
     # Update task status
     if choices_event:
-        async with session_scope() as s:
-            await s.execute(
-                update(Task)
-                .where(Task.id == job.task_id)
-                .values(status=TaskStatus.awaiting_user.value, updated_at=datetime.now(timezone.utc))
-            )
-        await redis.publish(
-            "tasks:notify",
-            json.dumps({
-                "task_id": str(job.task_id),
-                "type": "choices",
-                "question": choices_event.get("question", "Pick one:"),
-                "choices": choices_event.get("options", []),
-            }),
-        )
+        await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
+        await _notify_task(job.task_id, "choices",
+                           question=choices_event.get("question", "Pick one:"),
+                           choices=choices_event.get("options", []))
     elif question:
-        async with session_scope() as s:
-            await s.execute(
-                update(Task)
-                .where(Task.id == job.task_id)
-                .values(status=TaskStatus.awaiting_user.value, updated_at=datetime.now(timezone.utc))
-            )
-        # Notify user via Redis (Telegram bot listens)
-        await redis.publish(
-            "tasks:notify",
-            json.dumps({
-                "task_id": str(job.task_id),
-                "type": "question",
-                "text": question,
-            }),
-        )
+        await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
+        # Notify user via Redis (Telegram bot listens) + the outbox row
+        await _notify_task(job.task_id, "question", text=question)
     elif is_complete:
         # task_complete = this job's work is done.
         from src.runner import plans as plans_mod
@@ -1491,12 +1622,16 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                 "auto-continue sentinel detected — stopping at pending_approval",
                 task_id=str(job.task_id)[:8], job_id=str(job.id)[:8],
             )
+            _now = datetime.now(timezone.utc)
             async with session_scope() as s:
+                # Shared session with the TaskTurn insert below, so this
+                # stays inline rather than going through _set_task_status;
+                # it stamps awaiting_since itself (A2).
                 await s.execute(
                     update(Task)
                     .where(Task.id == job.task_id)
                     .values(status=TaskStatus.pending_approval.value,
-                            updated_at=datetime.now(timezone.utc))
+                            updated_at=_now, awaiting_since=_now)
                 )
                 from sqlalchemy import func as sqlfunc
                 max_turn = await s.execute(
@@ -1515,14 +1650,7 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                     ),
                 ))
                 await s.commit()
-            await redis.publish(
-                "tasks:notify",
-                json.dumps({
-                    "task_id": str(job.task_id),
-                    "type": "approval_request",
-                    "text": summary,
-                }),
-            )
+            await _notify_task(job.task_id, "approval_request", text=summary)
         else:
             # Genuine multi-phase task: phase complete, auto-continue to next phase.
             logger.info("auto-continuing task to next phase",
@@ -1559,14 +1687,8 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                 await s.commit()
 
             # Notify user that it's continuing (informational, not blocking)
-            await redis.publish(
-                "tasks:notify",
-                json.dumps({
-                    "task_id": str(job.task_id),
-                    "type": "progress",
-                    "text": f"Phase complete. Auto-continuing... (job {str(child.id)[:8]})",
-                }),
-            )
+            await _notify_task(job.task_id, "progress",
+                               text=f"Phase complete. Auto-continuing... (job {str(child.id)[:8]})")
 
 
 def _terminal_values(
@@ -1578,13 +1700,19 @@ def _terminal_values(
     terminal_reason: str | None = None,
     model_served: str | None = None,
     review_outcome: str | None = None,
+    usage: dict | None = None,
+    num_turns: int | None = None,
+    cost_usd_list: Any = None,
 ) -> dict:
     """The column values a terminal transition writes. Pure.
 
     The provider columns (migration 007: `resolved_provider`,
     `terminal_reason`, `model_served`) are written only when known, so a
     path that does not know them (timeout, generic failure) leaves what the
-    session stamped at start untouched (T4, 2026-10-21).
+    session stamped at start untouched (T4, 2026-10-21). Likewise the 008
+    token/cost subset (B3): `usage` (SDK key names, either lane) becomes the
+    five token columns through `result_capture.usage_columns`; `num_turns`
+    and `cost_usd_list` (→ Decimal for numeric(10,4)) when known.
     """
     values: dict = dict(
         status=status.value,
@@ -1602,6 +1730,12 @@ def _terminal_values(
         # The pre-push gate's verdict (T5); the Anthropic post-review
         # stamps this column itself in `_maybe_review`.
         values["review_outcome"] = review_outcome
+    if usage is not None:
+        values.update(usage_columns(usage))
+    if num_turns is not None:
+        values["num_turns"] = num_turns
+    if cost_usd_list is not None:
+        values["cost_usd_list"] = Decimal(str(cost_usd_list))
     return values
 
 
@@ -1616,6 +1750,9 @@ async def _finish_job(
     model_served: str | None = None,
     review_outcome: str | None = None,
     done_payload: dict | None = None,
+    usage: dict | None = None,
+    num_turns: int | None = None,
+    cost_usd_list: Any = None,
 ) -> None:
     """Terminal transition + `jobs:done` publish. `done_payload` overrides
     the published payload (the done DM's text) — used by the review-blocked
@@ -1635,7 +1772,8 @@ async def _finish_job(
             .values(**_terminal_values(
                 status, result=result, error=error, provider=provider,
                 terminal_reason=terminal_reason, model_served=model_served,
-                review_outcome=review_outcome))
+                review_outcome=review_outcome, usage=usage,
+                num_turns=num_turns, cost_usd_list=cost_usd_list))
         )
         if result_proxy.rowcount == 0:
             logger.info("finish suppressed — job already in a protected terminal state",
@@ -1646,6 +1784,17 @@ async def _finish_job(
     else:
         payload = {"summary": (result or {}).get("summary", "")} if result else {}
     await session_mod.publish_done(str(job_id), status.value, payload=payload)
+
+    # Outbox (A5): DoneCard / FailedCard for every eligible terminal —
+    # task-less completions, every non-internal failure, scheduled ones
+    # included. After publish_done so an INV-9-suppressed finish (returned
+    # above) writes no row; built from the ROW, never from done_payload.
+    # Unconditional: the kill switch is the bot's (D-P1-10).
+    if status in (JobStatus.completed, JobStatus.failed):
+        try:
+            await _enqueue_job_notice(job_id, status.value)
+        except Exception:  # noqa: BLE001 — the legacy publish already went out
+            logger.exception("job notice enqueue failed (non-fatal)", job_id=str(job_id)[:8])
 
     # Incremental audit index update (B2)
     try:
@@ -1672,8 +1821,145 @@ async def _scheduler_loop() -> None:
             continue
 
 
+# ── Provisioning pre-check (D1, 2026-10-21; spec §8.3) ──────────────────────
+#
+# A due row whose project .env lacks a key the manifest (or the row's own
+# job_payload.env_required, D-P1-7) declares cannot succeed: before D1 it ran
+# a full session and reported "completed" having produced nothing (spec §8.2:
+# 37/37 provisioning_gap runs "successful"). Defer it instead — no Job, the
+# clock still advances — write schedule_deferred to the schedule's stream on
+# every deferral, and DM once per project per UTC day. FAIL-OPEN on every
+# unknown: a pre-check that can silence 41 schedules on a file-read error is
+# worse than the waste it prevents. The ONLY thing that defers a row is a
+# positively declared name that the canonical .env positively lacks.
+
+# Names a project may never be required to carry in its own .env, because
+# this server refuses them everywhere (INV-3 / subscription auth). Verified
+# on prod: projects/atlas/manifest.yml declares env_required: [DATABASE_URL,
+# ANTHROPIC_API_KEY] and the second is absent from the atlas .env BY DESIGN —
+# without this exemption every atlas row would defer on its first tick. A
+# LOCAL set on purpose: codex_cli.DENIED_ENV_* denies exactly the broker /
+# vendor keys this check must be able to look for.
+PROVISIONING_EXEMPT: frozenset[str] = frozenset({
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+})
+PROVISIONING_EXEMPT_PREFIXES: tuple[str, ...] = ("ANTHROPIC_",)
+
+
+def env_keys_present(env_path: Path) -> set[str]:
+    """Pure-ish (one file read). The NAME= keys declared in a .env — blanks,
+    `#` comments and `export ` prefixes handled. Values are never read into
+    anything, never logged."""
+    try:
+        text = Path(env_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+    out: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name = line.split("=", 1)[0].strip()
+        if name.startswith("export "):
+            name = name[len("export "):].strip()
+        if name:
+            out.add(name)
+    return out
+
+
+def provisioning_gap(env_required: list[str] | None, present: set[str], *,
+                     exempt: frozenset[str] = PROVISIONING_EXEMPT) -> list[str]:
+    """Pure. Sorted required names the .env does not declare, minus the
+    exempt set and the ANTHROPIC_ prefix. Empty ⇒ run the row."""
+    return sorted({
+        name for name in (env_required or [])
+        if name and name not in present and name not in exempt
+        and not name.startswith(PROVISIONING_EXEMPT_PREFIXES)
+    })
+
+
+def schedule_env_required(sched: Any, manifest: Manifest | None) -> list[str]:
+    """Pure. The manifest's `env_required` ∪ the row's
+    `job_payload.env_required` (D-P1-7), deduplicated and sorted."""
+    names = set(manifest.env_required) if manifest is not None else set()
+    payload = getattr(sched, "job_payload", None) or {}
+    if isinstance(payload, dict):
+        names.update(coerce_env_names(payload.get("env_required")))
+    return sorted(n for n in names if n)
+
+
+async def _resolve_schedule_slug(sched: Any, s: Any) -> str | None:
+    """payload.project_slug first, then project_id → Project.slug in the
+    open session. None when the row has no project at all."""
+    payload = sched.job_payload if isinstance(sched.job_payload, dict) else {}
+    slug = payload.get("project_slug")
+    if slug:
+        return str(slug)
+    if sched.project_id is None:
+        return None
+    project = await s.get(Project, sched.project_id)
+    return project.slug if project is not None and project.slug else None
+
+
+def _project_env_files(slug: str, manifest: Manifest | None) -> list[Path]:
+    """The .env file(s) `provision_env_files` copies from — the SAME
+    canonical `resolve_delivery_cwd` picks for a non-deploy job (for atlas:
+    the dev clone, not the runtime clone)."""
+    cwd, _ = delivery.resolve_delivery_cwd(
+        settings.projects_dir / slug, manifest.delivery if manifest else None, is_deploy=False,
+    )
+    files = (manifest.delivery.env_files if manifest else None) or [".env"]
+    return [cwd / f for f in files]
+
+
+async def _schedule_provisioning_gap(
+    sched: Any, s: Any, cache: dict[str, tuple[Manifest | None, list[Path], set[str]]],
+) -> tuple[list[str], str | None, str]:
+    """(missing, slug, env_file label) for a due row. Manifest/.env reads
+    are cached per slug within one tick. Any exception → ([], …): the row
+    runs."""
+    slug: str | None = None
+    try:
+        slug = await _resolve_schedule_slug(sched, s)
+        if not slug:
+            return [], None, ""
+        if slug not in cache:
+            manifest = delivery.load_project_manifest(slug)
+            paths = _project_env_files(slug, manifest)
+            present: set[str] = set()
+            for path in paths:
+                present |= env_keys_present(path)
+            cache[slug] = (manifest, paths, present)
+        manifest, paths, present = cache[slug]
+        missing = provisioning_gap(schedule_env_required(sched, manifest), present)
+        return missing, slug, ", ".join(str(p) for p in paths)
+    except Exception:  # noqa: BLE001 — never let the pre-check stop a schedule
+        logger.debug("provisioning pre-check skipped — row runs",
+                     schedule=getattr(sched, "name", "?"), exc_info=True)
+        return [], slug, ""
+
+
+async def _notify_schedule_deferral(sched: Any, slug: str, env_file: str,
+                                    missing: list[str], now: datetime) -> None:
+    """One ops DM per PROJECT per UTC day. The day claim is SET NX only after
+    `enqueue_notice` returned an id, so a dropped insert does not burn the
+    day. Ops kind → delivered with the outbox switch on or off (D-P1-10)."""
+    key = f"{KEY_SCHEDULE_GAP_NOTIFIED_PREFIX}{slug}:{now:%Y-%m-%d}"
+    if await redis.exists(key):
+        return
+    nid = await enqueue_notice(build_ops_notice(
+        kind="schedule_deferred", severity="warn",
+        text=(f"⏸ {sched.name} deferred — {env_file} lacks {', '.join(missing)}; "
+              f"defers until provisioned"),
+        subject=f"schedule:{sched.id}",
+    ))
+    if nid is not None:
+        await redis.set(key, "1", nx=True, ex=TTL_SCHEDULE_GAP_NOTIFIED)
+
+
 async def _tick_schedules() -> None:
     now = datetime.now(timezone.utc)
+    gap_cache: dict[str, tuple[Manifest | None, list[Path], set[str]]] = {}
     async with session_scope() as s:
         result = await s.execute(
             select(Schedule).where(
@@ -1684,6 +1970,33 @@ async def _tick_schedules() -> None:
         due = list(result.scalars())
 
         for sched in due:
+            missing, slug, env_file = await _schedule_provisioning_gap(sched, s, gap_cache)
+            if missing:
+                # Unconditional once missing is non-empty: advance the clock,
+                # build no Job; the record and the DM are each best-effort.
+                sched.last_run_at = now
+                sched.next_run_at = croniter(sched.cron_expression, now).get_next(
+                    datetime
+                ).replace(tzinfo=timezone.utc)
+                try:
+                    audit_log.append_schedule_event(
+                        sched.id, "schedule_deferred", schedule=sched.name,
+                        reason="provisioning_gap", missing=missing, project=slug,
+                        env_file=env_file,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("schedule_deferred audit append failed", schedule=sched.name)
+                try:
+                    await _notify_schedule_deferral(sched, slug or "", env_file, missing, now)
+                except Exception:  # noqa: BLE001
+                    logger.warning("schedule_deferred notice failed", schedule=sched.name)
+                logger.warning(
+                    "schedule deferred: provisioning gap",
+                    schedule=sched.name, project=slug, missing=missing,
+                    next_run=sched.next_run_at.isoformat(),
+                )
+                continue
+
             job = Job(
                 kind=sched.job_kind,
                 description=sched.job_description,
@@ -1692,6 +2005,8 @@ async def _tick_schedules() -> None:
                 schedule_id=sched.id,
                 status=JobStatus.queued.value,
                 created_by="scheduler",
+                origin_channel="scheduler",
+                origin_ref=sched.name[:64],
             )
             s.add(job)
             await s.flush()

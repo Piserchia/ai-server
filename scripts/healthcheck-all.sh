@@ -15,6 +15,70 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG="$PROJECT_DIR/volumes/logs/healthcheck.log"
 
+# ── Interpreter for the notify CLI (A7, 2026-10-21) ─────────────────────────
+# NEVER run python through the pipenv shim from a launchd script: pipenv is a
+# ~/.pyenv shim that `bash -lc` cannot see (rc=127 — the schedule-monitor
+# incident of 2026-09-14..10-05). Resolution order: the timer plist's VENV_PY
+# (install-launchd.sh exports it) → `pipenv --venv` → pipenv's deterministic
+# ~/.local/share/virtualenvs/<basename>-* location, preferring the venv whose
+# pipenv-written `.project` file equals $PROJECT_DIR (whole-tier review
+# 2026-10-22: on a host with both the dev and the prod checkout — same
+# basename — the old first-match glob picked the DEV venv for prod's timers;
+# a first-match fallback is kept only when no `.project` matches, and it is
+# LOGGED) → none. An interpreter that cannot `import src.config` is treated as
+# absent: the alerts then take the raw-curl path below and the alert-history
+# row is simply not written. Both probes run in a SUBSHELL that cd's to the
+# project root first: this script never cd's, and the editable install is
+# inert under ~/Documents (the macOS hidden-.pth gotcha), so `import
+# src.config` only resolves from there.
+# Resolved LAZILY on the first notify_send (memoised): the 5-minute tick
+# otherwise spawned the interpreter on every run with nothing to send, and a
+# venv-less host logged the same WARN 288 times a day.
+VENV_PY="${VENV_PY:-}"
+_VENV_RESOLVED=0
+resolve_venv_py() {   # sets VENV_PY; empty = no usable interpreter (curl path)
+    (( _VENV_RESOLVED )) && return 0
+    _VENV_RESOLVED=1
+    local _venv _d _first=""
+    if [[ -z "$VENV_PY" ]] && command -v pipenv >/dev/null 2>&1; then
+        _venv="$(cd "$PROJECT_DIR" && pipenv --venv 2>/dev/null || true)"
+        [[ -n "$_venv" && -x "$_venv/bin/python" ]] && VENV_PY="$_venv/bin/python"
+    fi
+    if [[ -z "$VENV_PY" ]]; then
+        for _d in "$HOME/.local/share/virtualenvs/$(basename "$PROJECT_DIR")-"*; do
+            [[ -x "$_d/bin/python" ]] || continue
+            [[ -z "$_first" ]] && _first="$_d"
+            if [[ "$(cat "$_d/.project" 2>/dev/null)" == "$PROJECT_DIR" ]]; then
+                VENV_PY="$_d/bin/python"; break
+            fi
+        done
+        if [[ -z "$VENV_PY" && -n "$_first" ]]; then
+            VENV_PY="$_first/bin/python"
+            echo "$(date -u +%FT%TZ) WARN no venv whose .project matches $PROJECT_DIR; using first match $_first (run install-launchd.sh timers-only to pin VENV_PY)" >> "$LOG"
+        fi
+    fi
+    if [[ -n "$VENV_PY" ]] && ! (cd "$PROJECT_DIR" && "$VENV_PY" -c 'import src.config') >/dev/null 2>&1; then
+        echo "$(date -u +%FT%TZ) WARN venv python unusable ($VENV_PY); alerts fall back to curl" >> "$LOG"
+        VENV_PY=""
+    fi
+    [[ -z "$VENV_PY" ]] && echo "$(date -u +%FT%TZ) WARN no project venv python found; alerts fall back to curl (no alert-history row)" >> "$LOG"
+    return 0
+}
+
+# Owner DM path: the notifications outbox CLI first (direct Telegram HTTP +
+# a `notifications` row = the alert history), the raw curl at each call site
+# as the fallback when the CLI itself cannot run or did not deliver. Both are
+# out-of-band: neither depends on the bot or the runner being alive, and the
+# CLI exits non-zero whenever the DM was not delivered, so `notify_send … ||
+# curl` never drops an alert. Never reads `NOTIFY_OUTBOX` (the switch is the
+# bot's, D-P1-10).
+notify_send() {   # $1 = kind  $2 = text ; returns 0 only when the DM was delivered
+    resolve_venv_py
+    [[ -n "$VENV_PY" ]] || return 1
+    (cd "$PROJECT_DIR" && "$VENV_PY" -m src.notify send --kind "$1" --severity critical \
+        --text "$2" >> "$LOG" 2>&1)
+}
+
 CHECKED=0
 HEALTHY=0
 FAILED=0
@@ -70,7 +134,8 @@ done < <(find "$PROJECT_DIR/projects" -name manifest.yml -not -path '*/.git/*' 2
 #   1. Redis heartbeat `heartbeat:runner` (epoch seconds, TTL 15 min) missing
 #      or older than 600s, AND
 #   2. `launchctl list` shows no PID for com.assistant.runner.
-# DM goes straight to the Telegram API with the bot token + FIRST id of
+# DM goes through `notify_send` (the outbox CLI, A7) first and falls back to
+# the Telegram API directly with the bot token + FIRST id of
 # TELEGRAM_ALLOWED_CHAT_IDS, both READ from this checkout's .env
 # (TELEGRAM_ALLOWED_CHAT_IDS is auth config — never modified here).
 # Rate-limited to one DM per 30 min via a state file under volumes/.
@@ -124,11 +189,14 @@ check_runner_liveness() {
     fi
 
     msg="🚨 Runner down on $(hostname -s): heartbeat $age_txt (limit ${HB_STALE_SECONDS}s) and launchd has no PID for $RUNNER_LABEL. Restart: launchctl kickstart -k gui/$(id -u)/$RUNNER_LABEL"
-    if curl -sf --max-time 10 "https://api.telegram.org/bot${token}/sendMessage" \
+    if notify_send ops_alert "$msg"; then
+        echo "$now" > "$ALERT_STATE" 2>/dev/null || true
+        echo "$(date -u +%FT%TZ) ALERT runner-down sent via notify" >> "$LOG"
+    elif curl -sf --max-time 10 "https://api.telegram.org/bot${token}/sendMessage" \
             --data-urlencode "chat_id=${chat_id}" \
             --data-urlencode "text=${msg}" > /dev/null 2>&1; then
         echo "$now" > "$ALERT_STATE" 2>/dev/null || true
-        echo "$(date -u +%FT%TZ) ALERT runner-down DM sent to chat $chat_id" >> "$LOG"
+        echo "$(date -u +%FT%TZ) ALERT runner-down DM sent to chat $chat_id (curl fallback)" >> "$LOG"
     else
         echo "$(date -u +%FT%TZ) WARN runner-down DM failed (telegram unreachable?)" >> "$LOG"
     fi
@@ -177,11 +245,14 @@ check_swing_freshness() {
     chat_id=$(printf '%s' "$chat_ids" | cut -d, -f1 | tr -d '[:space:]')
     [[ -z "$token" || -z "$chat_id" ]] && return 0
     msg="🚨 Swing watchdog (R18): no completed swing run in $(( age / 3600 ))h on a market day. Resting broker stops protect stock lots; OPTION lifecycle needs eyes — check /trading/swing and the atlas-swing-* schedules."
-    if curl -sf --max-time 10 "https://api.telegram.org/bot${token}/sendMessage" \
+    if notify_send ops_alert "$msg"; then
+        echo "$now" > "$SWING_ALERT_STATE" 2>/dev/null || true
+        echo "$(date -u +%FT%TZ) ALERT swing-watchdog sent via notify" >> "$LOG"
+    elif curl -sf --max-time 10 "https://api.telegram.org/bot${token}/sendMessage" \
             --data-urlencode "chat_id=${chat_id}" \
             --data-urlencode "text=${msg}" > /dev/null 2>&1; then
         echo "$now" > "$SWING_ALERT_STATE" 2>/dev/null || true
-        echo "$(date -u +%FT%TZ) ALERT swing-watchdog DM sent" >> "$LOG"
+        echo "$(date -u +%FT%TZ) ALERT swing-watchdog DM sent (curl fallback)" >> "$LOG"
     fi
     return 0
 }

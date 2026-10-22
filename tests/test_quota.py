@@ -735,3 +735,143 @@ class TestTelegramSurfaces:
         upd = _tg_update("/resume codex")
         await tg.cmd_resume(upd, SimpleNamespace(args=["codex"]))
         assert "not paused" in upd.message.reply_text.call_args.args[0].lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# A3 (Observability Phase 1, 2026-10-21): the reset time is labelled by its
+# source. A pause's reset time is "vendor" ONLY when a RateLimitEvent carried
+# it (`detect_from_rate_limit` returned a datetime); the text heuristic and the
+# default pause window are "estimated". The source lives beside the global
+# pair in Redis (`quota:last_source`) and is forgotten with it (clear /
+# auto-resume), so the bot's quota_paused DM can never claim a vendor-sourced
+# window figure that no vendor event produced (spec §2.8 / review #4).
+# ═══════════════════════════════════════════════════════════════════════════
+
+from src.db import KEY_QUOTA_LAST_SOURCE
+
+
+class TestPauseSource:
+    def test_key_constant_is_the_contract_string(self):
+        assert KEY_QUOTA_LAST_SOURCE == "quota:last_source"
+
+    async def test_default_source_is_estimated(self, fake_redis):
+        await quota.pause_queue(_future(5), "x")
+        assert await quota.last_source() == "estimated"
+        assert await fake_redis.get(KEY_QUOTA_LAST_SOURCE) == "estimated"
+
+    async def test_unset_source_reads_as_estimated(self, fake_redis):
+        # No pause at all → the label is still a valid value, never None/"".
+        assert await quota.last_source() == "estimated"
+
+    async def test_vendor_source_round_trips(self, fake_redis):
+        await quota.pause_queue(_future(5), "x", source="vendor")
+        assert await quota.last_source() == "vendor"
+
+    async def test_clear_forgets_source(self, fake_redis):
+        await quota.pause_queue(_future(5), "x", source="vendor")
+        await quota.clear()
+        assert await quota.last_source() == "estimated"
+        assert await fake_redis.get(KEY_QUOTA_LAST_SOURCE) is None
+
+    async def test_auto_resume_forgets_source(self, fake_redis):
+        await quota.pause_queue(_future(-1), "expired", source="vendor")
+        paused, _, _ = await quota.is_paused()
+        assert paused is False
+        assert await quota.last_source() == "estimated"
+        assert await fake_redis.get(KEY_QUOTA_LAST_SOURCE) is None
+
+    async def test_corrupt_pause_forgets_source(self, fake_redis):
+        await quota.pause_queue(_future(5), "x", source="vendor")
+        await fake_redis.set(KEY_QUOTA_PAUSED_UNTIL, "not-a-timestamp")
+        paused, _, _ = await quota.is_paused()
+        assert paused is False
+        assert await quota.last_source() == "estimated"
+
+    async def test_provider_pause_never_writes_the_source(self, fake_redis):
+        # The per-provider lanes carry no reset time (Codex) and never raise
+        # QuotaExhausted; the label belongs to the global pair only.
+        await quota.pause_provider("codex", _future(5), "429")
+        assert await fake_redis.get(KEY_QUOTA_LAST_SOURCE) is None
+
+    async def test_anthropic_provider_pause_defaults_to_estimated(self, fake_redis):
+        await quota.pause_provider("anthropic", _future(5), "x")
+        assert await quota.last_source() == "estimated"
+
+    def test_exception_carries_source(self):
+        assert quota.QuotaExhausted(None, "r").source == "estimated"
+        assert quota.QuotaExhausted(None, "r", source="vendor").source == "vendor"
+
+
+class TestSessionPassesVendorOnlyForRateLimitEvent:
+    def test_three_raise_sites_are_labelled(self):
+        import ast
+        import inspect
+
+        from src.runner import session
+        src = inspect.getsource(session._run_in_process)
+        raises = [ast.unparse(n) for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.Raise) and "QuotaExhausted" in ast.unparse(n)]
+        assert len(raises) == 3, raises
+        vendor = [r for r in raises if 'source="vendor"' in r or "source='vendor'" in r]
+        assert len(vendor) == 1, "exactly the RateLimitEvent path may claim a vendor reset"
+        assert all("source=" in r for r in raises)
+
+    def test_vendor_claim_is_conditional_on_a_real_reset_time(self):
+        # The RateLimitEvent branch claims 'vendor' only when `reset_at` is a
+        # datetime; a rejected event without `resets_at` is 'estimated'.
+        import inspect
+
+        from src.runner import session
+        src = inspect.getsource(session._run_in_process)
+        assert 'source="vendor" if reset_at is not None else "estimated"' in src
+
+
+class TestMainPassesTheSourceToThePause:
+    async def test_pause_queue_receives_the_exception_source(self, main_harness, fake_redis):
+        from src.runner import main as runner_main
+        exc = quota.QuotaExhausted(_future(10), "rate limit rejected (window=five_hour)",
+                                   source="vendor")
+        h = main_harness(session_exc=exc, job=_job(payload={}))
+        await runner_main._process_job(h.job.id)
+        assert (await quota.is_paused())[0] is True
+        assert await quota.last_source() == "vendor"
+
+    async def test_estimated_exception_pauses_as_estimated(self, main_harness, fake_redis):
+        from src.runner import main as runner_main
+        h = main_harness(session_exc=quota.QuotaExhausted(None, "5-hour limit"),
+                         job=_job(payload={}))
+        await runner_main._process_job(h.job.id)
+        assert (await quota.is_paused())[0] is True
+        assert await quota.last_source() == "estimated"
+
+
+class TestQuotaNoticeLabelsTheSource:
+    """Spec §2.8 / review #4: a reset time is 'vendor' only when a RateLimitEvent
+    carried it; the text heuristic and the default window are 'estimated'."""
+
+    def test_reset_line_names_the_source(self):
+        from src.gateway import telegram_bot as tg
+        at = datetime(2026, 9, 25, 14, 0, tzinfo=timezone.utc)
+        assert "Reset at 14:00 UTC (vendor)" in tg.quota_paused_text(at, "rate limit rejected", "vendor")
+        assert "Reset at 14:00 UTC (estimated)" in tg.quota_paused_text(at, "x", "estimated")
+        assert "Reset at unknown (estimated)" in tg.quota_paused_text(None, "x", "vendor")   # no time → never 'vendor'
+
+    def test_unknown_source_value_is_never_vendor(self):
+        from src.gateway import telegram_bot as tg
+        at = datetime(2026, 9, 25, 14, 0, tzinfo=timezone.utc)
+        assert "(estimated)" in tg.quota_paused_text(at, "x", "")
+        assert "(estimated)" in tg.quota_paused_text(at, "x", "VENDOR")
+
+    def test_body_keeps_the_legacy_lines_and_clips_the_reason(self):
+        from src.gateway import telegram_bot as tg
+        text = tg.quota_paused_text(None, "r" * 500, "estimated")
+        assert text.startswith("⏸ Queue paused (subscription quota).\n")
+        assert "Reason: " + "r" * 200 in text and "r" * 201 not in text
+
+    def test_notifier_reads_last_source(self):
+        import inspect
+
+        from src.gateway import telegram_bot as tg
+        src = inspect.getsource(tg._quota_notifier)
+        assert "quota.last_source()" in src
+        assert "quota_paused_text(" in src

@@ -133,10 +133,17 @@ upsert 'atlas-advisors-panel'    '0 15 * * 6'  'atlas-advisors-panel'    'atlas-
 # narrowed to 09:35-10:25 ET so its overlap-month sibling (10:40 ET) falls
 # off_window (code-review 2026-08-30) (map above; Mon 13:00 is
 # research-report, 14:00 Mon/Thu advisors-ingest, Sun 15:00 trader governor).
-upsert 'atlas-swing-supervise-edt' '40 13 * 3-11 1-5' 'atlas-swing-supervise' 'atlas-swing-supervise (EDT rows): morning lifecycle run ~09:40 ET -> executor --manage in workspace clone; verify resting exits/R12/R20/R21; report (skills/atlas-swing-supervise)' '{"project_slug":"atlas"}'
-upsert 'atlas-swing-supervise-est' '40 14 * 1-3,11,12 1-5' 'atlas-swing-supervise' 'atlas-swing-supervise (EST rows): morning lifecycle run ~09:40 ET (skills/atlas-swing-supervise)' '{"project_slug":"atlas"}'
-upsert 'atlas-swing-trade-edt' '45 19 * 3-11 1-5' 'atlas-swing-trade' 'atlas-swing-trade (EDT rows): near-close decision run ~15:45 ET -> screen, bounded LLM selection, kernel submit via executor (skills/atlas-swing-trade)' '{"project_slug":"atlas"}'
-upsert 'atlas-swing-trade-est' '45 20 * 1-3,11,12 1-5' 'atlas-swing-trade' 'atlas-swing-trade (EST rows): near-close decision run ~15:45 ET (skills/atlas-swing-trade)' '{"project_slug":"atlas"}'
+# D-P1-7 (2026-10-21): the four supervise/trade rows declare the Tradier key
+# in job_payload.env_required — the scheduler's provisioning_gap pre-check
+# (src/runner/main.py) unions it with the atlas manifest's env_required and
+# DEFERS the row (schedule_deferred + one DM per project per day, no session)
+# while ~/Documents/repos/atlas/.env lacks TRADIER_SANDBOX_TOKEN. Declared
+# here, not in the atlas manifest, because atlas patches are never INV-4
+# server patches. research/evaluate and the value rows carry no key.
+upsert 'atlas-swing-supervise-edt' '40 13 * 3-11 1-5' 'atlas-swing-supervise' 'atlas-swing-supervise (EDT rows): morning lifecycle run ~09:40 ET -> executor --manage in workspace clone; verify resting exits/R12/R20/R21; report (skills/atlas-swing-supervise)' '{"project_slug":"atlas","env_required":["TRADIER_SANDBOX_TOKEN"]}'
+upsert 'atlas-swing-supervise-est' '40 14 * 1-3,11,12 1-5' 'atlas-swing-supervise' 'atlas-swing-supervise (EST rows): morning lifecycle run ~09:40 ET (skills/atlas-swing-supervise)' '{"project_slug":"atlas","env_required":["TRADIER_SANDBOX_TOKEN"]}'
+upsert 'atlas-swing-trade-edt' '45 19 * 3-11 1-5' 'atlas-swing-trade' 'atlas-swing-trade (EDT rows): near-close decision run ~15:45 ET -> screen, bounded LLM selection, kernel submit via executor (skills/atlas-swing-trade)' '{"project_slug":"atlas","env_required":["TRADIER_SANDBOX_TOKEN"]}'
+upsert 'atlas-swing-trade-est' '45 20 * 1-3,11,12 1-5' 'atlas-swing-trade' 'atlas-swing-trade (EST rows): near-close decision run ~15:45 ET (skills/atlas-swing-trade)' '{"project_slug":"atlas","env_required":["TRADIER_SANDBOX_TOKEN"]}'
 upsert 'atlas-swing-research' '0 13 * * 5' 'atlas-swing-research' 'atlas-swing-research: weekly governed research cycle under swing/evaluation/PROTOCOL.md -> one sealed card, backtest evidence, adversarial validation, ledger close-out (skills/atlas-swing-research)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 upsert 'atlas-swing-evaluate' '0 16 * * 0' 'atlas-swing-evaluate' 'atlas-swing-evaluate: weekly swing governor -> DB-rows grade vs SPY/BIL, liveness sweep, deterministic demotions, ladder/shakedown memos (skills/atlas-swing-evaluate)'
 # value-theses: ONE row (code-review 2026-08-30: value has no off_window

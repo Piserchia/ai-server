@@ -62,3 +62,24 @@ class TestFetchRetrySchedule:
     def test_a_few_retries(self):
         # "retry a few times": at least 3 delayed attempts after the immediate one.
         assert len([d for d in _JOB_FETCH_DELAYS if d > 0]) >= 3
+
+
+def test_job_completed_carries_cost_and_turns():
+    """B3: the `job_completed` audit event keeps its C14 fields byte-for-byte
+    (`duration_seconds`, `usage`, + T4's `provider`/`model_served`/
+    `terminal_reason`) and gains `num_turns, duration_api_ms, cost_usd_list,
+    sdk_cost_usd, stop_reason` — the reconcile script reads both cost figures
+    from the JSONL. Source pin on the one `job_completed` append in
+    `run_session` (behaviour is covered in tests/test_result_capture.py)."""
+    import ast
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "src" / "runner" / "session.py").read_text()
+    run_session = next(n for n in ast.walk(ast.parse(src))
+                       if isinstance(n, ast.AsyncFunctionDef) and n.name == "run_session")
+    calls = [n for n in ast.walk(run_session) if isinstance(n, ast.Call)
+             and ast.unparse(n.func) == "audit_log.append"
+             and len(n.args) >= 2 and ast.unparse(n.args[1]) == "'job_completed'"]
+    assert len(calls) == 1
+    keywords = {k.arg for k in calls[0].keywords}
+    assert {"duration_seconds", "usage", "provider", "model_served", "terminal_reason"} <= keywords
+    assert {"num_turns", "duration_api_ms", "cost_usd_list", "sdk_cost_usd", "stop_reason"} <= keywords

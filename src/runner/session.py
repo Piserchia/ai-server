@@ -22,6 +22,7 @@ permission_mode=bypassPermissions. This replaced the docker container lane on
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import re
@@ -36,6 +37,7 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     RateLimitEvent,
     ResultMessage,
+    SystemMessage,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -65,7 +67,19 @@ class SkillResolutionError(RuntimeError):
     """
 from src.runner import agents as agents_mod
 from src.runner import delivery, guards, quota, review, router, workspaces
+from src.runner import pricing
 from src.runner.executors import codex_cli
+from src.runner.result_capture import (
+    API_RETRY_TO_TERMINAL,
+    ENFORCEMENT_CATEGORIES,
+    ResultCapture,
+    capture_result_message,
+    derive_terminal_reason,
+    result_columns,
+    served_model_violation,
+    usage_columns,
+    usage_is_empty,  # noqa: F401 (re-export: is_api_terminal_session + tests)
+)
 
 logger = logging.getLogger(__name__)
 
@@ -480,6 +494,27 @@ _MODEL_BUDGETS: dict[str, int] = models_registry.context_windows()
 _DEFAULT_BUDGET = 200_000
 
 
+@functools.lru_cache(maxsize=1)
+def cli_version() -> str:
+    """Version of the SDK-bundled Claude CLI (stamped into `jobs.cli_version`
+    on the Anthropic lane; the Codex lane stamps `ExecResult.cli_version`).
+
+    Read from the SDK package itself — `claude_agent_sdk._cli_version.
+    __cli_version__` ("2.1.139" in the pinned wheel) — NOT by spawning the
+    CLI binary and NOT by parsing a SystemMessage (spec §2.3 row 007).
+    The pin moves the attribute and the binary together, so this is the same
+    number with no cold start to hide and nothing to warm at startup.
+    'unknown' if a future pin drops the module or the attribute; truncated to
+    the column's 24 chars.
+    """
+    try:
+        from claude_agent_sdk import _cli_version
+        value = str(getattr(_cli_version, "__cli_version__", "") or "").strip()
+    except Exception:  # noqa: BLE001 — a missing attribute must never fail a job
+        value = ""
+    return (value or "unknown")[:24]
+
+
 def estimate_context_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token. Pure function."""
     return len(text) // 4
@@ -543,34 +578,9 @@ def is_api_terminal_summary(summary: str | None) -> bool:
     return bool(_API_TERMINAL_BANNER.match(text))
 
 
-_USAGE_TOKEN_KEYS: tuple[str, ...] = (
-    "input_tokens",
-    "output_tokens",
-    "cache_read_input_tokens",
-    "cache_creation_input_tokens",
-)
-
-
-def usage_is_empty(usage: dict | None) -> bool:
-    """True when a session's usage dict shows no real work.
-
-    Pure function. Considers input / output / cache-read / cache-creation
-    tokens; a real session (even a trivial one) consumes at least the
-    system-prompt input, so all-zero across the four is the SDK's signature
-    for "we never actually made it through a live Anthropic call". Missing
-    or non-integer values count as zero (SDK versions vary).
-    """
-    if not usage:
-        return True
-    for key in _USAGE_TOKEN_KEYS:
-        try:
-            if int(usage.get(key) or 0) > 0:
-                return False
-        except (TypeError, ValueError):
-            continue
-    return True
-
-
+# `usage_is_empty` lives in `runner.result_capture` since B2 (2026-10-21) and
+# is re-exported here: `is_api_terminal_session` and `tests/test_api_terminal.py`
+# import it from this module.
 def is_api_terminal_session(summary: str | None, usage: dict | None) -> bool:
     """Combined predicate: the session's final text is an API-terminal
     banner AND usage shows no work. Pure function.
@@ -1471,13 +1481,42 @@ async def run_session(job: Job) -> dict[str, Any]:
     terminal_reason = "ok"
     review_outcome: str | None = None
     published = False
+    capture: ResultCapture | None = None
+    columns: dict[str, Any]
 
     try:
         if options is not None:
-            final_summary, usage = await _run_in_process(job_id, job.description, options)
+            final_summary, usage, capture = await _run_in_process(
+                job_id, job.description, options)
+            model_served = capture.model_served
+            # Typed reason from the ResultMessage (B2); the banner belt and
+            # the enforcement / silent-empty checks raised inside
+            # _run_in_process, so a value here is a finished session.
+            terminal_reason = derive_terminal_reason(capture)
+            # cost_usd_list is OUR number, from tokens, each cache-write
+            # bucket at its own rate (spec §2.8: "exactly one definition …
+            # in src/runner/pricing.py"). The served model is what was
+            # billed; the requested id is the fallback for the shapes where
+            # model_usage is absent. None when the id is unknown to the price
+            # table — the reconcile reports it as `unpriced`, never as $0.
+            cost_usd_list = pricing.price_usage(capture.model_served or model_used, usage)
+            columns = result_columns(capture, terminal_reason=terminal_reason,
+                                     cost_usd_list=cost_usd_list,
+                                     cli_version=cli_version())
         else:
-            final_summary, usage, model_served = await _run_executor(
+            final_summary, usage, model_served, lane_cli_version = await _run_executor(
                 job, model_ref, cwd=cwd, system_prompt=system_prompt, skill_cfg=skill_cfg)
+            # The executor lane keeps "ok" / ExecutorFailed as its terminal
+            # reason (ExecResult.terminal_reason, never derive_terminal_reason).
+            # Token columns through the same `usage_columns` as the Anthropic
+            # lane (the mapped SDK key names), `cli_version` is the Codex CLI's;
+            # `price_usage` is None for a non-Anthropic id (no Codex price
+            # table in Phase 1); num_turns / duration_api_ms / sdk_cost_usd
+            # have no source on this lane and stay NULL.
+            cost_usd_list = pricing.price_usage(model_served or model_used, usage)
+            columns = dict(usage_columns(usage),
+                           cli_version=(lane_cli_version or None),
+                           cost_usd_list=cost_usd_list)
             # Pre-push Anthropic review gate (T5; INV-21(c)) — a RULE keyed
             # on the provider, not a switch: every non-Anthropic diff is
             # reviewed by Anthropic before the runner commits, pushes and
@@ -1486,6 +1525,14 @@ async def run_session(job: Job) -> dict[str, Any]:
             if ws is not None:
                 review_outcome, published = await _pre_push_gate(
                     job, model_ref, ws, base_sha=base_sha, skill_name=skill_name)
+
+        # One stamp site for both lanes (B3): the migration-008 result
+        # columns, written before `job_completed` so the row and the JSONL
+        # never disagree. main._finish_job re-stamps the token/cost subset
+        # from the result dict on the terminal transition.
+        async with async_session() as s:
+            await s.execute(sql_update(Job).where(Job.id == job.id).values(**columns))
+            await s.commit()
 
         if final_summary:
             audit_log.write_summary(job_id, final_summary)
@@ -1502,6 +1549,7 @@ async def run_session(job: Job) -> dict[str, Any]:
                 logger.exception("text-event extraction failed (non-fatal)")
 
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+        cost_usd_float = float(cost_usd_list) if cost_usd_list is not None else None
         audit_log.append(
             job_id,
             "job_completed",
@@ -1510,6 +1558,15 @@ async def run_session(job: Job) -> dict[str, Any]:
             provider=provider,
             model_served=model_served,
             terminal_reason=terminal_reason,
+            # B3 (additive, C14): both cost figures, both labelled — the
+            # JSONL is where the reconcile script (B4) reads them, and
+            # comparing one against the other is a Phase-1 exit criterion.
+            # The executor lane has no turns / API time / SDK figure → None.
+            num_turns=capture.num_turns if capture else None,
+            duration_api_ms=capture.duration_api_ms if capture else None,
+            cost_usd_list=cost_usd_float,
+            sdk_cost_usd=capture.total_cost_usd if capture else None,
+            stop_reason=capture.stop_reason if capture else None,
         )
 
         return {
@@ -1523,6 +1580,10 @@ async def run_session(job: Job) -> dict[str, Any]:
             "model_served": model_served,
             "terminal_reason": terminal_reason,
             "review_outcome": review_outcome,
+            # B3: the two headline numbers (JSON-safe: this dict is
+            # jobs.result). Phase-1 cards read num_turns from the row.
+            "num_turns": capture.num_turns if capture else None,
+            "cost_usd_list": cost_usd_float,
         }
     except BaseException:
         session_failed = True
@@ -1670,9 +1731,11 @@ async def _run_executor(
     cwd: Path,
     system_prompt: str,
     skill_cfg: SkillConfig | None,
-) -> tuple[str, dict[str, Any], str | None]:
+) -> tuple[str, dict[str, Any], str | None, str | None]:
     """The non-Anthropic execution path (T4): one CLI-executor process in the
-    clone. Returns `(final_text, usage, model_served)` on `ok`; raises
+    clone. Returns `(final_text, usage, model_served, cli_version)` on `ok`
+    (`cli_version` is the vendor CLI's, stamped into `jobs.cli_version`
+    by run_session — B3; it was dropped by the old 3-tuple); raises
     `ExecutorFailed` on any other terminal reason (terminal in main, never
     escalated). The executor audits/streams its own events (C14 kinds).
     """
@@ -1737,15 +1800,25 @@ async def _run_executor(
     if result.terminal_reason != "ok":
         raise ExecutorFailed(ref.provider, ref.model_id, result.terminal_reason,
                              result.error, model_served=result.model_served)
-    return (result.final_text or "").strip(), dict(result.usage or {}), result.model_served
+    return ((result.final_text or "").strip(), dict(result.usage or {}),
+            result.model_served, result.cli_version)
 
 
 async def _run_in_process(
     job_id: str, prompt: str, options: ClaudeAgentOptions
-) -> tuple[str, dict[str, Any]]:
-    """The in-process Agent SDK execution path (the only execution path)."""
+) -> tuple[str, dict[str, Any], ResultCapture]:
+    """The in-process Agent SDK execution path (the Anthropic lane).
+    Returns (final_text, usage, capture) — `capture` is the full typed
+    ResultMessage (B2/B3), `usage` is kept for every existing consumer. Also
+    collects the `error` category of every `SystemMessage(subtype="api_retry")`
+    it sees (last one wins) and hands it to the capture / the raised error
+    text, so an enforcement signal (account hold, revoked OAuth grant,
+    billing) is classified the same way on the completed and failed paths
+    (spec §2.4)."""
     final_text_chunks: list[str] = []
     usage: dict[str, Any] = {}
+    capture = ResultCapture()
+    api_retry_error: str | None = None      # last system/api_retry `error` category
 
     client = ClaudeSDKClient(options=options)
     _running_sessions[job_id] = client
@@ -1755,6 +1828,22 @@ async def _run_in_process(
             await client.query(prompt)
 
             async for message in client.receive_response():
+                # system/api_retry carries `error ∈ {rate_limit, overloaded,
+                # account_on_hold, oauth_org_not_allowed, billing_error,
+                # authentication_failed}` + `attempt`. Recorded at the HEAD of
+                # the loop body — before the RateLimitEvent branch, which can
+                # `continue` or raise — so an enforcement signal is never lost
+                # on the paths that never reach the ResultMessage. The audit
+                # row carries the category and the attempt only, never the
+                # message text (B3).
+                if isinstance(message, SystemMessage) and message.subtype == "api_retry":
+                    data = message.data if isinstance(message.data, dict) else {}
+                    cat = str(data.get("error") or "").strip()
+                    if cat:
+                        api_retry_error = cat
+                        audit_log.append(job_id, "api_retry", error=cat,
+                                         attempt=data.get("attempt"))
+
                 # Typed rate-limit signal — the CLI emits these on status
                 # transitions; "rejected" means the current window is spent.
                 if isinstance(message, RateLimitEvent):
@@ -1769,10 +1858,14 @@ async def _run_in_process(
                     detected = quota.detect_from_rate_limit(info)
                     if detected is not None:
                         reset_at = detected if isinstance(detected, datetime) else None
+                        # A3: only a reset time the vendor event carried is
+                        # labelled "vendor"; a rejected status without
+                        # `resets_at` falls back to the estimated window.
                         raise quota.QuotaExhausted(
                             reset_at,
                             reason=f"rate limit rejected "
                                    f"(window={getattr(info, 'rate_limit_type', '?')})",
+                            source="vendor" if reset_at is not None else "estimated",
                         )
                     continue
 
@@ -1782,24 +1875,29 @@ async def _run_in_process(
                     detected = quota.detect_quota_error(str(err))
                     if detected is not None:
                         reset_at = detected if isinstance(detected, datetime) else None
-                        raise quota.QuotaExhausted(reset_at, reason=str(err)[:500])
+                        raise quota.QuotaExhausted(reset_at, reason=str(err)[:500],
+                                                   source="estimated")
 
                 await _handle_message(job_id, message, final_text_chunks)
 
                 if isinstance(message, ResultMessage):
-                    usage = getattr(message, "usage", {}) or {}
-                    if message.is_error:
-                        err_text = (message.result or "") or "; ".join(
-                            getattr(message, "errors", None) or [])
+                    capture = capture_result_message(message, api_retry_error=api_retry_error)
+                    usage = capture.usage
+                    if capture.is_error:
+                        err_text = capture.result_text or "; ".join(capture.errors)
                         detected = quota.detect_quota_error(err_text)
                         if detected is not None:
                             reset_at = detected if isinstance(detected, datetime) else None
-                            raise quota.QuotaExhausted(reset_at, reason=err_text[:500])
+                            raise quota.QuotaExhausted(reset_at, reason=err_text[:500],
+                                                       source="estimated")
                         # Fail loudly when the session errored AND produced no
                         # usable text (parity with the removed container lane).
+                        # The api_retry category rides in the text so
+                        # terminal_reason_for_exception maps it (B2).
                         if not final_text_chunks:
                             raise RuntimeError(
-                                f"session error ({message.subtype}): "
+                                f"session error ({capture.subtype}"
+                                f"{f'; api_retry {api_retry_error}' if api_retry_error else ''}): "
                                 f"{err_text[:500] or 'no output'}"
                             )
 
@@ -1822,7 +1920,31 @@ async def _run_in_process(
                 f"{summary_text[:300]}"
             )
 
-        return summary_text, usage
+        # An enforcement signal is never an unknown model id: if the vendor
+        # said account_on_hold / oauth_org_not_allowed / billing_error, the
+        # session is that, and escalating to another model would burn the
+        # escalation ladder against a suspended account (spec §2.4). Fail
+        # with the category so terminal_reason_for_exception maps it. Phase 1
+        # records the reason (A5's failed-job DM is the signal); the lane
+        # hold and the provider_enforcement notice are Phase 3.
+        if API_RETRY_TO_TERMINAL.get((api_retry_error or "").lower()) in ENFORCEMENT_CATEGORIES:
+            raise RuntimeError(f"session error (api_retry {api_retry_error}): "
+                               f"vendor enforcement — no retry")
+
+        # Silent-empty-success trap (spec §2.4 / claude-anthropic.md §7): the
+        # pinned CLI can return a 'success' with no text, zero usage and zero
+        # API time for an id it does not know. Typed check beside the banner
+        # regex above; fails the job so escalation (a known-good model)
+        # engages instead of recording a completed no-op. Anthropic lane
+        # only — the Codex executor already refuses "no turn.completed".
+        violation = served_model_violation(capture, options.model or "",
+                                           final_text=summary_text)
+        if violation:
+            audit_log.append(job_id, "job_result_rejected", reason="unrecognized_model",
+                             detail=violation, requested_model=options.model)
+            raise RuntimeError(f"unrecognized_model: silent empty success — {violation}")
+
+        return summary_text, usage, capture
     finally:
         _running_sessions.pop(job_id, None)
 
