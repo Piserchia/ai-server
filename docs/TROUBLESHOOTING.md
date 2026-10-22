@@ -427,16 +427,14 @@ Automated stuck-job recovery (`_stuck_task_recovery_loop`) was planned for Phase
 # Bot alive?
 bash scripts/run.sh status
 
-# Did it subscribe to jobs:done:*?
-grep "post_init\|done_listener" volumes/logs/bot.log | tail -10
+# Is the outbox listener alive and draining? (A6, 2026-10-21)
+grep "outbox" volumes/logs/bot.log | tail -10
 
-# Is the mapping intact?
-# (It's in-process; if the bot restarted since the job was submitted, the mapping is lost.)
+# Is there a notifications row for the job, and what happened to it?
+psql assistant -c "SELECT id, notice_kind, status, attempts, last_error, sent_at FROM notifications WHERE subject_id = '<job_id>' ORDER BY created_at DESC;"
 ```
 
-**Fix**: if the bot restarted, the `_job_to_chat` mapping is gone. This is a known Phase 1 limitation. Workaround: check the job via `/status <prefix>` in Telegram, or via the dashboard.
-
-Phase 2+ should probably persist this mapping in Redis with a TTL. Open item — track in a `docs/OPEN_ISSUES.md` entry when it matters.
+**Fix**: since Observability Phase 1 (A5/A6, 2026-10-21) the runner writes a `notifications` row for every completion/failure DM and the bot's `_outbox_listener` delivers it on a `notify:outbox` nudge or its 30 s poll — a bot restart no longer loses the DM, and the row's `status` says what happened (full checklist: "no completion/failure DM" at the end of this file). The in-process `_job_to_chat` map only matters with `NOTIFY_OUTBOX=0`: there the legacy `jobs:done` renderer is the sender, a restart between submit and finish loses the mapping, and the workaround is `/status <prefix>` in Telegram or the dashboard.
 
 ---
 
@@ -446,6 +444,7 @@ Phase 2+ should probably persist this mapping in Redis with a TTL. Open item —
 ```bash
 redis-cli get quota:paused_until   # if set, we're paused
 redis-cli get quota:last_reason    # why we think we're paused
+redis-cli get quota:last_source    # "vendor" = a RateLimitEvent carried the reset time; "estimated" = heuristic/default window (A3)
 
 # Find the job that triggered the pause
 grep "quota exhausted" volumes/logs/runner.log | tail -5
@@ -3163,3 +3162,205 @@ drop this entry. Plan §6 (T10 residual) tracks it.
 This is exactly the GOTCHAS.md pattern but for system-level failures. If the
 issue is scoped to one module, append to that module's `.context/modules/<x>/skills/GOTCHAS.md`
 instead.
+
+## Symptom: no completion/failure DM for a job, or a task card never arrives — the `notifications` outbox checklist (2026-10-21)
+
+### Diagnostic
+
+```bash
+# 1. Which mode is the bot in? The switch is the bot's (D-P1-10); unset = on (default True since A6).
+grep -E '^NOTIFY_OUTBOX=' .env || echo "NOTIFY_OUTBOX unset -> outbox on"
+grep "outbox" volumes/logs/bot.log | tail -5
+
+# 2. Was a row written at all? The runner writes one on every job terminal and every task card.
+psql assistant -c "SELECT id, notice_kind, status, attempts, last_error, next_attempt_at, sent_at, target FROM notifications WHERE subject_id = '<job_or_task_id>' ORDER BY created_at DESC;"
+grep -E '"kind": "notice_(queued|sent|failed)"' volumes/audit_log/<job_id>.jsonl
+
+# 3. Are pending rows piling up? (bot down or the listener dead)
+psql assistant -c "SELECT status, count(*), min(created_at) FROM notifications GROUP BY 1 ORDER BY 1;"
+
+# 4. Out-of-band alerts (healthcheck-all.sh / schedule-monitor.sh) write their row as sent/failed, never pending.
+tail -20 volumes/logs/healthcheck.log volumes/logs/schedule-monitor.log
+```
+
+### Root cause
+
+Read the row's `status`:
+
+- **no row** — the runner's `enqueue_notice` insert failed (`notice_queued` absent from the job's audit log; the runner log has the SQL error) or the card was not eligible (`should_notify_job`: `_`-prefixed kinds never DM; a completion DMs only when the job has no task and its `origin_channel` is telegram/web/cli — task completions go through the task card instead).
+- **`pending` and ageing** — the bot is down or its listener died; the poll is 30 s.
+- **`sending` older than 5 min** — a drainer died mid-send; `release_stuck_sending()` runs at bot start and before every drain (≤ 30 s after the 5-min lease expires; `python -m src.notify drain` does it too), so the row is re-sent (at-least-once: a kill between the Telegram call and `mark_sent` yields one duplicate DM).
+- **no row, and the sender was an OLD-code runner during a deploy window** — `server-deploy` kickstarts the bot first and the runner ~20 s after the deploy session ends; on the deploy that turned `NOTIFY_OUTBOX` on, every card the old runner published in that window (the deploy's own completion card included) went to the legacy channels the new bot ignores. Expected once; `/status <prefix>` has the summary.
+- **`failed`, `attempts = 5`** — Telegram rejected it five times; `last_error` is token-free by construction. A 400 usually means a bad `target` chat or a 4096-char overflow.
+- **`skipped`, `last_error = legacy_mode`** — the switch was OFF: the legacy `jobs:done` / `tasks:notify` renderer was responsible, and that one keys on the in-process `_job_to_chat` map (lost on a bot restart) or the task's `chat_id`.
+- **`sent`, nothing on the phone** — look at `target`: telegram-born jobs DM their origin chat, everything else (web, cli, scheduler, system) the owner's first `TELEGRAM_ALLOWED_CHAT_IDS` entry.
+
+### Fix
+
+```bash
+# bot down / listener dead — pending rows drain on the next poll (<= 30 s)
+launchctl kickstart -k gui/$(id -u)/com.assistant.bot
+# manual drain without the bot (project root, venv python; mirrors the bot's legacy_mode)
+python -m src.notify drain
+
+# failed at max attempts — fix the cause, then re-arm the row
+psql assistant -c "UPDATE notifications SET status = 'pending', attempts = 0, next_attempt_at = NULL WHERE id = '<id>';"
+```
+
+Switch off on purpose (`NOTIFY_OUTBOX=0`): job/task rows are `skipped` by design and only the ops kinds (`ops_alert`, `quota_paused`/`quota_resumed`, `schedule_deferred`, …) are delivered by the listener. Flip it back and kickstart the **bot only** — the runner never reads it.
+
+Out-of-band alerts never depend on the bot: `notify_send` / `send_dm` → `"$VENV_PY" -m src.notify send` (direct HTTP + a `sent`/`failed` row) → raw-curl fallback. A `WARN … alerts fall back to curl` line in `healthcheck.log` means the curl path ran and no history row exists: check that `pipenv --venv` resolves from the project root (or that the timer plist exports `VENV_PY`).
+
+### Prevention
+
+`tests/test_notify_bot.py::TestDrainOutbox::test_pending_rows_survive_listener_restart` pins the poll; `tests/test_notify_runner_hooks.py` pins that the runner always writes the row; `tests/test_scripts_syntax.py` pins the alerters' notify-first order and the `pipenv run` ban under launchd.
+
+## Symptom: an Anthropic job fails with `unrecognized_model: silent empty success` (terminal_reason `unrecognized_model`, audit kind `job_result_rejected`) — 2026-10-21
+
+### Diagnostic
+
+```bash
+psql assistant -c "SELECT id, resolved_model, model_served, terminal_reason, input_tokens, output_tokens, num_turns, duration_api_ms FROM jobs WHERE id = '<job_id>';"
+grep -E '"kind": "(job_result_rejected|api_retry|job_failed)"' volumes/audit_log/<job_id>.jsonl
+# the ResultMessage the session saw: usage / model_usage / result text
+grep -E '"kind": "job_completed"' volumes/audit_log/<job_id>.jsonl | tail -1
+```
+
+### Root cause
+
+B3's `served_model_violation` (`src/runner/result_capture.py`) rejects a `ResultMessage` whose `model_usage` does not contain the requested family **and** whose body is the silent-empty signature: no result text, all-zero usage, zero API time. The SDK produces that shape when the CLI accepted the request but never served a model — an unrecognised or retired model id (the Haiku 4.5 retirement class), a bare alias the CLI could not resolve, or an API path that returned nothing. Before B3 that job was recorded `completed` with an empty result; now it fails with `terminal_reason="unrecognized_model"` and the `job_result_rejected{reason, detail, requested_model}` audit record. All-zero usage WITH real text (a short chat answer) is **not** rejected, and a bare alias such as `sonnet` is accepted inside the served id.
+
+### Fix
+
+```bash
+# 1. Is the requested id still real? (registry first, then the vendor doc)
+grep -n '<model_id>' registry/models.yml docs/research/llm-landscape-2026-09/claude-anthropic.md
+# 2. If a skill pins a retired id, re-pin it (scripts/lint_docs.py check_model_pins) and relaunch the job.
+# 3. If the id is current and model_usage was empty, re-run once; a repeat is a vendor-side outage —
+#    check the api_retry records and `rate_limit_status` in the same audit log, then /status.
+```
+
+### Prevention
+
+`tests/test_result_capture.py::TestServedModel` pins the rejection and its two "not rejected" shapes (`test_zero_usage_with_text_and_api_duration_is_ok`, `test_bare_alias_request_is_not_rejected`); `check_model_pins` in the lint gate keeps skill pins on live ids.
+
+## Symptom: a Monday DM "cost-reconcile: 5-minute cache writes present — possible usage-credit overflow" (or "weekly run failed / did NOT run") — 2026-10-21
+
+### Diagnostic
+
+```bash
+tail -60 volumes/logs/cost-reconcile.log          # the two window blocks, computed-vs-SDK, the DB leg, the seed, `run rc=`
+launchctl list | grep cost-reconcile              # the timer exists (install-launchd.sh installs it; Mon 07:30)
+# re-run by hand from the project root with the venv python (never `pipenv run` under launchd; by hand it is fine).
+# No `--seed-lane-budgets` here on purpose: from the dev checkout its bare form resolves under settings.server_root,
+# which is PRODUCTION's volumes/ tree — pass an explicit PATH if you need the seed from dev.
+PIPENV_DONT_LOAD_ENV=1 SERVER_ROOT="$PWD" pipenv run python scripts/cost-reconcile.py --windows 30,7 --db
+```
+
+### Root cause
+
+`scripts/cost-reconcile.py` exits **1** when any window's `cw_5m` total is non-zero: a 5-minute cache write on this account means the prompt-cache TTL dropped from 1 h to 5 m, which is the usage-credits (metered spend) signature of spec §2.8 — the subscription writes 100 % of cache at the 1-h TTL. The wrapper turns that exit code into the DM, and **rc=1 is reserved for it**: the CLI catches a failing `--db` leg (Postgres down, DSN wrong, a pre-008 schema if the deploy order slipped) and any unexpected exception and exits **3** with a `DB leg failed: <ExcType>: <msg>` / `cost-reconcile failed: …` line plus the traceback on stderr (= the log), so a DB outage is never DM'd as "check claude.ai billing". "weekly run failed (rc=N)" is that rc=3, or rc=2 (the audit dir does not exist); "did NOT run" means no usable venv python was found (`FATAL` line in the log).
+
+### Fix
+
+```bash
+# rc=1: check claude.ai billing / usage credits BEFORE anything else; then find the 5-m jobs:
+grep -l '"ephemeral_5m_input_tokens": [1-9]' volumes/audit_log/*.jsonl | head
+# rc=3 (the --db leg / an unexpected crash): grep 'failed:' volumes/logs/cost-reconcile.log, then run the --db leg by hand (above).
+# rc=2: the audit dir does not exist — check SERVER_ROOT / --audit-dir.
+# FATAL: `pipenv --venv` must resolve from the project root, or export VENV_PY in the timer plist.
+```
+
+A computed-vs-SDK divergence (the `delta` / `implied cw $/M` columns) is a **finding, not a failure** — it is recorded in the re-cut plan's §8 with the implied rate and is never "fixed" by changing `pricing.py` to match the CLI.
+
+### Prevention
+
+`tests/test_pricing.py::TestCli` pins the exit codes and the JSON shape; `tests/test_scripts_syntax.py` pins the timer's interval, the wrapper's argv, the cd-first venv resolution and the notify-first alert path.
+
+## Symptom: `backup.log` says `offsite SKIP` / `seal SKIP` / `atlas dump SKIP`, or `scripts/restore-drill.sh` prints `WARN` lines (or `FAIL`) — 2026-10-21
+
+### Diagnostic
+
+```bash
+tail -12 volumes/logs/backup.log                 # one line per step: atlas dump, sealed secrets, offsite, prune, backup
+ls -lt volumes/backups | head -5                 # backup-<date>.tar.gz nightly + atlas-<date>.dump (up to 8 kept)
+rclone listremotes                               # must print `r2:` for the off-site leg
+ls -l ~/.config/ai-server/backup-seal.key        # must exist, mode 600, for the seal leg
+bash scripts/restore-drill.sh                    # on PROD only (dev's volumes/backups is empty); PASS/WARN/FAIL per leg
+```
+
+### Root cause
+
+Each `SKIP` / `WARN` is an owner step from `docs/runbooks/2026-10-21-phase1-ops-hygiene.md` not done yet, by design never fatal (C1, D-P1-6): `offsite SKIP (rclone or r2: remote not configured)` = no `rclone` remote named `r2` (runbook §2; prod had zero remotes on 2026-10-21, 100 nightly SKIPs); `seal SKIP (no key at …)` = no seal key (§3) — the tarball then carries no `secrets.tar.enc`, and the drill prints `WARN no sealed secrets in this backup`; `WARN sealed bundle present but no seal key` = the backup ran with a key the drill cannot see (`BACKUP_SEAL_KEY`, or a different `$HOME`); `atlas dump SKIP (no atlas database)` = `pg_database` has no `atlas` row on this cluster; `WARN sealed secrets PARTIAL (missing: …)` = a source (`env`, `atlas.env`, `cloudflared`) was unreadable when the backup ran — the bundle was still sealed with what was found (the drill then prints `WARN sealed bundle lacks …`; fix `ATLAS_ENV` / `~/.cloudflared`); the drill's `WARN atlas dump absent` = no `atlas-*.dump` in `volumes/backups` yet (first night after the deploy, or the dump is older than 7 days and the nightly has been failing — check for `WARN atlas dump failed`). A drill `FAIL` is real: `FAIL assistant restore` (the `db.sql` will not load or has 0 `jobs` rows), `FAIL atlas restore` (the `-Fc` dump will not `pg_restore`), `FAIL cannot unseal` (a present key is the wrong one — the bundle was sealed with another key), `FAIL no backup tarball`.
+
+### Fix
+
+```bash
+# offsite SKIP → runbook §2 (bucket + token + `rclone config` remote `r2`), then:
+bash scripts/backup.sh && tail -4 volumes/logs/backup.log      # offsite OK + offsite prune OK
+# seal SKIP → runbook §3 (seal key + password-manager copy), then the same backup run → `sealed secrets OK`
+# drill WARN → re-run after §2/§3; drill FAIL → read the leg's line, fix, re-run:
+BACKUP_SEAL_KEY=~/.config/ai-server/backup-seal.key bash scripts/restore-drill.sh
+# the drill's throwaway DBs are dropped on exit; if one survives a kill -9:
+dropdb --if-exists restore_drill_assistant; dropdb --if-exists restore_drill_atlas
+```
+
+### Prevention
+
+`tests/test_scripts_syntax.py` pins the backup script's dump/seal/retention lines and drives `restore-drill.sh` end to end with fake pg tools (`TestRestoreDrill`); the runbook's §9 table says which measurement goes where. `server-upkeep` still alerts when the newest remote object is > 48 h old — once the `r2` remote exists, that alert is the off-site watchdog.
+
+## Symptom: a schedule row stops running and the owner gets `⏸ <name> deferred — <path>/.env lacks <KEY>; defers until provisioned` — schedule deferred (provisioning_gap), 2026-10-21
+
+### Diagnostic
+
+```bash
+# the row's own stream (a SUBDIRECTORY — never under volumes/audit_log/<job_id>.jsonl)
+tail -5 "volumes/audit_log/schedules/$(psql assistant -Atc "SELECT id FROM schedules WHERE name='<name>'").jsonl"
+grep -h '"kind": "schedule_deferred"' volumes/audit_log/schedules/*.jsonl | tail      # fleet-wide
+psql assistant -c "SELECT name, job_payload->'env_required', last_run_at, next_run_at FROM schedules WHERE name='<name>';"
+redis-cli KEYS 'schedule:gap_notified:*'          # the one-DM-per-project-per-day claims
+```
+
+`/status` in Telegram lists every row deferred at its latest slot
+(`⏸ deferred: <name> (provisioning_gap: KEY)`); the Sunday adherence summary
+shows it as `DEFERRED`, not `DARK`; `schedule-monitor.sh` counts the last 24 h.
+
+### Root cause
+
+The scheduler's D1 pre-check (`src/runner/main.py` `_tick_schedules`, spec
+§8.3): the names in the project manifest's `env_required` ∪ the row's
+`job_payload.env_required` (D-P1-7) were checked against the project's
+**canonical** `.env` — the file `provision_env_files` copies from, i.e.
+`resolve_delivery_cwd(..., is_deploy=False) / <delivery.env_files or .env>`;
+for atlas (dev-repo topology) that is `~/Documents/repos/atlas/.env`, NOT
+`projects/atlas/.env` — and at least one declared name was absent. The row
+ran no session (nothing to burn); `last_run_at`/`next_run_at` advanced so it
+re-checks at its next slot; one `schedule_deferred` record per deferral and
+one DM per project per UTC day. Names only: the pre-check never reads a
+value. `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
+and any `ANTHROPIC_*` can never cause a deferral (INV-3 — atlas's manifest
+declares `ANTHROPIC_API_KEY` and its `.env` correctly lacks it).
+
+Known today (2026-10-21): the four `atlas-swing-supervise-*` /
+`atlas-swing-trade-*` rows declare `TRADIER_SANDBOX_TOKEN`
+(`scripts/seed-schedules.sh`) and the atlas `.env` does not have it — they
+defer by design until the owner provisions the token (re-cut plan §7).
+**pickem**: its manifest declares two names that are present today, so its
+rows run; if a future `.env` change drops one, pickem rows start deferring —
+intended, and the DM names the file and the key.
+
+### Fix
+
+Provision the key (add `KEY=...` to the named `.env`; the next slot runs —
+nothing to restart, no row to touch), or remove the name from the manifest's
+`env_required` (an atlas-repo change, never an INV-4 server patch) /
+`job_payload.env_required` (`scripts/seed-schedules.sh` + re-seed). A
+deferral is not a failure: no `jobs` row exists, nothing to retry.
+
+### Prevention
+
+Declare only names the skill actually needs; `.env` edits on the canonical
+checkout are the owner's — `scripts/backup.sh` seals that file nightly.
+Fail-open rules (`tests/test_provisioning_gap.py`): no project, no/invalid
+manifest, an unreadable `.env` or an empty list never defer a row — the ONLY
+trigger is a positively declared name that the file positively lacks.
