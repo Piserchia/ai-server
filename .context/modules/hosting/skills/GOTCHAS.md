@@ -91,3 +91,7 @@ http://www.chrispiserchia.com {
 **Root cause**: macOS Transparency/Consent/Control gates `~/Documents/`, `~/Desktop/`, `~/Downloads/` behind Full Disk Access.
 
 **Fix**: Server must live in `~/Library/Application Support/ai-server`, not `~/Documents/`.
+
+## 2026-10-22 — `psql` with no database name fails on this host
+
+There is no database named after the OS user, so any `psql -tAc "…"` without `-d <db>` (or a positional dbname) fails with `FATAL: database "alfredbot.ai.butler" does not exist` — silently, when stderr is discarded. Probes against the catalog use `psql -d postgres -tAc …`; `psql -l` works only because it connects to `postgres` by itself. Found when the first nightly `backup.sh` under Phase 1 reported "no atlas database".

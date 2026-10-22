@@ -432,7 +432,10 @@ def test_backup_dumps_atlas_and_seals_secrets():
     # the database exists, never fatal, size logged.
     # one query, no `psql -lqt | … | grep -q` pipeline (pipefail + grep -q
     # SIGPIPE hazard — whole-tier review 2026-10-22)
-    assert "SELECT 1 FROM pg_database WHERE datname = 'atlas'" in src
+    # ... and it names the maintenance database: a bare `psql -tAc` connects
+    # to a database named after the OS user, which this host does not have
+    # (first nightly run under C1 logged "atlas dump SKIP (no atlas database)").
+    assert "psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = 'atlas'\"" in src
     assert "psql -lqt" not in src
     assert 'pg_dump -Fc atlas > "$BACKUP_DIR/atlas-$STAMP.dump"' in src
     assert "atlas dump OK" in src and "WARN atlas dump failed" in src

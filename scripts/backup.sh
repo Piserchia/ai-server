@@ -36,7 +36,10 @@ trap 'rm -rf "$TMP" "${SEAL_TMP:-}"' EXIT
 pg_dump assistant > "$TMP/db.sql"
 # One query, no pipeline: a `psql -l | … | grep -q` chain under pipefail can report
 # "no atlas database" on SIGPIPE when grep exits early.
-if [[ "$(psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'atlas'" 2>/dev/null)" == "1" ]]; then
+# `-d postgres`: with no database named, psql connects to one named after the
+# OS user, which does not exist on this host — the probe then answered "no
+# atlas database" on the first nightly run (2026-10-22) while atlas is 5.9 GB.
+if [[ "$(psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'atlas'" 2>/dev/null)" == "1" ]]; then
     if pg_dump -Fc atlas > "$BACKUP_DIR/atlas-$STAMP.dump" 2>>"$LOG"; then
         echo "$(date -u +%FT%TZ) atlas dump OK ($(du -h "$ATLAS_DUMP" | cut -f1)) $ATLAS_DUMP" >> "$LOG"
     else
