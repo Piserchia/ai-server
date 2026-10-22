@@ -70,6 +70,7 @@ Defined as named constants in `src/db.py`, not inline strings:
 - `CHANNEL_JOB_DONE = "jobs:done"` → per-job: `"jobs:done:<id>"`
 - `CHANNEL_JOB_CANCEL = "jobs:cancel"`
 - `KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"` / `KEY_QUOTA_LAST_REASON = "quota:last_reason"` — the GLOBAL (= Anthropic) pause pair (INV-12)
+- `KEY_QUOTA_LAST_SOURCE = "quota:last_source"` — `"vendor"` when the global pause's reset time came from a `RateLimitEvent`, else `"estimated"` (A3, 2026-10-21); written/deleted with the pair, never for a provider lane
 - `KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"` → `quota:provider:<p>:paused_until` / `:last_reason` — one pair per non-Anthropic provider lane (T6, 2026-10-21); never written for `anthropic`
 
 ## Audit log

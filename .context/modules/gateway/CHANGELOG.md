@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A3: the quota_paused DM names the reset time's source
+
+**Agent task**: Observability Phase 1 re-cut plan A3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 7 Step 3b).
+**Files changed**:
+- `src/gateway/telegram_bot.py` — pure `quota_paused_text(reset_at, reason, source) -> str` renders `⏸ Queue paused (subscription quota).\nReset at HH:MM UTC (vendor|estimated).\nReason: <reason[:200]>`; the label is `vendor` ONLY when `reset_at` is a datetime AND `source == "vendor"` (no time → `Reset at unknown (estimated)`, any other source value → `estimated`). `_quota_notifier` renders the body once per state change via `quota_paused_text(reset_at, reason, await quota.last_source())` and sends the same text to every allowed chat (the resume text is unchanged: `▶️ Queue resumed.`).
+- `.context/modules/gateway/CONTEXT.md` (behaviour note + the `src.runner.quota` dependency line).
+
+**Why**: spec §2.8 / review #4 — the owner must be able to tell a vendor-reported reset time from the runner's default window. Every other surface that names a reset time (`/status`, `/api/quota`, the runner log) is left as is and still never says "vendor".
+
+**Side effects**: the pause DM gains a parenthesised label on its second line; the first and third lines are byte-identical to before. `quota.last_source()` is one extra Redis GET per pause transition (not per tick).
+
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A2: every launch persists its origin (`jobs.origin_*`, `tasks.origin_*`); the bot stamps `tasks.awaiting_since`
 
 **Agent task**: Observability Phase 1 re-cut plan A2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4 + Task 3b's `JobOut` fields).

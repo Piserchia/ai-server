@@ -59,6 +59,9 @@ KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"     # GLOBAL (= Anthropic) pause: 
                                                   # absent. The job loop stops BLPOPing while set;
                                                   # the job that hit it is LPUSHed to the FRONT (INV-12)
 KEY_QUOTA_LAST_REASON = "quota:last_reason"       # text of the signal that set the global pause
+KEY_QUOTA_LAST_SOURCE = "quota:last_source"       # A3 (2026-10-21): "vendor" when the global
+                                                  # pause's reset time came from a RateLimitEvent,
+                                                  # else "estimated"; deleted with the pair
 KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"     # per-provider lane pause (T6, 2026-10-21):
                                                   # + "<provider>:paused_until" / "<provider>:last_reason".
                                                   # Never written for anthropic (that is the global pair).

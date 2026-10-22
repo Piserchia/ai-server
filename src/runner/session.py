@@ -1769,10 +1769,14 @@ async def _run_in_process(
                     detected = quota.detect_from_rate_limit(info)
                     if detected is not None:
                         reset_at = detected if isinstance(detected, datetime) else None
+                        # A3: only a reset time the vendor event carried is
+                        # labelled "vendor"; a rejected status without
+                        # `resets_at` falls back to the estimated window.
                         raise quota.QuotaExhausted(
                             reset_at,
                             reason=f"rate limit rejected "
                                    f"(window={getattr(info, 'rate_limit_type', '?')})",
+                            source="vendor" if reset_at is not None else "estimated",
                         )
                     continue
 
@@ -1782,7 +1786,8 @@ async def _run_in_process(
                     detected = quota.detect_quota_error(str(err))
                     if detected is not None:
                         reset_at = detected if isinstance(detected, datetime) else None
-                        raise quota.QuotaExhausted(reset_at, reason=str(err)[:500])
+                        raise quota.QuotaExhausted(reset_at, reason=str(err)[:500],
+                                                   source="estimated")
 
                 await _handle_message(job_id, message, final_text_chunks)
 
@@ -1794,7 +1799,8 @@ async def _run_in_process(
                         detected = quota.detect_quota_error(err_text)
                         if detected is not None:
                             reset_at = detected if isinstance(detected, datetime) else None
-                            raise quota.QuotaExhausted(reset_at, reason=err_text[:500])
+                            raise quota.QuotaExhausted(reset_at, reason=err_text[:500],
+                                                       source="estimated")
                         # Fail loudly when the session errored AND produced no
                         # usable text (parity with the removed container lane).
                         if not final_text_chunks:

@@ -1243,6 +1243,17 @@ async def _done_listener(app: Application) -> None:
 # ── Quota-pause notifier ────────────────────────────────────────────────────
 
 
+def quota_paused_text(reset_at: datetime | None, reason: str, source: str) -> str:
+    """The quota_paused DM body (pure). A reset time is labelled 'vendor' ONLY
+    when a RateLimitEvent carried it (spec §2.8: the SDK emits resets_at on
+    status transitions, never a 5h/7d gauge); the text heuristic and the
+    default pause window are 'estimated'. No time → always 'estimated'."""
+    label = "vendor" if (reset_at is not None and source == "vendor") else "estimated"
+    reset_str = reset_at.strftime("%H:%M UTC") if reset_at else "unknown"
+    return (f"⏸ Queue paused (subscription quota).\nReset at {reset_str} ({label}).\n"
+            f"Reason: {reason[:200]}")
+
+
 async def _quota_notifier(app: Application) -> None:
     """Periodically check quota state; Telegram once on pause and once on resume."""
     last_state: tuple[bool, str] = (False, "")
@@ -1253,19 +1264,12 @@ async def _quota_notifier(app: Application) -> None:
             state = (paused, reason[:80])
             if state == last_state:
                 continue
-            # State changed
+            # State changed — render once (A3: the reset line names its source)
+            text = (quota_paused_text(reset_at, reason, await quota.last_source())
+                    if paused else "▶️ Queue resumed.")
             for chat_id in settings.allowed_chat_ids:
                 try:
-                    if paused:
-                        reset_str = reset_at.strftime("%H:%M UTC") if reset_at else "unknown"
-                        await app.bot.send_message(
-                            chat_id,
-                            f"⏸ Queue paused (subscription quota).\n"
-                            f"Reset at {reset_str}.\n"
-                            f"Reason: {reason[:200]}",
-                        )
-                    else:
-                        await app.bot.send_message(chat_id, "▶️ Queue resumed.")
+                    await app.bot.send_message(chat_id, text)
                 except Exception:
                     logger.exception("failed to send quota notification")
             last_state = state

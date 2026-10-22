@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A3: the quota reset time is labelled by its source (`vendor` vs `estimated`)
+
+**Agent task**: Observability Phase 1 re-cut plan A3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 7 Step 3b).
+**Files changed**:
+- `src/runner/quota.py` — `QuotaExhausted(reset_at, reason="", source="estimated")` stores `.source`; `pause_queue(reset_at, reason, *, source="estimated")` writes `quota:last_source` (`KEY_QUOTA_LAST_SOURCE`) beside the global pair (a value outside `SOURCES = ("vendor", "estimated")` is stored as `estimated` — the label may never over-claim); new `last_source() -> str` (`"estimated"` when unset or unknown); `clear()` deletes the three keys; `_read_pause` gains keyword-only `extra_keys=()` which the global `is_paused()` passes as `(quota:last_source,)` so BOTH the auto-resume and the corrupt-value branch forget the label with the pair. The per-provider lanes (`pause_provider` for a non-Anthropic name) never write the label; `pause_provider("anthropic", …)` delegates to `pause_queue` and so records `estimated`.
+- `src/runner/session.py` — the three `raise quota.QuotaExhausted(...)` nodes in `_run_in_process` carry `source=`: the `RateLimitEvent` branch `"vendor" if reset_at is not None else "estimated"` (a rejected status without `resets_at` is the default window, not a vendor figure); the two text-heuristic raises (`message.error`, `ResultMessage.is_error`) `"estimated"`. Pinned by the AST test `test_three_raise_sites_are_labelled` (exactly three raises, exactly one may say vendor) — **B3 rewrites this loop and must keep the three nodes and their kwargs**.
+- `src/runner/main.py` — the `QuotaExhausted` handler in `_process_job` passes `source=getattr(exc, "source", "estimated")` to `pause_queue` (the `getattr` keeps a test double without `.source` on the estimated path).
+- `tests/test_quota.py` (+18: `TestPauseSource` 10, `TestSessionPassesVendorOnlyForRateLimitEvent` 2, `TestMainPassesTheSourceToThePause` 2 through the existing `main_harness`, `TestQuotaNoticeLabelsTheSource` 4).
+- `.context/modules/runner/CONTEXT.md` (public interface line for `quota`).
+
+**Why**: spec §2.8 Claude row / review #4 — the SDK emits `resets_at` only on status transitions and nothing else in Phase 1 is a vendor gauge, so a window figure may be called vendor-sourced only when a vendor event carried it. The runner is the only writer of the label; the bot reads it (gateway CHANGELOG, same date).
+
+**Side effects**: `pause_queue`'s positional signature is unchanged (the new kwarg is keyword-only with the legacy default), so every caller/monkeypatch that passes two positionals keeps working. One more Redis key under `quota:` (string, no TTL — it is deleted with the pair). The runner log line `quota queue pause set` gains `source=`. No audit kind or field changes.
+
+**Gotchas discovered**: `_read_pause` is shared by the global and per-provider scopes, so "the auto-resume branch deletes it" had to be expressed as an opt-in key list rather than an unconditional delete — otherwise a Codex lane expiring would delete the Anthropic label out from under a live global pause.
+
 ## 2026-10-21 — A2: `queue_wait_ms` at the running flip; `tasks.awaiting_since` has one writer; typed `terminal_reason` on every Anthropic-lane failure; a cancelled job is never escalated; scheduler rows carry origin
 
 **Agent task**: Observability Phase 1 re-cut plan A2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4 + the 3b half of Task 3).

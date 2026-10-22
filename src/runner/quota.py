@@ -33,6 +33,7 @@ import structlog
 from src.config import settings
 from src.db import (
     KEY_QUOTA_LAST_REASON,
+    KEY_QUOTA_LAST_SOURCE,
     KEY_QUOTA_PAUSED_UNTIL,
     KEY_QUOTA_PROVIDER_PREFIX,
     redis,
@@ -43,6 +44,14 @@ logger = structlog.get_logger(__name__)
 # Redis keys — the GLOBAL (Anthropic) pair; see src/db.py for the contract.
 _KEY_PAUSED_UNTIL = KEY_QUOTA_PAUSED_UNTIL   # ISO timestamp, or missing if not paused
 _KEY_LAST_REASON = KEY_QUOTA_LAST_REASON
+_KEY_LAST_SOURCE = KEY_QUOTA_LAST_SOURCE   # "vendor" | "estimated"; lives and dies with the pair
+
+#: Where a pause's reset time came from (A3, spec §2.8 / review #4).
+#: "vendor" ONLY when a RateLimitEvent carried `resets_at`; the text
+#: heuristic and the default pause window are "estimated".
+SOURCE_VENDOR = "vendor"
+SOURCE_ESTIMATED = "estimated"
+SOURCES = (SOURCE_VENDOR, SOURCE_ESTIMATED)
 
 #: The provider the global pair belongs to. Equal to
 #: `registry.models.DEFAULT_PROVIDER` (asserted in tests; not imported so
@@ -67,9 +76,15 @@ def provider_keys(provider: str) -> tuple[str, str]:
 
 
 class QuotaExhausted(Exception):
-    def __init__(self, reset_at: datetime | None, reason: str = ""):
+    """Raised by the Anthropic session when the subscription window is spent.
+    `source` says where `reset_at` came from: "vendor" only when a
+    RateLimitEvent carried it, else "estimated" (A3)."""
+
+    def __init__(self, reset_at: datetime | None, reason: str = "",
+                 source: str = SOURCE_ESTIMATED):
         self.reset_at = reset_at
         self.reason = reason
+        self.source = source
         super().__init__(f"Claude subscription quota exhausted; reset at {reset_at}")
 
 
@@ -146,22 +161,23 @@ async def _write_pause(until_key: str, reason_key: str, reset_at: datetime | Non
 
 
 async def _read_pause(until_key: str, reason_key: str,
-                      scope: str) -> tuple[bool, datetime | None, str]:
+                      scope: str, *, extra_keys: tuple[str, ...] = ()) -> tuple[bool, datetime | None, str]:
     """`(paused_now, reset_at, reason)` for one key pair; an expired or
-    corrupt value is deleted and reported as not paused (auto-resume)."""
+    corrupt value is deleted and reported as not paused (auto-resume).
+    `extra_keys` are deleted with the pair (the global scope's source label)."""
     raw = await redis.get(until_key)
     if not raw:
         return (False, None, "")
     try:
         reset_at = datetime.fromisoformat(raw)
     except ValueError:
-        await redis.delete(until_key)
+        await redis.delete(until_key, *extra_keys)
         return (False, None, "")
     if datetime.now(timezone.utc) >= reset_at:
         # Auto-resume
         await redis.delete(until_key)
         reason = await redis.get(reason_key) or ""
-        await redis.delete(reason_key)
+        await redis.delete(reason_key, *extra_keys)
         logger.info("quota pause expired — resuming", scope=scope, prior_reason=reason[:120])
         return (False, None, "")
     reason = await redis.get(reason_key) or ""
@@ -171,21 +187,37 @@ async def _read_pause(until_key: str, reason_key: str,
 # ── Global (Anthropic) pause — INV-12 semantics, unchanged ──────────────────
 
 
-async def pause_queue(reset_at: datetime | None, reason: str) -> datetime:
-    """Record a pause. If reset_at is None, uses settings.quota_pause_minutes."""
+async def pause_queue(reset_at: datetime | None, reason: str, *,
+                      source: str = SOURCE_ESTIMATED) -> datetime:
+    """Record a pause. If reset_at is None, uses settings.quota_pause_minutes.
+    `source` labels where `reset_at` came from ("vendor" only when a
+    RateLimitEvent carried it); stored beside the pair as `quota:last_source`.
+    An unknown label is stored as "estimated" — the DM may never over-claim."""
+    if source not in SOURCES:
+        source = SOURCE_ESTIMATED
     reset_at = await _write_pause(_KEY_PAUSED_UNTIL, _KEY_LAST_REASON, reset_at, reason)
-    logger.warning("quota queue pause set", reset_at=reset_at.isoformat(), reason=reason[:120])
+    await redis.set(_KEY_LAST_SOURCE, source)
+    logger.warning("quota queue pause set", reset_at=reset_at.isoformat(), reason=reason[:120],
+                   source=source)
     return reset_at
 
 
 async def is_paused() -> tuple[bool, datetime | None, str]:
-    """Return (paused_now, reset_at, reason)."""
-    return await _read_pause(_KEY_PAUSED_UNTIL, _KEY_LAST_REASON, GLOBAL_PROVIDER)
+    """Return (paused_now, reset_at, reason). Auto-resume forgets the source too."""
+    return await _read_pause(_KEY_PAUSED_UNTIL, _KEY_LAST_REASON, GLOBAL_PROVIDER,
+                             extra_keys=(_KEY_LAST_SOURCE,))
+
+
+async def last_source() -> str:
+    """'vendor' when the current global pause's reset time came from a
+    RateLimitEvent, else 'estimated' (also when nothing is paused)."""
+    raw = await redis.get(_KEY_LAST_SOURCE)
+    return raw if raw in SOURCES else SOURCE_ESTIMATED
 
 
 async def clear() -> None:
     """Manual /resume command."""
-    await redis.delete(_KEY_PAUSED_UNTIL, _KEY_LAST_REASON)
+    await redis.delete(_KEY_PAUSED_UNTIL, _KEY_LAST_REASON, _KEY_LAST_SOURCE)
 
 
 # ── Per-provider lane pause (T6) ────────────────────────────────────────────

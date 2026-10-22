@@ -603,7 +603,8 @@ async def _process_job(job_id: uuid.UUID) -> None:
 
     except quota.QuotaExhausted as exc:
         # Pause the queue, requeue this job at the front so it retries after reset
-        await quota.pause_queue(exc.reset_at, exc.reason)
+        await quota.pause_queue(exc.reset_at, exc.reason,
+                                source=getattr(exc, "source", "estimated"))
         await redis.lpush(QUEUE_JOBS, str(job_id))
         async with session_scope() as s:
             await s.execute(

@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A3: `KEY_QUOTA_LAST_SOURCE` beside the global quota pair
+
+**Agent task**: Observability Phase 1 re-cut plan A3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `src/db.py` — `KEY_QUOTA_LAST_SOURCE = "quota:last_source"`: `"vendor"` when the global (Anthropic) pause's reset time came from a `RateLimitEvent`, else `"estimated"`. Written by `quota.pause_queue`, read by `quota.last_source`, deleted with the pair (`clear`, auto-resume, corrupt value). Never written for a per-provider lane.
+- `.context/modules/db/CONTEXT.md` (Redis keys list).
+
+**Why**: the label is state the bot reads out-of-process, so it lives next to `quota:paused_until` / `quota:last_reason` under the same contract.
+
+**Side effects**: none for existing readers; one more key under the `quota:` namespace.
+
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A1: migration 008 (Observability Phase 1 columns, task origin, notifications outbox) + alembic applied-history manifest
 
 **Agent task**: Observability Phase 1 re-cut plan A1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 1 + Task 18(a), re-cut against the slice's 007).

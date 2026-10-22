@@ -101,12 +101,12 @@ pre-007 rows) and the jobs table has a Provider column.
 - Telegram bot subscribes to `jobs:done:*` channels; DMs the submitter when
   their job completes. The submitter→chat_id mapping is held in memory (lost
   on bot restart — acceptable tradeoff vs adding a Redis key per job).
-- Quota state change (pause/resume) → periodic notifier DMs all allowed chat IDs.
+- Quota state change (pause/resume) → periodic notifier DMs all allowed chat IDs. The pause DM body is the pure `quota_paused_text(reset_at, reason, source)`; its reset line says `(vendor)` only when a `RateLimitEvent` carried the time (`quota.last_source()`), else `(estimated)` (A3, 2026-10-21).
 
 ## Dependencies
 
 - `src.config`, `src.db`, `src.models`, `src.audit_log`
-- `src.runner.quota` (is_paused, clear; T6: is_provider_paused, paused_providers, clear_provider — `GET /api/quota` adds `providers: {<p>: {paused, reset_at, reason}}` for non-Anthropic registry providers; `/status` lists each paused lane; `/resume <provider>` lifts one lane, bare `/resume` the global pause)
+- `src.runner.quota` (is_paused, clear, last_source (A3); T6: is_provider_paused, paused_providers, clear_provider — `GET /api/quota` adds `providers: {<p>: {paused, reset_at, reason}}` for non-Anthropic registry providers; `/status` lists each paused lane; `/resume <provider>` lifts one lane, bare `/resume` the global pause)
 - `fastapi`, `python-telegram-bot`
 
 ## Testing

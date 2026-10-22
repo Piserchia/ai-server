@@ -446,6 +446,7 @@ Phase 2+ should probably persist this mapping in Redis with a TTL. Open item —
 ```bash
 redis-cli get quota:paused_until   # if set, we're paused
 redis-cli get quota:last_reason    # why we think we're paused
+redis-cli get quota:last_source    # "vendor" = a RateLimitEvent carried the reset time; "estimated" = heuristic/default window (A3)
 
 # Find the job that triggered the pause
 grep "quota exhausted" volumes/logs/runner.log | tail -5
