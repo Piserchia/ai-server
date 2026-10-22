@@ -1,3 +1,30 @@
+## 2026-10-22 — GOTCHA: fence-saturation map + mining sources exhausted (from scout job 4b7c76c9)
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — three entries inserted
+  before the F-08 NAV-source scope entry: (1) THE FENCE IS NOW SUBSTANTIVELY
+  SATURATED — per-family map (F-01..F-08) showing every free-data-reachable
+  expression of seven of eight open families is lesson-terminated and the
+  two remaining open routes are the two owner-parked ideas A-0014/A-0011;
+  (2) all four mining sources are exhausted as of [E-0191] with cheap
+  one-shot checks (INBOX unchecked = 0, [E-0109] HARVESTED by terminal F-06
+  trio, every §2c slot DECLINED/DENIED with numbers, other verticals'
+  ledgers hold zero alpha-lab offers); (3) the scout CANNOT write its own
+  GOTCHAS — read-only guard profile INV-20 denies file mutation, so every
+  entry reaches disk via a follow-up `server-patch`.
+**Why**: the 2026-10-22 morning scout run swept the whole fence and filed
+  nothing; the sweep established that seven of eight open families have no
+  free-data-reachable expression a lesson does not prune and that the two
+  routes lessons left open (F-03 small-cap, F-05 monthly) are the two
+  owner-parked ideas A-0014/A-0011 — so the entries save every future run a
+  ~30-minute re-derivation and, critically, mark the [E-0109]
+  offered-but-unfiled observation as HARVESTED (the trap that previously
+  cost four `alpha-research` jobs). The alpha-scout session (job
+  4b7c76c9-d7ab-42a8-a051-bcbe0b924e9f) measured these findings under the
+  read-only guard profile and cannot write them itself; this server-patch is
+  the sanctioned route.
+**Side effects**: None — documentation-only change.
+
 ## 2026-10-19 — GOTCHA: 3 inbox-count learnings (recipe correction from job 98081219)
 
 **Files created**: none
