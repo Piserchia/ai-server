@@ -1,5 +1,15 @@
 # Changelog: hosting
 
+## 2026-10-22 — backup.sh: the atlas probe names the maintenance database
+
+**Agent task**: Observability Phase 1 post-deploy verification (plan `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §8, C1 accept).
+**Files changed**:
+- `scripts/backup.sh` — the atlas existence probe is `psql -d postgres -tAc …`; the whole-tier review's M11 rewrite (`psql -tAc …`, no database) connected to a database named after the OS user, which does not exist here, so the first nightly run (2026-10-22 04:00 local) logged `atlas dump SKIP (no atlas database)` while atlas is 5.9 GB. `tests/test_scripts_syntax.py` pins the `-d postgres` form.
+
+**Why**: the probe must behave identically under launchd (no PGDATABASE) and in a shell.
+
+**Side effects**: none beyond the dump now running nightly; the first atlas `-Fc` size is recorded in the plan's §8 after the next run.
+
 ## 2026-10-21 — C1: `backup.sh` atlas dump + sealed secrets + 60-d retention, `restore-drill.sh`, installer timer env block + `timers-only` + plist escaping, the Phase-1 ops-hygiene runbook
 
 **Agent task**: Observability Phase 1 re-cut plan C1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 13 "13a" Steps 3/4/6 + Task 12 Step 5's installer piece, adapted by symbol with the C1 Deltas and D-P1-6).
