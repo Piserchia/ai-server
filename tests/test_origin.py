@@ -261,7 +261,19 @@ class TestAwaitingSince:
 
         monkeypatch.setattr(runner_main, "_set_task_status", _record)
         monkeypatch.setattr(plans_mod, "fail_dependents_of", AsyncMock(return_value=0))
+        # main.py binds `redis` at import (`from src.db import redis`), so the
+        # patch must land on runner_main, not src.db — patching only src.db
+        # let this test publish to the LIVE Redis and, through the dual-write
+        # `_notify_task`, insert a real notifications row on prod (2026-10-22;
+        # tests/conftest.py now dead-ends both DSNs as well).
         monkeypatch.setattr(db_mod, "redis", SimpleNamespace(publish=AsyncMock()))
+        monkeypatch.setattr(runner_main, "redis", SimpleNamespace(publish=AsyncMock()))
+        monkeypatch.setattr(runner_main, "enqueue_notice", AsyncMock(return_value=None))
+
+        async def _no_target(task_id):
+            return None, None
+
+        monkeypatch.setattr(runner_main, "_task_target", _no_target)
         tid = _uuid.uuid4()
         job = SimpleNamespace(id=_uuid.uuid4(), task_id=tid, error_message="boom",
                               payload={"escalation_level": 3})

@@ -2,6 +2,18 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-22 — Post-deploy follow-ups: tests can no longer reach the live DB/Redis; weekly-allowance window filter
+
+**Agent task**: Observability Phase 1 Tier A post-deploy verification (plan `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §8).
+**Files changed**:
+- `tests/conftest.py` — before any `src` import, `POSTGRES_DSN`/`REDIS_URL` are pointed at a closed port (`127.0.0.1:1`) unless `AI_SERVER_RUN_DB_TESTS=1`: `pydantic-settings` reads `.env` from the CWD even under `PIPENV_DONT_LOAD_ENV=1`, the dev `.env` points at PRODUCTION, and the prod deploy gate runs with prod's `.env` exported. On 2026-10-22 03:40 local the deploy gate's pytest run drove the dual-write `_notify_task` from `tests/test_origin.py::test_level_3_escalation_fails_the_task_through_set_task_status` with only `src.db.redis` patched (main.py binds its own `redis` at import), inserted a real `notifications` row ("Last error: boom") on prod, and the new bot delivered it (Telegram message 940). The row was deleted by hand; `tests/test_no_live_services.py` pins the guard.
+- `tests/test_origin.py` — that test now patches `runner_main.redis`, `enqueue_notice` and `_task_target`.
+- `src/runner/pricing.py` — `weekly_allowance` keeps only the readings of the CURRENT fixed window (those sharing the newest `resets_at`); the first prod `cost-reconcile` run scored 09-25 readings against the 10-16 window opening and printed "allowance ≈ $0/week". `tests/test_pricing.py::test_readings_from_an_earlier_window_are_excluded`.
+
+**Why**: a test with a side effect on production is a blocker-class defect regardless of how it passed; the guard makes the class impossible rather than fixing one instance.
+
+**Side effects**: any test that silently relied on the live Postgres/Redis now fails with a connection error on `127.0.0.1:1` — exactly one did. The opt-in migration test is exempt (it needs the real DSN prefix for its throwaway database).
+
 ## 2026-10-22 — Whole-tier review applied: a recovered `api_retry` on a success is `ok`; anchored exception heuristics; no empty `choices` card
 
 **Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").
