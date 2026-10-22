@@ -35,6 +35,8 @@ session picking up work on this repo, or a human returning after a break.
 | [`PHASE_5_PLAN.md`](PHASE_5_PLAN.md) | Operations (upkeep, backup, server-patch, review-and-improve) | **SHIPPED** — historical reference |
 | [`PHASE_6_PLAN.md`](PHASE_6_PLAN.md) | Polish (research-deep, ideas, update-poll, restore, SSE, /schedule) | **SHIPPED** — historical reference |
 | [`assistant-system-design.md`](assistant-system-design.md) | Original full system design doc | Background reading; phase plans supersede it where they disagree |
+| [`superpowers/specs/2026-10-21-moneymachine-company-design.md`](superpowers/specs/2026-10-21-moneymachine-company-design.md) | **BUILT 2026-10-21, armed phase 0** — MoneyMachine Company: a bucketed, self-running agent company (`etf` / `longterm` / `shortterm` / `crypto`; one shared six-officer hierarchy as nine `mm-*` skills; arbitrage-first hypothesis families; `mmcore` deterministic spine + keyless adapters; three schedule rows; weekly owner memo). Reports only — INV-22: no order path. Owner decisions D0–D8 in §16 | Before any MoneyMachine work; owner review of §16 |
+| [`superpowers/plans/2026-10-21-moneymachine-company.md`](superpowers/plans/2026-10-21-moneymachine-company.md) | Implementation plan for the spec above (15 tasks across the `moneymachine` repo and ai-server: constitution, `mmcore`, adapters, four buckets, nine skills, division charter, registries, schedules, gates, provisioning) | Executing the MoneyMachine build |
 
 ## Recommended reading order for a new Claude Code session
 

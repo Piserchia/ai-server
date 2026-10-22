@@ -80,7 +80,7 @@ done
 ```
 
 ### 3. Diff → drift classes
-- **hosted-not-registered** — a `projects/<slug>/` exists but no `projects` DB row / registry row.
+- **hosted-not-registered** — a `projects/<slug>/` exists but no `projects` DB row / registry row (exempt: a manifest with `delivery.deployable: false` and no `port` — see Gotchas).
 - **registered-not-hosted** — a DB/registry row with no directory or route behind it.
 - **deployed-not-monitored** — a non-static project healthcheck-all skips (no top-level `port`+`healthcheck`; nested `services[]` healthchecks do NOT rescue it — the skip fires first), or `last_healthy_at` NULL/stale.
 - **served-not-supervised** — a Caddy route with no launchd plist, or vice versa.
@@ -139,3 +139,9 @@ report a clean seam — do not invent findings.
   this skill's description of a script's semantics disagrees with the script
   itself, the script wins — read it.
 - Bash is read-only here: `SELECT`/`git log`/`grep`/`ls`/`curl` a healthcheck only.
+- **A runner-scoping manifest is not drift.** A manifest with
+  `delivery.deployable: false` and no `port` whose PROJECTS_REGISTRY row says
+  not hosted (e.g. `moneymachine`) is a runner-scoping manifest, not
+  hosted-not-registered drift — never route it to `new-project` register-only
+  (that mode would publish the directory). Treat it like the content
+  projects: present on disk, no `projects` DB row, no Caddy.
