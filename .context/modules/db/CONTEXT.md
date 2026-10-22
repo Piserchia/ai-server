@@ -69,6 +69,7 @@ Defined as named constants in `src/db.py`, not inline strings:
 - `CHANNEL_JOB_STREAM = "jobs:stream"` → per-job: `"jobs:stream:<id>"`
 - `CHANNEL_JOB_DONE = "jobs:done"` → per-job: `"jobs:done:<id>"`
 - `CHANNEL_JOB_CANCEL = "jobs:cancel"`
+- `CHANNEL_NOTIFY_OUTBOX = "notify:outbox"` — body = `notifications.id`; a nudge only (A4, 2026-10-21): the bot's outbox listener also polls every 30 s, so a lost publish delays nothing past that. Producers never read `settings.notify_outbox` (D-P1-10) — the bot and `python -m src.notify drain` do
 - `KEY_QUOTA_PAUSED_UNTIL = "quota:paused_until"` / `KEY_QUOTA_LAST_REASON = "quota:last_reason"` — the GLOBAL (= Anthropic) pause pair (INV-12)
 - `KEY_QUOTA_LAST_SOURCE = "quota:last_source"` — `"vendor"` when the global pause's reset time came from a `RateLimitEvent`, else `"estimated"` (A3, 2026-10-21); written/deleted with the pair, never for a provider lane
 - `KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"` → `quota:provider:<p>:paused_until` / `:last_reason` — one pair per non-Anthropic provider lane (T6, 2026-10-21); never written for `anthropic`
@@ -84,7 +85,10 @@ the cross-vendor writer slice (2026-10-21) added `provider_selected`,
 `merge_gate_refused` (reasons `denied_path` | `unparseable_path` (+`lines`) | `diff_too_large` (+`max_chars`) — the last two added by the 2026-10-21 whole-branch review), `workspace_published` (T5), `executor_slot_wait` (whole-branch review: §4f slot wait, `executor`/`waited_s`/`concurrency`) and additive fields on
 `job_started`/`job_completed` (`provider`, …), `tool_result` (`exit_code`,
 `output`), `workspace_created` (`base_sha`), `post_review_skipped`
-(`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`). Kinds are
+(`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`); the
+notify outbox (A4, 2026-10-21) added `notice_queued`, `notice_sent`,
+`notice_failed` on job-subject notices (`src/notify/outbox.py`; JSONL only,
+not mirrored to `jobs:stream`). Kinds are
 a parsing contract (C14): add, never rename or reshape. The full list with
 field shapes is the `src/audit_log.py` docstring.
 

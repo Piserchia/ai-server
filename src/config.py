@@ -96,6 +96,18 @@ class Settings(BaseSettings):
     # Max evaluate→fix rounds before falling back to awaiting_user.
     max_eval_rounds: int = 2
 
+    # Notifications outbox (Observability Phase 1, A4; spec §3/§9). The
+    # runner ALWAYS publishes the legacy tasks:notify / jobs:done channels
+    # AND always writes `notifications` rows (D-P1-10: producers never read
+    # this switch). The switch is the BOT's: on, its outbox listener delivers
+    # every row and the legacy renderers are gated off; off (`NOTIFY_OUTBOX=0`,
+    # the kill switch), the legacy renderers send job/task DMs and the
+    # listener delivers only the ops kinds that have no legacy path. Read
+    # ONLY by src/gateway/telegram_bot.py and src/notify/__main__.py (drain
+    # mirrors the bot's legacy_mode). Ships False; A6 flips it to True in the
+    # commit that lands the listener.
+    notify_outbox: bool = False
+
     # Domain (Phase 3+)
     server_domain: str = ""
 

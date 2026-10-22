@@ -35,6 +35,9 @@ Kinds used (keep this list honest — update when adding new kinds):
 - post_review_skipped: {"kind", "ts", "job_id", "reason", ...}  # reason ∈ stale_head|no_diff|timeout|pre_push_gate (+ "provider", "verdict" for pre_push_gate — the gate is the review of record on non-Anthropic lanes, T5)
 - job_requeued_for_quota: {"kind", "ts", "job_id", "reason"}  # the job hit a rate limit and was LPUSHed to the FRONT (INV-12); + "provider", "until" when a NON-Anthropic executor's `rate_limited` paused that provider's lane (additive, T6 2026-10-21; absent on the Anthropic/global path)
 - job_held:         {"kind", "ts", "job_id", "provider", "reason", "until"}  # the job's provider lane is paused: NOT run, requeued at the TAIL after a bounded delay (plan §4g); written once per (job, pause window), not on every cycle (T6)
+- notice_queued:    {"kind", "ts", "job_id", "notice_id", "notice_kind"}  # an outbox row for this job was inserted `pending` (src/notify/outbox.py; A4 2026-10-21). job_id = the notice's subject; JSONL only, not mirrored to jobs:stream
+- notice_sent:      {"kind", "ts", "job_id", "notice_id", "external_ref"}  # the row was delivered (external_ref = Telegram message_id) — by the bot listener, `drain`, or a direct `python -m src.notify send` (A4)
+- notice_failed:    {"kind", "ts", "job_id", "notice_id", "error"}  # the row reached its terminal `failed` (MAX_ATTEMPTS, or a direct send that failed); error is token-free (TelegramSendError) and ≤ 200 chars (A4)
 
 Also writes a human-readable `<job_id>.summary.md` at job completion (written by the runner,
 not here — it's the last turn the assistant produces).

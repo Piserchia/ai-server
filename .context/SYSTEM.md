@@ -28,7 +28,7 @@
 |---|---|---|---|
 | `src/config.py` | Pydantic settings; no API key, subscription auth | — | Everything |
 | `src/db.py` | Async SQLAlchemy + Redis | config | Everything that touches state |
-| `src/models.py` | ORM: Job, Schedule, Project, Proposal | — | db, runner, gateway, registry |
+| `src/models.py` | ORM: Job, Schedule, Project, Proposal, Task, TaskTurn, Notification | — | db, runner, gateway, registry, notify |
 | `src/audit_log.py` | JSONL-per-job audit log | config | runner, gateway |
 | `src/runner/session.py` | Skill/isolation resolution + one session per job: in-process SDK for Anthropic (guard hooks + subagents wired here), else dispatch to the registry-named executor module (T4, 2026-10-21; fail-closed lane rules before the clone) | config, db, models, audit_log, registry.skills, registry.models, runner.quota, runner.router, runner.llm_router, runner.workspaces, runner.guards, runner.agents, runner.delivery, runner.mcp_projects, runner.mcp_dispatch, runner.executors.codex_cli, runner.review, context.module_graph | runner.main |
 | `src/runner/main.py` | Job loop + scheduler + cancel listener + writeback/escalation/plan-DAG/evaluate hooks + deploy-authority gate | config, db, models, runner.session, runner.quota, runner.writeback, runner.review, runner.events, runner.learning, runner.audit_index, runner.router, runner.plans, runner.delivery, gateway.jobs, registry.skills, registry.models, audit_log | (entry point) |
@@ -55,9 +55,12 @@
 | `src/registry/skills.py` | Load SKILL.md frontmatter (`SkillConfig.provider`/`.model_id` derived via registry.models) | config, registry.models | runner.session |
 | `src/registry/models.py` | Provider/model registry from repo-root `models.yml`: `[provider/]model_id` parse + alias resolution, fail-closed `ProviderRefused` (T1, 2026-10-21) | config | registry.skills, runner.session, runner.main, gateway.web, gateway.telegram_bot |
 | `src/registry/manifest.py` | Load project manifest.yml | config | register-project.sh, healthcheck |
-| `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers | db, models | web, telegram_bot |
+| `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers + `ORIGIN_CHANNELS` / `origin_from_created_by` | db, models | web, telegram_bot, notify.outbox |
 | `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes (+ per-project delivery contract on /api/projects) | config, db, models, gateway.jobs, audit_log, registry.models, runner.retrospective, runner.delivery | (entry point) |
 | `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards | config, db, models, gateway.jobs, audit_log, registry.models, runner.router, runner.plans | (entry point) |
+| `src/notify/outbox.py` | Notifications outbox (A4, 2026-10-21): `Notice`, kind vocabulary, card eligibility (`should_notify_job`), `lane_label`, job/task/ops builders, `enqueue_notice` (always inserts — the switch is the bot's), claim/lease, retry math, `mark_*` | db, models, audit_log, gateway.jobs | runner.main (A5), gateway.telegram_bot (A6), notify.__main__ |
+| `src/notify/telegram.py` | Telegram renderer (4096 / 64-byte / 8-button limits, no parse_mode), `send_via_bot`, `send_via_http`, `TelegramSendError` (token chokepoint) | — | gateway.telegram_bot (A6), notify.__main__ |
+| `src/notify/__main__.py` | `python -m src.notify send` / `drain` for launchd alerters, the canary and ops; mirrors the bot's legacy_mode | config, notify.outbox, notify.telegram | scripts/healthcheck-all.sh + schedule-monitor.sh (A7), credential canary (E10) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
 | `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
 | `scripts/schedule-monitor.sh` | Schedule-adherence watchdog: DARK/NEVER_RAN/STUCK/FAILURE_STREAK findings → owner DM; writes `volumes/telemetry/schedule_adherence.json` | runner.schedule_adherence, curl | — (daily 07:15 launchd timer, out-of-band) |

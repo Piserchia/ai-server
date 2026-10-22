@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A4: `CHANNEL_NOTIFY_OUTBOX` + `settings.notify_outbox` (ships False)
+
+**Agent task**: Observability Phase 1 re-cut plan A4 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `src/db.py` — `CHANNEL_NOTIFY_OUTBOX = "notify:outbox"` (pub: body = `notifications.id`; the bot's outbox listener drains on the nudge + a 30 s poll).
+- `src/config.py` — `notify_outbox: bool = False` (env `NOTIFY_OUTBOX`), after `max_eval_rounds`. The switch is the BOT's (D-P1-10): read only by `src/gateway/telegram_bot.py` and `src/notify/__main__.py`; the runner and `src/notify/outbox.py` never read it (producers always write the row). A6 flips the default to True in the commit that lands the listener.
+- `.context/modules/db/CONTEXT.md` — the channel in the Redis constants list; `notice_queued` / `notice_sent` / `notice_failed` in the audit-kind list.
+
+**Why**: the outbox row is the durable record; the channel is only a nudge (delivery survives a lost publish via the poll). The switch lives in `config` because both the bot and the CLI read it out-of-process.
+
+**Side effects**: none until A5 (producers) and A6 (listener) land.
+
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A3: `KEY_QUOTA_LAST_SOURCE` beside the global quota pair
 
 **Agent task**: Observability Phase 1 re-cut plan A3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
