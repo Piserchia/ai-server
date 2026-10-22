@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A7 (docs only): Notifications section names `[Details]` / `/status` and the out-of-band alert path; `_job_to_chat` gotcha closed
+
+**Agent task**: Observability Phase 1 re-cut plan A7, Docs-1 bucket (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `.context/modules/gateway/CONTEXT.md` — "Notifications back to user" gains the owner-facing summary (which cards carry `[Details]`, `/status <prefix>` as the pull side, the launchd alerters' `python -m src.notify send` path that bypasses the bot) and points at the new TROUBLESHOOTING checklist.
+- `.context/modules/gateway/skills/GOTCHAS.md` — the 2026-04-20 "done-listener mapping lost on bot restart" gotcha is closed by the outbox (A5/A6); the entry says in which mode it still applies.
+
+**Why**: the A6 section described the mechanism; the owner-felt behaviour and the diagnosis path were the plan's Docs-1 bucket, assigned to A7.
+
+**Side effects**: none (no code).
+
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A6: the bot delivers the notifications outbox; `[Details]`; `format_job_status`; quota notices via the outbox; `NOTIFY_OUTBOX` on
 
 **Agent task**: Observability Phase 1 re-cut plan A6 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 7 minus Step 3b).

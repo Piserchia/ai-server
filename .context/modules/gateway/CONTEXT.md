@@ -133,6 +133,16 @@ pre-007 rows) and the jobs table has a Provider column.
   DMs the submitter when their job completes, only while the outbox is off;
   the in-memory submitter→chat_id entry (`_job_to_chat`) is popped either
   way. Legacy `tasks:notify` renderer (`_task_notifier`): same gate.
+- What the owner sees (A5–A7): every job card (completion for
+  telegram/web/cli-born jobs without a task, every failure incl. scheduled
+  ones) carries a `[Details]` button (`jd:<job8>` → `format_job_status`,
+  plain text), and `/status <prefix>` is the pull-side equivalent at any
+  time. Out-of-band alerts from the launchd scripts (`healthcheck-all.sh`,
+  `schedule-monitor.sh`) do NOT pass through this listener: they go
+  `python -m src.notify send` (direct HTTP + a `sent`/`failed` row) with a
+  raw-curl fallback, so they arrive even when the bot is the thing that is
+  down. Diagnosis of a missing DM: `docs/TROUBLESHOOTING.md` "no
+  completion/failure DM".
 - Quota state change (pause/resume) → `_quota_notifier` writes a
   `quota_paused` / `quota_resumed` OPS row per lane (the global Anthropic
   pause and every enabled non-Anthropic lane via `quota.is_provider_paused`),

@@ -427,16 +427,14 @@ Automated stuck-job recovery (`_stuck_task_recovery_loop`) was planned for Phase
 # Bot alive?
 bash scripts/run.sh status
 
-# Did it subscribe to jobs:done:*?
-grep "post_init\|done_listener" volumes/logs/bot.log | tail -10
+# Is the outbox listener alive and draining? (A6, 2026-10-21)
+grep "outbox" volumes/logs/bot.log | tail -10
 
-# Is the mapping intact?
-# (It's in-process; if the bot restarted since the job was submitted, the mapping is lost.)
+# Is there a notifications row for the job, and what happened to it?
+psql assistant -c "SELECT id, notice_kind, status, attempts, last_error, sent_at FROM notifications WHERE subject_id = '<job_id>' ORDER BY created_at DESC;"
 ```
 
-**Fix**: if the bot restarted, the `_job_to_chat` mapping is gone. This is a known Phase 1 limitation. Workaround: check the job via `/status <prefix>` in Telegram, or via the dashboard.
-
-Phase 2+ should probably persist this mapping in Redis with a TTL. Open item — track in a `docs/OPEN_ISSUES.md` entry when it matters.
+**Fix**: since Observability Phase 1 (A5/A6, 2026-10-21) the runner writes a `notifications` row for every completion/failure DM and the bot's `_outbox_listener` delivers it on a `notify:outbox` nudge or its 30 s poll — a bot restart no longer loses the DM, and the row's `status` says what happened (full checklist: "no completion/failure DM" at the end of this file). The in-process `_job_to_chat` map only matters with `NOTIFY_OUTBOX=0`: there the legacy `jobs:done` renderer is the sender, a restart between submit and finish loses the mapping, and the workaround is `/status <prefix>` in Telegram or the dashboard.
 
 ---
 
@@ -3144,3 +3142,53 @@ drop this entry. Plan §6 (T10 residual) tracks it.
 This is exactly the GOTCHAS.md pattern but for system-level failures. If the
 issue is scoped to one module, append to that module's `.context/modules/<x>/skills/GOTCHAS.md`
 instead.
+
+## Symptom: no completion/failure DM for a job, or a task card never arrives — the `notifications` outbox checklist (2026-10-21)
+
+### Diagnostic
+
+```bash
+# 1. Which mode is the bot in? The switch is the bot's (D-P1-10); unset = on (default True since A6).
+grep -E '^NOTIFY_OUTBOX=' .env || echo "NOTIFY_OUTBOX unset -> outbox on"
+grep "outbox" volumes/logs/bot.log | tail -5
+
+# 2. Was a row written at all? The runner writes one on every job terminal and every task card.
+psql assistant -c "SELECT id, notice_kind, status, attempts, last_error, next_attempt_at, sent_at, target FROM notifications WHERE subject_id = '<job_or_task_id>' ORDER BY created_at DESC;"
+grep -E '"kind": "notice_(queued|sent|failed)"' volumes/audit_log/<job_id>.jsonl
+
+# 3. Are pending rows piling up? (bot down or the listener dead)
+psql assistant -c "SELECT status, count(*), min(created_at) FROM notifications GROUP BY 1 ORDER BY 1;"
+
+# 4. Out-of-band alerts (healthcheck-all.sh / schedule-monitor.sh) write their row as sent/failed, never pending.
+tail -20 volumes/logs/healthcheck.log volumes/logs/schedule-monitor.log
+```
+
+### Root cause
+
+Read the row's `status`:
+
+- **no row** — the runner's `enqueue_notice` insert failed (`notice_queued` absent from the job's audit log; the runner log has the SQL error) or the card was not eligible (`should_notify_job`: `_`-prefixed kinds never DM; a completion DMs only when the job has no task and its `origin_channel` is telegram/web/cli — task completions go through the task card instead).
+- **`pending` and ageing** — the bot is down or its listener died; `release_stuck_sending()` runs at every bot start and the poll is 30 s.
+- **`failed`, `attempts = 5`** — Telegram rejected it five times; `last_error` is token-free by construction. A 400 usually means a bad `target` chat or a 4096-char overflow.
+- **`skipped`, `last_error = legacy_mode`** — the switch was OFF: the legacy `jobs:done` / `tasks:notify` renderer was responsible, and that one keys on the in-process `_job_to_chat` map (lost on a bot restart) or the task's `chat_id`.
+- **`sent`, nothing on the phone** — look at `target`: telegram-born jobs DM their origin chat, everything else (web, cli, scheduler, system) the owner's first `TELEGRAM_ALLOWED_CHAT_IDS` entry.
+
+### Fix
+
+```bash
+# bot down / listener dead — pending rows drain on the next poll (<= 30 s)
+launchctl kickstart -k gui/$(id -u)/com.assistant.bot
+# manual drain without the bot (project root, venv python; mirrors the bot's legacy_mode)
+python -m src.notify drain
+
+# failed at max attempts — fix the cause, then re-arm the row
+psql assistant -c "UPDATE notifications SET status = 'pending', attempts = 0, next_attempt_at = NULL WHERE id = '<id>';"
+```
+
+Switch off on purpose (`NOTIFY_OUTBOX=0`): job/task rows are `skipped` by design and only the ops kinds (`ops_alert`, `quota_paused`/`quota_resumed`, `schedule_deferred`, …) are delivered by the listener. Flip it back and kickstart the **bot only** — the runner never reads it.
+
+Out-of-band alerts never depend on the bot: `notify_send` / `send_dm` → `"$VENV_PY" -m src.notify send` (direct HTTP + a `sent`/`failed` row) → raw-curl fallback. A `WARN … alerts fall back to curl` line in `healthcheck.log` means the curl path ran and no history row exists: check that `pipenv --venv` resolves from the project root (or that the timer plist exports `VENV_PY`).
+
+### Prevention
+
+`tests/test_notify_bot.py::TestDrainOutbox::test_pending_rows_survive_listener_restart` pins the poll; `tests/test_notify_runner_hooks.py` pins that the runner always writes the row; `tests/test_scripts_syntax.py` pins the alerters' notify-first order and the `pipenv run` ban under launchd.

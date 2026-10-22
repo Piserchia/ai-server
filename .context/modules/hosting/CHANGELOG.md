@@ -1,5 +1,20 @@
 # Changelog: hosting
 
+## 2026-10-21 — A7: out-of-band alerters prefer `python -m src.notify send`, curl kept as the fallback; `tests/test_scripts_syntax.py` is born
+
+**Agent task**: Observability Phase 1 re-cut plan A7 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 13 "13b" + the Task 12 `test_scripts_syntax.py` preamble).
+**Files changed**:
+- `scripts/healthcheck-all.sh` — interpreter resolution after `LOG=`: `VENV_PY="${VENV_PY:-}"` (the timer plist's export, when one exists) → `(cd "$PROJECT_DIR" && pipenv --venv)` → pipenv's deterministic `~/.local/share/virtualenvs/<basename>-*` → none, guarded by `(cd "$PROJECT_DIR" && "$VENV_PY" -c 'import src.config')` (both probes in a cd-first subshell: this script never cd's and the editable install is inert under `~/Documents`); an unusable or absent interpreter is a WARN line and the curl path. New `notify_send(kind, text)` = `"$VENV_PY" -m src.notify send --kind <kind> --severity critical --text <text>` from the project root, returning 1 when there is no interpreter or the CLI did not deliver. The runner-down and swing-watchdog alert sites become `if notify_send ops_alert "$msg"; then … elif curl …; then … (curl fallback)`; the `.env` reads and the creds-missing guards stay for the fallback.
+- `scripts/schedule-monitor.sh` — the existing venv block now honours an exported `VENV_PY` first (same §4 order as healthcheck); `send_dm` tries `"$VENV_PY" -m src.notify send --kind ops_alert --severity warn` and falls back to the unchanged curl; new `count_schedule_deferred()` counts `"kind": "schedule_deferred"` records with `ts` inside the last 24 h under `volumes/audit_log/schedules/*.jsonl` (D1's stream; 0 when the directory does not exist yet), logs `schedule_deferred_24h=<n>`, appends a `FINDING deferred: …` line to the findings (so the 12 h-rate-limited DM fires) and `deferred_24h=<n>` to the Sunday summary. The header comment no longer quotes the literal `pipenv run` phrase (the new test greps for it).
+- `tests/test_scripts_syntax.py` (new, 30 collected) — `bash -n` over every `scripts/*.sh`; `TIMER_SCRIPTS = (backup, healthcheck-all, schedule-monitor)` with the `pipenv run` ban and the installer cross-check (`install_timer "<x>" "scripts/<y>"` calls in `install-launchd.sh` must all be listed, so the list cannot drift); the alerter order pins; and fixture-driven runs of `notify_send()` (fake interpreter records argv + cwd; rc 0/1 paths) and `count_schedule_deferred()` (sub-directory only, 24 h window, other kinds ignored).
+- `.context/modules/hosting/CONTEXT.md` — Paths + the two alerter bullets.
+
+**Why**: the alert-history row (spec §3) must exist for out-of-band alerts too, but the out-of-band doctrine (healthcheck-all header, 2026-07-30 and 08-17 incidents) forbids depending on the bot, the runner or Postgres for delivery: `python -m src.notify send` sends over direct HTTP and only then records the row, exits 1 whenever the DM was not delivered, and the raw curl stays behind it. `pipenv run` never appears in a timer script (the 2026-09-14..10-05 rc=127 incident); `codex-canary.sh` is hand-run and excluded.
+
+**Side effects**: none on the probes — every new line is inside the guarded alert paths or before them with `|| true` semantics. `healthcheck.log` gains one `WARN … alerts fall back to curl` line per run on a host with no resolvable venv (none expected on prod: `schedule-monitor` resolves the same way daily). B4 and E10 append their timer scripts to `TIMER_SCRIPTS` in the commit that creates them; D1 is the producer of the records `count_schedule_deferred` reads.
+
+**Gotchas discovered**: `pipenv --venv` must run from the project root (it finds the Pipfile by cwd) — healthcheck-all never cd's, hence the subshell. A bash function extracted by name and sourced into a throwaway shell is a cheap way to test a script's alert path with a fake interpreter without running the probes.
+
 ## 2026-10-05 — schedule-monitor.sh: resolve venv Python directly (watchdog unbroken)
 
 **Files created**: none

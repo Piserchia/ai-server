@@ -60,10 +60,10 @@
 | `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards; delivers the notifications outbox (A6: claim + `notify:outbox` nudge + 30 s poll, `legacy_mode` when `NOTIFY_OUTBOX=0`), `jd:` [Details] button, quota notices as ops rows | config, db, models, gateway.jobs, audit_log, registry.models, runner.router, runner.plans, notify.outbox, notify.telegram | (entry point) |
 | `src/notify/outbox.py` | Notifications outbox (A4, 2026-10-21): `Notice`, kind vocabulary, card eligibility (`should_notify_job`), `lane_label`, job/task/ops builders, `enqueue_notice` (always inserts — the switch is the bot's), claim/lease, retry math, `mark_*` | db, models, audit_log, gateway.jobs | runner.main, gateway.telegram_bot, notify.__main__ |
 | `src/notify/telegram.py` | Telegram renderer (4096 / 64-byte / 8-button limits, no parse_mode), `send_via_bot`, `send_via_http`, `TelegramSendError` (token chokepoint) | — | gateway.telegram_bot, notify.__main__ |
-| `src/notify/__main__.py` | `python -m src.notify send` / `drain` for launchd alerters, the canary and ops; mirrors the bot's legacy_mode | config, notify.outbox, notify.telegram | scripts/healthcheck-all.sh + schedule-monitor.sh (A7), credential canary (E10) |
+| `src/notify/__main__.py` | `python -m src.notify send` / `drain` for launchd alerters, the canary and ops; mirrors the bot's legacy_mode | config, notify.outbox, notify.telegram | scripts/healthcheck-all.sh + schedule-monitor.sh, credential canary (E10) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |
-| `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at` | yq, curl, psql | — |
-| `scripts/schedule-monitor.sh` | Schedule-adherence watchdog: DARK/NEVER_RAN/STUCK/FAILURE_STREAK findings → owner DM; writes `volumes/telemetry/schedule_adherence.json` | runner.schedule_adherence, curl | — (daily 07:15 launchd timer, out-of-band) |
+| `scripts/healthcheck-all.sh` | Probe all projects, update `last_healthy_at`; runner-liveness backstop, swing watchdog, deploy autopilot; alerts via `notify_send` (A7: `"$VENV_PY" -m src.notify send`, curl fallback) | yq, curl, psql, notify.__main__ (via `$VENV_PY`) | — (5-min launchd timer, out-of-band) |
+| `scripts/schedule-monitor.sh` | Schedule-adherence watchdog: DARK/NEVER_RAN/STUCK/FAILURE_STREAK findings + last-24 h `schedule_deferred` count (A7) → owner DM via `send_dm` (notify send, curl fallback); writes `volumes/telemetry/schedule_adherence.json` | runner.schedule_adherence, notify.__main__ (via `$VENV_PY`), curl | — (daily 07:15 launchd timer, out-of-band) |
 | `scripts/backup.sh` | Nightly pg_dump + audit log + log snapshot | psql, tar | — (launchd timer) |
 | `scripts/seed-schedules.sh` | Insert canonical schedules into DB | psql | server-deploy skill (step 3b, every deploy) |
 | `scripts/seed-module-skills.sh` | Ensure every `.context/modules/<x>/` has `skills/{GOTCHAS,PATTERNS,DEBUG}.md` stubs | — | bootstrap.sh + test_doc_lint.py |
@@ -93,8 +93,17 @@ Task lifecycle: task_plan → validate → store → spawn subtask DAG (roots
   EVAL_PASS → task auto-closed, evidence DM'd (Reopen button)
   EVAL_FAIL → fix round (≤ max_eval_rounds) → then awaiting_user
                                                         ↓
-Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
-  question, progress)
+Runner: enqueue_notice → `notifications` row (pending) + PUBLISH notify:outbox
+  — ALWAYS, beside the byte-identical legacy jobs:done / tasks:notify
+  (the switch is the bot's, D-P1-10)
+                                                        ↓
+Bot's _outbox_listener (nudge or 30 s poll): claim → render → send →
+  sent | failed (backoff, 5 attempts); the job card carries [Details].
+  NOTIFY_OUTBOX=0 ⇒ the legacy done_listener / task_notifier send the
+  job/task cards (rows marked skipped) and the ops kinds are still delivered.
+Out-of-band (launchd, no bot/runner dependency): healthcheck-all.sh /
+  schedule-monitor.sh → `python -m src.notify send` (direct HTTP + a
+  sent/failed row) → raw-curl fallback
 ```
 
 ## Conventions

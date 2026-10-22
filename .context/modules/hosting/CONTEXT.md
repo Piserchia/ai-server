@@ -1,6 +1,6 @@
 # Hosting module
 
-**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/backup.sh`, `Caddyfile`, `Caddyfile.d/`
+**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/schedule-monitor.sh`, `scripts/backup.sh`, `scripts/install-launchd.sh`, `Caddyfile`, `Caddyfile.d/`; timer-script invariants are pinned by `tests/test_scripts_syntax.py` (`bash -n`, no `pipenv run` under launchd, `TIMER_SCRIPTS` = every `install_timer` call)
 
 ## Purpose
 
@@ -13,10 +13,21 @@ Multi-project hosting on a single public domain via:
 ## Public interface
 
 - `register-project.sh <slug> [--dry-run]` — add/update a project's hosting config. Reads `projects/<slug>/manifest.yml`, generates Caddy snippet + launchd plist(s) + DB row.
-- `healthcheck-all.sh` — probe all projects (runs on 5-min timer via launchd)
+- `healthcheck-all.sh` — probe all projects (runs on 5-min timer via launchd);
+  also the runner-liveness backstop, the swing watchdog and the deploy
+  autopilot. Its owner alerts go `notify_send` → `"$VENV_PY" -m src.notify
+  send --kind ops_alert --severity critical` (direct Telegram HTTP + a
+  `notifications` row as alert history) and fall back to the raw curl when
+  there is no usable venv python or the CLI did not deliver (A7,
+  2026-10-21). `VENV_PY`: plist export → `pipenv --venv` → virtualenvs glob,
+  guarded by `import src.config` from the project root; never `pipenv run`.
 - `schedule-monitor.sh` — schedule-adherence watchdog (daily 07:15 timer
   `com.assistant.schedule-monitor`; out-of-band — the scheduler must not
-  watchdog itself; new timers require one `install-launchd.sh` run on prod)
+  watchdog itself; new timers require one `install-launchd.sh` run on prod).
+  `send_dm` is notify-first with the curl fallback (severity `warn`), and
+  the run counts the last 24 h of `schedule_deferred` records under
+  `volumes/audit_log/schedules/` (D1's provisioning-gap stream) as a
+  `FINDING deferred:` line + `deferred_24h=<n>` in the Sunday summary (A7).
 - `setup-tunnel.sh` — one-time: create/update Cloudflare named tunnel (interactive, needs browser)
 - `setup-caddy.sh` — one-time: install Caddy + base Caddyfile + launchd service
 - `backup.sh` — nightly (04:00 via `com.assistant.backup`): pg_dump + audit-log/log snapshot → `volumes/backups/backup-<date>.tar.gz`, then off-site replication to Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`. Off-site push is guarded — absent `rclone`/`r2:` remote or a failed upload never fails the local backup. `server-upkeep` alerts if the newest remote object is > 48h old.

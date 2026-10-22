@@ -50,8 +50,17 @@ JSONL audit log on disk.
   (pending | sending | sent | failed | skipped), attempts, last_error,
   next_attempt_at, sent_at, created_at`. Indexes `ix_notifications_status`,
   `ix_notifications_created_at`, partial `ix_notifications_pending` on
-  `(status, created_at) WHERE status = 'pending'`. Written by the runner /
-  CLI (A4–A7), drained by the bot; the table is the alert history.
+  `(status, created_at) WHERE status = 'pending'`. Written by the runner
+  (`enqueue_notice`, always `pending` + a `notify:outbox` nudge — A5) and by
+  `python -m src.notify send` (the launchd alerters `healthcheck-all.sh` /
+  `schedule-monitor.sh` and, later, the canary: direct HTTP first, then the
+  row as `sent` or `failed`, never `pending` — A7); drained by the bot's
+  `_outbox_listener` (A6) or `python -m src.notify drain`. The table is the
+  alert history. `settings.notify_outbox` (`NOTIFY_OUTBOX`, default True
+  since A6) is read by the bot (`legacy_mode = not notify_outbox`) and by
+  `drain` ONLY — the runner, `outbox.py` and the scripts never read it
+  (D-P1-10): with the switch off, job/task rows are marked `skipped`
+  (`last_error = legacy_mode`) and the ops kinds are still delivered.
   Fields: `id`, `proposed_by_job_id` (FK→jobs, CASCADE), `target_file`,
   `change_type` ('default-model'|'context-files'|'frontmatter-tweak'|'doc-update'),
   `rationale`, `proposed_at`, `applied_pr_url`, `applied_at`, `outcome`

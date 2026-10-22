@@ -13,9 +13,11 @@ queryable (`SELECT notice_kind, status, attempts, last_error FROM
 notifications ORDER BY created_at DESC`).
 
 **The switch is the bot's (D-P1-10).** `settings.notify_outbox`
-(`NOTIFY_OUTBOX`, default False until A6 flips it) is read ONLY by
-`src/gateway/telegram_bot.py` and `src/notify/__main__.py`. The runner and
-`outbox.py` never read it: the runner always publishes the legacy
+(`NOTIFY_OUTBOX`, default True since A6) is read ONLY by
+`src/gateway/telegram_bot.py` and `src/notify/__main__.py`. The runner,
+`outbox.py` and the launchd alerter scripts (`scripts/healthcheck-all.sh`,
+`scripts/schedule-monitor.sh` — `python -m src.notify send` first, raw curl
+as the fallback, A7) never read it: the runner always publishes the legacy
 `tasks:notify` / `jobs:done` channels AND always writes the row. Off = the
 legacy renderers send job/task DMs and the listener delivers only
 `OPS_NOTICE_KINDS` (the kinds that have no legacy path); on = the listener

@@ -2,6 +2,18 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A7 (docs only): the launchd alerters are the first `python -m src.notify send` callers
+
+**Agent task**: Observability Phase 1 re-cut plan A7 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `.context/modules/notify/CONTEXT.md` — the switch paragraph states the A6 default (True) and that the alerter scripts never read it; names the two callers of `send` and their curl fallback. No change to `src/notify/`.
+
+**Why**: `__main__.py`'s docstring already described the `send` contract for bash callers (exit 0 only when delivered); the callers now exist (`scripts/healthcheck-all.sh` `notify_send`, `scripts/schedule-monitor.sh` `send_dm`), recorded in the hosting CHANGELOG.
+
+**Side effects**: none.
+
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A4: module created — outbox rows, Telegram renderer with limits, `python -m src.notify send|drain`
 
 **Agent task**: Observability Phase 1 re-cut plan A4 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 5, deltas 1–6 applied).

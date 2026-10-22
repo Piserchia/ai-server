@@ -2,6 +2,18 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A7 (docs only): `notifications` writers/readers and who reads `notify_outbox`
+
+**Agent task**: Observability Phase 1 re-cut plan A7, Docs-1 bucket (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `.context/modules/db/CONTEXT.md` — the `notifications` bullet now names every writer (runner `enqueue_notice` → `pending`; `python -m src.notify send` from the launchd alerters → `sent`/`failed` directly), every drainer, and states that `settings.notify_outbox` is read by the bot and `drain` only (D-P1-10), with the `skipped`/`legacy_mode` semantics.
+
+**Why**: the origin columns and `CHANNEL_NOTIFY_OUTBOX` were already documented by A1/A4; the missing piece was the alert-history contract for rows the bot never touches.
+
+**Side effects**: none (no code).
+
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A6: `settings.notify_outbox` default → True
 
 **Agent task**: Observability Phase 1 re-cut plan A6 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
