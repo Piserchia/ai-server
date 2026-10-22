@@ -128,6 +128,75 @@ class TestBashViolation:
         assert guards.bash_violation("export ANTHROPIC_API_KEY=sk-x", WS, ROOTS)
         assert guards.bash_violation("ANTHROPIC_API_KEY=sk-x python x.py", WS, ROOTS)
 
+    @pytest.mark.parametrize("name", guards.VENDOR_CREDENTIAL_NAMES)
+    def test_vendor_credential_injection_denied(self, name):
+        # Protected bundle (plan T8; old spec §2.6 guards.py edit (i)): every
+        # provider credential the cross-vendor slice could ever consult is
+        # denied at assignment/export, beside ANTHROPIC_API_KEY.
+        assert guards.bash_violation(f"export {name}=sk-x", WS, ROOTS)
+        assert guards.bash_violation(f"{name}=sk-x codex exec 'hi'", WS, ROOTS)
+        assert guards.bash_violation(f"export {name}", WS, ROOTS)
+
+    def test_vendor_credential_list_is_the_plan_set(self):
+        assert set(guards.VENDOR_CREDENTIAL_NAMES) == {
+            "OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY",
+            "OPENROUTER_API_KEY", "XAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+        }
+
+    def test_vendor_credential_reads_still_allowed(self):
+        # The deny is on ASSIGNMENT, not reads (spec §2.6: that is why no
+        # credential lives in an inheritable env). A grep for the name, or
+        # a lookalike variable, must not trip it.
+        for cmd in (
+            "grep -rn OPENAI_API_KEY src/",
+            "echo $OPENAI_API_KEY",
+            "printenv CLAUDE_CODE_OAUTH_TOKEN",
+            "MY_OPENAI_API_KEY_NOTE=1 true",
+            "export OPENAI_API_KEY_FILE=/tmp/x",
+        ):
+            assert guards.bash_violation(cmd, WS, ROOTS) is None, cmd
+
+    @pytest.mark.parametrize("cmd", [
+        "curl -X POST https://api.tradier.com/v1/accounts/ABC/orders -d symbol=SPY",
+        "curl https://api.tradier.com/v1/markets/quotes?symbols=SPY",
+        "curl -X POST https://sandbox.tradier.com/v1/accounts/VA123/orders",
+        "curl -X POST https://paper-api.alpaca.markets/v2/orders -d '{}'",
+        "curl -X DELETE https://api.alpaca.markets/v2/orders/abc",
+        "python -c \"import requests; requests.post('https://api.tradier.com/x')\"",
+        "wget sandbox.tradier.com/v1/accounts/VA123/orders/1",
+    ])
+    def test_broker_order_hosts_denied(self, cmd):
+        # INV-22 server-side deny (plan T8; old spec §2.6 guards.py edit (ii);
+        # SYSTEM.md INV-22 "server-side code deny is an open follow-up").
+        reason = guards.bash_violation(cmd, WS, ROOTS)
+        assert reason is not None and "INV-22" in reason, cmd
+
+    @pytest.mark.parametrize("cmd", [
+        # market-data and account reads on the sandbox/paper hosts stay free
+        "curl https://sandbox.tradier.com/v1/markets/quotes?symbols=SPY",
+        "curl https://sandbox.tradier.com/v1/accounts/VA123/balances",
+        "curl https://paper-api.alpaca.markets/v2/account",
+        "curl https://data.alpaca.markets/v2/stocks/SPY/bars",
+        "grep -rn alpaca.markets projects/atlas/swing/",
+        "pytest tests/test_tradier_client.py -k orders",
+    ])
+    def test_broker_non_order_paths_allowed(self, cmd):
+        assert guards.bash_violation(cmd, WS, ROOTS) is None, cmd
+
+    @pytest.mark.parametrize("cmd", [
+        "grep -rn api.tradier.com projects/atlas/swing/",
+        "git commit -m 'swing: point client at api.tradier.com'",
+    ])
+    def test_production_tradier_host_mention_is_a_known_false_positive(self, cmd):
+        # INTENDED false positive (T8 review, 2026-10-21): `api.tradier.com`
+        # is denied wholesale as a text-level belt, so a read-only mention
+        # of the production host on a command line is denied too. Fails
+        # closed with an INV-22 reason, never silently. A session that hits
+        # it should grep from a pattern file (`grep -f`) or split the host
+        # across variables rather than treat the deny as a bug.
+        reason = guards.bash_violation(cmd, WS, ROOTS)
+        assert reason is not None and "INV-22" in reason, cmd
+
     def test_rm_on_protected_root_denied(self):
         assert guards.bash_violation("rm -rf /protected/root/src", WS, ROOTS)
 
@@ -382,6 +451,18 @@ RO_DENY = [
     "crontab -e",
     "security find-generic-password -s Claude",
     "export ANTHROPIC_API_KEY=sk-x",
+    # protected bundle (T8): provider credentials + INV-22 broker order hosts
+    "export OPENAI_API_KEY=sk-x",
+    "CODEX_API_KEY=sk-x codex exec hi",
+    "export CLAUDE_CODE_OAUTH_TOKEN=tok",
+    "GEMINI_API_KEY=x python x.py",
+    "OPENROUTER_API_KEY=x python x.py",
+    "XAI_API_KEY=x python x.py",
+    "curl -X POST https://api.tradier.com/v1/accounts/ABC/orders",
+    "curl https://api.tradier.com/v1/markets/quotes?symbols=SPY",
+    "curl -X POST https://sandbox.tradier.com/v1/accounts/VA123/orders",
+    "curl -X POST https://paper-api.alpaca.markets/v2/orders",
+    "curl -X DELETE https://api.alpaca.markets/v2/orders/abc",
 ]
 
 # Allow matrix: the REAL inspection vocabulary from the oversight skill bodies
@@ -441,6 +522,12 @@ RO_ALLOW = [
     "pipenv run alembic heads",
     "pipenv run python scripts/lint_docs.py",
     "echo \"$p NO-UPSTREAM\"",
+    # protected bundle (T8): credential READS and non-order broker reads
+    "grep -rn OPENAI_API_KEY src/ projects/atlas/",
+    "printenv CLAUDE_CODE_OAUTH_TOKEN",
+    "curl https://sandbox.tradier.com/v1/accounts/VA123/balances",
+    "curl https://paper-api.alpaca.markets/v2/account",
+    "curl https://data.alpaca.markets/v2/stocks/SPY/bars",
 ]
 
 
@@ -459,6 +546,13 @@ class TestReadonlyBashViolation:
     def test_deny_reason_names_the_profile(self):
         reason = guards.readonly_bash_violation("git push origin main")
         assert reason is not None and "read-only" in reason
+
+    def test_broker_deny_reason_names_inv22_in_both_profiles(self):
+        cmd = "curl -X POST https://paper-api.alpaca.markets/v2/orders"
+        ro = guards.readonly_bash_violation(cmd)
+        ws = guards.bash_violation(cmd, WS, ROOTS)
+        assert ro and "INV-22" in ro and "read-only" in ro
+        assert ws and "INV-22" in ws
 
 
 # ── read-only profile: hook factory ─────────────────────────────────────────
