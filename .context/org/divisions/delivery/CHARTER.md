@@ -32,7 +32,7 @@ project, and keep hosted projects healthy across their lifecycle
   <slug>" dispatches `new-project` in register-only mode (validate manifest →
   register → verify healthcheck). The reconciler routes registration drift here.
 - **Project-specific operational workers live here** unless the project is big
-  enough to have its own division (atlas is the only one today). `pickem-sync`,
+  enough to have its own division (atlas and moneymachine today). `pickem-sync`,
   `pickem-analysis`, `pickem-chart` and `pickem-chart-check` are the pickem
   dashboard's four: one keeps its data fresh, one serves its visitor-triggered
   AI panel, and the chart pair builds+checks visitor-triggered charts. All are

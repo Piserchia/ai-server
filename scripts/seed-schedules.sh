@@ -197,6 +197,14 @@ upsert 'alpha-scout-pm' '10 20 * * *' 'alpha-scout' 'alpha-scout: evening idea g
 upsert 'atlas-quant-validate' '10 14 * * 0' 'atlas-quant-validate' 'atlas-quant-validate: weekly validation-desk sweep -> quantlab stack (costed backtest, walk-forward worst-fold, 8-check critic, deflated Sharpe vs lifetime N) -> R-#### reports + health pass, commit+push, TL;DR (skills/atlas-quant-validate)' '{"project_slug":"atlas","session_timeout_seconds":3600}'
 upsert 'atlas-quant-governor' '20 12 * * 2' 'atlas-quant-governor' 'atlas-quant-governor: weekly quant-desk audit -> validate-row liveness, trials-before-report ordering, independent DSR recompute from metrics.json (mismatch = PROTOCOL-VIOLATION), FLAG acknowledgement, AUDIT ledger entry (skills/atlas-quant-governor)' '{"project_slug":"atlas"}'
 
+# ── MoneyMachine Company (spec 2026-10-21; three rows, all workspace-scoped) ──
+# CEO Sat 17:00 UTC (free band 15:15–20:09 after advisors-panel 15:00); reporter
+# 2.5 h later so a failed CEO is written into the memo; resumer daily 10:30 (clear
+# of alpha-governor 09:30, atlas-build 10:00 Tue/Fri, the 11:00 loop block).
+upsert 'mm-ceo-weekly'    '0 17 * * 6'  'mm-ceo'    'mm-ceo: weekly MoneyMachine allocation -> fetch origin, read bucket state/grades/liveness/spend, dispatch <=2 mm-govern; read-only + dispatch (skills/mm-ceo)' '{"project_slug":"moneymachine","session_timeout_seconds":3600}'
+upsert 'mm-report-weekly' '30 19 * * 6' 'mm-report' 'mm-report: mode=weekly -> record CEO decisions as C-#### entries, write reports/weekly/<Saturday>.md (CEO FAILED is a headline, not a skip), monthly scoreboard on the first Saturday; never dispatches (skills/mm-report)' '{"project_slug":"moneymachine","session_timeout_seconds":1800}'
+upsert 'mm-resume-daily'  '30 10 * * *' 'mm-resume' 'mm-resume: daily heartbeat -> git show origin/main state, re-dispatch stale (>6h) or cap-stalled stages within caps, double-dispatch guarded; read-only + dispatch (skills/mm-resume)' '{"project_slug":"moneymachine","session_timeout_seconds":1200}'
+
 echo "Schedules seeded."
 echo ""
 echo "NOTE: review-and-improve runs via idle-queue trigger in events.py"

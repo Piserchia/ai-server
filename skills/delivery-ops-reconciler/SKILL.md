@@ -139,3 +139,9 @@ report a clean seam — do not invent findings.
   this skill's description of a script's semantics disagrees with the script
   itself, the script wins — read it.
 - Bash is read-only here: `SELECT`/`git log`/`grep`/`ls`/`curl` a healthcheck only.
+- **A runner-scoping manifest is not drift.** A manifest with
+  `delivery.deployable: false` and no `port` whose PROJECTS_REGISTRY row says
+  not hosted (e.g. `moneymachine`) is a runner-scoping manifest, not
+  hosted-not-registered drift — never route it to `new-project` register-only
+  (that mode would publish the directory). Treat it like the content
+  projects: present on disk, no `projects` DB row, no Caddy.

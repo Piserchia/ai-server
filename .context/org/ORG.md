@@ -70,6 +70,7 @@ defines or enforces a restraint stays behind the owner.
 | Platform Ops | `ops-manager` | [platform-ops](divisions/platform-ops/CHARTER.md) | weekly |
 | Knowledge | `knowledge-manager` | [knowledge](divisions/knowledge/CHARTER.md) | weekly |
 | Atlas | `atlas-manager` | [atlas](divisions/atlas/CHARTER.md) | weekly |
+| MoneyMachine | `mm-ceo` | [moneymachine](divisions/moneymachine/CHARTER.md) | weekly |
 
 `god` is intentionally outside the hierarchy (break-glass, INV-18).
 

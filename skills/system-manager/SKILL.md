@@ -60,7 +60,7 @@ manager jobs' summaries:
 # CEO reads connector reports — e.g. the Delivery→Ops reconciler — alongside
 # division reports and escalates systemic patterns)
 psql assistant -c "SELECT resolved_skill, id, completed_at FROM jobs
-  WHERE resolved_skill IN ('ops-manager','delivery-manager','knowledge-manager','atlas-manager','delivery-ops-reconciler')
+  WHERE resolved_skill IN ('ops-manager','delivery-manager','knowledge-manager','atlas-manager','mm-ceo','delivery-ops-reconciler')
     AND status='completed' ORDER BY completed_at DESC LIMIT 15;"
 # then read each one's summary:
 cat volumes/audit_log/<job-id>.summary.md
