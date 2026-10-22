@@ -150,8 +150,8 @@ not a requirement. Rate limits are detected typed-first (`RateLimitEvent` →
 - INV-12: Quota exhaustion pauses queue; jobs requeued at front of queue.
 - INV-15: On startup the runner reconciles orphaned `running` jobs (fail-only, no
   auto-requeue) before consuming the queue.
-- INV-21 (implemented profile, 2026-10-21 — the SYSTEM.md row still carries the
-  08-17 wording until the owner merges plan T8): a non-Anthropic executor runs only at
+- INV-21 (implemented profile, 2026-10-21; the SYSTEM.md row carries the same profile
+  since the owner merged the T8 protected-path bundle): a non-Anthropic executor runs only at
   `isolation: workspace`, under its vendor sandbox with network off and an env scrubbed
   to `{PATH, HOME, LANG, TMPDIR, CODEX_HOME}`, with no MCP and no subagents, never on
   `code-server` skills or a canonical inside this repo (D-A, setting-gated), and every

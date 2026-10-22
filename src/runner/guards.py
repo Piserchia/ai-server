@@ -4,7 +4,10 @@ Session guardrails — SDK-native isolation (replaces the container lane, 2026-0
 Every workspace-tier session gets PreToolUse hooks that hard-deny:
   - file writes outside the per-job workspace clone (OS temp dirs excepted)
   - dangerous Bash commands: sudo, launchctl, keychain reads, force-push,
-    process kills, crontab edits, ANTHROPIC_API_KEY injection, and
+    process kills, crontab edits, ANTHROPIC_API_KEY injection (and, since
+    the 2026-10-21 protected bundle, every other provider credential the
+    cross-vendor slice could consult — VENDOR_CREDENTIAL_NAMES), brokerage
+    order endpoints (INV-22 server-side deny, both profiles), and
     destructive commands referencing protected roots (live checkouts,
     ~/.claude credentials, ~/.ssh, LaunchAgents)
 
@@ -133,6 +136,42 @@ def write_target_violation(
 
 # ── Bash guard ──────────────────────────────────────────────────────────────
 
+# Provider credentials beyond ANTHROPIC_API_KEY (protected bundle, plan T8,
+# 2026-10-21; old spec §2.6 guards.py edit (i)). Denied at ASSIGNMENT and
+# EXPORT in both profiles — a session must never be able to point an
+# executor at a key the owner did not provision. Like the Anthropic rule
+# this guards the literal name only: reads (`printenv X`, `echo $X`) are
+# not denied, which is why no credential lives in an inheritable env
+# (`executors/codex_cli.scrubbed_env`) rather than why this rule exists.
+VENDOR_CREDENTIAL_NAMES: tuple[str, ...] = (
+    "OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY", "XAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+)
+_VENDOR_CRED_ALT = "(?:" + "|".join(VENDOR_CREDENTIAL_NAMES) + ")"
+_VENDOR_CRED_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?<![A-Za-z0-9_])" + _VENDOR_CRED_ALT + r"\s*="),
+     "provider credential assignment (INV-3/INV-21: only the owner provisions a key)"),
+    (re.compile(r"\bexport\s+" + _VENDOR_CRED_ALT + r"(?![A-Za-z0-9_])"),
+     "provider credential export (INV-3/INV-21: only the owner provisions a key)"),
+]
+
+# INV-22 server-side deny (the open follow-up named on the SYSTEM.md row;
+# protected bundle, plan T8; old spec §2.6 guards.py edit (ii)): no
+# ai-server session ever places, modifies or cancels a brokerage order. The
+# production Tradier host is denied wholesale; on the sandbox and on every
+# Alpaca host only the orders path is — market data and account reads stay
+# free. Honestly a text-level belt (a URL assembled from parts never matches):
+# the atlas kernel tripwires and `risk.validate` remain the enforcement of
+# record; this closes the one path that needed no atlas code at all.
+_BROKER_ORDER_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?<![A-Za-z0-9.-])api\.tradier\.com(?![A-Za-z0-9-])"),
+     "production brokerage host api.tradier.com (INV-22: no session places orders)"),
+    (re.compile(r"\bsandbox\.tradier\.com/v1/accounts/[^\s/'\"]+/orders(?![A-Za-z0-9_-])"),
+     "brokerage order endpoint on sandbox.tradier.com (INV-22: no session places orders)"),
+    (re.compile(r"[A-Za-z0-9.-]*\.alpaca\.markets/v2/orders(?![A-Za-z0-9_-])"),
+     "brokerage order endpoint on *.alpaca.markets (INV-22: no session places orders)"),
+]
+
 # Commands denied outright for workspace-tier sessions, regardless of target.
 _HARD_DENY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bsudo\b"), "sudo"),
@@ -147,6 +186,8 @@ _HARD_DENY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bcrontab\b"), "crontab"),
     (re.compile(r"\bANTHROPIC_API_KEY\s*="), "ANTHROPIC_API_KEY assignment (INV-3)"),
     (re.compile(r"\bexport\s+ANTHROPIC_API_KEY\b"), "ANTHROPIC_API_KEY export (INV-3)"),
+    *_VENDOR_CRED_PATTERNS,
+    *_BROKER_ORDER_PATTERNS,
 ]
 
 # Command heads that mutate the filesystem: when one of these appears in a
@@ -260,6 +301,10 @@ _RO_HARD_DENY: list[tuple[re.Pattern[str], str]] = [
      "keychain access via `security`"),
     (re.compile(r"\bANTHROPIC_API_KEY\s*="), "ANTHROPIC_API_KEY assignment (INV-3)"),
     (re.compile(r"\bexport\s+ANTHROPIC_API_KEY\b"), "ANTHROPIC_API_KEY export (INV-3)"),
+    # Protected bundle (T8): the read-only profile is the one that may run
+    # `curl`, so the INV-22 broker deny matters here most.
+    *_VENDOR_CRED_PATTERNS,
+    *_BROKER_ORDER_PATTERNS,
 ]
 
 # Mutating command patterns, each with a label that lands in the denial reason.
@@ -327,8 +372,9 @@ def readonly_bash_violation(command: str) -> str | None:
     or None. Pure function.
 
     Denies mutation by pattern: output redirection (except /dev/null and fd
-    dups), file/git/service/migration/package/redis mutators, and psql with a
-    write verb. Deliberately allows the inspection vocabulary oversight
+    dups), file/git/service/migration/package/redis mutators, psql with a
+    write verb, provider-credential assignment/export and brokerage order
+    endpoints (INV-22). Deliberately allows the inspection vocabulary oversight
     skills actually use: SELECT queries, `git log/status/diff/rev-parse/
     fetch`, grep/ls/cat/tail, `curl` healthchecks, `redis-cli get/llen/
     lrange/ping`, `pipenv run alembic current/heads`, `launchctl list`.

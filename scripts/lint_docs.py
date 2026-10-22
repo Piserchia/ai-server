@@ -7,7 +7,7 @@ Usage:
     python scripts/lint-docs.py          # prints report, exit 0 if clean
     pipenv run pytest tests/test_doc_lint.py  # same checks as pytest tests
 
-Checks (13):
+Checks (15):
 1. Every skill directory has a row in SKILLS_REGISTRY.md
 2. Every project directory has a row in PROJECTS_REGISTRY.md
 3. Every src/runner/*.py file is mentioned in runner CONTEXT.md
@@ -26,6 +26,13 @@ Checks (13):
     acceptEdits (plan blocks the dispatch MCP — proven live 2026-07-30); and
     charter Role/Privilege columns match skill frontmatter
 13. No structlog-style kwargs on stdlib loggers (TypeError at log time)
+14. Model pins (protected bundle 2026-10-21, plan T8 / INV-21): every skill
+    `model:` and escalation target resolves in `models.yml`; a non-Anthropic
+    provider requires `isolation: workspace`; a `code-server` skill may pin a
+    non-Anthropic provider only when ROUTER_CODE_SERVER_PROVIDERS lists it;
+    an escalation target must be Anthropic
+15. The `code-server` skill set in runner/session.py is byte-equal to the
+    protected CODE_SERVER_SKILLS here (the set of record)
 """
 
 from __future__ import annotations
@@ -704,6 +711,161 @@ def check_unisolated_writers() -> list[str]:
     return warnings
 
 
+# ── 2026-10-21 protected bundle (cross-vendor writer slice, plan T8) ────────
+
+# Skills that write to THIS repo or deploy it (plan D-A). A non-Anthropic
+# provider may run them only when `settings.router_code_server_providers`
+# lists it. This protected set is the one of record: `runner/session.py`
+# carries an INV-4-editable copy (`CODE_SERVER_SKILLS`) that
+# check_code_server_set() pins to this one, so neither a frontmatter edit
+# nor a session.py edit can widen the lane without an owner-approved change
+# here. Growing it is routine (a new deploy skill); shrinking it is a
+# review decision.
+CODE_SERVER_SKILLS: frozenset[str] = frozenset({
+    "server-patch", "server-deploy", "new-skill", "deploy-director",
+    "atlas-redeploy", "project-redeploy",
+})
+
+
+def _code_server_providers() -> frozenset[str]:
+    """`settings.router_code_server_providers` as a set — read from the SAME
+    setting `runner/session.py:code_server_providers` reads, so the pin
+    cannot be relaxed from `models.yml` (data) alone."""
+    from src.config import settings
+    raw = settings.router_code_server_providers or ""
+    return frozenset(p.strip().lower() for p in raw.split(",") if p.strip())
+
+
+def check_model_pins() -> list[str]:
+    """Provider/model pin rules the runtime enforces fail-closed
+    (`registry/models.py:resolve`, `runner/session.py:lane_refusal`), caught
+    at lint time so a frontmatter edit never reaches a scheduled job as
+    `provider_refused`:
+
+    1. a skill pinning a non-Anthropic provider must declare
+       `isolation: workspace` (INV-21(a): the vendor sandbox confines writes
+       to the per-job clone; `none` is host-equivalent, `host` is god's);
+    2. every `model:` and `escalation.on_failure.model` must resolve in
+       `models.yml` — provider AND model (C12: unknown is a refusal, never a
+       default);
+    3. a `code-server` skill (CODE_SERVER_SKILLS above) may pin a non-Anthropic
+       provider only when ROUTER_CODE_SERVER_PROVIDERS lists it (plan D-A —
+       the review gate is one Anthropic session's judgement, and guards.py /
+       this file are what an injected diff would target);
+    4. an `escalation.on_failure.model` must resolve to an Anthropic model:
+       `runner/main.py:_maybe_escalate` enqueues the retry with
+       `payload.model=<target>` and `created_by="escalation:<id>"`, and
+       `session.py:lane_refusal`'s owner-origin rule refuses a non-owner
+       payload override on an Anthropic-pinned skill — so a non-Anthropic
+       target is a retry that can never run (T8 review, 2026-10-21).
+    """
+    from src.registry import models as models_registry
+
+    warnings: list[str] = []
+    allowed_code_server = _code_server_providers()
+    for name, fm, err in _iter_skill_frontmatters():
+        if fm is None:
+            continue  # frontmatter_parses reports it
+        pins: list[tuple[str, str]] = []
+        raw_model = fm.get("model")
+        if raw_model:
+            pins.append(("model", str(raw_model)))
+        esc = fm.get("escalation") or {}
+        on_failure = esc.get("on_failure") if isinstance(esc, dict) else None
+        if isinstance(on_failure, dict) and on_failure.get("model"):
+            pins.append(("escalation on_failure model", str(on_failure["model"])))
+        for label, raw in pins:
+            try:
+                ref = models_registry.resolve(raw)
+            except models_registry.ProviderRefused as exc:
+                warnings.append(
+                    f"Skill `{name}` {label} `{raw}` is not in models.yml "
+                    f"({exc.reason}) — the job would be provider_refused (C12)"
+                )
+                continue
+            if ref.provider == models_registry.DEFAULT_PROVIDER:
+                continue
+            if label != "model":
+                warnings.append(
+                    f"Skill `{name}` {label} `{raw}` names provider "
+                    f"{ref.provider!r} — escalation targets are Anthropic by "
+                    f"design (runner/main.py:_non_anthropic_lane); the retry "
+                    f"would be provider_refused by lane_refusal's owner-origin rule"
+                )
+            if label == "model":
+                iso = str(fm.get("isolation", "none"))
+                if iso != "workspace":
+                    warnings.append(
+                        f"Skill `{name}` pins non-Anthropic model `{raw}` but "
+                        f"isolation is {iso!r} — a non-Anthropic executor runs "
+                        f"only at `isolation: workspace` (INV-21(a))"
+                    )
+            if name in CODE_SERVER_SKILLS and ref.provider not in allowed_code_server:
+                warnings.append(
+                    f"Skill `{name}` is in the code-server set but its {label} "
+                    f"`{raw}` names provider {ref.provider!r}, which is not in "
+                    f"ROUTER_CODE_SERVER_PROVIDERS "
+                    f"({','.join(sorted(allowed_code_server)) or '<empty>'}; plan D-A)"
+                )
+    return warnings
+
+
+def check_code_server_set() -> list[str]:
+    """`runner/session.py:CODE_SERVER_SKILLS` must equal the protected set
+    above. Read by AST (not import — the lint must not load the SDK or the
+    DB layer), so the literal is the thing compared."""
+    import ast
+
+    path = REPO_ROOT / "src" / "runner" / "session.py"
+    text = _read(path)
+    if not text:
+        return [f"{path.relative_to(REPO_ROOT)} not found — cannot cross-check "
+                f"CODE_SERVER_SKILLS"]
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return [f"src/runner/session.py does not parse ({exc}) — cannot "
+                f"cross-check CODE_SERVER_SKILLS"]
+    found: set[str] | None = None
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        else:
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "CODE_SERVER_SKILLS"
+                   for t in targets):
+            continue
+        try:
+            value = ast.literal_eval(node.value)
+        except (ValueError, TypeError):
+            # frozenset({...}) is a Call, not a literal — unwrap one level
+            v = node.value
+            if (isinstance(v, ast.Call) and isinstance(v.func, ast.Name)
+                    and v.func.id == "frozenset" and len(v.args) == 1):
+                try:
+                    value = ast.literal_eval(v.args[0])
+                except (ValueError, TypeError):
+                    value = None
+            else:
+                value = None
+        if isinstance(value, (set, frozenset, list, tuple)):
+            found = {str(x) for x in value}
+        break
+    if found is None:
+        return ["src/runner/session.py has no literal CODE_SERVER_SKILLS "
+                "assignment — the lint cannot pin the code-server set"]
+    if found != set(CODE_SERVER_SKILLS):
+        extra = sorted(found - CODE_SERVER_SKILLS)
+        missing = sorted(CODE_SERVER_SKILLS - found)
+        return [f"src/runner/session.py CODE_SERVER_SKILLS drifts from the "
+                f"protected set in scripts/lint_docs.py (extra: {extra}, "
+                f"missing: {missing}) — the lint's set is the one of record"]
+    return []
+
+
 def check_invariant_refs() -> list[str]:
     """Every INV-N referenced in MISSION.md / .context/INDEX.md must exist as
     a row in SYSTEM.md's invariant table (EVALUATION_2026-08-30 F4: INV-21
@@ -739,6 +901,8 @@ def run_all() -> dict[str, list[str]]:
         "frontmatter_parses": check_frontmatter_parses(),
         "unisolated_writers": check_unisolated_writers(),
         "invariant_refs": check_invariant_refs(),
+        "model_pins": check_model_pins(),
+        "code_server_set": check_code_server_set(),
         "delivery_contracts": check_delivery_contracts(),
         "org_charters": check_org_charters(),
         "role_privileges": check_role_privileges(),
