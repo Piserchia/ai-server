@@ -5,7 +5,7 @@ model: claude-opus-4-7
 effort: high
 permission_mode: bypassPermissions
 required_tools: [Read, Bash, Glob, Grep]
-max_turns: 30
+max_turns: 50
 escalation:
   on_failure:
     model: claude-opus-4-7
