@@ -1,6 +1,6 @@
 # Hosting module
 
-**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/schedule-monitor.sh`, `scripts/backup.sh`, `scripts/cost-reconcile-run.sh` (+ the CLI it wraps, `scripts/cost-reconcile.py`), `scripts/install-launchd.sh`, `Caddyfile`, `Caddyfile.d/`; timer-script invariants are pinned by `tests/test_scripts_syntax.py` (`bash -n`, no `pipenv run` under launchd, `TIMER_SCRIPTS` = every `install_timer` call, `ALERTER_SCRIPTS` = notify-first with the curl fallback)
+**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/schedule-monitor.sh`, `scripts/backup.sh`, `scripts/restore-drill.sh`, `scripts/cost-reconcile-run.sh` (+ the CLI it wraps, `scripts/cost-reconcile.py`), `scripts/install-launchd.sh`, `Caddyfile`, `Caddyfile.d/`, `docs/runbooks/2026-10-21-phase1-ops-hygiene.md` (the owner runbook for the by-hand ops steps); timer-script invariants are pinned by `tests/test_scripts_syntax.py` (`bash -n`, no `pipenv run` under launchd, `TIMER_SCRIPTS` = every `install_timer` call, `ALERTER_SCRIPTS` = notify-first with the curl fallback, the backup/drill/installer/runbook pins from C1)
 
 ## Purpose
 
@@ -50,7 +50,45 @@ Multi-project hosting on a single public domain via:
   `LANE_WEEKLY_BUDGET_JSON` at Phase 3 — nothing reads it in Phase 1.
 - `setup-tunnel.sh` — one-time: create/update Cloudflare named tunnel (interactive, needs browser)
 - `setup-caddy.sh` — one-time: install Caddy + base Caddyfile + launchd service
-- `backup.sh` — nightly (04:00 via `com.assistant.backup`): pg_dump + audit-log/log snapshot → `volumes/backups/backup-<date>.tar.gz`, then off-site replication to Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`. Off-site push is guarded — absent `rclone`/`r2:` remote or a failed upload never fails the local backup. `server-upkeep` alerts if the newest remote object is > 48h old.
+- `backup.sh` — nightly (04:00 via `com.assistant.backup`): `pg_dump assistant`
+  (plain) + audit-log/log snapshot + config snapshot + the **sealed secrets
+  bundle** `secrets.tar.enc` (C1, 2026-10-21: the server `.env`, the atlas
+  canonical `.env` at `~/Documents/repos/atlas/.env` (`ATLAS_ENV` overrides),
+  `~/.cloudflared/{config.yml,cert.pem,*.json}`; `openssl enc -aes-256-cbc
+  -pbkdf2 -iter 200000` with `BACKUP_SEAL_KEY` → `~/.config/ai-server/
+  backup-seal.key`; no key = `seal SKIP`, never fatal; the plain `.env` never
+  enters the tarball) → `volumes/backups/backup-<date>.tar.gz`; **atlas dump**
+  (D-P1-6): `pg_dump -Fc atlas` → `volumes/backups/atlas-<date>.dump` beside
+  the tarball when `psql -lqt` lists the DB (`atlas dump OK (<size>)` /
+  `WARN atlas dump failed` / `atlas dump SKIP`), local keep 7 d. Off-site to
+  Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`: the tarball nightly +
+  `rclone delete --min-age 60d --include 'backup-*.tar.gz'`, the atlas dump
+  on **Sundays only** + `--min-age 35d --include 'atlas-*'`; guarded — absent
+  `rclone`/`r2:` remote (`offsite SKIP`) or a failed upload never fails the
+  local backup. Local retention 60 d for tarballs (`-mtime +60`). Every step
+  after `pg_dump assistant` is `if …; else log; fi` under `set -euo pipefail`.
+  `server-upkeep` alerts if the newest remote object is > 48h old.
+- `restore-drill.sh [tarball]` — OWNER-RUN on prod (C1; the Phase-1 exit
+  criterion "the restore drill passes"): restores the newest tarball's
+  `db.sql` into `restore_drill_assistant` and the newest `atlas-*.dump`
+  (`pg_restore --no-owner --no-privileges`) into `restore_drill_atlas`,
+  counts `jobs` rows and the first atlas base table, unseals the bundle
+  (names counted, values never printed), checks the off-site copy; prints
+  one `PASS`/`WARN`/`FAIL` line per leg + a verdict, exit 0 (WARNs allowed)
+  / 1 (any FAIL), one `restore-drill … result=` line in `backup.log`; drops
+  both throwaways on exit. WARN = no dump / no bundle / no key / no `r2:`;
+  FAIL = a DB leg will not restore, 0 jobs, or a present key cannot unseal.
+  PATH is appended (not prepended) so the operator's shell — and the test's
+  fake pg tools — win. First run on this host before runbook §2/§3: PASS
+  with two WARNs.
+- `install-launchd.sh [timers-only|uninstall]` — services + timers; `timers-only`
+  (C1) re-renders and reloads only the timer plists (no runner/web/bot
+  restart). `install_timer` writes an `EnvironmentVariables` dict (`PATH`
+  with `${VENV_DIR}/bin`, `VENV_PY`, `DISABLE_ERROR_REPORTING=1`,
+  `DISABLE_TELEMETRY=1`; never a credential). Every `ProgramArguments`
+  string escapes `&&` as `&amp;&amp;` (a raw `&&` is not XML — 10 of 14
+  prod plists failed `plutil -p`); timer plists pick it up on `timers-only`,
+  service plists on the next full install.
 
 ## Manifest schema
 

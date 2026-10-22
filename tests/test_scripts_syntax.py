@@ -321,3 +321,246 @@ def test_schedule_monitor_reports_deferrals_as_a_finding():
     assert "count_schedule_deferred" in src
     assert "volumes/audit_log/schedules" in src
     assert "FINDING deferred:" in src
+
+
+# --- C1: backup.sh (atlas dump, sealed secrets, retention), restore-drill.sh,
+#         install-launchd.sh (timer env block, timers-only, plist escaping),
+#         the Phase-1 ops-hygiene runbook ----------------------------------------
+
+RUNBOOK = "docs/runbooks/2026-10-21-phase1-ops-hygiene.md"
+
+
+def test_backup_dumps_atlas_and_seals_secrets():
+    src = _read("scripts/backup.sh")
+    # D-P1-6: a custom-format atlas dump OUTSIDE the nightly tarball, only when
+    # the database exists, never fatal, size logged.
+    assert "psql -lqt" in src
+    assert 'pg_dump -Fc atlas > "$BACKUP_DIR/atlas-$STAMP.dump"' in src
+    assert "atlas dump OK" in src and "WARN atlas dump failed" in src
+    # the sealed bundle: .env, the atlas CANONICAL .env (the dev clone, the
+    # file provision_env_files copies), the cloudflared trio
+    assert "openssl enc -aes-256-cbc -pbkdf2 -iter 200000" in src
+    assert 'SEAL_KEY="${BACKUP_SEAL_KEY:-$HOME/.config/ai-server/backup-seal.key}"' in src
+    assert "seal SKIP" in src
+    assert "secrets.tar.enc" in src
+    assert "Documents/repos/atlas/.env" in src
+    assert ".cloudflared" in src
+    # the plain .env never lands in the tarball tree; it is copied into the
+    # seal staging dir only, and only the encrypted bundle reaches $TMP
+    assert 'cp "$PROJECT_DIR/.env" "$TMP/' not in src
+    assert 'cp "$PROJECT_DIR/.env" "$SEAL_TMP/secrets/env"' in src
+    # off-site: the tarball nightly, the atlas dump on Sundays only
+    assert "date -u +%u" in src
+    assert "pipenv" not in src
+    # the header was written for a 2 TB disk; this host has 228 GB
+    assert "2TB" not in src and "2 TB" not in src
+
+
+def test_backup_has_retention_rule():
+    src = _read("scripts/backup.sh")
+    assert "--min-age 60d" in src                          # off-site tarballs
+    assert "-mtime +60" in src                             # local tarballs
+    assert "-mtime +7" in src                              # local atlas dumps (D-P1-6)
+    assert "--min-age 35d --include 'atlas-*'" in src      # off-site atlas dumps
+    assert "No retention cap" not in src                   # the old comment is gone
+
+
+def test_restore_drill_exists_and_parses():
+    rel = "scripts/restore-drill.sh"
+    r = subprocess.run(["bash", "-n", str(REPO / rel)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert os.access(REPO / rel, os.X_OK)
+    src = _read(rel)
+    assert "restore_drill_assistant" in src and "restore_drill_atlas" in src
+    assert "pg_restore" in src                              # the -Fc atlas dump
+    assert "dropdb --if-exists" in src
+    assert "openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000" in src
+    assert "pipenv" not in src
+    # the drill prepends nothing to PATH: the operator's shell (and a test's
+    # fake pg tools) win over the Homebrew dirs appended for bare launchd-ish shells
+    assert 'export PATH="$PATH:' in src
+
+
+class TestRestoreDrill:
+    """`scripts/restore-drill.sh` driven end to end with fake Postgres tools on
+    PATH (createdb/dropdb/psql/pg_restore/rclone record their argv and answer
+    the drill's three queries), a fixture tarball, a fixture `atlas-*.dump`
+    and a REAL sealed bundle (openssl, throwaway key). No live database."""
+
+    REL = "scripts/restore-drill.sh"
+
+    FAKE = r'''#!/bin/bash
+# fake pg tool: log argv, answer the drill's queries from env
+me=$(basename "$0")
+printf '%s %s\n' "$me" "$*" >> "$FAKE_LOG"
+case "$me" in
+  psql)
+    if [[ "$1" == "-tAc" ]]; then
+      q="$2"
+      case "$q" in
+        *"FROM jobs"*) echo "${FAKE_JOBS:-42}" ;;
+        *information_schema.tables*) echo "public.candles" ;;
+        *"FROM public.candles"*) echo "7" ;;
+        *) echo 0 ;;
+      esac
+    fi
+    exit 0 ;;
+  rclone) exit 1 ;;
+  *) exit 0 ;;
+esac
+'''
+
+    def _setup(self, tmp_path: Path, *, with_key=True, with_dump=True, with_bundle=True,
+               jobs="42") -> dict[str, str]:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        for tool in ("createdb", "dropdb", "psql", "pg_restore", "rclone"):
+            p = fake_bin / tool
+            p.write_text(self.FAKE)
+            p.chmod(p.stat().st_mode | stat.S_IXUSR)
+        root = tmp_path / "server"
+        (root / "volumes/backups").mkdir(parents=True)
+        (root / "volumes/logs").mkdir(parents=True)
+        stage = tmp_path / "stage"
+        stage.mkdir()
+        (stage / "db.sql").write_text("-- fixture dump\nCREATE TABLE jobs (id text);\n")
+        key = tmp_path / "seal.key"
+        key.write_text("fixture-seal-key\n")
+        if with_bundle:
+            sec = tmp_path / "secrets"
+            (sec / "cloudflared").mkdir(parents=True)
+            (sec / "env").write_text("TELEGRAM_BOT_TOKEN=fixture-not-a-secret\n")
+            (sec / "cloudflared/config.yml").write_text("tunnel: fixture\n")
+            subprocess.run(["tar", "-cf", str(tmp_path / "secrets.tar"), "-C", str(tmp_path), "secrets"], check=True)
+            subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-salt",
+                            "-in", str(tmp_path / "secrets.tar"), "-out", str(stage / "secrets.tar.enc"),
+                            "-pass", f"file:{key}"], check=True)
+        subprocess.run(["tar", "-czf", str(root / "volumes/backups/backup-2026-10-21.tar.gz"),
+                        "-C", str(stage), "."], check=True)
+        if with_dump:
+            (root / "volumes/backups/atlas-2026-10-21.dump").write_bytes(b"PGDMP fixture")
+        # the script resolves PROJECT_DIR from its own location → copy it into the fixture tree
+        (root / "scripts").mkdir()
+        target = root / "scripts/restore-drill.sh"
+        target.write_text(_read(self.REL))
+        target.chmod(target.stat().st_mode | stat.S_IXUSR)
+        env = {
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "FAKE_LOG": str(tmp_path / "calls.log"),
+            "FAKE_JOBS": jobs,
+            "BACKUP_SEAL_KEY": str(key if with_key else tmp_path / "no-such-key"),
+            "HOME": str(tmp_path),
+        }
+        return {"script": str(target), "root": str(root), "calls": str(tmp_path / "calls.log"), **env}
+
+    def _run(self, cfg: dict[str, str]) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in cfg.items() if k in ("PATH", "FAKE_LOG", "FAKE_JOBS", "BACKUP_SEAL_KEY", "HOME")}
+        return subprocess.run(["bash", cfg["script"]], capture_output=True, text=True, env=env)
+
+    def test_pass_on_both_db_legs_unseals_the_bundle_and_drops_the_throwaways(self, tmp_path):
+        cfg = self._setup(tmp_path)
+        r = self._run(cfg)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "PASS assistant restore: 42 jobs" in r.stdout
+        assert "PASS atlas restore: public.candles 7 rows" in r.stdout
+        assert "PASS sealed secrets: 4 entries" in r.stdout            # names counted, never printed
+        assert "fixture-not-a-secret" not in r.stdout + r.stderr       # a value never leaks
+        assert "WARN off-site" in r.stdout                             # rclone r2: not configured
+        assert r.stdout.rstrip().endswith("PASS")
+        calls = Path(cfg["calls"]).read_text()
+        assert "pg_restore" in calls and "restore_drill_atlas" in calls
+        assert "dropdb --if-exists restore_drill_assistant" in calls
+        assert "dropdb --if-exists restore_drill_atlas" in calls
+        log = (Path(cfg["root"]) / "volumes/logs/backup.log").read_text()
+        assert "restore-drill backup-2026-10-21.tar.gz result=PASS" in log
+
+    def test_first_run_shape_db_legs_pass_with_two_warns(self, tmp_path):
+        # the §6 Deltas' first-run expectation on this host: no seal key yet,
+        # no r2 remote → PASS with WARNs, exit 0 (the WARNs are the owner's §7 rows)
+        cfg = self._setup(tmp_path, with_key=False)
+        r = self._run(cfg)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "PASS assistant restore" in r.stdout and "PASS atlas restore" in r.stdout
+        assert "WARN sealed bundle present but no seal key" in r.stdout
+        assert "WARN off-site" in r.stdout
+        assert r.stdout.rstrip().endswith("PASS")
+
+    def test_missing_dump_and_bundle_are_warns_not_fails(self, tmp_path):
+        cfg = self._setup(tmp_path, with_dump=False, with_bundle=False)
+        r = self._run(cfg)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "WARN atlas dump absent" in r.stdout
+        assert "WARN no sealed secrets in this backup" in r.stdout
+
+    def test_zero_jobs_is_a_fail(self, tmp_path):
+        cfg = self._setup(tmp_path, jobs="0")
+        r = self._run(cfg)
+        assert r.returncode == 1
+        assert "FAIL assistant restore" in r.stdout
+        assert r.stdout.rstrip().endswith("FAIL")
+        log = (Path(cfg["root"]) / "volumes/logs/backup.log").read_text()
+        assert "result=FAIL" in log
+
+    def test_no_tarball_is_a_fail(self, tmp_path):
+        cfg = self._setup(tmp_path)
+        Path(cfg["root"], "volumes/backups/backup-2026-10-21.tar.gz").unlink()
+        r = self._run(cfg)
+        assert r.returncode == 1
+        assert "FAIL no backup tarball" in r.stdout
+
+
+def test_installer_timer_plists_carry_venv_env():
+    src = _read("scripts/install-launchd.sh")
+    # `timers-only`: re-render the timers without unload/load of runner/web/bot
+    assert "timers-only" in src
+    assert "if (( ! TIMERS_ONLY )); then" in src
+    timer_fn = _bash_function("scripts/install-launchd.sh", "install_timer")
+    assert "<key>EnvironmentVariables</key>" in timer_fn
+    assert "<string>${VENV_DIR}/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>" in timer_fn
+    assert "<key>VENV_PY</key><string>${VENV_DIR}/bin/python</string>" in timer_fn
+    assert "<key>DISABLE_ERROR_REPORTING</key><string>1</string>" in timer_fn
+    assert "<key>DISABLE_TELEMETRY</key><string>1</string>" in timer_fn
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in src                  # never a credential in a plist
+
+
+def _installer_plist_bodies() -> list[str]:
+    src = _read("scripts/install-launchd.sh")
+    bodies = re.findall(r"<< PLIST\n(.*?)\nPLIST\n", src, re.S)
+    assert len(bodies) == 3, "services loop, sync-learnings timer, install_timer"
+    return bodies
+
+
+def test_installer_escapes_ampersands():
+    # 10 of 14 prod plists failed `plutil -p` on 2026-10-21: a raw `&&` inside
+    # a <string> is not XML. Every ProgramArguments string must carry
+    # `&amp;&amp;`, and each heredoc must parse as XML once the shell
+    # expansions are replaced by a placeholder.
+    import xml.etree.ElementTree as ET
+    for body in _installer_plist_bodies():
+        assert "&&" not in body, body
+        assert "&amp;&amp;" in body
+        rendered = re.sub(r"\$\{[A-Za-z_0-9]+\}|\$[0-9A-Za-z_]+", "X", body)
+        ET.fromstring(rendered)                                  # raises on raw `&`
+
+
+def test_runbook_exists():
+    doc = _read(RUNBOOK)
+    for needle in (
+        # §0 entry probes
+        "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/jobs",
+        "plutil -p ~/Library/LaunchAgents/com.assistant.*.plist | grep -c CLAUDE_CODE_OAUTH_TOKEN",
+        # §1 power, §2 R2, §3 seal key, §4 drill, §5 timers
+        "sudo pmset -a autorestart 1",
+        "ai-server-backups", "rclone config", "--min-age 60d", "--min-age 35d",
+        "mkdir -p ~/.config/ai-server", "openssl rand -base64 48", "backup-seal.key", "chmod 600",
+        "restore-drill.sh", "atlas dump OK",
+        "bash scripts/install-launchd.sh timers-only",
+        # §6 Ollama (spec D5 = yes; the pull / keep-alive settings are Phase 4)
+        "ollama rm", "phi3:mini", "deepseek-coder-v2:16b", "mistral", "OLLAMA_MAX_LOADED_MODELS",
+        # §7 D4 confirmations, §8 bingo's hook
+        "Help improve Claude", "baseball-bingo",
+    ):
+        assert needle in doc, needle
+    # the reviewed spec forbids a token in the launchd env (P0 runbook, round-1 #31)
+    assert "into the launchd env" not in doc
+    assert "pipenv run" not in doc

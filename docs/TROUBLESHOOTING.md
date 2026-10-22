@@ -3254,3 +3254,35 @@ A computed-vs-SDK divergence (the `delta` / `implied cw $/M` columns) is a **fin
 ### Prevention
 
 `tests/test_pricing.py::TestCli` pins the exit codes and the JSON shape; `tests/test_scripts_syntax.py` pins the timer's interval, the wrapper's argv, the cd-first venv resolution and the notify-first alert path.
+
+## Symptom: `backup.log` says `offsite SKIP` / `seal SKIP` / `atlas dump SKIP`, or `scripts/restore-drill.sh` prints `WARN` lines (or `FAIL`) — 2026-10-21
+
+### Diagnostic
+
+```bash
+tail -12 volumes/logs/backup.log                 # one line per step: atlas dump, sealed secrets, offsite, prune, backup
+ls -lt volumes/backups | head -5                 # backup-<date>.tar.gz nightly + atlas-<date>.dump (up to 8 kept)
+rclone listremotes                               # must print `r2:` for the off-site leg
+ls -l ~/.config/ai-server/backup-seal.key        # must exist, mode 600, for the seal leg
+bash scripts/restore-drill.sh                    # on PROD only (dev's volumes/backups is empty); PASS/WARN/FAIL per leg
+```
+
+### Root cause
+
+Each `SKIP` / `WARN` is an owner step from `docs/runbooks/2026-10-21-phase1-ops-hygiene.md` not done yet, by design never fatal (C1, D-P1-6): `offsite SKIP (rclone or r2: remote not configured)` = no `rclone` remote named `r2` (runbook §2; prod had zero remotes on 2026-10-21, 100 nightly SKIPs); `seal SKIP (no key at …)` = no seal key (§3) — the tarball then carries no `secrets.tar.enc`, and the drill prints `WARN no sealed secrets in this backup`; `WARN sealed bundle present but no seal key` = the backup ran with a key the drill cannot see (`BACKUP_SEAL_KEY`, or a different `$HOME`); `atlas dump SKIP (no atlas database)` = `psql -lqt` does not list `atlas` on this cluster; the drill's `WARN atlas dump absent` = no `atlas-*.dump` in `volumes/backups` yet (first night after the deploy, or the dump is older than 7 days and the nightly has been failing — check for `WARN atlas dump failed`). A drill `FAIL` is real: `FAIL assistant restore` (the `db.sql` will not load or has 0 `jobs` rows), `FAIL atlas restore` (the `-Fc` dump will not `pg_restore`), `FAIL cannot unseal` (a present key is the wrong one — the bundle was sealed with another key), `FAIL no backup tarball`.
+
+### Fix
+
+```bash
+# offsite SKIP → runbook §2 (bucket + token + `rclone config` remote `r2`), then:
+bash scripts/backup.sh && tail -4 volumes/logs/backup.log      # offsite OK + offsite prune OK
+# seal SKIP → runbook §3 (seal key + password-manager copy), then the same backup run → `sealed secrets OK`
+# drill WARN → re-run after §2/§3; drill FAIL → read the leg's line, fix, re-run:
+BACKUP_SEAL_KEY=~/.config/ai-server/backup-seal.key bash scripts/restore-drill.sh
+# the drill's throwaway DBs are dropped on exit; if one survives a kill -9:
+dropdb --if-exists restore_drill_assistant; dropdb --if-exists restore_drill_atlas
+```
+
+### Prevention
+
+`tests/test_scripts_syntax.py` pins the backup script's dump/seal/retention lines and drives `restore-drill.sh` end to end with fake pg tools (`TestRestoreDrill`); the runbook's §9 table says which measurement goes where. `server-upkeep` still alerts when the newest remote object is > 48 h old — once the `r2` remote exists, that alert is the off-site watchdog.
