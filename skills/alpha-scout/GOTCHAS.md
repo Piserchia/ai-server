@@ -157,6 +157,83 @@
   candidates/filed/dropped is burying the one thing that would unblock the
   flywheel. Escalate the parked DECISION-REQUESTs by id in the Telegram
   summary, every run, until they clear.
+- 2026-10-22 THE FENCE IS NOW SUBSTANTIVELY SATURATED while still formally
+  `open` on all eight families, and this — not capacity — is the binding
+  reason a run files nothing. Measured this run (25 ideas, 23 verdicts,
+  lifetime trials N **107** after [E-0191]): every free-data-reachable
+  expression of seven of the eight families is terminated by a lesson that
+  also closes its escape hatch, and the two routes lessons left explicitly
+  open are the two PARKED ideas themselves. Per family:
+  · F-01 — both daily-bar month-turn expressions closed ([A-0005] SPY-only,
+    [A-0010] cross-sectional); remainder is the month-end auction ([A-0002]
+    ceiling). Tax-date and expiry sub-mechanisms are NOT lesson-pruned but
+    die pre-filing on power (an annual event buys ~25 blocks ~= 8/fold vs the
+    >=30-per-OOS-slice floor) and on data (OI-by-strike is not free; the
+    OI-free version is mechanism-thin, [A-0001]).
+  · F-02 — deletion branch dead ([A-0012]); remainder is the effective-date
+    auction ([E-0113] verbatim). An addition-announcement anticipation idea
+    is NOT pre-pruned but [A-0012](a) demands the flow's print session be
+    observable and it is that auction — it would be the lab's SIXTH
+    flow-calendar attempt against an explicit 0-for-5 common cause.
+  · F-03 — large-cap consensus-free PEAD dead ([A-0006]); small-cap PEAD is
+    **A-0014, parked**; consensus-SUE is BLOCKED-ON-DATA (FINNHUB_TOKEN
+    unprovisioned since 2026-08-30). 'Horizons other than H=20' sits on
+    A-0014's own panel = the E-0098/E-0099 sealed-but-unrun duplicate trap.
+  · F-04 — FIVE pre-seal deaths (A-0021..A-0025), lifetime N still **0**;
+    [A-0023](d) closed the same-session pair from both sides and
+    [A-0024](1) closes the non-same-minute overnight-gap route
+    arithmetically (needs >12-16 bps gross; the unconditional overnight pays
+    0.0-6.4 bps/night). Do not file a sixth.
+  · F-05 — daily expression closed ([A-0008]), quarterly closed ([A-0009]);
+    the monthly horizon is **A-0011, parked**.
+  · F-06 — three deaths; the 'exclude disclosure days' hatch is closed
+    ([A-0018](a)) and any 'reversal after a decline' conditioner IS the
+    traded leg's own return (corr ~0.9), which [A-0018](b) makes an
+    ADVERSE-sign prior, not a neutral one.
+  · F-07 — [A-0019]'s two prescribed repairs (wider cross-section, longer
+    hold) were BOTH spent by [A-0020] and died; the measurement class is
+    established as unable to resolve 15-30 bps/mo in either direction.
+  · F-08 — all three free-data daily-bar expressions terminated
+    ([A-0007]/[A-0013]/[A-0015], second recurrence [A-0016]); remainder is
+    the primary market, not published free.
+  Consequence for future runs: invention into this fence has now produced
+  SEVEN consecutive NO-GOs (A-0019..A-0025), five of them dying pre-seal at
+  triage for 0 cycles and 0 trials. The run's highest-value output is the
+  prose family proposal plus the parked-decision escalation, NOT an eighth
+  invented candidate. Re-do this sweep only if FAMILIES.md gains a
+  `status: open` family or a DECISION lands a new offered-but-unfiled item.
+- 2026-10-22 mining sources are ALL provably exhausted as of [E-0191], and
+  each has a cheap one-shot check — run these four before any sweep:
+  (1) INBOX.md unchecked lines = **0** (all 30 lines checked; the five
+  stacked F-04 lines from 2026-10-17 were drained into A-0021..A-0025).
+  (2) The [E-0109] offered-but-unfiled observation (A-0013's controls arm,
+  +43.7 bps, t_nw 4.33, n=22) is **HARVESTED — consumed by the terminal F-06
+  trio** (ledger line ~23709). It is the single most expensive trap in this
+  skill's history: [E-0099]/[E-0113] record that the scout 'mines the same
+  [E-0109] observation each run and nothing in its read path marks that
+  observation as already harvested', which cost FOUR alpha-research jobs on
+  two decided questions. It is now marked harvested HERE, which is the
+  closest thing to the append-only 'mined' marker [E-0113] asked the owner
+  for. Do not re-file it.
+  (3) Every §2c refinement slot is DECLINED-OR-DENIED WITH NUMBERS, and the
+  reasons are in the DECISION's own paragraph: A-0020 ([E-0191], re-checked
+  by the validator today), A-0021 (0 cycles), A-0022 (DENIED — repair was
+  already queued), A-0023 (DENIED — [A-0022](d): a margin on sample WIDTH is
+  not standing), A-0024/A-0025 (DECLINED with numbers). Supersedes the
+  2026-10-04 'refinement slots are spent-or-declined' entry with the current
+  roster.
+  (4) The other four verticals' ledgers (momentum|trader|swing|value) contain
+  **zero** alpha-lab offers — Grep for `alpha-lab|scout` returns no matches
+  in all four. This is a 4-call check; stop expecting a mined candidate from
+  them until one of them writes an explicit offer.
+- 2026-10-22 the scout CANNOT write its own GOTCHAS/CHANGELOG — the
+  read-only guard profile (INV-20) PreToolUse-denies file mutation, so every
+  learning entry in this file reached disk via a follow-up `server-patch`
+  (see the CHANGELOG's own 2026-10-19 entry: 'the alpha-scout session ...
+  cannot write them itself; this server-patch is the sanctioned route').
+  Budget for this: put the full entry text in the Telegram summary so the
+  owner can land it in one patch, and do not burn a retry on the denied
+  Edit.
 - 2026-10-04 F-08 NAV-source scope: family F-08
   (etf-primary-market-frictions) requires that every candidate names the
   *exact free NAV source* in the idea_text, or triage blocks the card as
