@@ -318,6 +318,17 @@ class ModelRow:
     usd: Decimal = Decimal(0)        # each bucket at its own rate (spec §2.8)
     usd_sdk: Decimal | None = None
     sdk_jobs: int = 0
+    # The PAIRED subset — only the jobs that carry an SDK figure — so the
+    # computed-vs-SDK comparison is like for like. Before 2026-10-22 the
+    # reconcile divided the SDK sum of the few stamped jobs by the computed
+    # sum of EVERY job in the window (−96.9 % and a negative implied rate on
+    # the first prod run, when one job of twelve carried sdk_cost_usd).
+    paired_usd: Decimal = Decimal(0)
+    paired_input: int = 0
+    paired_cache_read: int = 0
+    paired_cache_write_1h: int = 0
+    paired_cache_write_5m: int = 0
+    paired_output: int = 0
 
     def add(self, jc: JobCost) -> None:
         self.jobs += 1
@@ -330,6 +341,12 @@ class ModelRow:
         if jc.usd_sdk is not None:
             self.usd_sdk = (self.usd_sdk or Decimal(0)) + jc.usd_sdk
             self.sdk_jobs += 1
+            self.paired_usd += jc.usd or Decimal(0)
+            self.paired_input += jc.input
+            self.paired_cache_read += jc.cache_read
+            self.paired_cache_write_1h += jc.cache_write_1h
+            self.paired_cache_write_5m += jc.cache_write_5m
+            self.paired_output += jc.output
 
     @property
     def tokens(self) -> int:
@@ -467,12 +484,12 @@ def implied_cache_write_rate(row: ModelRow) -> Decimal | None:
     rate the CLI uses"). None when there is nothing to solve for.
     """
     price = LIST_PRICES.get(row.model)
-    writes = row.cache_write_1h + row.cache_write_5m
+    writes = row.paired_cache_write_1h + row.paired_cache_write_5m
     if price is None or row.usd_sdk is None or writes <= 0:
         return None
-    others = (Decimal(row.input) * price.input
-              + Decimal(row.cache_read) * price.cache_read
-              + Decimal(row.output) * price.output) / _M
+    others = (Decimal(row.paired_input) * price.input
+              + Decimal(row.paired_cache_read) * price.cache_read
+              + Decimal(row.paired_output) * price.output) / _M
     return ((row.usd_sdk - others) * _M / Decimal(writes)).quantize(Decimal("0.01"))
 
 
@@ -484,18 +501,20 @@ def render_sdk_reconcile(rep: LedgerReport) -> str:
     rate the CLI uses" (spec §9, §2.8). Before round 3 both columns came from
     the SDK, so this table would have shown 0.0 % forever.
     """
-    lines = ["-- computed vs SDK (exit criterion: within 1 %, else record the rate) --",
-             f"{'model':<20} {'computed $':>11} {'SDK $':>11} {'delta':>8} {'implied cw $/M':>15}"]
+    lines = ["-- computed vs SDK (exit criterion: within 1 %, else record the rate; "
+             "PAIRED over the jobs that carry an SDK figure) --",
+             f"{'model':<20} {'computed $':>11} {'SDK $':>11} {'(n)':>5} {'delta':>8} {'implied cw $/M':>15}"]
     flagged = False
     for r in rep.per_model:
-        if r.usd_sdk is None or not r.usd:
-            lines.append(f"{r.model:<20} {usd_2dp(r.usd):>11.2f} {'—':>11} {'':>8} {'':>15}")
+        if r.usd_sdk is None or not r.paired_usd:
+            lines.append(f"{r.model:<20} {usd_2dp(r.usd):>11.2f} {'—':>11} {'':>5} {'':>8} {'':>15}")
             continue
-        delta = (r.usd_sdk - r.usd) / r.usd * 100
+        delta = (r.usd_sdk - r.paired_usd) / r.paired_usd * 100
         rate = implied_cache_write_rate(r)
         mark = "" if abs(delta) <= 1 else "  ⚠"
         flagged = flagged or bool(mark)
-        lines.append(f"{r.model:<20} {usd_2dp(r.usd):>11.2f} {usd_2dp(r.usd_sdk):>11.2f} {delta:>7.1f}%"
+        lines.append(f"{r.model:<20} {usd_2dp(r.paired_usd):>11.2f} {usd_2dp(r.usd_sdk):>11.2f} "
+                     f"{r.sdk_jobs:>5} {delta:>7.1f}%"
                      f" {(f'{rate:.2f}' if rate is not None else '—'):>15}{mark}")
     if flagged:
         lines.append("⚠ >1 % divergence: record the implied cache-write rate in the Phase-1 PR. "

@@ -394,7 +394,7 @@ Fresh reviewer over `git diff main...observability/phase-1` (four dimensions: ru
 
 | Exit criterion | Tier | Proven by |
 |---|---|---|
-| every completed job carries tokens/cost/turns/terminal reason | A | tokens + terminal reason on **both** lanes (B3 accept: first Anthropic job **and** first Codex job); turns/cost on the Anthropic lane only; Codex rows appear as `unpriced` with their provider in B4's `--db` leg — the criterion as the spec phrases it holds for the Anthropic lane and is stated honestly for Codex |
+| every completed job carries tokens/cost/turns/terminal reason | A | **Anthropic lane verified 2026-10-22** (`bfc449b5` deploy-director: provider, `ok`, 10/4426/207349 tokens, 7 turns, `cli_version` 2.1.139, both costs; then `alpha-scout` origin=scheduler, `server-patch` origin=system); 2244 of 2472 pre-existing jobs token-backfilled by 008; **Codex lane pending** its next job. Turns/cost on the Anthropic lane only; Codex rows appear as `unpriced` with their provider |
 | a scheduled failure DMs within 60 s | A | A6 accept (30 s poll + nudge) |
 | a bot restart loses no DM | A | A6 `test_pending_rows_survive_listener_restart` + a prod bot restart with a pending row |
 | with `NOTIFY_OUTBOX=0` a Telegram launch still DMs via the legacy path | A | A6 `test_done_message_sends_legacy_when_outbox_off`; ops notices still delivered (`test_ops_notices_delivered_with_outbox_off`) |
@@ -402,18 +402,18 @@ Fresh reviewer over `git diff main...observability/phase-1` (four dimensions: ru
 | both tracked settings files carry no `hooks` | **B** | E1 `test_settings_no_hooks` |
 | the runner refuses to start with a planted key | **B** | E7 `test_startup_env_refuses_planted_key`; live `plutil … grep -c CLAUDE_CODE_OAUTH_TOKEN` → 0 (runbook §0) |
 | `model_usage` on utility calls lists only the requested model | **B** | E7 `test_utility_model_usage_is_audited` + prod audit |
-| the restore drill passes | A | C1 accept — **record the atlas `-Fc` size here** |
+| the restore drill passes | A | **PASS 2026-10-22 08:50Z** on prod: assistant leg 2477 jobs restored, atlas leg restored from the 529 MB dump in ≈ 2.5 min (`advisors.books` 8 rows sampled), throwaway databases dropped; WARNs only for the owner items (seal key, `r2`) |
 | the two trading tokens are in | A (owner) | §7 row 6 |
 | ~45 wasted sessions/month stop | A | D1 accept; re-count `schedule_deferred` vs `provisioning_gap` completions after 30 d — **record here** |
 
 | Measured at Phase-1 exit | result |
 |---|---|
-| `cost_usd_list` vs `sdk_cost_usd` (B4) | _pending_ |
-| atlas `-Fc` dump size / nightly tarball size (C1) | _pending_ |
-| first off-site `rclone copy` OK + prune OK (C1, after §7 row 3) | _pending_ |
-| sessions deferred by `provisioning_gap` in the first 30 d (D1) | _pending_ |
-| 30-d rolling `cost_usd_list` baseline (the Phase-2 drift alarm keys +25 % off it) | _pending_ |
-| `WEB_AUTH_TOKEN` probe → 401; `plutil` credential grep → 0 | _pending_ |
+| `cost_usd_list` vs `sdk_cost_usd` (B4) | **Divergence recorded (2026-10-22, first 3 stamped jobs)**: `deploy-director` opus-4-7 $0.6470 vs $0.4847 (−25.1 %) and `alpha-scout` opus-5 $4.5235 vs $3.5401 (−21.7 %) — both exactly the same arithmetic with cache writes at the **5-minute rate ($6.25/M implied)**; a `server-patch` opus-4-7 job (code-review subagent in session) was +2.8 % the other way — unexplained, re-check with more jobs. **The CLI prices cache writes at the 5-m rate; `cost_usd_list` at the 1-h rate stays the figure of record.** The reconcile's comparison was made PAIRED (jobs carrying an SDK figure only) after the first run compared one job's SDK figure with the whole window |
+| atlas `-Fc` dump size / nightly tarball size (C1) | **529 MB** (547,358,740 B) in ≈ 35 s; nightly tarball **19 MB**. Local keep-7 ≈ 3.7 GB; weekly off-site keep-5 ≈ 2.6 GB — inside R2's free 10 GB-month (D-P1-6 sizing holds). First nightly run (04:00 local) said "no atlas database": the review's `psql -tAc` probe lacked `-d postgres` — fixed (`a0b4599`) and re-run by hand 08:47Z |
+| first off-site `rclone copy` OK + prune OK (C1, after §7 row 3) | _pending the owner's `r2` remote_ (every run logs `offsite SKIP`) |
+| sessions deferred by `provisioning_gap` in the first 30 d (D1) | _pending_ — the four swing rows carry `env_required` on prod since 07:42Z; first due `atlas-swing-supervise-edt` 2026-10-22 13:40Z |
+| 30-d rolling `cost_usd_list` baseline (the Phase-2 drift alarm keys +25 % off it) | **≈ $2,101.63 list-equivalent** (trailing 30 d to 2026-10-22, 856 priced jobs; alpha-research 48.7 %, alpha-governor 12.5 %); trailing 7 d ≈ $444.85 (first `scripts/cost-reconcile.py --db` run, 07:5xZ) |
+| `WEB_AUTH_TOKEN` probe → 401; `plutil` credential grep → 0 | **401** (`curl` on `/api/jobs`, 2026-10-22 08:5xZ); **0** `CLAUDE_CODE_OAUTH_TOKEN` across the 14 `com.assistant.*` plists |
 
 ## 9) Out of scope / deferred (one line each) and findings for other owners
 
@@ -422,3 +422,21 @@ Phases 2–4 (control plane, lanes/ledger/contracts, registry-lint/retro/in-proc
 ## 10) Review log
 
 **2026-10-21 — fact-finding + adversarial review applied in place.** Fact-finding: one reader per P0 task (19) + three scouts (terminal-reason vocabulary, prod host, schedules/manifests) + a conflict detector over the current tree (2.3 M tokens). Plan review: five dimension reviewers (spec coverage, tree anchors, internal consistency, hard rules/safety, executability/honesty) and two skeptics per critical/major (29 agents, 2.4 M tokens) — 0 critical, 11 majors confirmed, 1 refuted (the sealed secrets bundle: C1 seals `.env`/atlas `.env`/cloudflared copies exactly as spec §9 asks; the skeptics found no INV-22 exposure), 4 unverified majors and 34 minors applied as well. The substantive changes: token columns are stamped on **both** lanes through a capture-free `usage_columns` (B2/B3) and §8 row 1 says what is actually proven; `NOTIFY_OUTBOX` is read only by the bot, the runner always writes rows, and the bot's `legacy_mode` keeps ops notices flowing under the kill switch (D-P1-10, A4–A6); `send_via_http` can no longer persist the bot token (A4 `TelegramSendError`); the §7 entry set is the spec's (D1/D2/D3, D6 first half, `WEB_AUTH_TOKEN` probe, `pmset`); the bingo observe arm is a recorded deviation (D-P1-12) with an inventory test and an owner exit (§7 row 11); `COMPLETION_DM_CHANNELS` keeps `cli` and reserves only `pwa`; the two pure origin helpers are born in A1 (so A1's test can import them); `tests/test_scripts_syntax.py` is created by A7 with the three existing timer scripts and appended by B4/C1/E10 with a drift test; the codex subset relation is a test, not a module-level assert; D1 names the four swing rows and their exact payload, checks the atlas **dev clone** `.env` through `resolve_delivery_cwd`, writes its stream to a subdirectory, scopes fail-open to resolution only, teaches `schedule_adherence` the `deferred` status and takes the day-claim only after the notice row exists; the rollback rule is path-level because A1 is one commit. Two owner decisions were added (D-P1-12; D-P1-7 explicit yes). The tree anchors cited in Tier A were all verified within ±5 lines at `b47ebf9`.
+
+## 11) Deployment log — Tier A
+
+| When (UTC) | What | Evidence |
+|---|---|---|
+| 2026-10-22 07:40–07:42 | **`aa4499b` deployed** by the autopilot (`deploy-director 89f57558` → `server-deploy dc650206`): alembic **008**, backfills, `seed-schedules` (the four swing rows carry `env_required`), services restarted, hooks re-armed | alembic_version 008; jobs 2472 / 2244 with tokens / every row has `origin_channel` (system 1348, scheduler 829, web 240, telegram 55); tasks 37/41 with origin |
+| 07:40:13 | **Incident**: the deploy gate's pytest run inserted a REAL `notifications` row ("Task failed after 3 escalation attempts. Last error: boom") and the new bot delivered it (message 940) | `tests/test_origin.py::test_level_3_escalation_fails_the_task_through_set_task_status` patched `src.db.redis` while `main.py` binds its own `redis`; `pydantic-settings` reads the dev `.env` (prod DSN) even under `PIPENV_DONT_LOAD_ENV=1`, and the prod gate exports prod's `.env`. Row deleted by hand |
+| 07:49 | **`6e442a2`** pushed: `tests/conftest.py` dead-ends `POSTGRES_DSN`/`REDIS_URL` at `127.0.0.1:1` unless `AI_SERVER_RUN_DB_TESTS=1`; `tests/test_no_live_services.py`; the test patches the runner's bindings; `weekly_allowance` keeps only the current fixed window (first run printed "$0/week") | suite 2798 passed; the one test the guard exposed was the leaking one |
+| 08:00 | First nightly `backup.sh` under C1 logged `atlas dump SKIP (no atlas database)` | the review's M11 probe `psql -tAc …` had no `-d postgres` (this host has no DB named after the OS user) |
+| 08:05 | **`a0b4599`** pushed: probe fixed + pinned, hosting GOTCHAS | `tests/test_scripts_syntax.py` 62 passed |
+| 08:14 | First job completed under the new runner: `deploy-director bfc449b5` with every 008 stamp | §8 |
+| 08:24 | `alpha-scout` landed three GOTCHAS via the INV-4 lane (`server-patch 5c41f8db`, docs only) → `origin/main` **`7f61b5d`** | gate 2798 passed under the guard |
+| 08:44–08:46 | **`7f61b5d` deployed** (`server-deploy c70e124e`); services on new pids | `/health` ok |
+| 08:47 | `backup.sh` run by hand: atlas `-Fc` **529 MB** in ≈ 35 s, tarball 19 MB; seal SKIP, offsite SKIP (owner items) | `backup.log` |
+| 08:50 | `restore-drill.sh` **PASS** both legs (2477 jobs; atlas ≈ 2.5 min) | drill log |
+| 08:5x | `cost-reconcile.py --db`: 30 d ≈ $2,101.63, 7 d ≈ $444.85; SDK prices cache writes at the 5-m rate ($6.25/M implied on 2 of 3 stamped jobs) | §8; paired comparison fix committed with this entry |
+
+**Owner items still open after Tier A** (§7): row 0 b/c (D2, D3 — not stated), row 3 (`rclone` remote `r2` + bucket — no off-site copy exists until then), row 4 (seal key), row 5 (`bash scripts/install-launchd.sh timers-only` on prod — the `cost-reconcile` and `credential-canary` timers are not installed until then; then the full install once, outside market hours), row 6 (the two trading tokens into `~/Documents/repos/atlas/.env` — until then the four swing rows defer daily with one DM), row 7 (D4 confirmations), row 8 (Ollama), row 11 (bingo's hook, before E1). **Tier B (E1–E10) is not built**; §8 rows 6–8 are therefore still open and Tier A is a partial Phase 1 (D-P1-11).

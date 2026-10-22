@@ -2,6 +2,17 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-22 — cost-reconcile: the computed-vs-SDK comparison is paired
+
+**Agent task**: Observability Phase 1 §8 measurement (first prod `scripts/cost-reconcile.py --db` run after B3 stamped the first job).
+**Files changed**:
+- `src/runner/pricing.py` — `ModelRow` tracks the paired subset (tokens + computed $ of the jobs that carry `sdk_cost_usd`); `implied_cache_write_rate` and `render_sdk_reconcile` compare over that subset and print `(n)`. The window total `usd` is unchanged. First prod run compared one stamped opus-4-7 job's SDK figure with the computed sum of all twelve in the window (−96.9 %, implied rate −6.63).
+- `tests/test_pricing.py::test_reconcile_pairs_only_jobs_with_an_sdk_figure`.
+
+**Why**: the exit criterion ("within 1 %, or record the rate the CLI uses") is only meaningful like for like. Measured on the first stamped job (bfc449b5, opus-4-7): computed $0.6470 at the 1-h cache-write rate, SDK $0.4847 — exactly the same arithmetic with cache writes at the 5-minute rate ($6.25/M); the CLI prices cache writes at the 5-m rate.
+
+**Side effects**: none at runtime (report only).
+
 ## 2026-10-22 — Post-deploy follow-ups: tests can no longer reach the live DB/Redis; weekly-allowance window filter
 
 **Agent task**: Observability Phase 1 Tier A post-deploy verification (plan `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §8).

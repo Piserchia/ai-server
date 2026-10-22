@@ -355,6 +355,23 @@ class TestSdkReconcile:
         rate = implied_cache_write_rate(rep.per_model[0])
         assert rate == Decimal("6.25"), rate                # named, not guessed
 
+    def test_reconcile_pairs_only_jobs_with_an_sdk_figure(self):
+        # First prod run (2026-10-22): one of twelve opus-4-7 jobs carried
+        # sdk_cost_usd, and the row compared that one SDK figure with the
+        # computed sum of all twelve (−96.9 %, implied rate −6.63). The
+        # comparison must be over the paired subset only.
+        paired = job_cost_from_events("a", _events("claude-opus-5", OPUS5_REAL, cost=3.069))
+        unpaired = job_cost_from_events("b", _events("claude-opus-5", OPUS5_REAL))
+        rep = summarize([paired, unpaired], since=SINCE, until=UNTIL, days=30)
+        row = rep.per_model[0]
+        assert row.jobs == 2 and row.sdk_jobs == 1
+        assert usd_2dp(row.paired_usd) == Decimal("3.49")  # the paired job only
+        assert usd_2dp(row.usd) == Decimal("6.97")         # the window total, untouched
+        assert implied_cache_write_rate(row) == Decimal("6.25")
+        out = render_sdk_reconcile(rep)
+        assert "PAIRED" in out and "    1 " in out and "3.49" in out and "6.97" not in out
+        assert "-11.9%" in out                              # 3.069 vs 3.485, not vs 6.97
+
     def test_within_one_percent_is_not_flagged(self):
         a = job_cost_from_events("a", _events("claude-opus-5", OPUS5_REAL, cost=3.49))
         rep = summarize([a], since=SINCE, until=UNTIL, days=30)
