@@ -406,6 +406,31 @@ class TestWeeklyAllowance:
         assert cal is not None and cal.window_opens_at == datetime(2026, 9, 25, tzinfo=timezone.utc)
         assert cal.implied_usd == (Decimal("0"),) and cal.marginal_usd is None
 
+    def test_readings_from_an_earlier_window_are_excluded(self):
+        # First prod run (2026-10-22): readings from the 09-25→10-02 window were
+        # scored against the 10-16 window's opening and printed "$0/week". Only
+        # readings sharing the newest resets_at belong to the current window.
+        old = [_quota_event("2026-09-25T13:57:00+00:00", 0.25),
+               _quota_event("2026-09-27T10:32:00+00:00", 0.58)]
+        cur = [_quota_event("2026-10-17T12:00:00+00:00", 0.20,
+                            resets="2026-10-23T00:00:00+00:00"),
+               _quota_event("2026-10-19T12:00:00+00:00", 0.40,
+                            resets="2026-10-23T00:00:00+00:00")]
+        reads = quota_readings(old + cur)
+        jobs = [job_cost_from_events("c1", _events(
+                    "claude-opus-5", _usage(out=1_600_000),      # $40 at $25/M output
+                    ts="2026-10-17T06:00:00+00:00")),
+                job_cost_from_events("c2", _events(
+                    "claude-opus-5", _usage(out=1_600_000),      # +$40 ⇒ $80
+                    ts="2026-10-18T06:00:00+00:00"))]
+        cal = weekly_allowance(jobs, reads)
+        assert cal is not None
+        assert cal.window_opens_at == datetime(2026, 10, 16, tzinfo=timezone.utc)
+        assert [p[0].isoformat() for p in cal.points] == [
+            "2026-10-17T12:00:00+00:00", "2026-10-19T12:00:00+00:00"]
+        assert cal.implied_usd == (Decimal("200"), Decimal("200"))
+        assert cal.marginal_usd == Decimal("200")
+
     def test_five_hour_readings_are_not_the_weekly_bar(self):
         assert quota_readings([_quota_event("2026-09-25T13:57:00+00:00", 0.96,
                                             kind="five_hour")]) == []

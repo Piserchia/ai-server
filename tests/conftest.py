@@ -11,6 +11,22 @@ opt-in Postgres gate).
 
 from __future__ import annotations
 
+import os
+
+# ── Never let a test reach the live Postgres or Redis ───────────────────────
+# The suite is pure/fixture style, but `pydantic-settings` reads `.env` from the
+# CWD even under PIPENV_DONT_LOAD_ENV=1, and the dev `.env` points at the
+# PRODUCTION database; the prod deploy gate runs with prod's `.env` exported.
+# On 2026-10-22 a test that drove `_notify_task` without patching the outbox
+# session inserted a real `notifications` row on prod and the bot DM'd it.
+# Point both DSNs at a closed port BEFORE `src.db` builds its engine/client, so
+# an unpatched access fails fast instead of touching production. The opt-in
+# Postgres migration test (AI_SERVER_RUN_DB_TESTS=1) needs the real DSN prefix
+# to derive its throwaway database, so it is the one exemption.
+if os.environ.get("AI_SERVER_RUN_DB_TESTS") != "1":
+    os.environ["POSTGRES_DSN"] = "postgresql+asyncpg://nobody:nobody@127.0.0.1:1/aiserver_tests_never_connect"
+    os.environ["REDIS_URL"] = "redis://127.0.0.1:1/0"
+
 import pytest
 
 try:

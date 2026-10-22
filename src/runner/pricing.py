@@ -574,10 +574,17 @@ def weekly_allowance(jobs: Iterable[JobCost], readings: Iterable[QuotaReading], 
     that ignores whatever was spent before the series started. None when no
     seven_day reading carries a resets_at — stated, never assumed.
     """
-    reads = sorted((r for r in readings if r.resets_at is not None), key=lambda r: r.ts)
-    if not reads:
+    dated = [r for r in readings if r.resets_at is not None]
+    if not dated:
         return None
-    opens = max(r.resets_at for r in reads) - timedelta(days=7)
+    # Only the CURRENT fixed window: every seven_day reading of one window
+    # shares its resets_at, so readings carrying an older resets_at belong to
+    # a window that has already closed. Mixing them in computed "spent since
+    # this window opened" for a reading taken before it opened — always $0 —
+    # and printed "allowance ≈ $0/week" (first prod run, 2026-10-22).
+    current = max(r.resets_at for r in dated)
+    reads = sorted((r for r in dated if r.resets_at == current), key=lambda r: r.ts)
+    opens = current - timedelta(days=7)
     priced = sorted((j for j in jobs
                      if j.completed_at is not None and j.completed_at >= opens
                      and j.usd is not None),

@@ -581,3 +581,7 @@ origin_from_created_by(created_by)` on the two direct constructors is a
 2-line change if a later task wants the columns populated — do it as a
 named task with the GOTCHA updated, never by threading a message id through
 the plan payload.
+
+## 2026-10-22 — A test that calls a runner function unpatched can touch PRODUCTION
+
+`main.py`, `jobs.py`, `telegram_bot.py` and `notify/outbox.py` each bind `redis`/`async_session` at import (`from src.db import …`), so `monkeypatch.setattr(src.db, "redis", …)` patches nothing they use. The dev `.env` points `POSTGRES_DSN`/`SERVER_ROOT` at the production checkout and `pydantic-settings` reads it even under `PIPENV_DONT_LOAD_ENV=1`; the prod deploy gate exports prod's `.env`. `tests/conftest.py` therefore dead-ends both DSNs at `127.0.0.1:1` before `src.db` builds its engine/client (exempt: `AI_SERVER_RUN_DB_TESTS=1`). Symptom of a leak now: `ConnectionRefusedError … ('127.0.0.1', 1)` in a test — patch the MODULE that bound the name (`runner_main.redis`, `runner_main.enqueue_notice`, `outbox_mod.async_session`), never `src.db`.
