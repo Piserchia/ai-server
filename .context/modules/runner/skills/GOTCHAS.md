@@ -514,3 +514,22 @@ under the session scratch directory. Exit 2 means Codex did not run
 `python -m src.runner.executors.codex_cli` works but runpy warns that the
 package `__init__` already imported the module (it then executes twice);
 the script imports `main` from a one-line entry file instead.
+
+## `git diff --no-ext-diff` does NOT disable textconv (2026-10-21)
+
+`--no-ext-diff` only skips `diff.external` / `diff.<drv>.command`. A
+`diff.<drv>.textconv` configured in the clone's `.git/config` and bound by a
+`.gitattributes` line still runs and replaces the blob the diff is computed
+from — an empty converter yields a hunk with no `+` lines at all. The gate
+needs `--no-textconv` as well (`review.GATE_DIFF_FLAGS`), on both
+`diff <base>` and `diff --no-index`. Verified on git 2.53.0.
+
+## Path deny lists must casefold on this host (2026-10-21)
+
+The canonical checkouts and every agent that opens them live on
+case-insensitive APFS: `.CLAUDE/settings.json` written by a job IS
+`.claude/settings.json` to Claude Code, `agents.md` IS `AGENTS.md` to Codex.
+`review.gate_path_denied` compares with `str.casefold()`; any future path
+allow/deny rule here must too (fail closed — a false positive on a
+case-sensitive box only costs a refusal).
+

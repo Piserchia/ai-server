@@ -200,8 +200,12 @@ GATE_GIT_OPTS: tuple[str, ...] = (
     "-c", "core.hooksPath=/dev/null",
 )
 #: Flags on every `git diff` the gate runs: attributes in the clone cannot
-#: hide content (`--text`) or substitute a driver (`--no-ext-diff`).
-GATE_DIFF_FLAGS: tuple[str, ...] = ("--no-color", "--text", "--no-ext-diff")
+#: hide content (`--text`), substitute a driver (`--no-ext-diff`) or run a
+#: converter over it (`--no-textconv` — `diff.<drv>.textconv` is honoured
+#: even under `--no-ext-diff`, and an empty converter leaves the reviewer a
+#: file with no content lines; final review, 2026-10-21). Git honours all
+#: three on both `diff <base>` and `diff --no-index`.
+GATE_DIFF_FLAGS: tuple[str, ...] = ("--no-color", "--text", "--no-ext-diff", "--no-textconv")
 
 
 def diff_for_gate(cwd: Path, base_sha: str | None) -> str:
@@ -226,7 +230,9 @@ def diff_for_gate(cwd: Path, base_sha: str | None) -> str:
     reviewer sees or run code under the runner — `--text` (a nested
     `.gitattributes` with `* -diff` would otherwise render every file as
     `Binary files … differ`), `--no-ext-diff` (no `diff=<driver>` /
-    `diff.external` command), `core.quotePath=false` (non-ASCII paths print
+    `diff.external` command), `--no-textconv` (no `diff.<driver>.textconv`
+    converter — it runs and can empty the hunk even with `--no-ext-diff`),
+    `core.quotePath=false` (non-ASCII paths print
     raw so the deny list sees them; tabs/quotes/newlines stay quoted and
     `gate_unparseable_headers` refuses those), `core.fsmonitor=false` and
     `core.hooksPath=/dev/null` (no config-driven command execution).
@@ -291,6 +297,14 @@ GATE_DENIED_FILES: tuple[str, ...] = (
 # one applies to its subtree and is read by every later git in the checkout
 # (diff drivers, filters, `-diff`), not only at the root.
 GATE_DENIED_BASENAMES: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md", ".gitattributes")
+# Matching is CASE-INSENSITIVE (final review, 2026-10-21): the canonical and
+# the agents that open it live on case-insensitive APFS, so a job-written
+# `.CLAUDE/settings.json` or `agents.md` IS the file Claude Code / Codex /
+# git later read as `.claude/settings.json` / `AGENTS.md`. Fail closed — a
+# false positive on a case-sensitive host only costs a refusal.
+_GATE_DENIED_DIRS_CF = frozenset(d.casefold() for d in GATE_DENIED_DIRS)
+_GATE_DENIED_FILES_CF = frozenset(f.casefold() for f in GATE_DENIED_FILES)
+_GATE_DENIED_BASENAMES_CF = frozenset(b.casefold() for b in GATE_DENIED_BASENAMES)
 
 _DIFF_PATH_LINE = re.compile(
     r"^(?:\+\+\+ b/|--- a/|rename (?:from|to) |copy (?:from|to) )(?P<path>.+?)\s*$")
@@ -323,19 +337,20 @@ def gate_diff_paths(diff: str) -> list[str]:
 
 
 def gate_path_denied(path: str) -> bool:
-    """True when `path` (repo-root-relative, POSIX) hits the deny list. Pure."""
+    """True when `path` (repo-root-relative, POSIX) hits the deny list,
+    compared case-insensitively (`str.casefold`). Pure."""
     norm = path.strip()
     while norm.startswith("./"):
         norm = norm[2:]
     parts = [p for p in norm.split("/") if p and p != "."]
     if not parts:
         return False
-    top = parts[0]
-    if top in GATE_DENIED_DIRS:
+    top = parts[0].casefold()
+    if top in _GATE_DENIED_DIRS_CF:
         return True          # anything under it, or the entry itself
-    if len(parts) == 1 and top in GATE_DENIED_FILES:
+    if len(parts) == 1 and top in _GATE_DENIED_FILES_CF:
         return True
-    if parts[-1] in GATE_DENIED_BASENAMES:
+    if parts[-1].casefold() in _GATE_DENIED_BASENAMES_CF:
         return True
     return False
 

@@ -808,9 +808,13 @@ class TestGatePathDenials:
     def test_denied(self, path):
         assert review.gate_path_denied(path), path
 
+    # `research/claude.md` and `agents.md` were listed as allowed until the
+    # final review (2026-10-21): on case-insensitive APFS they ARE
+    # `CLAUDE.md` / `AGENTS.md`, so they are denied now (see
+    # TestGateDiffCannotBeBlinded.test_deny_list_is_case_insensitive).
     @pytest.mark.parametrize("path", [
-        "src/x.py", ".gitignore", "docs/.claude-notes.md", "research/claude.md",
-        "agents.md", "src/.github.py", "x/.gitmodules", "README.md", "",
+        "src/x.py", ".gitignore", "docs/.claude-notes.md", "research/claude-notes.md",
+        "agents.txt", "src/.github.py", "x/.gitmodules", "README.md", "",
     ])
     def test_allowed(self, path):
         assert not review.gate_path_denied(path), path
@@ -1110,6 +1114,22 @@ class TestGateDiffCannotBeBlinded:
         assert "HIJACKED" not in diff
         assert not marker.exists()
 
+    def test_textconv_driver_is_never_invoked(self, clone, tmp_path):
+        # Final review (2026-10-21): `--no-ext-diff` leaves `diff.<drv>.textconv`
+        # open — the converter RUNS and, with an empty converter, the reviewer
+        # sees a file with no content lines at all. `--no-textconv` closes it
+        # on both `diff <base>` (tracked) and `diff --no-index` (untracked).
+        base = workspaces.head_sha(clone.path)
+        marker = tmp_path / "TEXTCONV_RAN"
+        _git(["config", "diff.evil.textconv", f"sh -c 'touch {marker}; true'"], clone.path)
+        (clone.path / ".gitattributes").write_text("*.py diff=evil\n")
+        (clone.path / "keep.py").write_text("x = 5\n")                 # tracked
+        (clone.path / "evil.py").write_text('os.system("evil")\n')     # untracked
+        diff = review.diff_for_gate(clone.path, base)
+        assert "+x = 5" in diff
+        assert '+os.system("evil")' in diff
+        assert not marker.exists()
+
     def test_fsmonitor_and_hooks_in_the_clone_config_do_not_run_for_the_diff(self, clone, tmp_path):
         base = workspaces.head_sha(clone.path)
         marker = tmp_path / "FSMON_RAN"
@@ -1123,6 +1143,25 @@ class TestGateDiffCannotBeBlinded:
     @pytest.mark.parametrize("path", ["sub/.gitattributes", "a/b/c/.gitattributes"])
     def test_gitattributes_denied_at_any_depth(self, path):
         assert review.gate_path_denied(path)
+
+    # Final review (2026-10-21): the canonical lives on case-insensitive APFS,
+    # so `.CLAUDE/settings.json` written by the job IS `.claude/settings.json`
+    # when Claude Code opens the checkout. The deny list casefolds.
+    @pytest.mark.parametrize("path", [
+        ".CLAUDE/settings.json", ".Claude/x", ".Github/workflows/x.yml",
+        ".CODEX/config.toml", ".GIT/hooks/pre-push", ".GitHooks/pre-push",
+        "agents.md", "Agents.MD", "claude.md", "Claude.md", "sub/claude.md",
+        "sub/.GitAttributes", ".GITMODULES", ".GitConfig", ".MCP.json",
+    ])
+    def test_deny_list_is_case_insensitive(self, path):
+        assert review.gate_path_denied(path)
+
+    @pytest.mark.parametrize("path", [
+        "claude.py", "agents/x.py", "github/x.yml", "src/.claude_cache/x",
+        "notes/readme.md", "sub/gitattributes",
+    ])
+    def test_casefold_does_not_overreach(self, path):
+        assert not review.gate_path_denied(path)
 
 
 class TestGateQuotedPaths:
