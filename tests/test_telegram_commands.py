@@ -87,6 +87,11 @@ class TestParseCallback:
         assert prefix is None
         assert extra is None
 
+    def test_job_details_callback_parses(self):
+        # A6: the FailedCard's [Details] button — the prefix is a JOB id.
+        from src.gateway.telegram_bot import _parse_callback
+        assert _parse_callback("jd:abcdef12") == ("jd", "abcdef12", None)
+
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch

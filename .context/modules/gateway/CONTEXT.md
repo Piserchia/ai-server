@@ -55,7 +55,25 @@ the single enqueue/cancel/lookup helper.
 - Telegram admin commands: `/chat`, `/resume`, `/schedule`, `/projects`
 - Thread-based interaction: plain text replies in task threads auto-route as continuations
 - Inline keyboard buttons: approve, cancel, rate, view details, structured choices
-- CallbackQueryHandler: parses `action:task_prefix[:extra]` callback data
+- CallbackQueryHandler: parses `action:task_prefix[:extra]` callback data.
+  `jd:<job8>` (A6, 2026-10-21) is a JOB-level callback — the FailedCard's
+  `[Details]` button — handled before the task lookup: replies with
+  `format_job_status(job)` as plain text (no `parse_mode`), or `Job not found.`
+- `format_job_status(job) -> str` — pure (A6): `Job <8> — <status>`, kind,
+  lane (`lane_label`, provider/model), terminal reason, turns, tokens, api
+  time, list-equivalent cost, origin, 300-char error, 600-char summary;
+  ≤ 4000 chars, never Markdown-safe by design (sent without `parse_mode`).
+- `_lane_label` is a thin alias of `src.notify.outbox.lane_label` since A6
+  (one definition for the done DM, `/jobs` and the outbox cards).
+- `quota_paused_text(reset_at, reason, source)` (A3) and
+  `provider_paused_text(provider, reset_at, reason)` (A6) — pure bodies of
+  the `quota_paused` notice for the global Anthropic pause and for a
+  non-Anthropic lane respectively.
+- Outbox delivery (A6): `_drain_outbox(app, *, legacy_mode) -> (sent,
+  failed, skipped)` and `_outbox_listener(app, *, legacy_mode)`
+  (`_OUTBOX_POLL_SECONDS = 30`); `_handle_done_message(app, channel, data)
+  -> bool` is the per-message gate of the legacy `jobs:done` listener. See
+  "Notifications back to user".
 - MessageHandler: detects replies to task threads via `thread_message_id` lookup
 
 ## Flag parsing
@@ -98,14 +116,36 @@ pre-007 rows) and the jobs table has a Provider column.
 
 ## Notifications back to user
 
-- Telegram bot subscribes to `jobs:done:*` channels; DMs the submitter when
-  their job completes. The submitter→chat_id mapping is held in memory (lost
-  on bot restart — acceptable tradeoff vs adding a Redis key per job).
-- Quota state change (pause/resume) → periodic notifier DMs all allowed chat IDs. The pause DM body is the pure `quota_paused_text(reset_at, reason, source)`; its reset line says `(vendor)` only when a `RateLimitEvent` carried the time (`quota.last_source()`), else `(estimated)` (A3, 2026-10-21).
+- **Outbox (A6, 2026-10-21; D-P1-10)**: the runner always writes a
+  `notifications` row (A5) and always publishes the legacy channels; the bot
+  decides which renderer sends. `_outbox_listener` ALWAYS runs
+  (`release_stuck_sending()` once, subscribe `notify:outbox`, drain on every
+  nudge and at least every 30 s — a bot restart loses no DM). With
+  `settings.notify_outbox` **on** (the default since A6) it delivers every
+  row (claim → `render_telegram` → `send_via_bot` → `mark_sent` /
+  `mark_failed` with backoff; token-free `last_error`) and the legacy
+  renderers below are gated off. With `NOTIFY_OUTBOX=0` (kill switch,
+  bot-only restart) the listener runs in `legacy_mode`: job/task rows are
+  marked `skipped`, the ops kinds (`quota_*`, `schedule_deferred`,
+  `ops_alert`, …) are still delivered, and the legacy renderers send the
+  job/task cards.
+- Legacy `jobs:done:*` renderer (`_handle_done_message` → `_deliver_done`):
+  DMs the submitter when their job completes, only while the outbox is off;
+  the in-memory submitter→chat_id entry (`_job_to_chat`) is popped either
+  way. Legacy `tasks:notify` renderer (`_task_notifier`): same gate.
+- Quota state change (pause/resume) → `_quota_notifier` writes a
+  `quota_paused` / `quota_resumed` OPS row per lane (the global Anthropic
+  pause and every enabled non-Anthropic lane via `quota.is_provider_paused`),
+  delivered in both switch positions. The Anthropic pause body is the pure
+  `quota_paused_text(reset_at, reason, source)`; its reset line says
+  `(vendor)` only when a `RateLimitEvent` carried the time
+  (`quota.last_source()`), else `(estimated)` (A3, 2026-10-21). A lane body is
+  `provider_paused_text(...)` and names `/resume <provider>`.
 
 ## Dependencies
 
 - `src.config`, `src.db`, `src.models`, `src.audit_log`
+- `src.notify.outbox` (A6: `OPS_NOTICE_KINDS`, `lane_label`, `build_ops_notice`, `enqueue_notice`, `pending_notices`, `claim_notice`, `mark_sent`, `mark_failed`, `mark_skipped`, `release_stuck_sending`) and `src.notify.telegram` (`render_telegram`, `send_via_bot`, `TelegramSendError`)
 - `src.runner.quota` (is_paused, clear, last_source (A3); T6: is_provider_paused, paused_providers, clear_provider — `GET /api/quota` adds `providers: {<p>: {paused, reset_at, reason}}` for non-Anthropic registry providers; `/status` lists each paused lane; `/resume <provider>` lifts one lane, bare `/resume` the global pause)
 - `fastapi`, `python-telegram-bot`
 

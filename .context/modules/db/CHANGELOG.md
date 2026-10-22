@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A6: `settings.notify_outbox` default → True
+
+**Agent task**: Observability Phase 1 re-cut plan A6 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**:
+- `src/config.py` — `notify_outbox` ships `True` now that the bot's `_outbox_listener` consumes the rows (was `False` since A4). `NOTIFY_OUTBOX=0` is the kill switch (D-P1-10): it changes which bot renderer sends job/task cards — never what the runner publishes or writes — and the listener keeps delivering the ops kinds in `legacy_mode`. Flipping it needs a bot-only restart (`launchctl kickstart -k gui/$UID/com.assistant.bot`).
+
+**Why**: spec §9 switch cell for Phase 1; the consumer landed in the same commit.
+
 ## 2026-10-21 — A4: `CHANNEL_NOTIFY_OUTBOX` + `settings.notify_outbox` (ships False)
 
 **Agent task**: Observability Phase 1 re-cut plan A4 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
