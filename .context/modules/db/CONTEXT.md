@@ -23,7 +23,12 @@ JSONL audit log on disk.
   `output_tokens`, `cache_read_tokens`, `cache_write_1h_tokens`,
   `cache_write_5m_tokens`, `num_turns`, `duration_api_ms`, `cost_usd_list`
   (runner-computed, `pricing.py`) and `sdk_cost_usd` (the SDK's figure —
-  two columns, never one), `cli_version`; and `lane`, `task_class`,
+  two columns, never one; `scripts/cost-reconcile.py --db` sums both per
+  served model against the JSONL ledger, B4), `cli_version` (**the lane's
+  CLI**: the Anthropic SDK's bundled CLI on the Anthropic lane, the Codex
+  CLI's version on the Codex lane — distinct from the `executor_started`
+  audit record's `cli_version` field, which is the Codex executor's own
+  stamp of the same value at process start); and `lane`, `task_class`,
   `first_event_at` reserved for Phase 3 (NULL until then). 008 backfills
   the token columns from `result->'usage'` and origin from `created_by`;
   turns/cost/API duration are not backfillable and stay NULL on pre-008

@@ -41,13 +41,16 @@ ALL_SCRIPTS = sorted(p.relative_to(REPO).as_posix() for p in (REPO / "scripts").
 # canary, not a timer, and legitimately uses `pipenv run` — excluded.
 TIMER_SCRIPTS = (
     "scripts/backup.sh",
+    "scripts/cost-reconcile-run.sh",
     "scripts/healthcheck-all.sh",
     "scripts/schedule-monitor.sh",
 )
 
-# The two out-of-band alerters (A7): `python -m src.notify send` first, the
-# raw Telegram curl as the fallback when the CLI itself cannot run.
-ALERTER_SCRIPTS = ("scripts/healthcheck-all.sh", "scripts/schedule-monitor.sh")
+# The out-of-band alerters (A7; B4 adds the weekly cost-reconcile wrapper):
+# `python -m src.notify send` first, the raw Telegram curl as the fallback
+# when the CLI itself cannot run.
+ALERTER_SCRIPTS = ("scripts/healthcheck-all.sh", "scripts/schedule-monitor.sh",
+                   "scripts/cost-reconcile-run.sh")
 
 NOTIFY_SEND = '"$VENV_PY" -m src.notify send'
 
@@ -228,6 +231,89 @@ class TestCountScheduleDeferred:
         # a top-level job log mentioning the kind is NOT a schedule stream
         (tmp_path / "volumes/audit_log/job.jsonl").write_text(self._rec("schedule_deferred", 1) + "\n")
         assert self._count(tmp_path) == "3"
+
+
+# --- B4: the weekly cost-reconcile timer --------------------------------------
+
+
+def test_cost_reconcile_timer_installed():
+    # D-P1-8: a launchd timer, not a schedule row. Monday 07:30 local, through
+    # the existing 3-arg `install_timer` helper (label, script, interval block).
+    src = _read("scripts/install-launchd.sh")
+    m = re.search(r'^install_timer "cost-reconcile" "scripts/cost-reconcile-run\.sh" \\\n\s*"(.*)"$', src, re.M)
+    assert m, "install-launchd.sh has no install_timer call for cost-reconcile"
+    block = m.group(1)
+    assert "<key>StartCalendarInterval</key>" in block
+    assert "<key>Weekday</key><integer>1</integer>" in block
+    assert "<key>Hour</key><integer>7</integer>" in block
+    assert "<key>Minute</key><integer>30</integer>" in block
+    # … and the installer still only installs listed timer scripts (cross-check above).
+    assert "scripts/cost-reconcile-run.sh" in TIMER_SCRIPTS
+
+
+def test_cost_reconcile_wrapper_runs_the_cli_with_both_windows_the_db_leg_and_the_seed():
+    run_src = _read("scripts/cost-reconcile-run.sh")
+    assert "pipenv run" not in run_src
+    assert '"$VENV_PY" scripts/cost-reconcile.py' in run_src
+    assert "--windows 30,7" in run_src and "--db" in run_src and "--seed-lane-budgets" in run_src
+    assert "volumes/logs/cost-reconcile.log" in run_src
+    # `cd "$PROJECT_DIR"` comes BEFORE the first VENV_PY= assignment: the
+    # editable install is inert under ~/Documents, and `pipenv --venv` finds
+    # the Pipfile by cwd.
+    assert run_src.index('cd "$PROJECT_DIR"') < run_src.index("VENV_PY=")
+    assert 'VENV_PY="${VENV_PY:-' in run_src and "pipenv --venv" in run_src
+    assert "import src.config" in run_src
+    # a non-zero exit is alerted through notify send (severity warn), curl fallback
+    assert "--kind ops_alert" in run_src and "--severity warn" in run_src
+    assert "5-minute cache writes" in run_src                   # the rc=1 message
+    # rc=1 is the CLI's RESERVED credits-signature code (review round 1): the
+    # billing DM is gated on exactly 1, and the generic branch names rc=3 (the
+    # run itself failed — DB leg down) so a Postgres outage never reads as a
+    # usage-credit overflow.
+    assert "if (( rc == 1 )); then" in run_src
+    assert "3 = the run itself failed" in run_src
+    assert "FATAL" in run_src                                   # no-venv is logged, never silent
+    assert os.access(REPO / "scripts/cost-reconcile-run.sh", os.X_OK)
+    assert os.access(REPO / "scripts/cost-reconcile.py", os.X_OK)
+
+
+class TestCostReconcileAlert:
+    """`send_alert()` in cost-reconcile-run.sh, driven with a fake interpreter:
+    notify send first (argv pinned), the curl fallback only when it fails."""
+
+    REL = "scripts/cost-reconcile-run.sh"
+
+    def _fake_python(self, tmp_path: Path, rc: int) -> Path:
+        fake = tmp_path / "fake-python"
+        fake.write_text(
+            "#!/bin/bash\n"
+            f"printf '%s\\n' \"$@\" > '{tmp_path}/argv.txt'\n"
+            f"printf '%s\\n' \"$PWD\" > '{tmp_path}/cwd.txt'\n"
+            f"exit {rc}\n"
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        return fake
+
+    def test_delivered_via_notify_with_the_cli_argv(self, tmp_path):
+        fake = self._fake_python(tmp_path, rc=0)
+        log = tmp_path / "log"
+        r = _run_function(self.REL, "send_alert", 'send_alert "cost-reconcile: x"; echo "rc=$?"',
+                          {"VENV_PY": str(fake), "PROJECT_DIR": str(tmp_path), "LOG": str(log)})
+        assert "rc=0" in r.stdout, r.stderr
+        argv = (tmp_path / "argv.txt").read_text().splitlines()
+        assert argv == ["-m", "src.notify", "send", "--kind", "ops_alert",
+                        "--severity", "warn", "--text", "cost-reconcile: x"]
+        assert (tmp_path / "cwd.txt").read_text().strip() == str(tmp_path)
+        assert "ALERT sent via notify" in log.read_text()
+
+    def test_cli_failure_without_creds_is_logged_not_fatal(self, tmp_path):
+        fake = self._fake_python(tmp_path, rc=1)
+        log = tmp_path / "log"
+        # no .env → the curl fallback has no creds → WARN line, rc 0 (never aborts the wrapper)
+        r = _run_function(self.REL, "send_alert", 'send_alert "x"; echo "rc=$?"',
+                          {"VENV_PY": str(fake), "PROJECT_DIR": str(tmp_path), "LOG": str(log)})
+        assert "rc=0" in r.stdout, r.stderr
+        assert "creds missing" in log.read_text()
 
 
 def test_schedule_monitor_reports_deferrals_as_a_finding():

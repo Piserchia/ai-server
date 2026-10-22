@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — B4 (docs + consumer): `scripts/cost-reconcile.py` is `pricing`'s ledger consumer
+
+**Agent task**: Observability Phase 1 re-cut plan B4 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6). No `src/runner/` code change — the script and its timer are recorded in the hosting CHANGELOG.
+**Files changed**: `.context/modules/runner/CONTEXT.md` — the B1 pricing bullet's "ledger side for B4" now names its consumer (`scripts/cost-reconcile.py`: both windows, the per-kind step, `render_sdk_reconcile`, `render_weekly_allowance`, the `--db` leg through `render_db_delta`, the seed through `write_lane_seed`/`lane_seed`) and the DB leg's grouping key (`COALESCE(model_served, resolved_model)` — the same precedence `job_cost_from_events` uses).
+**Why**: the Phase-1 exit criterion (computed vs SDK within 1 %, or the divergence recorded with the implied cache-write rate) is measured by that script's first prod run; the module's docs should say who calls what.
+**Side effects**: none at runtime.
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — B3: capture + pricing wired into `session.py` / `main.py` (both lanes); typed `terminal_reason`; silent-empty-success rejection
 
 **Agent task**: Observability Phase 1 re-cut plan B3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 3 "3a", adapted by symbol with the seven B3 Deltas).

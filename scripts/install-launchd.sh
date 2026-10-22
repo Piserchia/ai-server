@@ -196,6 +196,12 @@ install_timer "healthcheck-all" "scripts/healthcheck-all.sh" \
   "<key>StartInterval</key><integer>300</integer>"
 install_timer "schedule-monitor" "scripts/schedule-monitor.sh" \
   "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer></dict>"
+# Weekly cost reconcile (Observability Phase 1 B4, spec §2.8/§9; D-P1-8 — a
+# timer, not a schedule row): both windows + the per-kind step + the --db leg +
+# the lane-budget seed, Monday 07:30 local. The wrapper DMs the owner on a
+# non-zero exit (rc=1 = 5-minute cache writes seen, the credits signature).
+install_timer "cost-reconcile" "scripts/cost-reconcile-run.sh" \
+  "<key>StartCalendarInterval</key><dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>"
 
 echo ""
 echo "Done. Services will auto-start on login and auto-restart on crash."

@@ -3192,3 +3192,65 @@ Out-of-band alerts never depend on the bot: `notify_send` / `send_dm` → `"$VEN
 ### Prevention
 
 `tests/test_notify_bot.py::TestDrainOutbox::test_pending_rows_survive_listener_restart` pins the poll; `tests/test_notify_runner_hooks.py` pins that the runner always writes the row; `tests/test_scripts_syntax.py` pins the alerters' notify-first order and the `pipenv run` ban under launchd.
+
+## Symptom: an Anthropic job fails with `unrecognized_model: silent empty success` (terminal_reason `unrecognized_model`, audit kind `job_result_rejected`) — 2026-10-21
+
+### Diagnostic
+
+```bash
+psql assistant -c "SELECT id, resolved_model, model_served, terminal_reason, input_tokens, output_tokens, num_turns, duration_api_ms FROM jobs WHERE id = '<job_id>';"
+grep -E '"kind": "(job_result_rejected|api_retry|job_failed)"' volumes/audit_log/<job_id>.jsonl
+# the ResultMessage the session saw: usage / model_usage / result text
+grep -E '"kind": "job_completed"' volumes/audit_log/<job_id>.jsonl | tail -1
+```
+
+### Root cause
+
+B3's `served_model_violation` (`src/runner/result_capture.py`) rejects a `ResultMessage` whose `model_usage` does not contain the requested family **and** whose body is the silent-empty signature: no result text, all-zero usage, zero API time. The SDK produces that shape when the CLI accepted the request but never served a model — an unrecognised or retired model id (the Haiku 4.5 retirement class), a bare alias the CLI could not resolve, or an API path that returned nothing. Before B3 that job was recorded `completed` with an empty result; now it fails with `terminal_reason="unrecognized_model"` and the `job_result_rejected{reason, detail, requested_model}` audit record. All-zero usage WITH real text (a short chat answer) is **not** rejected, and a bare alias such as `sonnet` is accepted inside the served id.
+
+### Fix
+
+```bash
+# 1. Is the requested id still real? (registry first, then the vendor doc)
+grep -n '<model_id>' registry/models.yml docs/research/llm-landscape-2026-09/claude-anthropic.md
+# 2. If a skill pins a retired id, re-pin it (scripts/lint_docs.py check_model_pins) and relaunch the job.
+# 3. If the id is current and model_usage was empty, re-run once; a repeat is a vendor-side outage —
+#    check the api_retry records and `rate_limit_status` in the same audit log, then /status.
+```
+
+### Prevention
+
+`tests/test_result_capture.py::TestServedModel` pins the rejection and its two "not rejected" shapes (`test_zero_usage_with_text_and_api_duration_is_ok`, `test_bare_alias_request_is_not_rejected`); `check_model_pins` in the lint gate keeps skill pins on live ids.
+
+## Symptom: a Monday DM "cost-reconcile: 5-minute cache writes present — possible usage-credit overflow" (or "weekly run failed / did NOT run") — 2026-10-21
+
+### Diagnostic
+
+```bash
+tail -60 volumes/logs/cost-reconcile.log          # the two window blocks, computed-vs-SDK, the DB leg, the seed, `run rc=`
+launchctl list | grep cost-reconcile              # the timer exists (install-launchd.sh installs it; Mon 07:30)
+# re-run by hand from the project root with the venv python (never `pipenv run` under launchd; by hand it is fine).
+# No `--seed-lane-budgets` here on purpose: from the dev checkout its bare form resolves under settings.server_root,
+# which is PRODUCTION's volumes/ tree — pass an explicit PATH if you need the seed from dev.
+PIPENV_DONT_LOAD_ENV=1 SERVER_ROOT="$PWD" pipenv run python scripts/cost-reconcile.py --windows 30,7 --db
+```
+
+### Root cause
+
+`scripts/cost-reconcile.py` exits **1** when any window's `cw_5m` total is non-zero: a 5-minute cache write on this account means the prompt-cache TTL dropped from 1 h to 5 m, which is the usage-credits (metered spend) signature of spec §2.8 — the subscription writes 100 % of cache at the 1-h TTL. The wrapper turns that exit code into the DM, and **rc=1 is reserved for it**: the CLI catches a failing `--db` leg (Postgres down, DSN wrong, a pre-008 schema if the deploy order slipped) and any unexpected exception and exits **3** with a `DB leg failed: <ExcType>: <msg>` / `cost-reconcile failed: …` line plus the traceback on stderr (= the log), so a DB outage is never DM'd as "check claude.ai billing". "weekly run failed (rc=N)" is that rc=3, or rc=2 (the audit dir does not exist); "did NOT run" means no usable venv python was found (`FATAL` line in the log).
+
+### Fix
+
+```bash
+# rc=1: check claude.ai billing / usage credits BEFORE anything else; then find the 5-m jobs:
+grep -l '"ephemeral_5m_input_tokens": [1-9]' volumes/audit_log/*.jsonl | head
+# rc=3 (the --db leg / an unexpected crash): grep 'failed:' volumes/logs/cost-reconcile.log, then run the --db leg by hand (above).
+# rc=2: the audit dir does not exist — check SERVER_ROOT / --audit-dir.
+# FATAL: `pipenv --venv` must resolve from the project root, or export VENV_PY in the timer plist.
+```
+
+A computed-vs-SDK divergence (the `delta` / `implied cw $/M` columns) is a **finding, not a failure** — it is recorded in the re-cut plan's §8 with the implied rate and is never "fixed" by changing `pricing.py` to match the CLI.
+
+### Prevention
+
+`tests/test_pricing.py::TestCli` pins the exit codes and the JSON shape; `tests/test_scripts_syntax.py` pins the timer's interval, the wrapper's argv, the cd-first venv resolution and the notify-first alert path.

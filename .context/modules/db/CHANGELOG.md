@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — B4 (docs only): `jobs.cli_version` is the lane's CLI, `executor_started.cli_version` the Codex audit field
+
+**Agent task**: Observability Phase 1 re-cut plan B4 Docs-2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**: `.context/modules/db/CONTEXT.md` — the 008 column list now disambiguates the two `cli_version`s and says what the two cost columns are reconciled by (`scripts/cost-reconcile.py --db`).
+**Why**: B3 stamps `jobs.cli_version` on both lanes (the bundled Anthropic CLI, `2.1.139`, or the Codex CLI's version) while T3's `executor_started` audit record carries its own `cli_version` field — same name, two sources.
+**Side effects**: none.
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — B2 (comment only): `jobs.terminal_reason` vocabulary pointer in `src/models.py`
 
 **Agent task**: Observability Phase 1 re-cut plan B2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).

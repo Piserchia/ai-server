@@ -422,3 +422,258 @@ class TestWeeklyAllowance:
         reads = quota_readings([_quota_event("2026-09-25T13:57:00+00:00", 0.25, resets=None)])
         assert len(reads) == 1 and reads[0].resets_at is None
         assert weekly_allowance([], reads) is None
+
+
+# ── B4: the CLI over a fixture JSONL dir ─────────────────────────────────────
+
+import importlib.util  # noqa: E402
+import json as _json  # noqa: E402
+from datetime import timedelta  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
+CLI_PATH = REPO / "scripts" / "cost-reconcile.py"
+
+
+@pytest.fixture(scope="module")
+def cli():
+    """`scripts/cost-reconcile.py` loaded as a module (hyphenated file name →
+    importlib, not `import`). `main(argv, *, db_rows=)` is the entry point;
+    `db_rows` is the injectable DB leg so no test ever opens Postgres."""
+    spec = importlib.util.spec_from_file_location("cost_reconcile", CLI_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _write_job(audit_dir: Path, job_id: str, model: str, usage: dict, *, days_ago: float,
+               skill: str = "chat", channel: str = "telegram", cost=None, provider=None,
+               model_served=None, extra: list[dict] | None = None) -> None:
+    ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    events = _events(model, usage, ts=ts, cost=cost, skill=skill, channel=channel,
+                     provider=provider, model_served=model_served)
+    for e in events:
+        e["job_id"] = job_id
+    events = events[:1] + (extra or []) + events[1:]
+    (audit_dir / f"{job_id}.jsonl").write_text(
+        "\n".join(_json.dumps(e) for e in events) + "\n", encoding="utf-8")
+
+
+@pytest.fixture
+def ledger(tmp_path: Path) -> Path:
+    """Three completed jobs: a scheduler-born opus-5 atlas job 2 d ago (with an
+    SDK figure and a seven_day quota reading), a telegram-born sonnet job 15 d
+    ago (only in the 30-d window) and a Codex job 1 d ago (unpriced). INDEX.jsonl is the audit index, not a
+    job trace, and carries a complete job_started/job_completed pair that must
+    NOT be counted."""
+    now = datetime.now(timezone.utc)
+    resets = (now + timedelta(days=1)).isoformat()
+    reading = {"ts": (now - timedelta(days=2, hours=1)).isoformat(), "job_id": "a",
+               "kind": "rate_limit_status", "status": "allowed_warning",
+               "utilization": 0.25, "resets_at": resets, "rate_limit_type": "seven_day"}
+    _write_job(tmp_path, "a", "claude-opus-5", OPUS5_REAL, days_ago=2,
+               skill="atlas-swing-research", channel="scheduler", cost=3.49, extra=[reading])
+    _write_job(tmp_path, "b", "claude-sonnet-4-6", FLEET_MEDIAN, days_ago=15,
+               skill="atlas-report")
+    _write_job(tmp_path, "c", "gpt-5-codex", _usage(inp=1000, out=500), days_ago=1,
+               skill="server-patch", provider="codex", model_served="gpt-5-codex")
+    index_events = _events("claude-opus-5", OPUS5_REAL, ts=(now - timedelta(days=1)).isoformat())
+    (tmp_path / "INDEX.jsonl").write_text(
+        "\n".join(_json.dumps(e) for e in index_events) + "\n", encoding="utf-8")
+    return tmp_path
+
+
+class TestCli:
+    def test_default_windows_print_both_blocks_and_the_per_kind_step(self, cli, ledger, capsys):
+        rc = cli.main(["--audit-dir", str(ledger)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "== trailing 30 d ==" in out and "== trailing 7 d ==" in out
+        assert out.index("== trailing 30 d ==") < out.index("== trailing 7 d ==")
+        assert out.count("-- by kind (the §2.8 step) --") == 2
+        assert "atlas-swing-research" in out and "atlas-report" in out
+        assert "codex/gpt-5-codex" in out                      # unpriced, provider named
+        assert out.count("computed vs SDK") == 2
+        assert "-- weekly allowance" in out and "unre-derived" not in out
+        assert "DB reconcile" not in out and "lane budget seed" not in out
+
+    def test_json_shape(self, cli, ledger, capsys):
+        rc = cli.main(["--audit-dir", str(ledger), "--json"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        data = _json.loads(out)
+        assert set(data) >= {"windows", "weekly_allowance", "credit_signature", "prices_as_of",
+                             "audit_dir", "until"}
+        assert [w["days"] for w in data["windows"]] == [30, 7]
+        assert data["windows"][0]["totals"]["jobs"] == 3        # a + b + c, never INDEX.jsonl
+        assert data["windows"][1]["totals"]["jobs"] == 2        # a + c
+        assert [r["model"] for r in data["windows"][1]["unpriced"]] == ["codex/gpt-5-codex"]
+        assert data["credit_signature"] is False
+        assert data["weekly_allowance"]["window_opens_at"] is not None
+        assert data["prices_as_of"] == PRICES_AS_OF
+        assert "db" not in data and "lane_seed" not in data
+
+    def test_days_alias_is_one_window(self, cli, ledger, capsys):
+        assert cli.main(["--audit-dir", str(ledger), "--days", "7", "--json"]) == 0
+        data = _json.loads(capsys.readouterr().out)
+        assert [w["days"] for w in data["windows"]] == [7]
+
+    def test_windows_list_is_honoured_in_order(self, cli, ledger, capsys):
+        assert cli.main(["--audit-dir", str(ledger), "--windows", "1, 90", "--json"]) == 0
+        data = _json.loads(capsys.readouterr().out)
+        assert [w["days"] for w in data["windows"]] == [1, 90]
+
+    def test_exit_1_on_the_credit_signature(self, cli, ledger, capsys):
+        _write_job(ledger, "d", "claude-opus-5", _usage(out=100, read=1000, w5m=500), days_ago=3)
+        rc = cli.main(["--audit-dir", str(ledger)])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "5-minute cache writes present" in out
+        assert cli.main(["--audit-dir", str(ledger), "--json"]) == 1
+        assert _json.loads(capsys.readouterr().out)["credit_signature"] is True
+
+    def test_missing_audit_dir_exits_2(self, cli, tmp_path, capsys):
+        rc = cli.main(["--audit-dir", str(tmp_path / "nope")])
+        err = capsys.readouterr().err
+        assert rc == 2 and "no such audit dir" in err
+
+    def test_empty_audit_dir_is_a_report_not_a_failure(self, cli, tmp_path, capsys):
+        assert cli.main(["--audit-dir", str(tmp_path), "--json"]) == 0
+        data = _json.loads(capsys.readouterr().out)
+        assert data["windows"][0]["totals"]["jobs"] == 0
+        assert data["weekly_allowance"] is None
+
+    def test_seed_lane_budgets_writes_the_7d_seed(self, cli, ledger, tmp_path, capsys):
+        out_path = tmp_path / "telemetry" / "lane_budget_seed.json"
+        rc = cli.main(["--audit-dir", str(ledger), "--seed-lane-budgets", str(out_path)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        seed = _json.loads(out_path.read_text())
+        assert seed["window_days"] == 7                       # the SHORTEST window, never 30
+        assert seed["multiplier"] == "1.2" and seed["approximated_lanes"] is True
+        # the approximated lanes: the scheduler-born atlas-* job → `atlas`, the
+        # telegram-born Codex job → `owner` ($0, unpriced); the sonnet job is
+        # 15 d old and outside the 7-d seed window
+        assert set(seed["weekly_budget_usd"]) == {"atlas", "owner"}
+        expected = (price_usage("claude-opus-5", OPUS5_REAL) * Decimal("1.2")).quantize(Decimal("0.01"))
+        assert Decimal(seed["weekly_budget_usd"]["atlas"]) == expected
+        assert seed["weekly_budget_usd"]["owner"] == "0.00"
+        assert "lane budget seed (trailing 7 d × 1.2)" in out
+        assert str(out_path) in out
+        # the same values are printed as a table
+        for lane, usd in seed["weekly_budget_usd"].items():
+            assert lane in out and usd in out
+
+    def test_seed_default_path_is_under_the_server_root(self, cli, ledger, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(cli.settings, "server_root", tmp_path)
+        assert cli.main(["--audit-dir", str(ledger), "--seed-lane-budgets", "--json"]) == 0
+        data = _json.loads(capsys.readouterr().out)
+        expected = tmp_path / "volumes" / "telemetry" / "lane_budget_seed.json"
+        assert expected.is_file()
+        assert data["lane_seed"]["path"] == str(expected)
+        assert data["lane_seed"]["window_days"] == 7
+        assert data["lane_seed"]["weekly_budget_usd"] == _json.loads(expected.read_text())["weekly_budget_usd"]
+
+    def test_db_leg_uses_the_injected_rows_for_both_cost_columns(self, cli, ledger, capsys):
+        calls: list[tuple[datetime, datetime]] = []
+
+        def fake_rows(since, until):
+            calls.append((since, until))
+            return [("claude-opus-5-20260901", 1, Decimal("3.4850"), Decimal("3.49")),
+                    ("gpt-5-codex", 1, None, None)]
+
+        rc = cli.main(["--audit-dir", str(ledger), "--db"], db_rows=fake_rows)
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert len(calls) == 2 and all(isinstance(s, datetime) and s < u for s, u in calls)
+        assert (calls[0][1] - calls[0][0]).days == 30 and (calls[1][1] - calls[1][0]).days == 7
+        assert "-- DB reconcile, trailing 30 d --" in out and "-- DB reconcile, trailing 7 d --" in out
+        assert "DB computed" in out and "JSONL SDK" in out
+        assert "claude-opus-5 " in out                          # family, not the dated id
+
+    def test_db_leg_in_json(self, cli, ledger, capsys):
+        rows = [("claude-opus-5", 1, Decimal("3.4850"), Decimal("3.49"))]
+        assert cli.main(["--audit-dir", str(ledger), "--db", "--json"],
+                        db_rows=lambda s, u: rows) == 0
+        data = _json.loads(capsys.readouterr().out)
+        assert [d["days"] for d in data["db"]] == [30, 7]
+        assert data["db"][0]["rows"] == [{"model": "claude-opus-5", "jobs": 1,
+                                          "cost_usd_list": "3.4850", "sdk_cost_usd": "3.49"}]
+        assert "DB computed" in data["db"][0]["table"]
+
+    def test_db_is_never_touched_without_the_flag(self, cli, ledger, capsys):
+        def boom(since, until):
+            raise AssertionError("Postgres opened without --db")
+        assert cli.main(["--audit-dir", str(ledger)], db_rows=boom) == 0
+
+    def test_db_leg_failure_is_not_the_credit_signature(self, cli, ledger, capsys):
+        # Review round 1 (major): Postgres down / DSN wrong / pre-008 schema
+        # must NOT exit 1 — rc=1 is reserved for `credit_signature`, and the
+        # wrapper turns it into the "check claude.ai billing" DM. Infrastructure
+        # failures get rc=3 and a stderr line, with no traceback as rc=1.
+        def down(since, until):
+            raise ConnectionRefusedError("connection refused")
+
+        rc = cli.main(["--audit-dir", str(ledger), "--db"], db_rows=down)
+        cap = capsys.readouterr()
+        assert rc == 3
+        assert "DB leg failed: ConnectionRefusedError: connection refused" in cap.err
+        assert "5-minute cache writes present" not in cap.out
+        # the JSON path fails the same way, and never claims the signature
+        rc = cli.main(["--audit-dir", str(ledger), "--db", "--json"], db_rows=down)
+        cap = capsys.readouterr()
+        assert rc == 3 and "DB leg failed" in cap.err
+        assert '"credit_signature": true' not in cap.out
+
+    def test_db_sql_reads_both_cost_columns_keyed_on_the_served_model(self, cli):
+        sql = " ".join(cli.DB_SQL.split())
+        assert "SUM(cost_usd_list)" in sql and "SUM(sdk_cost_usd)" in sql
+        assert "COALESCE(model_served, resolved_model" in sql     # the JSONL leg's precedence
+        assert "status = 'completed'" in sql and "completed_at >= :since" in sql
+        assert "completed_at < :until" in sql
+
+    def test_db_leg_disposes_the_engine_per_run(self):
+        # Review round 2 (major): `main` calls `db_rows` once PER WINDOW and
+        # `_db_rows` wraps each call in its own `asyncio.run`. `src.db.engine`
+        # is a module-level pooled AsyncEngine; a connection checked out in the
+        # first loop is handed back by the pool inside the second loop and
+        # asyncpg raises "attached to a different loop" — the 7-d DB leg would
+        # exit 3 every Monday. SQLAlchemy's rule: dispose the engine before
+        # reusing it under a new event loop. The injected-rows tests cannot
+        # see the real leg, so its one invariant is pinned at source level:
+        # `_db_rows_async` ends in `finally: await engine.dispose()`.
+        import ast
+        tree = ast.parse(CLI_PATH.read_text())
+        fn = next(n for n in tree.body
+                  if isinstance(n, ast.AsyncFunctionDef) and n.name == "_db_rows_async")
+        tries = [n for n in ast.walk(fn) if isinstance(n, ast.Try) and n.finalbody]
+        assert tries, "_db_rows_async has no try/finally"
+
+        def _is_engine_dispose(node: ast.AST) -> bool:
+            return (isinstance(node, ast.Await)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Attribute)
+                    and node.value.func.attr == "dispose"
+                    and isinstance(node.value.func.value, ast.Name)
+                    and node.value.func.value.id == "engine")
+
+        assert any(_is_engine_dispose(x) for t in tries for stmt in t.finalbody
+                   for x in ast.walk(stmt)), "no `await engine.dispose()` in a finally"
+        # the session block itself is inside the guarded body, not after it
+        guarded = [n for t in tries for stmt in t.body for n in ast.walk(stmt)
+                   if isinstance(n, ast.AsyncWith)]
+        assert guarded, "the async_session block is not inside the try body"
+
+    def test_cli_imports_nothing_from_the_db_at_module_level(self):
+        # The DB engine is built on `import src.db`; the hand-run and the
+        # timer must not open Postgres unless `--db` was asked for, so the
+        # only `src.db` / `sqlalchemy` imports are inside the --db function.
+        import ast
+        tree = ast.parse(CLI_PATH.read_text())
+        top = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+        names = {a.name for n in top if isinstance(n, ast.Import) for a in n.names}
+        names |= {n.module or "" for n in top if isinstance(n, ast.ImportFrom)}
+        assert not any(n == "src.db" or n.startswith("sqlalchemy") for n in names), names

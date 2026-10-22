@@ -1,6 +1,6 @@
 # Hosting module
 
-**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/schedule-monitor.sh`, `scripts/backup.sh`, `scripts/install-launchd.sh`, `Caddyfile`, `Caddyfile.d/`; timer-script invariants are pinned by `tests/test_scripts_syntax.py` (`bash -n`, no `pipenv run` under launchd, `TIMER_SCRIPTS` = every `install_timer` call)
+**Paths:** `scripts/register-project.sh`, `scripts/setup-tunnel.sh`, `scripts/setup-caddy.sh`, `scripts/healthcheck-all.sh`, `scripts/schedule-monitor.sh`, `scripts/backup.sh`, `scripts/cost-reconcile-run.sh` (+ the CLI it wraps, `scripts/cost-reconcile.py`), `scripts/install-launchd.sh`, `Caddyfile`, `Caddyfile.d/`; timer-script invariants are pinned by `tests/test_scripts_syntax.py` (`bash -n`, no `pipenv run` under launchd, `TIMER_SCRIPTS` = every `install_timer` call, `ALERTER_SCRIPTS` = notify-first with the curl fallback)
 
 ## Purpose
 
@@ -28,6 +28,26 @@ Multi-project hosting on a single public domain via:
   the run counts the last 24 h of `schedule_deferred` records under
   `volumes/audit_log/schedules/` (D1's provisioning-gap stream) as a
   `FINDING deferred:` line + `deferred_24h=<n>` in the Sunday summary (A7).
+- `cost-reconcile-run.sh` — weekly cost reconcile (Monday 07:30 local, timer
+  `com.assistant.cost-reconcile`; Observability Phase 1 B4, 2026-10-21;
+  D-P1-8: a launchd timer, not a schedule row — one `install-launchd.sh` run
+  on prod installs it). `cd "$PROJECT_DIR"` first, then the §4 interpreter
+  order (`VENV_PY` export → `pipenv --venv` → `~/.local/share/virtualenvs/
+  <basename>-*`, guarded by `import src.config`; no interpreter = a `FATAL`
+  log line + an owner DM, never a silent fallback), then
+  `"$VENV_PY" scripts/cost-reconcile.py --windows 30,7 --db --seed-lane-budgets`
+  appending to `volumes/logs/cost-reconcile.log`. The CLI's exit code is
+  the signal: `1` = 5-minute cache writes seen (the usage-credits signature,
+  spec §2.8; RESERVED — the CLI exits 1 for nothing else) → `send_alert`
+  "Check claude.ai billing"; `3` = the run itself failed (the `--db` leg
+  could not reach Postgres, an unexpected crash — `... failed:` line +
+  traceback in the log), `2` = no audit dir → "weekly run failed (rc=N),
+  read the log". `send_alert` is notify-first
+  (`"$VENV_PY" -m src.notify send --kind ops_alert --severity warn`) with
+  the raw-curl fallback, like `schedule-monitor.sh`'s `send_dm`. The seed it
+  writes (`volumes/telemetry/lane_budget_seed.json`, trailing-7-d × 1.2,
+  approximated lanes) is printed as a table for the owner to paste into
+  `LANE_WEEKLY_BUDGET_JSON` at Phase 3 — nothing reads it in Phase 1.
 - `setup-tunnel.sh` — one-time: create/update Cloudflare named tunnel (interactive, needs browser)
 - `setup-caddy.sh` — one-time: install Caddy + base Caddyfile + launchd service
 - `backup.sh` — nightly (04:00 via `com.assistant.backup`): pg_dump + audit-log/log snapshot → `volumes/backups/backup-<date>.tar.gz`, then off-site replication to Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`. Off-site push is guarded — absent `rclone`/`r2:` remote or a failed upload never fails the local backup. `server-upkeep` alerts if the newest remote object is > 48h old.
