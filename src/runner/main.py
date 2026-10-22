@@ -1329,6 +1329,8 @@ async def _notify_task(task_id, notify_type: str, **fields) -> None:
     await redis.publish("tasks:notify", json.dumps({
         "task_id": str(task_id), "type": notify_type, **fields,
     }))
+    if notify_type == "choices" and not fields.get("choices"):
+        return      # parity: the legacy renderer skips a choices card with no options
     try:
         target, thread = await _task_target(task_id)
         notice = build_task_notice(

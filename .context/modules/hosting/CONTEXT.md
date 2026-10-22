@@ -59,7 +59,7 @@ Multi-project hosting on a single public domain via:
   backup-seal.key`; no key = `seal SKIP`, never fatal; the plain `.env` never
   enters the tarball) → `volumes/backups/backup-<date>.tar.gz`; **atlas dump**
   (D-P1-6): `pg_dump -Fc atlas` → `volumes/backups/atlas-<date>.dump` beside
-  the tarball when `psql -lqt` lists the DB (`atlas dump OK (<size>)` /
+  the tarball when `pg_database` has the DB (`atlas dump OK (<size>)` /
   `WARN atlas dump failed` / `atlas dump SKIP`), local keep 7 d. Off-site to
   Cloudflare R2 (`r2:ai-server-backups/`) via `rclone`: the tarball nightly +
   `rclone delete --min-age 60d --include 'backup-*.tar.gz'`, the atlas dump

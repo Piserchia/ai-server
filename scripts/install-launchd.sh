@@ -52,9 +52,17 @@ SERVICES=(
     "com.assistant.bot|python3 -m src.gateway.telegram_bot"
 )
 
+# Every `install_timer` label below; `uninstall` removes these too (whole-tier
+# review 2026-10-22: the timers used to stay loaded and keep firing against a
+# checkout that may no longer exist). tests/test_scripts_syntax.py pins the
+# two lists against each other.
+TIMER_LABELS=(backup healthcheck-all schedule-monitor cost-reconcile)
+
 uninstall() {
     echo "Uninstalling launchd services..."
-    for svc in "${SERVICES[@]}" "com.assistant.sync-learnings|"; do
+    local timers=()
+    for t in "${TIMER_LABELS[@]}"; do timers+=("com.assistant.$t|"); done
+    for svc in "${SERVICES[@]}" "com.assistant.sync-learnings|" "${timers[@]}"; do
         label="${svc%%|*}"
         plist="$LAUNCH_DIR/${label}.plist"
         if [ -f "$plist" ]; then

@@ -114,6 +114,12 @@ def render_telegram(notice_like: Any, *, owner_chat_id: int) -> TelegramMessage:
     footer = ""
     if kind.startswith("job_") and actions.get("job8"):
         footer = f"\n/status {actions['job8']}"
+    # Task cards name the task (the legacy renderer wrote `Task <prefix> …`;
+    # a card with no thread to reply in is otherwise unattributable).
+    prefix = actions.get("prefix") if kind.startswith("task_") else None
+    if prefix:
+        head = (head.replace("task", f"task {prefix}", 1) if " task " in f" {head} "
+                else f"{head} · task {prefix}")
     thread = getattr(notice_like, "thread", None)
     reply_to = int(thread) if isinstance(thread, str) and thread.isdigit() else None
     return TelegramMessage(

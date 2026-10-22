@@ -43,6 +43,8 @@ _Evidence: job `523e25fc`_
 
 **Still true only with `NOTIFY_OUTBOX=0`**: the legacy `jobs:done` renderer keys on the in-process `_job_to_chat` map (next entry), so a restart between submit and finish loses the DM there — `/status <prefix>` is the workaround, and the ops kinds (`ops_alert`, `quota_*`, `schedule_deferred`, …) are still delivered by the listener in that mode.
 
+**One-time deploy-window loss (whole-tier review 2026-10-22)**: `server-deploy` kickstarts web and bot immediately and the runner ~20 s after the deploy session ends. On the deploy that first turns `NOTIFY_OUTBOX` on, every job/task card the OLD runner publishes in that window (the deploy's own completion card included) goes to the legacy channels the new bot ignores, and no `notifications` row exists for it — lost once, not delayed. `/status <prefix>` has the summary. Not fixed bot-side on purpose: the new runner publishes the legacy channel BEFORE inserting the row, so a "no row → render legacy" fallback races the dual-write.
+
 **Out-of-band alerts never pass through the bot**: `healthcheck-all.sh` / `schedule-monitor.sh` call `python -m src.notify send` (direct HTTP + a `sent`/`failed` row) and fall back to raw curl; a `WARN … alerts fall back to curl` line in their log means the DM may have arrived with no history row.
 
 ## 2026-04-20 — Telegram done-listener mapping lost on bot restart (legacy renderer only since 2026-10-21)

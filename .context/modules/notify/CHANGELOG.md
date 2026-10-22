@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-22 — Whole-tier review applied: CLI `drain` releases stuck rows; task cards name the task
+
+**Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").
+**Files changed**:
+- `src/notify/__main__.py` — `drain` calls `release_stuck_sending()` before `pending_notices` (non-fatal; count or a redacted one-liner to stderr): the manual drain had the bot listener's blind spot for rows left `sending` past their lease.
+- `src/notify/outbox.py` — `release_stuck_sending` docstring ("once at startup" → before every drain, bot and CLI).
+- `src/notify/telegram.py` — `render_telegram`: `task_*` headers carry `actions.prefix` (`✋ task abcdef12 needs your approval`, `❓ task abcdef12 needs your input …`, `🔀 task abcdef12 — pick one`; headers without the word get ` · task abcdef12`). The legacy renderer wrote `Task <prefix> …` on every card; an outbox card with no thread (owner chat, no reply) was unattributable.
+- `tests/test_notify_telegram.py` — `TestCli` autouse fixture stubs `release_stuck_sending`; `test_drain_releases_stuck_sending_rows_before_selecting`, `test_drain_release_failure_is_non_fatal_and_token_free`; `TestRender::test_task_cards_name_the_task` (5) + `test_task_card_without_prefix_keeps_the_plain_header`.
+- `.context/modules/notify/CONTEXT.md` — `target=None` → `allowed_chat_ids[0]` only (the quota notices no longer fan out), the release-before-every-drain contract, the task-header shape.
+**Why**: review findings (one major shared with the bot, two minors).
+**Side effects**: header text of every task card changes (prefix added); `python -m src.notify drain` may print `notify: released N stuck sending row(s)` to stderr.
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A7 (docs only): the launchd alerters are the first `python -m src.notify send` callers
 
 **Agent task**: Observability Phase 1 re-cut plan A7 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).

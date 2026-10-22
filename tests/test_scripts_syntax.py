@@ -157,10 +157,21 @@ def test_schedule_monitor_send_dm_tries_notify_first():
     assert "TELEGRAM_ALLOWED_CHAT_IDS" in fn        # read-only, for the fallback
 
 
+def _run_functions(rel: str, names: tuple[str, ...], call: str,
+                   env: dict[str, str]) -> subprocess.CompletedProcess:
+    script = "\n".join(_bash_function(rel, n) for n in names) + "\n" + call + "\n"
+    full_env = {**os.environ, **env}
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=full_env)
+
+
 class TestNotifySendFunction:
-    """`notify_send()` in healthcheck-all.sh, driven with a fake interpreter."""
+    """`notify_send()` in healthcheck-all.sh, driven with a fake interpreter.
+    `resolve_venv_py()` is sourced beside it: the interpreter is resolved
+    lazily on the first send (whole-tier review 2026-10-22), memoised, and a
+    VENV_PY handed in by the plist env is still import-guarded."""
 
     REL = "scripts/healthcheck-all.sh"
+    FNS = ("resolve_venv_py", "notify_send")
 
     def _fake_python(self, tmp_path: Path, rc: int) -> Path:
         fake = tmp_path / "fake-python"
@@ -174,15 +185,17 @@ class TestNotifySendFunction:
         return fake
 
     def test_no_interpreter_returns_1_without_running_anything(self, tmp_path):
-        r = _run_function(self.REL, "notify_send", 'notify_send ops_alert "hi"; echo "rc=$?"',
-                          {"VENV_PY": "", "PROJECT_DIR": str(tmp_path), "LOG": str(tmp_path / "log")})
+        r = _run_functions(self.REL, self.FNS, 'notify_send ops_alert "hi"; echo "rc=$?"',
+                           {"VENV_PY": "", "PROJECT_DIR": str(tmp_path), "LOG": str(tmp_path / "log"),
+                            "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"})
         assert "rc=1" in r.stdout
         assert not (tmp_path / "argv.txt").exists()
+        assert "WARN no project venv python found" in (tmp_path / "log").read_text()
 
     def test_delivered_returns_0_with_the_cli_argv(self, tmp_path):
         fake = self._fake_python(tmp_path, rc=0)
-        r = _run_function(self.REL, "notify_send", 'notify_send ops_alert "runner down: x"; echo "rc=$?"',
-                          {"VENV_PY": str(fake), "PROJECT_DIR": str(tmp_path), "LOG": str(tmp_path / "log")})
+        r = _run_functions(self.REL, self.FNS, 'notify_send ops_alert "runner down: x"; echo "rc=$?"',
+                           {"VENV_PY": str(fake), "PROJECT_DIR": str(tmp_path), "LOG": str(tmp_path / "log")})
         assert "rc=0" in r.stdout, r.stderr
         argv = (tmp_path / "argv.txt").read_text().splitlines()
         assert argv == ["-m", "src.notify", "send", "--kind", "ops_alert",
@@ -192,9 +205,92 @@ class TestNotifySendFunction:
 
     def test_cli_failure_returns_1_so_the_caller_takes_curl(self, tmp_path):
         fake = self._fake_python(tmp_path, rc=1)
-        r = _run_function(self.REL, "notify_send", 'notify_send ops_alert "x"; echo "rc=$?"',
-                          {"VENV_PY": str(fake), "PROJECT_DIR": str(tmp_path), "LOG": str(tmp_path / "log")})
+        r = _run_functions(self.REL, self.FNS, 'notify_send ops_alert "x"; echo "rc=$?"',
+                           {"VENV_PY": str(fake), "PROJECT_DIR": str(tmp_path), "LOG": str(tmp_path / "log")})
         assert "rc=1" in r.stdout
+
+
+def _venv_block(rel: str) -> str:
+    """The top-level interpreter-resolution block of a timer script: from the
+    `VENV_PY="${VENV_PY:-}"` line to the `fi` that closes it (column 0)."""
+    src = _read(rel)
+    m = re.search(r'^VENV_PY="\$\{VENV_PY:-\}"\n.*?^fi\n', src, re.S | re.M)
+    assert m, f"{rel}: no VENV_PY resolution block"
+    return m.group(0)
+
+
+class TestVenvResolution:
+    """The `~/.local/share/virtualenvs/<basename>-*` fallback of the three
+    timer scripts selects the venv whose pipenv-written `.project` equals
+    PROJECT_DIR (whole-tier review 2026-10-22): on this host the dev and the
+    prod checkout share the basename `ai-server`, and the old first-match glob
+    picked the DEV venv (`ai-server-SOXcmoRD` sorts before prod's
+    `ai-server-bpzo5SVu`) for prod's timers. First-match survives only as a
+    LOGGED fallback. Fixture: HOME=tmp with two venv dirs, the lexically
+    FIRST one belonging to another checkout; PATH without pipenv."""
+
+    SCRIPTS = ("scripts/healthcheck-all.sh", "scripts/schedule-monitor.sh",
+               "scripts/cost-reconcile-run.sh")
+
+    def _fixture(self, tmp_path: Path, *, match: bool) -> dict[str, str]:
+        project = tmp_path / "server"
+        project.mkdir()
+        other = tmp_path / "elsewhere" / "server"
+        for name, owner in (("server-AAAA", other), ("server-BBBB", project if match else other)):
+            d = tmp_path / ".local/share/virtualenvs" / name
+            (d / "bin").mkdir(parents=True)
+            py = d / "bin/python"
+            py.write_text("#!/bin/bash\nexit 0\n")        # `-c 'import src.config'` succeeds
+            py.chmod(py.stat().st_mode | stat.S_IXUSR)
+            (d / ".project").write_text(f"{owner}\n")       # pipenv writes a trailing newline
+        return {"HOME": str(tmp_path), "PROJECT_DIR": str(project), "LOG": str(tmp_path / "log"),
+                "VENV_PY": "", "PATH": "/usr/bin:/bin"}
+
+    def _resolve(self, rel: str, env: dict[str, str]) -> subprocess.CompletedProcess:
+        if rel == "scripts/healthcheck-all.sh":
+            return _run_function(rel, "resolve_venv_py", 'resolve_venv_py; echo "VENV_PY=$VENV_PY"', env)
+        script = _venv_block(rel) + '\necho "VENV_PY=$VENV_PY"\n'
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                              env={**os.environ, **env})
+
+    @pytest.mark.parametrize("rel", SCRIPTS)
+    def test_project_match_beats_first_match(self, tmp_path, rel):
+        env = self._fixture(tmp_path, match=True)
+        r = self._resolve(rel, env)
+        assert f"VENV_PY={tmp_path}/.local/share/virtualenvs/server-BBBB/bin/python" in r.stdout, r.stderr
+        assert "WARN" not in Path(env["LOG"]).read_text() if Path(env["LOG"]).exists() else True
+
+    @pytest.mark.parametrize("rel", SCRIPTS)
+    def test_no_project_match_falls_back_to_first_match_and_logs(self, tmp_path, rel):
+        env = self._fixture(tmp_path, match=False)
+        r = self._resolve(rel, env)
+        assert f"VENV_PY={tmp_path}/.local/share/virtualenvs/server-AAAA/bin/python" in r.stdout, r.stderr
+        log = Path(env["LOG"]).read_text()
+        assert "WARN no venv whose .project matches" in log and "server-AAAA" in log
+
+    @pytest.mark.parametrize("rel", SCRIPTS)
+    def test_source_pins(self, rel):
+        src = _read(rel)
+        assert '.project' in src and 'first' in src
+        assert "WARN no venv whose .project matches $PROJECT_DIR" in src
+
+    def test_healthcheck_resolves_lazily_and_memoises(self, tmp_path):
+        # the 5-min tick must not spawn the interpreter when nothing is sent,
+        # and a second notify_send must not resolve again
+        src = _read("scripts/healthcheck-all.sh")
+        fn = _bash_function("scripts/healthcheck-all.sh", "notify_send")
+        assert "resolve_venv_py" in fn
+        assert "_VENV_RESOLVED=1" in _bash_function("scripts/healthcheck-all.sh", "resolve_venv_py")
+        # no top-level import probe outside the function (prose may mention it)
+        top = src.replace(_bash_function("scripts/healthcheck-all.sh", "resolve_venv_py"), "")
+        assert "-c 'import src.config'" not in top
+        env = self._fixture(tmp_path, match=True)
+        r = _run_function("scripts/healthcheck-all.sh", "resolve_venv_py",
+                          'resolve_venv_py; a="$VENV_PY"; VENV_PY=""; resolve_venv_py; echo "second=$VENV_PY"; echo "first=$a"',
+                          env)
+        out = r.stdout
+        assert "first=" in out and out.split("first=")[1].strip().endswith("server-BBBB/bin/python")
+        assert "second=\n" in out        # memoised: the second call did not resolve again
 
 
 class TestCountScheduleDeferred:
@@ -334,7 +430,10 @@ def test_backup_dumps_atlas_and_seals_secrets():
     src = _read("scripts/backup.sh")
     # D-P1-6: a custom-format atlas dump OUTSIDE the nightly tarball, only when
     # the database exists, never fatal, size logged.
-    assert "psql -lqt" in src
+    # one query, no `psql -lqt | … | grep -q` pipeline (pipefail + grep -q
+    # SIGPIPE hazard — whole-tier review 2026-10-22)
+    assert "SELECT 1 FROM pg_database WHERE datname = 'atlas'" in src
+    assert "psql -lqt" not in src
     assert 'pg_dump -Fc atlas > "$BACKUP_DIR/atlas-$STAMP.dump"' in src
     assert "atlas dump OK" in src and "WARN atlas dump failed" in src
     # the sealed bundle: .env, the atlas CANONICAL .env (the dev clone, the
@@ -349,6 +448,15 @@ def test_backup_dumps_atlas_and_seals_secrets():
     # seal staging dir only, and only the encrypted bundle reaches $TMP
     assert 'cp "$PROJECT_DIR/.env" "$TMP/' not in src
     assert 'cp "$PROJECT_DIR/.env" "$SEAL_TMP/secrets/env"' in src
+    # the OK line names the three sources; a source that did not land is a
+    # PARTIAL line (the cp's are `|| true` and tar+openssl seal an empty tree)
+    assert "sealed secrets OK (env, atlas.env, cloudflared)" in src
+    assert "WARN sealed secrets PARTIAL (missing:$missing)" in src
+    assert '-s "$SEAL_TMP/secrets/atlas.env"' in src
+    assert '-s "$SEAL_TMP/secrets/cloudflared/config.yml"' in src
+    # an EXIT trap: a killed run never leaves db.sql or plaintext secret
+    # copies under $TMPDIR
+    assert "trap 'rm -rf \"$TMP\" \"${SEAL_TMP:-}\"' EXIT" in src
     # off-site: the tarball nightly, the atlas dump on Sundays only
     assert "date -u +%u" in src
     assert "pipenv" not in src
@@ -411,7 +519,7 @@ esac
 '''
 
     def _setup(self, tmp_path: Path, *, with_key=True, with_dump=True, with_bundle=True,
-               jobs="42") -> dict[str, str]:
+               with_atlas_env=True, jobs="42") -> dict[str, str]:
         fake_bin = tmp_path / "bin"
         fake_bin.mkdir()
         for tool in ("createdb", "dropdb", "psql", "pg_restore", "rclone"):
@@ -430,6 +538,8 @@ esac
             sec = tmp_path / "secrets"
             (sec / "cloudflared").mkdir(parents=True)
             (sec / "env").write_text("TELEGRAM_BOT_TOKEN=fixture-not-a-secret\n")
+            if with_atlas_env:
+                (sec / "atlas.env").write_text("DATABASE_URL=fixture-not-a-secret\n")
             (sec / "cloudflared/config.yml").write_text("tunnel: fixture\n")
             subprocess.run(["tar", "-cf", str(tmp_path / "secrets.tar"), "-C", str(tmp_path), "secrets"], check=True)
             subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-salt",
@@ -463,7 +573,8 @@ esac
         assert r.returncode == 0, r.stdout + r.stderr
         assert "PASS assistant restore: 42 jobs" in r.stdout
         assert "PASS atlas restore: public.candles 7 rows" in r.stdout
-        assert "PASS sealed secrets: 4 entries" in r.stdout            # names counted, never printed
+        assert "PASS sealed secrets: 5 entries" in r.stdout            # names counted, never printed
+        assert "sealed bundle lacks" not in r.stdout                   # env, atlas.env, cloudflared all present
         assert "fixture-not-a-secret" not in r.stdout + r.stderr       # a value never leaks
         assert "WARN off-site" in r.stdout                             # rclone r2: not configured
         assert r.stdout.rstrip().endswith("PASS")
@@ -484,6 +595,25 @@ esac
         assert "WARN sealed bundle present but no seal key" in r.stdout
         assert "WARN off-site" in r.stdout
         assert r.stdout.rstrip().endswith("PASS")
+
+    def test_bundle_without_atlas_env_warns_but_passes(self, tmp_path):
+        # whole-tier review 2026-10-22: the drill names the other two sources
+        # too (atlas.env, cloudflared) — WARN, not FAIL, so a host without the
+        # atlas dev clone or a tunnel still passes; backup.sh logged PARTIAL.
+        cfg = self._setup(tmp_path, with_atlas_env=False)
+        r = self._run(cfg)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "PASS sealed secrets: 4 entries" in r.stdout
+        assert "WARN sealed bundle lacks secrets/atlas.env" in r.stdout
+        assert "WARN sealed bundle lacks secrets/cloudflared/config.yml" not in r.stdout
+        assert r.stdout.rstrip().endswith("PASS")
+
+    def test_atlas_table_identifier_is_quoted(self):
+        # a mixed-case or reserved table name must not yield `?` rows: the
+        # drill asks Postgres for a format('%I.%I') identifier
+        src = _read(self.REL)
+        assert "format('%I.%I', table_schema, table_name)" in src
+        assert "table_schema||'.'||table_name" not in src
 
     def test_missing_dump_and_bundle_are_warns_not_fails(self, tmp_path):
         cfg = self._setup(tmp_path, with_dump=False, with_bundle=False)
@@ -521,6 +651,19 @@ def test_installer_timer_plists_carry_venv_env():
     assert "<key>DISABLE_ERROR_REPORTING</key><string>1</string>" in timer_fn
     assert "<key>DISABLE_TELEMETRY</key><string>1</string>" in timer_fn
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in src                  # never a credential in a plist
+
+
+def test_installer_uninstall_removes_every_timer():
+    # whole-tier review 2026-10-22: `uninstall` used to remove only the three
+    # services + sync-learnings; the timers stayed loaded and kept firing.
+    src = _read("scripts/install-launchd.sh")
+    installed = re.findall(r'^install_timer "([a-z-]+)"', src, re.M)
+    m = re.search(r"^TIMER_LABELS=\(([^)]*)\)", src, re.M)
+    assert m, "TIMER_LABELS array missing"
+    assert sorted(m.group(1).split()) == sorted(installed) == sorted(
+        ["backup", "healthcheck-all", "schedule-monitor", "cost-reconcile"])
+    un = _bash_function("scripts/install-launchd.sh", "uninstall")
+    assert 'for t in "${TIMER_LABELS[@]}"' in un and '"${timers[@]}"' in un
 
 
 def _installer_plist_bodies() -> list[str]:

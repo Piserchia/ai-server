@@ -88,7 +88,16 @@ def test_migrations_apply_cleanly(monkeypatch):
         # Must not raise — a migration that fails to apply is the exact failure
         # server-deploy runs blind against prod (migrate before the test gate).
         try:
-            command.upgrade(_alembic_config(), "head")
+            cfg = _alembic_config()
+            command.upgrade(cfg, "head")
+            # A1 Accept: the head migration's downgrade must apply on Postgres
+            # too (the plan's rollback precondition, `alembic downgrade -1` on
+            # prod) and head must re-apply to the downgraded shape — the 008
+            # backfills are idempotent (whole-tier review 2026-10-22: the
+            # round-trip was promised by the Accept line but only `upgrade
+            # head` ran here).
+            command.downgrade(cfg, "-1")
+            command.upgrade(cfg, "head")
         except Exception as exc:
             from asyncpg.exceptions import InsufficientPrivilegeError
             cause = exc.__cause__ or exc
@@ -548,9 +557,15 @@ def test_008_origin_backfill_case_matches_origin_from_created_by():
     assert "WHEN created_by = 'web'" in case and "THEN 'web'" in case
     assert "WHEN created_by = 'scheduler'" in case and "THEN 'scheduler'" in case
     assert "ELSE 'system'" in case
-    # Both ref arms are NULLIF'd and clipped to the String(64) column.
+    # The telegram and system ref arms are NULLIF'd and clipped to the
+    # String(64) column; web/scheduler get an explicit NULL ref BEFORE the
+    # ELSE (whole-tier review 2026-10-22: the ELSE alone stamped the literal
+    # `web`/`scheduler` as origin_ref, unlike the helper and A2's stamps).
     assert "NULLIF(LEFT(split_part(created_by, ':', 2), 64), '')" in case
-    assert "ELSE NULLIF(LEFT(created_by, 64), '')" in case
+    web_null = "WHEN created_by IN ('web', 'scheduler') THEN NULL"
+    else_arm = "ELSE NULLIF(LEFT(created_by, 64), '')"
+    assert web_null in case and else_arm in case
+    assert case.index(web_null) < case.index(else_arm)
     assert "WHERE origin_channel IS NULL" in case     # idempotent: never rewrites a stamped row
     assert "WHERE origin_channel IS NULL AND chat_id IS NOT NULL" in src   # task arm
 

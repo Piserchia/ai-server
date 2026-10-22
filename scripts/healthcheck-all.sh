@@ -19,28 +19,51 @@ LOG="$PROJECT_DIR/volumes/logs/healthcheck.log"
 # NEVER run python through the pipenv shim from a launchd script: pipenv is a
 # ~/.pyenv shim that `bash -lc` cannot see (rc=127 — the schedule-monitor
 # incident of 2026-09-14..10-05). Resolution order: the timer plist's VENV_PY
-# (install-launchd.sh may export it) → `pipenv --venv` → pipenv's deterministic
-# ~/.local/share/virtualenvs/<basename>-* location → none. An interpreter that
-# cannot `import src.config` is treated as absent: the alerts then take the
-# raw-curl path below and the alert-history row is simply not written.
-# Both probes run in a SUBSHELL that cd's to the project root first: this
-# script never cd's, and the editable install is inert under ~/Documents (the
-# macOS hidden-.pth gotcha), so `import src.config` only resolves from there.
+# (install-launchd.sh exports it) → `pipenv --venv` → pipenv's deterministic
+# ~/.local/share/virtualenvs/<basename>-* location, preferring the venv whose
+# pipenv-written `.project` file equals $PROJECT_DIR (whole-tier review
+# 2026-10-22: on a host with both the dev and the prod checkout — same
+# basename — the old first-match glob picked the DEV venv for prod's timers;
+# a first-match fallback is kept only when no `.project` matches, and it is
+# LOGGED) → none. An interpreter that cannot `import src.config` is treated as
+# absent: the alerts then take the raw-curl path below and the alert-history
+# row is simply not written. Both probes run in a SUBSHELL that cd's to the
+# project root first: this script never cd's, and the editable install is
+# inert under ~/Documents (the macOS hidden-.pth gotcha), so `import
+# src.config` only resolves from there.
+# Resolved LAZILY on the first notify_send (memoised): the 5-minute tick
+# otherwise spawned the interpreter on every run with nothing to send, and a
+# venv-less host logged the same WARN 288 times a day.
 VENV_PY="${VENV_PY:-}"
-if [[ -z "$VENV_PY" ]] && command -v pipenv >/dev/null 2>&1; then
-    _venv="$(cd "$PROJECT_DIR" && pipenv --venv 2>/dev/null || true)"
-    [[ -n "$_venv" && -x "$_venv/bin/python" ]] && VENV_PY="$_venv/bin/python"
-fi
-if [[ -z "$VENV_PY" ]]; then
-    for _d in "$HOME/.local/share/virtualenvs/$(basename "$PROJECT_DIR")-"*; do
-        [[ -x "$_d/bin/python" ]] && { VENV_PY="$_d/bin/python"; break; }
-    done
-fi
-if [[ -n "$VENV_PY" ]] && ! (cd "$PROJECT_DIR" && "$VENV_PY" -c 'import src.config') >/dev/null 2>&1; then
-    echo "$(date -u +%FT%TZ) WARN venv python unusable ($VENV_PY); alerts fall back to curl" >> "$LOG"
-    VENV_PY=""
-fi
-[[ -z "$VENV_PY" ]] && echo "$(date -u +%FT%TZ) WARN no project venv python found; alerts fall back to curl (no alert-history row)" >> "$LOG"
+_VENV_RESOLVED=0
+resolve_venv_py() {   # sets VENV_PY; empty = no usable interpreter (curl path)
+    (( _VENV_RESOLVED )) && return 0
+    _VENV_RESOLVED=1
+    local _venv _d _first=""
+    if [[ -z "$VENV_PY" ]] && command -v pipenv >/dev/null 2>&1; then
+        _venv="$(cd "$PROJECT_DIR" && pipenv --venv 2>/dev/null || true)"
+        [[ -n "$_venv" && -x "$_venv/bin/python" ]] && VENV_PY="$_venv/bin/python"
+    fi
+    if [[ -z "$VENV_PY" ]]; then
+        for _d in "$HOME/.local/share/virtualenvs/$(basename "$PROJECT_DIR")-"*; do
+            [[ -x "$_d/bin/python" ]] || continue
+            [[ -z "$_first" ]] && _first="$_d"
+            if [[ "$(cat "$_d/.project" 2>/dev/null)" == "$PROJECT_DIR" ]]; then
+                VENV_PY="$_d/bin/python"; break
+            fi
+        done
+        if [[ -z "$VENV_PY" && -n "$_first" ]]; then
+            VENV_PY="$_first/bin/python"
+            echo "$(date -u +%FT%TZ) WARN no venv whose .project matches $PROJECT_DIR; using first match $_first (run install-launchd.sh timers-only to pin VENV_PY)" >> "$LOG"
+        fi
+    fi
+    if [[ -n "$VENV_PY" ]] && ! (cd "$PROJECT_DIR" && "$VENV_PY" -c 'import src.config') >/dev/null 2>&1; then
+        echo "$(date -u +%FT%TZ) WARN venv python unusable ($VENV_PY); alerts fall back to curl" >> "$LOG"
+        VENV_PY=""
+    fi
+    [[ -z "$VENV_PY" ]] && echo "$(date -u +%FT%TZ) WARN no project venv python found; alerts fall back to curl (no alert-history row)" >> "$LOG"
+    return 0
+}
 
 # Owner DM path: the notifications outbox CLI first (direct Telegram HTTP +
 # a `notifications` row = the alert history), the raw curl at each call site
@@ -50,6 +73,7 @@ fi
 # curl` never drops an alert. Never reads `NOTIFY_OUTBOX` (the switch is the
 # bot's, D-P1-10).
 notify_send() {   # $1 = kind  $2 = text ; returns 0 only when the DM was delivered
+    resolve_venv_py
     [[ -n "$VENV_PY" ]] || return 1
     (cd "$PROJECT_DIR" && "$VENV_PY" -m src.notify send --kind "$1" --severity critical \
         --text "$2" >> "$LOG" 2>&1)

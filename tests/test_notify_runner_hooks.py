@@ -326,6 +326,17 @@ class TestNotifyTask:
         assert n.notice_kind == "task_choices" and n.body == "Pick:"
         assert n.actions["choices"] == ["a", "b"]
 
+    async def test_choices_without_options_writes_no_row(self, wired, fake_redis):
+        # parity with the legacy `_task_notifier` (`elif notify_type ==
+        # "choices" and choices`): no "Pick one:" card with zero buttons. The
+        # legacy publish still goes out byte-identically.
+        pubsub = fake_redis.pubsub()
+        await pubsub.subscribe("tasks:notify")
+        await main_mod._notify_task(TASK, "choices", question="Pick:", choices=[])
+        assert wired == []
+        msg = await _first_message(pubsub)
+        assert msg is not None and json.loads(msg["data"])["choices"] == []
+
     async def test_outbox_insert_failure_never_raises(self, monkeypatch, fake_redis):
         monkeypatch.setattr(main_mod, "redis", fake_redis)
 

@@ -516,9 +516,18 @@ async def cmd_god(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @_error_safe
-async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show active tasks with status icons and inline prompts."""
+async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show active tasks with status icons and inline prompts. With an
+    argument — `/status <job prefix>`, the footer every outbox job card
+    carries — reply with `format_job_status` for that job instead (plain
+    text, no parse_mode; same shape as the `[Details]` button)."""
     if await _guard(update) is None:
+        return
+
+    args = getattr(ctx, "args", None) or []
+    if args:
+        job = await find_job_by_prefix(str(args[0]).strip())
+        await update.message.reply_text(format_job_status(job) if job else "Job not found.")
         return
 
     active_statuses = [
@@ -843,7 +852,8 @@ def _parse_callback(data: str) -> tuple[str, str | None, str | None]:
 
 
 def format_job_status(job) -> str:
-    """Pure. The `[Details]` button (A6) and `/status <prefix>` (Phase 2).
+    """Pure. The `[Details]` button (A6) and `/status <prefix>` (the footer
+    on every outbox job card; wired in the 2026-10-22 whole-tier review).
     Plain text — sent WITHOUT parse_mode: skill names with `_` crash
     Markdown (TROUBLESHOOTING.md). Lane via the one `lane_label` definition;
     the terminal reason is its own line, so the lane carries none here."""
@@ -1624,18 +1634,29 @@ async def _drain_outbox(app: Application, *, legacy_mode: bool) -> tuple[int, in
     return sent, failed, skipped
 
 
-async def _outbox_listener(app: Application, *, legacy_mode: bool) -> None:
-    """Drain on every `notify:outbox` nudge and at least every 30 s. The poll
-    is what makes a bot restart lossless: rows written while we were down
-    are still `pending` (exit criterion 'bot restart loses no DM'). Rows a
-    crashed drainer left `sending` past their lease are released first.
-    Runs in BOTH switch positions; `legacy_mode` only narrows what it sends."""
+async def _release_stuck() -> None:
+    """Rows a drainer left `sending` past their 5-min lease go back to
+    `pending`. Non-fatal: a DB blip here must not skip the drain."""
     try:
         released = await release_stuck_sending()
         if released:
             logger.warning("outbox: released stuck sending rows", count=released)
     except Exception:
         logger.exception("outbox: release_stuck_sending failed (continuing)")
+
+
+async def _outbox_listener(app: Application, *, legacy_mode: bool) -> None:
+    """Drain on every `notify:outbox` nudge and at least every 30 s. The poll
+    is what makes a bot restart lossless: rows written while we were down
+    are still `pending` (exit criterion 'bot restart loses no DM'). Rows a
+    crashed drainer left `sending` past their lease are released at startup
+    AND before every drain (≤ 30 s after the lease expires): a row claimed
+    just before a restart is still inside its lease at startup, and a DB error
+    between the Telegram call and `mark_sent` would otherwise strand it until
+    the next restart (whole-tier review 2026-10-22; at-least-once — that one
+    shape can yield a duplicate DM). Runs in BOTH switch positions;
+    `legacy_mode` only narrows what it sends."""
+    await _release_stuck()
     pubsub = redis.pubsub()
     await pubsub.subscribe(CHANNEL_NOTIFY_OUTBOX)
     try:
@@ -1643,6 +1664,7 @@ async def _outbox_listener(app: Application, *, legacy_mode: bool) -> None:
             try:
                 await pubsub.get_message(ignore_subscribe_messages=True,
                                          timeout=_OUTBOX_POLL_SECONDS)
+                await _release_stuck()
                 await _drain_outbox(app, legacy_mode=legacy_mode)
             except asyncio.CancelledError:
                 raise

@@ -11,9 +11,9 @@ DM was delivered; 1 otherwise, so bash callers (A7 `notify_send … ||
 curl-fallback`) take their legacy curl path. A `failed` row is history, not
 a retry queue — the fallback is the retry.
 
-`drain` is the manual counterpart of the bot's outbox listener: it claims
-before sending (so it is safe beside the running bot) and mirrors the
-bot's `legacy_mode` — with `NOTIFY_OUTBOX=0` the legacy listeners still
+`drain` is the manual counterpart of the bot's outbox listener: it releases
+rows stuck in `sending` past their lease, claims before sending (so it is
+safe beside the running bot) and mirrors the bot's `legacy_mode` — with `NOTIFY_OUTBOX=0` the legacy listeners still
 send job/task DMs, so those rows are marked `skipped`, never double-sent.
 
 Secrets: everything this module records or prints passes through
@@ -37,6 +37,7 @@ from src.notify.outbox import (
     mark_skipped,
     pending_notices,
     record_notice,
+    release_stuck_sending,
 )
 from src.notify.telegram import TelegramSendError, render_telegram, send_via_http
 
@@ -89,6 +90,14 @@ async def _drain(args: argparse.Namespace) -> int:
         print("notify: telegram not configured", file=sys.stderr)
         return 1
     legacy_mode = not settings.notify_outbox
+    # Same recovery as the bot's listener: a row another drainer left
+    # `sending` past its lease is pending again before we select.
+    try:
+        released = await release_stuck_sending()
+        if released:
+            print(f"notify: released {released} stuck sending row(s)", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 — non-fatal, the drain still runs
+        print(f"notify: release_stuck_sending failed: {_safe_error(exc)}", file=sys.stderr)
     rows = await pending_notices(limit=args.limit)
     sent = failed = skipped = 0
     for row in rows:

@@ -190,6 +190,28 @@ class TestTerminalReason:
                                      api_retry_error=category)
         assert derive_terminal_reason(cap) == expected
 
+    @pytest.mark.parametrize("category", ["overloaded", "rate_limit", "authentication_failed"])
+    def test_recovered_api_retry_on_a_success_is_ok(self, category):
+        # The CLI emits system/api_retry before the retry's outcome is known;
+        # a session that then finished cleanly is `ok` (spec §2.4) — the audit
+        # `api_retry` row keeps the recovered retry. The same category on a
+        # failed capture is the mapped reason (whole-tier review 2026-10-22).
+        assert derive_terminal_reason(capture_result_message(_msg(), api_retry_error=category)) == "ok"
+        cap = capture_result_message(_msg(is_error=True, result="failed"), api_retry_error=category)
+        assert derive_terminal_reason(cap) == API_RETRY_TO_TERMINAL[category]
+
+    @pytest.mark.parametrize("category,expected", [
+        ("account_on_hold", "account_on_hold"),
+        ("oauth_org_not_allowed", "oauth_revoked"),
+        ("billing_error", "billing_error"),
+    ])
+    def test_enforcement_category_maps_even_on_a_success_shape(self, category, expected):
+        # The plan's "outranks the status" guarantee is independent of
+        # is_error: a vendor enforcement category is the reason regardless of
+        # what the ResultMessage looks like (session._run_in_process raises on
+        # it before this runs, but the mapping must not depend on that).
+        assert derive_terminal_reason(capture_result_message(_msg(), api_retry_error=category)) == expected
+
     def test_api_retry_category_outranks_the_http_status(self):
         # A 403 with an account_on_hold category is a hold, not an expiry: the
         # two need different owner actions (spec §2.4 holds every lane but
@@ -361,6 +383,12 @@ class TestColumnsAndHelpers:
         (RuntimeError("session error (api_retry billing_error): payment required"), "billing_error"),
         (RuntimeError("session error (api_retry rate_limit): slow down"), "rate_limited"),
         (ValueError("anything else"), "error"),
+        # Anchored heuristics (whole-tier review 2026-10-22): a category or an
+        # auth-looking fragment inside infrastructure text is NOT the session's
+        # own signal.
+        (RuntimeError("workspace creation failed for x: git push rate_limit by remote"), "error"),
+        (RuntimeError("git: Authentication failed for https://x; HTTP 403"), "error"),
+        (RuntimeError("session error (error_during_execution): 403 forbidden, auth token revoked"), "auth_expired"),
     ])
     def test_exception_mapping(self, exc, expected):
         assert terminal_reason_for_exception(exc) == expected

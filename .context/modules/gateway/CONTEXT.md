@@ -124,8 +124,11 @@ as floats). The jobs table has a Provider column and a Cost · Turns column
 - **Outbox (A6, 2026-10-21; D-P1-10)**: the runner always writes a
   `notifications` row (A5) and always publishes the legacy channels; the bot
   decides which renderer sends. `_outbox_listener` ALWAYS runs
-  (`release_stuck_sending()` once, subscribe `notify:outbox`, drain on every
-  nudge and at least every 30 s — a bot restart loses no DM). With
+  (`release_stuck_sending()` at startup and before every drain — ≤ 30 s
+  after a dead drainer's 5-min lease expires — subscribe `notify:outbox`,
+  drain on every nudge and at least every 30 s — a bot restart loses no DM).
+  `/status <prefix>` replies with `format_job_status` (the outbox job-card
+  footer). With
   `settings.notify_outbox` **on** (the default since A6) it delivers every
   row (claim → `render_telegram` → `send_via_bot` → `mark_sent` /
   `mark_failed` with backoff; token-free `last_error`) and the legacy

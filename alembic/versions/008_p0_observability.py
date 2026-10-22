@@ -112,14 +112,20 @@ WHERE input_tokens IS NULL
   AND COALESCE(result->'usage'->'cache_creation'->>'ephemeral_5m_input_tokens', '0') ~ '^[0-9]+$'
 """
 
-# Byte-equivalent to gateway.jobs.origin_from_created_by: `telegram:<chat>` →
-# ('telegram', <chat>); `web` → ('web', NULL); `scheduler` → ('scheduler',
-# NULL); everything else (dispatch-mcp, event-trigger*, learning:, writeback:,
-# escalation*, plan:, evaluator:, eval-fix:, auto-continue:,
-# bot-error-handler, deploy-autopilot, owner-*) → ('system', LEFT(created_by,
-# 64)). NULLIF on both ref arms: a bare `telegram:` (or empty created_by)
-# gives origin_ref NULL, exactly what the Python helper returns, so backfilled
-# and new rows agree. tests/test_migrations.py pins the arms textually.
+# Equivalent to gateway.jobs.origin_from_created_by over the producer
+# vocabulary: `telegram:<chat>` → ('telegram', <chat>); `web` → ('web', NULL);
+# `scheduler` → ('scheduler', NULL); everything else (dispatch-mcp,
+# event-trigger*, learning:, writeback:, escalation*, plan:, evaluator:,
+# eval-fix:, auto-continue:, bot-error-handler, deploy-autopilot, owner-*) →
+# ('system', LEFT(created_by, 64)). The `web`/`scheduler` ref arm is an
+# explicit NULL (whole-tier review 2026-10-22: without it the ELSE stamped the
+# literal `web`/`scheduler` as origin_ref, so backfilled rows disagreed with
+# A2's fresh stamps). NULLIF on the other ref arms: a bare `telegram:` (or
+# empty created_by) gives origin_ref NULL, exactly what the Python helper
+# returns. Not byte-identical outside the vocabulary: `split_part(…, ':', 2)`
+# takes the second colon field untrimmed where Python takes everything after
+# the first colon and strips it — no producer writes `telegram:a:b` or padded
+# ids. tests/test_migrations.py pins the arms textually.
 _BACKFILL_ORIGIN = """
 UPDATE jobs SET
   origin_channel = CASE
@@ -129,6 +135,7 @@ UPDATE jobs SET
     ELSE 'system' END,
   origin_ref = CASE
     WHEN created_by LIKE 'telegram:%' THEN NULLIF(LEFT(split_part(created_by, ':', 2), 64), '')
+    WHEN created_by IN ('web', 'scheduler') THEN NULL
     ELSE NULLIF(LEFT(created_by, 64), '') END
 WHERE origin_channel IS NULL
 """

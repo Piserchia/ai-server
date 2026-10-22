@@ -79,12 +79,14 @@ useless after a disk loss.
     openssl rand -base64 48 > ~/.config/ai-server/backup-seal.key
     chmod 600 ~/.config/ai-server/backup-seal.key
     cat ~/.config/ai-server/backup-seal.key     # paste into the password manager as "ai-server backup seal key"
-    bash scripts/backup.sh && grep 'sealed secrets OK' volumes/logs/backup.log | tail -1
+    bash scripts/backup.sh && grep 'sealed secrets' volumes/logs/backup.log | tail -1
+    # → `sealed secrets OK (env, atlas.env, cloudflared)`; a `WARN sealed secrets PARTIAL (missing: …)` line
+    #   names what this host is missing — fix ATLAS_ENV / ~/.cloudflared before relying on the bundle
 
 `BACKUP_SEAL_KEY=<path>` overrides the location for both `backup.sh` and
 the drill. `backup.sh` never copies `~/.config/ai-server/` anywhere.
 
-## 4. Restore drill (the Phase-1 exit criterion, 5 min)
+## 4. Restore drill (the Phase-1 exit criterion; 5 min for the assistant leg — the atlas leg takes about as long as a full `pg_restore` of the 5.9 GB dump and needs ~2× its uncompressed size free in the cluster's data directory, so tens of minutes on this host is normal, not a hang)
 
     bash scripts/restore-drill.sh
     # expected after §2 + §3:
@@ -110,6 +112,10 @@ plan's §8 — that measurement sizes D-P1-6.
 Right after the C1 deploy, re-render the timers only — no service restart:
 
     bash scripts/install-launchd.sh timers-only
+    # `timers-only` is what pins VENV_PY in the four timer plists. Until then the scripts
+    # resolve the venv by `.project` match under ~/.local/share/virtualenvs (on a host with
+    # both checkouts the old first-match glob selected the DEV venv — schedule-monitor did so
+    # from 2026-10-05 until the 2026-10-22 whole-tier review fix).
     launchctl list | grep com.assistant                       # backup, healthcheck-all, schedule-monitor, cost-reconcile, sync-learnings
     plutil -p ~/Library/LaunchAgents/com.assistant.backup.plist | grep -c VENV_PY   # → 1
 

@@ -74,7 +74,7 @@ if [[ -n "$ATLAS_DUMP" && -s "$ATLAS_DUMP" ]]; then
     dropdb --if-exists "$ATLAS_DB" 2>/dev/null || true
     if createdb "$ATLAS_DB" 2>/dev/null \
             && pg_restore --no-owner --no-privileges -d "$ATLAS_DB" "$ATLAS_DUMP" > /dev/null 2>&1; then
-        table=$(psql -tAc "SELECT table_schema||'.'||table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE' ORDER BY 1 LIMIT 1" "$ATLAS_DB" 2>/dev/null || true)
+        table=$(psql -tAc "SELECT format('%I.%I', table_schema, table_name) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE' ORDER BY 1 LIMIT 1" "$ATLAS_DB" 2>/dev/null || true)
         if [[ -n "$table" ]]; then
             rows=$(psql -tAc "SELECT count(*) FROM $table" "$ATLAS_DB" 2>/dev/null || echo "?")
             echo "PASS atlas restore: $table $rows rows"
@@ -84,7 +84,7 @@ if [[ -n "$ATLAS_DUMP" && -s "$ATLAS_DUMP" ]]; then
     else
         # pg_restore exits non-zero on ANY warning (e.g. missing extensions);
         # a restore with tables present still counts.
-        table=$(psql -tAc "SELECT table_schema||'.'||table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE' ORDER BY 1 LIMIT 1" "$ATLAS_DB" 2>/dev/null || true)
+        table=$(psql -tAc "SELECT format('%I.%I', table_schema, table_name) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE' ORDER BY 1 LIMIT 1" "$ATLAS_DB" 2>/dev/null || true)
         if [[ -n "$table" ]]; then
             rows=$(psql -tAc "SELECT count(*) FROM $table" "$ATLAS_DB" 2>/dev/null || echo "?")
             echo "PASS atlas restore (pg_restore warned): $table $rows rows"
@@ -105,6 +105,12 @@ if [[ -s "$TMP/secrets.tar.enc" ]]; then
         names=$(tar -tf "$TMP/secrets.tar" 2>/dev/null || true)
         if printf '%s\n' "$names" | grep -qx 'secrets/env'; then
             echo "PASS sealed secrets: $(printf '%s\n' "$names" | grep -c .) entries"
+            # WARN, not FAIL: a host without the atlas dev clone or a tunnel
+            # must still pass the drill; backup.sh logged PARTIAL that night.
+            for want in secrets/atlas.env secrets/cloudflared/config.yml; do
+                printf '%s\n' "$names" | grep -qx "$want" \
+                    || echo "WARN sealed bundle lacks $want (backup.sh logged 'sealed secrets PARTIAL'? ATLAS_ENV / ~/.cloudflared absent on that host)"
+            done
         else
             echo "FAIL sealed bundle lacks secrets/env"; fail=1
         fi

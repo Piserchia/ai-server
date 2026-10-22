@@ -354,7 +354,8 @@ async def claim_notice(notice_id: uuid.UUID, now: datetime | None = None) -> boo
 
 async def release_stuck_sending(now: datetime | None = None) -> int:
     """Rows a crashed drainer left `sending` past their lease go back to
-    `pending` (the bot listener calls this once at startup). Returns count."""
+    `pending`. Called before every drain — the bot listener at startup and on
+    each iteration, `python -m src.notify drain` once per run. Returns count."""
     now = now or datetime.now(timezone.utc)
     async with async_session() as s:
         res = await s.execute(

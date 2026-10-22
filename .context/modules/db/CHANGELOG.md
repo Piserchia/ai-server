@@ -2,6 +2,17 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-22 — Whole-tier review applied: migration 008 `origin_ref` NULL arm for `web`/`scheduler`; opt-in Postgres test round-trips the downgrade
+
+**Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").
+**Files changed**:
+- `alembic/versions/008_p0_observability.py` — `_BACKFILL_ORIGIN`'s `origin_ref` CASE gains `WHEN created_by IN ('web', 'scheduler') THEN NULL` before the ELSE. Without it the ELSE (`NULLIF(LEFT(created_by, 64), '')`) stamped the literal `web` / `scheduler` as `origin_ref` on every such row (verified by the reviewer on a throwaway DB), while the docstring, `gateway.jobs.origin_from_created_by` and A2's writers give NULL — `format_job_status` would have printed `origin: web:web` for the ~2456 backfilled rows against `origin: web` for new ones, and the acceptance probe (`origin_ref = ''` = 0) passes either way. Pre-deploy edit of the unapplied file: prod is at 007, no new revision. The comment also records the one non-byte-identical corner (`split_part(…, ':', 2)` untrimmed vs Python's `split(':', 1)[1].strip()`; no producer writes such values).
+- `tests/test_migrations.py` — `test_008_origin_backfill_case_matches_origin_from_created_by` pins the new arm and its position before the ELSE; `test_migrations_apply_cleanly` (opt-in `AI_SERVER_RUN_DB_TESTS=1`) now runs `upgrade head → downgrade -1 → upgrade head` — the A1 Accept line as written; the downgrade leg (17 + 4 columns, the table and three indexes) was exercised nowhere on Postgres before. Not run in this session (the dev DSN points at the production cluster); the reviewer ran the same round-trip by hand on a throwaway DB and it is correct.
+- Plan A1 Accept line: `+ origin_channel IN ('web','scheduler') AND origin_ref IS NOT NULL` = 0 and the digit-guard probe (`jsonb_typeof(result->'usage') = 'object' AND input_tokens IS NULL` — the guard is row-level: one non-digit value in any of the six usage keys leaves all five token columns NULL for that row).
+**Why**: review finding (major): backfilled and fresh rows disagreed on `origin_ref`.
+**Side effects**: none at runtime until the deploy applies 008.
+**Gotchas discovered**: a textual CASE pin that checks only `NULLIF` fragments does not prove which arm a value reaches — pin the arm AND its order.
+
 ## 2026-10-21 — D1: per-schedule audit streams + the `schedule:gap_notified:` key
 
 **Agent task**: Observability Phase 1 re-cut plan D1.

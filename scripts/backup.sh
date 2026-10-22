@@ -21,6 +21,10 @@ STAMP=$(date -u +%Y-%m-%d)
 OUT="$BACKUP_DIR/backup-$STAMP.tar.gz"
 ATLAS_DUMP="$BACKUP_DIR/atlas-$STAMP.dump"
 TMP=$(mktemp -d)
+SEAL_TMP=""
+# A run killed mid-way (launchd unload, ENOSPC under set -e, SIGTERM) must not
+# leave db.sql or the 4b plaintext secret copies under $TMPDIR.
+trap 'rm -rf "$TMP" "${SEAL_TMP:-}"' EXIT
 
 # 1. Postgres dumps. `assistant` is the server DB (plain text, small,
 #    grep-friendly — travels inside the tarball). `atlas` (the trading
@@ -30,7 +34,9 @@ TMP=$(mktemp -d)
 #    fatal, size logged. A plain dump inside a 60-day tarball series does not
 #    fit the disk; the dump has its own retention (step 7).
 pg_dump assistant > "$TMP/db.sql"
-if psql -lqt 2>/dev/null | cut -d'|' -f1 | tr -d ' ' | grep -qx atlas; then
+# One query, no pipeline: a `psql -l | … | grep -q` chain under pipefail can report
+# "no atlas database" on SIGPIPE when grep exits early.
+if [[ "$(psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'atlas'" 2>/dev/null)" == "1" ]]; then
     if pg_dump -Fc atlas > "$BACKUP_DIR/atlas-$STAMP.dump" 2>>"$LOG"; then
         echo "$(date -u +%FT%TZ) atlas dump OK ($(du -h "$ATLAS_DUMP" | cut -f1)) $ATLAS_DUMP" >> "$LOG"
     else
@@ -71,21 +77,34 @@ if [[ -r "$SEAL_KEY" ]]; then
     cp "$ATLAS_ENV" "$SEAL_TMP/secrets/atlas.env" 2>/dev/null || true
     cp "$HOME"/.cloudflared/config.yml "$HOME"/.cloudflared/cert.pem "$HOME"/.cloudflared/*.json \
         "$SEAL_TMP/secrets/cloudflared/" 2>/dev/null || true
+    # Name what did NOT land (the cp's are `|| true`; tar+openssl succeed on an
+    # empty tree). A plain string, not an array: under launchd this is
+    # /bin/bash 3.2, where an empty array under set -u is an error. Whatever
+    # landed is still sealed — the drill's `FAIL … lacks secrets/env` is the
+    # stronger signal and keeps firing.
+    missing=""
+    [[ -s "$SEAL_TMP/secrets/env" ]]                    || missing="$missing env"
+    [[ -s "$SEAL_TMP/secrets/atlas.env" ]]              || missing="$missing atlas.env"
+    [[ -s "$SEAL_TMP/secrets/cloudflared/config.yml" ]] || missing="$missing cloudflared"
     if tar -cf "$SEAL_TMP/secrets.tar" -C "$SEAL_TMP" secrets 2>>"$LOG" \
         && openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
             -in "$SEAL_TMP/secrets.tar" -out "$TMP/secrets.tar.enc" \
             -pass file:"$SEAL_KEY" 2>>"$LOG"; then
-        echo "$(date -u +%FT%TZ) sealed secrets OK" >> "$LOG"
+        if [[ -z "$missing" ]]; then
+            echo "$(date -u +%FT%TZ) sealed secrets OK (env, atlas.env, cloudflared)" >> "$LOG"
+        else
+            echo "$(date -u +%FT%TZ) WARN sealed secrets PARTIAL (missing:$missing) — check ATLAS_ENV=$ATLAS_ENV and ~/.cloudflared; bundle still written" >> "$LOG"
+        fi
     else
         echo "$(date -u +%FT%TZ) WARN sealing failed (bundle omitted)" >> "$LOG"
         rm -f "$TMP/secrets.tar.enc"
     fi
-    rm -rf "$SEAL_TMP"
+    rm -rf "$SEAL_TMP"; SEAL_TMP=""
 else
     echo "$(date -u +%FT%TZ) seal SKIP (no key at $SEAL_KEY)" >> "$LOG"
 fi
 
-# 5. Tar it up
+# 5. Tar it up (the EXIT trap removes $TMP; an early rm keeps the window short)
 tar -czf "$OUT" -C "$TMP" .
 rm -rf "$TMP"
 

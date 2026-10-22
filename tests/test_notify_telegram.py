@@ -104,6 +104,24 @@ class TestRender:
             assert msg.text and len(msg.text) <= 4096
             assert not msg.text.startswith(kind), f"{kind} has no header"
 
+    @pytest.mark.parametrize("kind,expected", [
+        ("task_approval_request", "✋ task abcdef12 needs your approval"),
+        ("task_question", "❓ task abcdef12 needs your input — reply to this message"),
+        ("task_choices", "\U0001f500 task abcdef12 — pick one"),
+        ("task_progress", "\U0001f504 progress · task abcdef12"),
+        ("task_plan", "\U0001f4cb plan (executing now) · task abcdef12"),
+    ])
+    def test_task_cards_name_the_task(self, kind, expected):
+        # whole-tier review 2026-10-22: the legacy renderer wrote `Task <prefix>`
+        # on every card; a card without a thread is otherwise unattributable.
+        msg = render_telegram(_n(notice_kind=kind, actions={"prefix": "abcdef12", "buttons": []}),
+                              owner_chat_id=OWNER)
+        assert msg.text.startswith(expected), msg.text
+
+    def test_task_card_without_prefix_keeps_the_plain_header(self):
+        msg = render_telegram(_n(notice_kind="task_failed", actions=None), owner_chat_id=OWNER)
+        assert msg.text.startswith("❌ task failed")
+
     def test_renders_a_row_object_too(self):
         row = SimpleNamespace(notice_kind="ops_alert", body="runner down", severity="critical",
                               subject_type="ops", subject_id=None, actions=None, target=None, thread=None)
@@ -206,6 +224,15 @@ class TestCli:
                                       last_error=last_error))
             return self.row_id
         monkeypatch.setattr(cli, "record_notice", _record)
+        # `drain` releases stuck `sending` rows before selecting (whole-tier
+        # review 2026-10-22); default it to "nothing stuck" so the drain tests
+        # never touch a database.
+        self.released: list = []
+
+        async def _release(now=None):
+            self.released.append("release")
+            return 0
+        monkeypatch.setattr(cli, "release_stuck_sending", _release)
 
     def _route(self, monkeypatch, transport):
         real = self.cli.send_via_http
@@ -286,6 +313,44 @@ class TestCli:
         assert self.cli.main(["drain", "--limit", "5"]) == 0
         assert sent == [(rows[0].id, "41", {"subject_type": "job", "subject_id": "j"})]
         assert "drained sent=1 failed=0 skipped=1 pending_before=2" in capsys.readouterr().out
+
+    def test_drain_releases_stuck_sending_rows_before_selecting(self, monkeypatch, capsys):
+        # Same recovery as the bot listener (whole-tier review 2026-10-22): a
+        # row a dead drainer left `sending` past its lease is released, and
+        # the release runs BEFORE pending_notices so the freed row is in this
+        # drain's selection.
+        from src.config import settings
+        monkeypatch.setattr(settings, "notify_outbox", True)
+        self._route(monkeypatch, _mock_transport(200, {"ok": True, "result": {"message_id": 43}}))
+        order: list = []
+
+        async def _release(now=None):
+            order.append("release")
+            return 1
+
+        async def _pending(limit=20):
+            order.append("select")
+            return []
+        monkeypatch.setattr(self.cli, "release_stuck_sending", _release)
+        monkeypatch.setattr(self.cli, "pending_notices", _pending)
+        assert self.cli.main(["drain"]) == 0
+        assert order == ["release", "select"]
+        out = capsys.readouterr()
+        assert "released 1 stuck sending row" in out.err
+        assert "drained sent=0 failed=0 skipped=0 pending_before=0" in out.out
+
+    def test_drain_release_failure_is_non_fatal_and_token_free(self, monkeypatch, capsys):
+        from src.config import settings
+        monkeypatch.setattr(settings, "notify_outbox", True)
+
+        async def _release(now=None):
+            raise RuntimeError(f"db down https://api.telegram.org/bot{TOKEN}/x")
+        monkeypatch.setattr(self.cli, "release_stuck_sending", _release)
+        monkeypatch.setattr(self.cli, "pending_notices", AsyncMock(return_value=[]))
+        assert self.cli.main(["drain"]) == 0
+        out = capsys.readouterr()
+        assert "release_stuck_sending failed" in out.err and TOKEN not in out.err
+        assert "drained sent=0" in out.out
 
     def test_drain_with_the_switch_off_skips_job_and_task_rows_but_sends_ops(self, monkeypatch, capsys):
         # Mirrors A6's legacy_mode: with NOTIFY_OUTBOX=0 the legacy listeners

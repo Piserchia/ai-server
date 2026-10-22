@@ -2,6 +2,17 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-22 — Whole-tier review applied: stuck `sending` rows released before every drain; `/status <prefix>`; the quota-notice fan-out narrowing recorded
+
+**Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").
+**Files changed**:
+- `src/gateway/telegram_bot.py` — `_release_stuck()` (non-fatal `release_stuck_sending()`) runs at listener startup AND at the top of every loop iteration before `_drain_outbox` (≤ 30 s after a dead drainer's 5-min lease expires). Before: once at startup only, so (1) a row claimed just before a bot restart (every deploy) was still inside its lease at startup and never released until the NEXT restart, and (2) a `mark_sent`/`mark_failed` failure after the Telegram call stranded the row in `sending` for good — the exit criterion "a bot restart loses no DM" did not hold for a row mid-send. At-least-once: a kill between the Telegram call and `mark_sent` yields one duplicate DM. `cmd_status(update, ctx)`: with an argument, `find_job_by_prefix(ctx.args[0]) → format_job_status` (plain text, no `parse_mode`; `"Job not found."`) — the `/status <job8>` footer on every outbox job card pointed at a form that did not exist. `format_job_status` docstring updated.
+- `tests/test_notify_bot.py` — `test_releases_stuck_rows_then_drains_on_nudge_and_poll` runs two iterations and asserts a release precedes each drain (3 releases); `TestStatusWithPrefix` (2).
+- `.context/modules/gateway/CONTEXT.md` (listener wording, `/status <prefix>`), `skills/GOTCHAS.md` (the one-time deploy-window loss), `docs/TROUBLESHOOTING.md` (`sending` bullet, deploy-window bullet).
+**Why**: review findings (one major, two minors).
+**Side effects**: one indexed `UPDATE notifications … WHERE status = 'sending' AND next_attempt_at <= now()` per listener iteration (`ix_notifications_status`). **A6 narrowing, recorded here**: `_quota_notifier` now writes one `quota_paused` / `quota_resumed` row with `target=None` → delivered to `allowed_chat_ids[0]` only; the pre-A6 loop DM'd every chat in `TELEGRAM_ALLOWED_CHAT_IDS`. Single-owner deployments see no difference.
+**Gotchas discovered**: the per-iteration release and the startup release are the same helper; a test that counts `release` events must account for startup + one per `get_message` return.
+
 ## 2026-10-21 — D1: `/status` lists each schedule row the provisioning pre-check deferred
 
 **Agent task**: Observability Phase 1 re-cut plan D1 (`telegram_bot.py` slice).

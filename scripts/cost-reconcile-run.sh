@@ -46,10 +46,21 @@ if [[ -z "$VENV_PY" ]]; then
         PIPENV_VENV="$(pipenv --venv 2>/dev/null || true)"
     fi
     if [[ -z "$PIPENV_VENV" || ! -x "$PIPENV_VENV/bin/python" ]]; then
+        # Prefer the venv whose pipenv-written `.project` equals $PROJECT_DIR:
+        # on a host with both the dev and the prod checkout (same basename)
+        # the first match is the DEV venv (whole-tier review 2026-10-22).
+        # First-match is kept only as a LOGGED fallback.
         base="$(basename "$PROJECT_DIR")"
+        first=""
         for d in "$HOME/.local/share/virtualenvs/${base}-"*; do
-            if [[ -x "$d/bin/python" ]]; then PIPENV_VENV="$d"; break; fi
+            [[ -x "$d/bin/python" ]] || continue
+            [[ -z "$first" ]] && first="$d"
+            if [[ "$(cat "$d/.project" 2>/dev/null)" == "$PROJECT_DIR" ]]; then PIPENV_VENV="$d"; break; fi
         done
+        if [[ -z "$PIPENV_VENV" && -n "$first" ]]; then
+            PIPENV_VENV="$first"
+            echo "$(date -u +%FT%TZ) WARN no venv whose .project matches $PROJECT_DIR; using first match $first (run install-launchd.sh timers-only to pin VENV_PY)" >> "$LOG"
+        fi
     fi
     VENV_PY="${PIPENV_VENV:+$PIPENV_VENV/bin/python}"
 fi
@@ -83,7 +94,7 @@ send_alert() {
 }
 
 if [[ -z "$VENV_PY" ]]; then
-    echo "$(date -u +%FT%TZ) FATAL cost-reconcile cannot locate a usable project venv python (searched: VENV_PY, PATH pipenv, ~/.local/share/virtualenvs/$(basename "$PROJECT_DIR")-*)" >> "$LOG"
+    echo "$(date -u +%FT%TZ) FATAL cost-reconcile cannot locate a usable project venv python (searched: VENV_PY, PATH pipenv, ~/.local/share/virtualenvs/$(basename "$PROJECT_DIR")-* preferring .project == $PROJECT_DIR)" >> "$LOG"
     send_alert "cost-reconcile: weekly run did NOT run — no usable project venv python (see volumes/logs/cost-reconcile.log)"
     exit 0
 fi

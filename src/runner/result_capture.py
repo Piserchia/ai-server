@@ -30,6 +30,7 @@ shape degrades to NULL columns, never a crash.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -68,6 +69,12 @@ API_RETRY_TO_TERMINAL: dict[str, str] = {
 # (B3 raises on these after the banner belt; Phase 3 holds the lane).
 ENFORCEMENT_CATEGORIES: frozenset[str] = frozenset(
     {"account_on_hold", "oauth_revoked", "billing_error"})
+
+# terminal_reason_for_exception anchors: the `api_retry <category>` token the
+# session's raise text carries, and the word-bounded auth signals (the Codex
+# lane's `classify_error` uses the same discipline).
+_API_RETRY_IN_TEXT = re.compile(r"\bapi_retry ([a-z_]+)")
+_AUTH_SIGNAL_RE = re.compile(r"\b401\b|\b403\b|\bexpired\b|unauthori[sz]ed")
 
 _USAGE_TOKEN_KEYS: tuple[str, ...] = (
     "input_tokens",
@@ -226,13 +233,22 @@ def derive_terminal_reason(capture: ResultCapture, *, banner_terminal: bool = Fa
     `ExecResult.terminal_reason`). `banner_terminal` is
     session.is_api_terminal_session(...) — the regex belt kept for one release
     (spec §2.4: 'kept as a belt'). `capture.api_retry_error` is the `error`
-    category of the session's last system/api_retry message, and it is checked
-    FIRST: an account hold, a revoked OAuth grant and a billing event are
-    category-borne signals that no HTTP status distinguishes (spec §2.4)."""
-    mapped = API_RETRY_TO_TERMINAL.get((capture.api_retry_error or "").strip().lower())
-    if mapped:
-        return mapped
+    category of the session's last system/api_retry message. It is checked
+    first among the FAILURE signals: an account hold, a revoked OAuth grant
+    and a billing event are category-borne signals that no HTTP status
+    distinguishes (spec §2.4), and the three enforcement reasons outrank the
+    status unconditionally. A transient category (`overloaded`, `rate_limit`,
+    `authentication_failed`) only labels a session that actually FAILED
+    (is_error, an api_error_status, or the banner belt): the CLI emits
+    system/api_retry before the retry's outcome is known, so a success-shaped
+    capture after a recovered retry is `ok` — the `api_retry` audit row keeps
+    the recovered retry (whole-tier review 2026-10-22)."""
+    category = (capture.api_retry_error or "").strip().lower()
+    mapped = API_RETRY_TO_TERMINAL.get(category)
     status = capture.api_error_status
+    failed = capture.is_error or status is not None or banner_terminal
+    if mapped and (failed or mapped in ENFORCEMENT_CATEGORIES):
+        return mapped
     if status == 429:
         return "rate_limited"
     if status in (401, 403):
@@ -342,15 +358,20 @@ def terminal_reason_for_exception(exc: BaseException) -> str:
     text = str(exc).lower()
     if "unrecognized_model" in text:
         return "unrecognized_model"
-    # The api_retry categories, which _run_in_process writes into the message
+    # The api_retry category, which _run_in_process writes into the message
     # text of the RuntimeError it raises ("session error (<subtype>; api_retry
     # <cat>): …") so a raised session records the same reason a completed one
-    # would.
-    for category, reason in API_RETRY_TO_TERMINAL.items():
-        if category in text:
-            return reason
+    # would. Anchored to that shape: a bare substring match would label a
+    # git/tool error that merely echoes "rate_limit" (whole-tier review
+    # 2026-10-22).
+    m = _API_RETRY_IN_TEXT.search(text)
+    if m and m.group(1) in API_RETRY_TO_TERMINAL:
+        return API_RETRY_TO_TERMINAL[m.group(1)]
     if "api terminal error" in text:
         return "api_error"
-    if "auth" in text and any(t in text for t in ("401", "403", "expired", "unauthorized")):
+    # Generic auth heuristic: only on the session's own raise text and
+    # word-bounded (a git "Authentication failed … 403" from workspace
+    # creation is infrastructure, not an expired login).
+    if text.startswith("session error") and "auth" in text and _AUTH_SIGNAL_RE.search(text):
         return "auth_expired"
     return "error"

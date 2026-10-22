@@ -153,7 +153,9 @@ def price_usage(model: str | None, usage: dict[str, Any] | None) -> Decimal | No
     `cost_usd_list`. Each cache-write bucket at its own rate (spec §2.3 row
     007, §2.8); None for a bare alias / unknown id / non-Anthropic id so the
     caller can COUNT it under `unpriced` instead of mispricing it. A known
-    family with no tokens is Decimal(0), not None."""
+    family with no tokens is Decimal(0), not None. `usage` is the session
+    TOTAL: a session whose subagents ran on another family is priced at
+    `model`'s rate for the whole total (the B4 reconcile shows it as drift)."""
     fam = family_for(model)
     if fam is None:
         return None

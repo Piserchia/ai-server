@@ -430,7 +430,7 @@ class TestOutboxListener:
             async def get_message(self, ignore_subscribe_messages=True, timeout=None):
                 self.n += 1
                 events.append(("poll", timeout))
-                if self.n >= 2:
+                if self.n >= 3:
                     raise asyncio.CancelledError
                 return {"type": "message", "data": "x"}
 
@@ -445,10 +445,19 @@ class TestOutboxListener:
             await bot_mod._outbox_listener(_app(), legacy_mode=True)
         assert events[0] == "release"
         assert ("subscribe", bot_mod.CHANNEL_NOTIFY_OUTBOX) in events
-        assert ("drain", True) in events
+        assert events.count(("drain", True)) == 2
         assert ("poll", bot_mod._OUTBOX_POLL_SECONDS) in events
         assert events[-1] == ("unsubscribe", bot_mod.CHANNEL_NOTIFY_OUTBOX)
         assert bot_mod._OUTBOX_POLL_SECONDS == 30
+        # Whole-tier review 2026-10-22: the release runs before EVERY drain,
+        # not only at startup — a row claimed just before a restart is still
+        # inside its lease at startup, and a mark_sent/mark_failed failure
+        # after the Telegram call would otherwise strand it until the next
+        # restart. Startup + one per iteration = 3 here.
+        assert events.count("release") == 3
+        for i, ev in enumerate(events):
+            if ev == ("drain", True):
+                assert events[i - 1] == "release", events
 
     async def test_release_failure_does_not_stop_the_listener(self, monkeypatch):
         async def release(now=None):
@@ -476,6 +485,42 @@ class TestOutboxListener:
         with pytest.raises(asyncio.CancelledError):
             await bot_mod._outbox_listener(_app(), legacy_mode=False)
         # subscribed and polled (the poll raised Cancelled); release failing was logged, not fatal
+
+
+# ── /status <prefix> (the footer on every outbox job card) ────────────────
+
+
+class TestStatusWithPrefix:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(bot_mod, "_is_authorized", lambda chat_id: True)
+
+    def _update(self):
+        msg = SimpleNamespace(text="/status abcdef12", reply_text=AsyncMock())
+        return SimpleNamespace(effective_chat=SimpleNamespace(id=999), message=msg)
+
+    async def test_prefix_replies_with_format_job_status_plain_text(self, monkeypatch):
+        job = _job()
+        seen = []
+
+        async def find(prefix):
+            seen.append(prefix)
+            return job
+        monkeypatch.setattr(bot_mod, "find_job_by_prefix", find)
+        upd = self._update()
+        await bot_mod.cmd_status(upd, SimpleNamespace(args=["abcdef12"]))
+        assert seen == ["abcdef12"]
+        call = upd.message.reply_text.call_args
+        assert call.args[0] == format_job_status(job)
+        assert "parse_mode" not in call.kwargs      # skill names with `_` would crash Markdown
+
+    async def test_unknown_prefix(self, monkeypatch):
+        async def find(prefix):
+            return None
+        monkeypatch.setattr(bot_mod, "find_job_by_prefix", find)
+        upd = self._update()
+        await bot_mod.cmd_status(upd, SimpleNamespace(args=["zzzzzzzz"]))
+        assert upd.message.reply_text.call_args.args[0] == "Job not found."
 
 
 # ── [Details] button ───────────────────────────────────────────────────────
