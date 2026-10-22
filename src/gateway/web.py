@@ -109,6 +109,19 @@ class JobOut(BaseModel):
     origin_channel: str | None = None
     origin_ref: str | None = None
     queue_wait_ms: int | None = None
+    # Migration 008 result-capture columns (Observability Phase 1 B3):
+    # additive, None on rows stamped before B3. `cost_usd_list` is the
+    # runner's list-price figure, `sdk_cost_usd` the SDK's — two columns.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_1h_tokens: int | None = None
+    cache_write_5m_tokens: int | None = None
+    num_turns: int | None = None
+    duration_api_ms: int | None = None
+    cost_usd_list: float | None = None
+    sdk_cost_usd: float | None = None
+    cli_version: str | None = None
 
 
 class RateRequest(BaseModel):
@@ -140,7 +153,22 @@ def _serialize(job: Job) -> JobOut:
         origin_channel=getattr(job, "origin_channel", None),
         origin_ref=getattr(job, "origin_ref", None),
         queue_wait_ms=getattr(job, "queue_wait_ms", None),
+        input_tokens=getattr(job, "input_tokens", None),
+        output_tokens=getattr(job, "output_tokens", None),
+        cache_read_tokens=getattr(job, "cache_read_tokens", None),
+        cache_write_1h_tokens=getattr(job, "cache_write_1h_tokens", None),
+        cache_write_5m_tokens=getattr(job, "cache_write_5m_tokens", None),
+        num_turns=getattr(job, "num_turns", None),
+        duration_api_ms=getattr(job, "duration_api_ms", None),
+        cost_usd_list=_opt_float(getattr(job, "cost_usd_list", None)),
+        sdk_cost_usd=_opt_float(getattr(job, "sdk_cost_usd", None)),
+        cli_version=getattr(job, "cli_version", None),
     )
+
+
+def _opt_float(value) -> float | None:
+    """numeric(10,4) comes back as Decimal; JSON wants a float."""
+    return float(value) if value is not None else None
 
 
 # ── Routes ──────────────────────────────────────────────────────────────────
@@ -817,7 +845,7 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
       if (!rows.length) return "<p>No jobs yet.</p>";
       return `<table>
         <tr><th>ID</th><th>Skill / Kind</th><th>Provider</th><th>Model · Effort</th>
-            <th>Status</th><th>Description</th><th>Rating</th><th>Created</th></tr>
+            <th>Status</th><th>Cost · Turns</th><th>Description</th><th>Rating</th><th>Created</th></tr>
         ${rows.map(r => `<tr>
           <td><a href="/api/jobs/${r.id}" target="_blank">${r.id.slice(0, 8)}</a></td>
           <td>${r.resolved_skill || r.kind}</td>
@@ -827,6 +855,9 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
           <td>${r.resolved_model ? esc(r.resolved_model.replace('claude-', '')) : '—'}${
             r.resolved_effort ? ' · ' + esc(r.resolved_effort) : ''}</td>
           <td><span class="badge ${r.status}">${r.status}</span></td>
+          <td title="${r.sdk_cost_usd != null ? 'sdk: $' + r.sdk_cost_usd.toFixed(2) : ''}">${
+            r.cost_usd_list != null ? '$' + r.cost_usd_list.toFixed(2) : '—'}${
+            r.num_turns != null ? ' · ' + r.num_turns + 't' : ''}</td>
           <td>${esc(r.description).slice(0, 60)}</td>
           <td>${r.user_rating ?? (r.status === 'completed' ? rateCell(r.id) : '—')}</td>
           <td>${r.created_at.slice(0, 16).replace('T', ' ')}</td>

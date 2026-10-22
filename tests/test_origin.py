@@ -461,7 +461,9 @@ class TestCancelledGuard:
 
     @pytest.mark.parametrize("exc,reason", [
         (asyncio.TimeoutError(), "timeout"),
-        (RuntimeError("boom"), "api_error"),
+        # B3 replaced A2's interim "api_error" with the typed mapping
+        # (`terminal_reason_for_exception`): a bare RuntimeError is `error`.
+        (RuntimeError("boom"), "error"),
     ])
     async def test_cancelled_job_is_not_escalated(self, harness, exc, reason):
         from src.config import settings

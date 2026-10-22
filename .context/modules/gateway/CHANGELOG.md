@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — B3: `JobOut` carries the 008 result-capture columns; jobs table shows Cost · Turns
+
+**Agent task**: Observability Phase 1 re-cut plan B3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6), the `web.py` slice — edits inside `JobOut`/`_serialize` and the jobs-table renderer only; `_check_auth` and every route decorator untouched.
+**Files changed**:
+- `src/gateway/web.py` — `JobOut` gains `input_tokens, output_tokens, cache_read_tokens, cache_write_1h_tokens, cache_write_5m_tokens, num_turns, duration_api_ms, cost_usd_list, sdk_cost_usd, cli_version` (all Optional, None on rows stamped before B3); `_serialize` fills them with the `getattr(job, …, None)` idiom (the row stand-ins older tests build lack the attributes) and `_opt_float` turns the two `numeric(10,4)` Decimals into floats for JSON; the jobs table gains a `Cost · Turns` column (`$<cost_usd_list>` · `<num_turns>t`, `sdk_cost_usd` in the title) between Status and Description.
+- `.context/modules/gateway/CONTEXT.md` — the `JobOut` paragraph names the new columns and the table column.
+- `tests/test_web.py` — `test_jobout_carries_token_and_cost_columns`.
+
+**Why**: the plan's Accept line — `/api/jobs/{id}` shows the row's tokens / cost / turns / CLI version after the first deployed job on each lane.
+
+**Side effects**: dashboard JSON consumers see extra keys only; the table has one more column.
+
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — A7 (docs only): Notifications section names `[Details]` / `/status` and the out-of-band alert path; `_job_to_chat` gotcha closed
 
 **Agent task**: Observability Phase 1 re-cut plan A7, Docs-1 bucket (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).

@@ -9,10 +9,12 @@ Why JSONL files, not a DB table:
 
 Kinds used (keep this list honest — update when adding new kinds):
 - job_started:      {"kind", "ts", "job_id", "description", "payload"}  # + "provider" (additive, T4 2026-10-21)
-- job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no cost (subscription auth); + "provider", "model_served", "terminal_reason" (additive, T4)
+- job_completed:    {"kind", "ts", "job_id", "duration_seconds", "usage"}  # usage = SDK token counts; no bill (subscription auth); + "provider", "model_served", "terminal_reason" (additive, T4); + "num_turns", "duration_api_ms", "cost_usd_list" (the runner's list-price figure, pricing.price_usage), "sdk_cost_usd" (the SDK's own), "stop_reason" (additive, B3 2026-10-21; all five None on the executor lane — no turns / API time / SDK figure / Codex price table there; the reconcile script reads both cost figures here)
 - job_failed:       {"kind", "ts", "job_id", "error", "error_category"}  # + "terminal_reason" on every branch (additive, A2 2026-10-21: error|timeout|api_error|provider_refused|review_blocked|<executor terminal_reason>); category: quota|auth|timeout|…|skill_contract|deploy_refused|provider_refused|review_blocked (T5)|<executor terminal_reason: rate_limited|auth_expired|api_error|timeout|interrupted (T4)|publish_failed (T5: LGTM but the runner's push was rejected)>
 - provider_selected: {"kind", "ts", "job_id", "provider", "model", "reason"}  # which provider/model the job resolved to; reason ∈ payload|pin|default (T4, 2026-10-21)
 - provider_refused: {"kind", "ts", "job_id", "provider", "model", "raw", "reason"}  # registry or lane rule refused `[provider/]model_id` before any clone or process (T1/T4, 2026-10-21)
+- api_retry:        {"kind", "ts", "job_id", "error", "attempt"}  # a system/api_retry message on the Anthropic lane; `error` is the vendor category (rate_limit|overloaded|account_on_hold|oauth_org_not_allowed|billing_error|authentication_failed) — never the message text (B3, 2026-10-21)
+- job_result_rejected: {"kind", "ts", "job_id", "reason", "detail", "requested_model"}  # the session's ResultMessage was a silent empty success / served a different model than requested; reason = "unrecognized_model"; the job then fails with that terminal_reason (B3, 2026-10-21)
 - job_cancelled:    {"kind", "ts", "job_id"}
 - tool_use:         {"kind", "ts", "job_id", "tool_name", "tool_use_id", "input"}
 - tool_result:      {"kind", "ts", "job_id", "tool_use_id", "is_error", "result_preview"}  # + "exit_code", "output" from the Codex executor (additive, T3)

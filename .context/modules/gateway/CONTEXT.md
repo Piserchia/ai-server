@@ -107,7 +107,12 @@ disabled → **422** `model refused: <reason>`. The dashboard model dropdown
 is rendered from the registry (`web._model_options_html`), one `<optgroup>`
 per enabled provider (T7). `JobOut` carries the 007 columns
 `resolved_provider`, `model_served`, `terminal_reason` (additive, None on
-pre-007 rows) and the jobs table has a Provider column.
+pre-007 rows), the 008 origin trio (A2) and the 008 result-capture columns
+`input_tokens, output_tokens, cache_read_tokens, cache_write_1h_tokens,
+cache_write_5m_tokens, num_turns, duration_api_ms, cost_usd_list,
+sdk_cost_usd, cli_version` (B3; `getattr(..., None)`, the two cost columns
+as floats). The jobs table has a Provider column and a Cost · Turns column
+(`cost_usd_list` + `num_turns`; `sdk_cost_usd` in the title).
 
 ## Auth
 

@@ -28,6 +28,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,7 @@ from src.runner.review import (
     run_code_review,
 )
 from src.runner import delivery, quota, session as session_mod, writeback
+from src.runner.result_capture import terminal_reason_for_exception, usage_columns
 
 logger = structlog.get_logger()
 _shutdown = asyncio.Event()
@@ -538,6 +540,12 @@ async def _process_job(job_id: uuid.UUID) -> None:
             terminal_reason=result.get("terminal_reason"),
             model_served=result.get("model_served"),
             review_outcome=result.get("review_outcome"),
+            # B3: the token/cost subset the session already stamped at its
+            # one-site UPDATE, re-written on the terminal transition from
+            # the same result dict (same values; both lanes).
+            usage=result.get("usage"),
+            num_turns=result.get("num_turns"),
+            cost_usd_list=result.get("cost_usd_list"),
         )
         log.info("job completed")
 
@@ -835,10 +843,15 @@ async def _process_job(job_id: uuid.UUID) -> None:
     except Exception as exc:
         from src.runner.audit_index import categorize_error
         err_str = str(exc)[:500]
-        # "api_error" is the Anthropic lane's untyped failure reason until
-        # B3 maps the exception class (`terminal_reason_for_exception`).
+        # B3: the typed reason from the exception class / the category the
+        # session wrote into its error text (`unrecognized_model`, the
+        # api_retry enforcement categories, `rate_limited`, …). One reason
+        # per handler: the audit row and the DB row never disagree.
+        # `categorize_error` keeps its own vocabulary; consumers read
+        # terminal_reason first, error_category as the fallback.
+        reason = terminal_reason_for_exception(exc)
         audit_log.append(str(job_id), "job_failed", error=err_str,
-                         error_category=categorize_error(err_str), terminal_reason="api_error")
+                         error_category=categorize_error(err_str), terminal_reason=reason)
         log.exception("job failed")
 
         # Refresh the ORM instance here too — the session may have stamped
@@ -861,14 +874,14 @@ async def _process_job(job_id: uuid.UUID) -> None:
             # on the lane it ran on, never escalated onto Anthropic
             # (review round 1, 2026-10-21).
             await _finish_job(job_id, JobStatus.failed, error=err_str,
-                              provider=lane, terminal_reason="api_error")
+                              provider=lane, terminal_reason=reason)
             audit_log.append(str(job_id), "note",
                              text=f"{lane} lane failed — terminal, not escalated "
                                   f"(no vendor switch onto Anthropic)")
             log.warning("job failed — non-Anthropic lane, terminal", provider=lane)
         else:
             await _finish_job(job_id, JobStatus.failed, error=err_str,
-                              terminal_reason="api_error")
+                              terminal_reason=reason)
 
             # Escalation: if the skill declares on_failure, enqueue a retry with
             # the escalated model/effort. One level only, guarded by a payload flag.
@@ -1682,13 +1695,19 @@ def _terminal_values(
     terminal_reason: str | None = None,
     model_served: str | None = None,
     review_outcome: str | None = None,
+    usage: dict | None = None,
+    num_turns: int | None = None,
+    cost_usd_list: Any = None,
 ) -> dict:
     """The column values a terminal transition writes. Pure.
 
     The provider columns (migration 007: `resolved_provider`,
     `terminal_reason`, `model_served`) are written only when known, so a
     path that does not know them (timeout, generic failure) leaves what the
-    session stamped at start untouched (T4, 2026-10-21).
+    session stamped at start untouched (T4, 2026-10-21). Likewise the 008
+    token/cost subset (B3): `usage` (SDK key names, either lane) becomes the
+    five token columns through `result_capture.usage_columns`; `num_turns`
+    and `cost_usd_list` (→ Decimal for numeric(10,4)) when known.
     """
     values: dict = dict(
         status=status.value,
@@ -1706,6 +1725,12 @@ def _terminal_values(
         # The pre-push gate's verdict (T5); the Anthropic post-review
         # stamps this column itself in `_maybe_review`.
         values["review_outcome"] = review_outcome
+    if usage is not None:
+        values.update(usage_columns(usage))
+    if num_turns is not None:
+        values["num_turns"] = num_turns
+    if cost_usd_list is not None:
+        values["cost_usd_list"] = Decimal(str(cost_usd_list))
     return values
 
 
@@ -1720,6 +1745,9 @@ async def _finish_job(
     model_served: str | None = None,
     review_outcome: str | None = None,
     done_payload: dict | None = None,
+    usage: dict | None = None,
+    num_turns: int | None = None,
+    cost_usd_list: Any = None,
 ) -> None:
     """Terminal transition + `jobs:done` publish. `done_payload` overrides
     the published payload (the done DM's text) — used by the review-blocked
@@ -1739,7 +1767,8 @@ async def _finish_job(
             .values(**_terminal_values(
                 status, result=result, error=error, provider=provider,
                 terminal_reason=terminal_reason, model_served=model_served,
-                review_outcome=review_outcome))
+                review_outcome=review_outcome, usage=usage,
+                num_turns=num_turns, cost_usd_list=cost_usd_list))
         )
         if result_proxy.rowcount == 0:
             logger.info("finish suppressed — job already in a protected terminal state",

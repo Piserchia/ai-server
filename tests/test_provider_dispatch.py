@@ -41,6 +41,7 @@ from src.registry import models as reg
 from src.registry.skills import SkillConfig
 from src.runner import session, workspaces
 from src.runner.executors.codex_cli import CodexNotFound, ExecResult
+from src.runner.result_capture import ResultCapture
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -255,7 +256,14 @@ class _FakeDB:
 
     @property
     def params(self) -> dict:
+        """The resolved_* stamp run_session issues before the session (B3
+        added a second, post-session column stamp — see `column_params`)."""
         assert self.statements, "no UPDATE captured"
+        return dict(self.statements[0].compile().params)
+
+    @property
+    def column_params(self) -> dict:
+        assert len(self.statements) >= 2, "no post-session column stamp captured"
         return dict(self.statements[-1].compile().params)
 
 
@@ -316,7 +324,11 @@ def harness(tmp_path, monkeypatch):
 
     async def fake_run_in_process(job_id, prompt, options):
         h.sdk_calls.append((job_id, prompt, options))
-        return "SDK did it.\nTASK_COMPLETE: via the SDK", {"input_tokens": 3, "output_tokens": 1}
+        # B3: the 3-tuple — the typed capture rides beside the usage dict.
+        return ("SDK did it.\nTASK_COMPLETE: via the SDK", {"input_tokens": 3, "output_tokens": 1},
+                ResultCapture(usage={"input_tokens": 3, "output_tokens": 1}, num_turns=1,
+                              duration_api_ms=500, total_cost_usd=0.001,
+                              model_usage={"claude-sonnet-4-6": {}}))
 
     monkeypatch.setattr(session, "_resolve_skill", fake_resolve_skill)
     monkeypatch.setattr(session, "_resolve_project", fake_resolve_project)
@@ -511,10 +523,12 @@ async def test_run_session_anthropic_path_is_unchanged(harness):
     assert (sel["provider"], sel["model"], sel["reason"]) == ("anthropic", "claude-sonnet-4-6", "payload")
     assert _event(job.id, "job_started")["provider"] == "anthropic"
     done = _event(job.id, "job_completed")
-    assert (done["provider"], done["model_served"], done["terminal_reason"]) == ("anthropic", None, "ok")
+    # B3: model_served is the captured value (ResultMessage.model_usage).
+    assert (done["provider"], done["model_served"], done["terminal_reason"]) == \
+        ("anthropic", "claude-sonnet-4-6", "ok")
     assert done["usage"] == {"input_tokens": 3, "output_tokens": 1}
     assert result["provider"] == "anthropic" and result["terminal_reason"] == "ok"
-    assert result["model"] == "claude-sonnet-4-6" and result["model_served"] is None
+    assert result["model"] == "claude-sonnet-4-6" and result["model_served"] == "claude-sonnet-4-6"
     assert result["summary"].startswith("SDK did it.")
     assert h.db.params["resolved_provider"] == "anthropic"
     assert h.db.params["resolved_model"] == "claude-sonnet-4-6"
@@ -763,7 +777,11 @@ def main_harness(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("exc, terminal_reason, category", [
     (asyncio.TimeoutError(), "timeout", "timeout"),
-    (RuntimeError("clone exploded"), "api_error", None),
+    # B3: the generic handler types every failure through
+    # `terminal_reason_for_exception` (one reason per handler, both lanes);
+    # a bare infrastructure RuntimeError is `error`, no longer the blanket
+    # `api_error`.
+    (RuntimeError("clone exploded"), "error", None),
 ])
 async def test_main_non_anthropic_failures_are_terminal_never_escalated(
         main_harness, exc, terminal_reason, category):
