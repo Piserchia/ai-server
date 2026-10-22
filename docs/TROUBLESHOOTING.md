@@ -3286,3 +3286,59 @@ dropdb --if-exists restore_drill_assistant; dropdb --if-exists restore_drill_atl
 ### Prevention
 
 `tests/test_scripts_syntax.py` pins the backup script's dump/seal/retention lines and drives `restore-drill.sh` end to end with fake pg tools (`TestRestoreDrill`); the runbook's §9 table says which measurement goes where. `server-upkeep` still alerts when the newest remote object is > 48 h old — once the `r2` remote exists, that alert is the off-site watchdog.
+
+## Symptom: a schedule row stops running and the owner gets `⏸ <name> deferred — <path>/.env lacks <KEY>; defers until provisioned` — schedule deferred (provisioning_gap), 2026-10-21
+
+### Diagnostic
+
+```bash
+# the row's own stream (a SUBDIRECTORY — never under volumes/audit_log/<job_id>.jsonl)
+tail -5 "volumes/audit_log/schedules/$(psql assistant -Atc "SELECT id FROM schedules WHERE name='<name>'").jsonl"
+grep -h '"kind": "schedule_deferred"' volumes/audit_log/schedules/*.jsonl | tail      # fleet-wide
+psql assistant -c "SELECT name, job_payload->'env_required', last_run_at, next_run_at FROM schedules WHERE name='<name>';"
+redis-cli KEYS 'schedule:gap_notified:*'          # the one-DM-per-project-per-day claims
+```
+
+`/status` in Telegram lists every row deferred at its latest slot
+(`⏸ deferred: <name> (provisioning_gap: KEY)`); the Sunday adherence summary
+shows it as `DEFERRED`, not `DARK`; `schedule-monitor.sh` counts the last 24 h.
+
+### Root cause
+
+The scheduler's D1 pre-check (`src/runner/main.py` `_tick_schedules`, spec
+§8.3): the names in the project manifest's `env_required` ∪ the row's
+`job_payload.env_required` (D-P1-7) were checked against the project's
+**canonical** `.env` — the file `provision_env_files` copies from, i.e.
+`resolve_delivery_cwd(..., is_deploy=False) / <delivery.env_files or .env>`;
+for atlas (dev-repo topology) that is `~/Documents/repos/atlas/.env`, NOT
+`projects/atlas/.env` — and at least one declared name was absent. The row
+ran no session (nothing to burn); `last_run_at`/`next_run_at` advanced so it
+re-checks at its next slot; one `schedule_deferred` record per deferral and
+one DM per project per UTC day. Names only: the pre-check never reads a
+value. `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
+and any `ANTHROPIC_*` can never cause a deferral (INV-3 — atlas's manifest
+declares `ANTHROPIC_API_KEY` and its `.env` correctly lacks it).
+
+Known today (2026-10-21): the four `atlas-swing-supervise-*` /
+`atlas-swing-trade-*` rows declare `TRADIER_SANDBOX_TOKEN`
+(`scripts/seed-schedules.sh`) and the atlas `.env` does not have it — they
+defer by design until the owner provisions the token (re-cut plan §7).
+**pickem**: its manifest declares two names that are present today, so its
+rows run; if a future `.env` change drops one, pickem rows start deferring —
+intended, and the DM names the file and the key.
+
+### Fix
+
+Provision the key (add `KEY=...` to the named `.env`; the next slot runs —
+nothing to restart, no row to touch), or remove the name from the manifest's
+`env_required` (an atlas-repo change, never an INV-4 server patch) /
+`job_payload.env_required` (`scripts/seed-schedules.sh` + re-seed). A
+deferral is not a failure: no `jobs` row exists, nothing to retry.
+
+### Prevention
+
+Declare only names the skill actually needs; `.env` edits on the canonical
+checkout are the owner's — `scripts/backup.sh` seals that file nightly.
+Fail-open rules (`tests/test_provisioning_gap.py`): no project, no/invalid
+manifest, an unreadable `.env` or an empty list never defer a row — the ONLY
+trigger is a positively declared name that the file positively lacks.

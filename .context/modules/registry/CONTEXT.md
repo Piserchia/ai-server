@@ -69,12 +69,23 @@ Parsers for the three pieces of external declarative configuration:
 
 - `load(path) -> Manifest` — load + validate; raises `ManifestError` on invalid.
   `Manifest.from_dict` tolerates unknown top-level keys (mission, platforms,
-  web_strategy, env_required, services …) — before 2026-07-27 the loader did
+  web_strategy, services …; `env_required` is read since D1) — before 2026-07-27 the loader did
   `Manifest(**data)` and TypeError'd on every live manifest (all carry extras),
   so the Python loader was dead; `load_all` now also catches TypeError.
 - `load_all() -> list[Manifest]` — all projects, malformed ones skipped with a warning
 - `Manifest` dataclass — slug, name, type, subdomain, port, healthcheck,
-  start_command, env, on_update, git, **delivery**, dependencies
+  start_command, env, on_update, git, **delivery**, dependencies, **env_required**
+- `Manifest.env_required: list[str]` (READ since 2026-10-21, D1; ignored
+  before) — owner-provisioned env NAMES the project needs. Consumed by the
+  scheduler's `provisioning_gap` pre-check (`runner.main`): a due schedule
+  row of this project is DEFERRED while its canonical `.env` lacks a declared
+  name (except the INV-3 exemptions: `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, any `ANTHROPIC_*`). So
+  **adding a name to a project's `env_required` can defer that project's
+  schedules** — additions are reviewed. Still fail-open and unvalidated:
+  str-coerced via `coerce_env_names` (a bare string is one name, junk → `[]`),
+  a bad entry never makes a manifest unloadable. Schedule rows may add their
+  own names in `job_payload.env_required` (D-P1-7, `scripts/seed-schedules.sh`).
 - `Delivery.env_files` (2026-08-10) — list of gitignored in-repo paths (e.g.
   `.env`) the runner copies from the canonical checkout into each workspace
   clone. `Delivery.validate` rejects absolute/`~`/`..` entries so a manifest

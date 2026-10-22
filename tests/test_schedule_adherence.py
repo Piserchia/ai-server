@@ -146,3 +146,52 @@ class TestReportShape:
         rep = adherence_report([dark, ok], jobs, NOW)
         assert rep["schedules"][0]["name"] == "z-dark"
         assert {"findings", "schedules"} <= set(rep)
+
+
+class TestDeferred:
+    """D1: a row the scheduler deferred (provisioning_gap) at/after its
+    latest slot is `deferred`, sorted with `paused`, with a DEFERRED finding
+    — never DARK. A stale deferral (before the slot) masks nothing."""
+
+    def test_deferred_row_is_not_dark(self):
+        sid = str(uuid4())
+        sch = _sched(name="atlas-swing-trade-edt", sid=sid, cron="45 19 * * 1-5")
+        # Last slot: Tue 19:45 UTC (NOW is Wed 18:00) → no job since → DARK.
+        base = adherence_report([sch], [], NOW)
+        assert base["schedules"][0]["status"] == "dark"
+
+        sch_deferred = dict(sch, last_deferred_at=NOW - timedelta(hours=22),
+                            deferred_missing=["TRADIER_SANDBOX_TOKEN"])
+        rep = adherence_report([sch_deferred], [], NOW)
+        row = rep["schedules"][0]
+        assert row["status"] == "deferred"
+        assert row["missing"] == ["TRADIER_SANDBOX_TOKEN"]
+        assert [f["kind"] for f in rep["findings"]] == ["DEFERRED"]
+        assert "provisioning_gap: TRADIER_SANDBOX_TOKEN" in rep["findings"][0]["detail"]
+
+        # A deferral older than the latest slot does not cover it.
+        stale = dict(sch, last_deferred_at=NOW - timedelta(days=3),
+                     deferred_missing=["TRADIER_SANDBOX_TOKEN"])
+        assert adherence_report([stale], [], NOW)["schedules"][0]["status"] == "dark"
+
+    def test_deferred_sorts_with_paused_after_ok(self):
+        ok = _sched(name="a-ok", cron="0 11 * * 1")
+        okj = _job(ok["id"], created_hours_ago=1)
+        deferred = dict(_sched(name="b-deferred", cron="45 19 * * 1-5"),
+                        last_deferred_at=NOW - timedelta(hours=1), deferred_missing=["K"])
+        paused = _sched(name="c-paused", paused=True)
+        rep = adherence_report([paused, deferred, ok], [okj], NOW)
+        assert [r["status"] for r in rep["schedules"]] == ["ok", "deferred", "paused"]
+
+    def test_latest_deferral_pure_helper(self):
+        from src.runner.schedule_adherence import latest_deferral
+        assert latest_deferral([]) == (None, [])
+        events = [
+            {"ts": "2026-09-01T10:00:00+00:00", "kind": "schedule_deferred", "missing": ["A"]},
+            {"ts": "2026-09-02T10:00:00+00:00", "kind": "note"},
+            {"ts": "2026-09-02T09:00:00+00:00", "kind": "schedule_deferred", "missing": ["B", "C"]},
+            {"ts": "garbage", "kind": "schedule_deferred", "missing": ["Z"]},
+        ]
+        at, missing = latest_deferral(events)
+        assert at == datetime(2026, 9, 2, 9, 0, tzinfo=timezone.utc)
+        assert missing == ["B", "C"]

@@ -564,3 +564,25 @@ def test_runbook_exists():
     # the reviewed spec forbids a token in the launchd env (P0 runbook, round-1 #31)
     assert "into the launchd env" not in doc
     assert "pipenv run" not in doc
+
+
+# --- D1: the four swing rows declare their Tradier key (D-P1-7) ---------------
+
+
+def test_seed_schedules_swing_rows_carry_env_required():
+    src = _read("scripts/seed-schedules.sh")
+    want = '\'{"project_slug":"atlas","env_required":["TRADIER_SANDBOX_TOKEN"]}\''
+    rows = {}
+    for m in re.finditer(r"^upsert '([^']+)'.*$", src, re.M):
+        rows[m.group(1)] = m.group(0)
+    for name in ("atlas-swing-supervise-edt", "atlas-swing-supervise-est",
+                 "atlas-swing-trade-edt", "atlas-swing-trade-est"):
+        assert name in rows, f"{name} missing from seed-schedules.sh"
+        assert rows[name].rstrip().endswith(want), f"{name} payload is not exactly {want}"
+    # The research row keeps its timeout payload; the governor has none;
+    # the value rows are untouched.
+    assert rows["atlas-swing-research"].rstrip().endswith(
+        '\'{"project_slug":"atlas","session_timeout_seconds":3600}\'')
+    assert "env_required" not in rows["atlas-swing-evaluate"]
+    assert "env_required" not in rows["atlas-value-monitor"]
+    assert src.count('"env_required":[') == 4      # the four rows, nothing else

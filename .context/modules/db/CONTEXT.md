@@ -102,7 +102,12 @@ the cross-vendor writer slice (2026-10-21) added `provider_selected`,
 (`pre_push_gate`), `job_requeued_for_quota` (`provider`, `until`); the
 notify outbox (A4, 2026-10-21) added `notice_queued`, `notice_sent`,
 `notice_failed` on job-subject notices (`src/notify/outbox.py`; JSONL only,
-not mirrored to `jobs:stream`). Kinds are
+not mirrored to `jobs:stream`); D1 (2026-10-21) added `schedule_deferred`
+(`schedule_id`, `schedule`, `reason: provisioning_gap`, `missing`, `project`,
+`env_file`) in a SEPARATE per-schedule stream,
+`volumes/audit_log/schedules/<schedule_id>.jsonl`
+(`audit_log.append_schedule_event` / `read_schedule_events`; a subdirectory
+so `runner/audit_index.rebuild_index` never indexes it as a job). Kinds are
 a parsing contract (C14): add, never rename or reshape. The full list with
 field shapes is the `src/audit_log.py` docstring.
 

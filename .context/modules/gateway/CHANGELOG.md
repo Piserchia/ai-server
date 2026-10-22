@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — D1: `/status` lists each schedule row the provisioning pre-check deferred
+
+**Agent task**: Observability Phase 1 re-cut plan D1 (`telegram_bot.py` slice).
+**Files changed**: `src/gateway/telegram_bot.py` — `_deferred_schedule_lines()` (best-effort; one `⏸ deferred: <name> (provisioning_gap: \`KEY\`)` line per unpaused `Schedule` whose newest `schedule_deferred` record in `volumes/audit_log/schedules/<id>.jsonl` covers its latest cron slot, via `schedule_adherence.latest_deferral` / `is_deferred`), folded into `cmd_status`'s ops lines beside the paused-lane lines; imports `src.audit_log` and `runner.schedule_adherence` (SYSTEM.md Depends-on updated). `tests/test_provisioning_gap.py::TestStatusLine`.
+**Why**: the DM is once per project per day; `/status` is where the owner sees which rows are currently deferred and on which key.
+**Side effects**: none when nothing is deferred (`tests/test_quota.py::TestTelegramSurfaces` unchanged). A failure reading the streams logs a warning and shows no line — `/status` never breaks on it.
+**Gotchas discovered**: keys are rendered in backticks — a bare `TRADIER_SANDBOX_TOKEN` under `parse_mode="Markdown"` italicises `_SANDBOX_`.
+
 ## 2026-10-21 — B3: `JobOut` carries the 008 result-capture columns; jobs table shows Cost · Turns
 
 **Agent task**: Observability Phase 1 re-cut plan B3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6), the `web.py` slice — edits inside `JobOut`/`_serialize` and the jobs-table renderer only; `_check_auth` and every route decorator untouched.

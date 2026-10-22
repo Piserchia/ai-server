@@ -44,7 +44,10 @@ def adherence_report(
     after grace), NEVER_RAN (slots expected since creation, zero jobs ever),
     STUCK (non-terminal job older than stuck_hours), FAILURE_STREAK
     (>= streak_threshold consecutive terminal failures; cancelled ends a
-    streak — operator action, not reliability signal).
+    streak — operator action, not reliability signal), DEFERRED (D1: the
+    scheduler skipped the latest slot on a provisioning_gap — the schedule
+    dict carries ``last_deferred_at`` / ``deferred_missing`` from its audit
+    stream; status ``deferred`` sorts with ``paused`` and is never DARK).
     """
     by_schedule: dict[str, list[dict]] = {}
     for j in jobs:
@@ -61,6 +64,18 @@ def adherence_report(
             continue
 
         last_slot = croniter(sch["cron_expression"], now).get_prev(datetime)
+        if deferral_covers_slot(sch.get("last_deferred_at"), last_slot):
+            missing = list(sch.get("deferred_missing") or [])
+            row = _row(sch, "deferred", last_slot, newest)
+            row["missing"] = missing
+            rows.append(row)
+            findings.append({
+                "kind": "DEFERRED", "schedule": name,
+                "detail": f"provisioning_gap: {', '.join(missing) or '?'} "
+                          f"(deferred {sch['last_deferred_at']:%Y-%m-%d %H:%M}Z; "
+                          f"no session ran — provision the key or drop it from env_required)",
+            })
+            continue
         # Status is built by sequential overwrites in ASCENDING severity —
         # failing < stuck < dark/never_ran — so when several conditions
         # apply, the last (most severe) write wins, matching the severity
@@ -125,9 +140,9 @@ def adherence_report(
         rows.append(_row(sch, status, last_slot, newest))
 
     severity = {"dark": 0, "never_ran": 1, "stuck": 2, "failing": 3,
-                "ok": 4, "paused": 5}
+                "ok": 4, "deferred": 5, "paused": 6}
     rows.sort(key=lambda r: (severity[r["status"]], r["name"]))
-    order = {"DARK": 0, "NEVER_RAN": 1, "STUCK": 2, "FAILURE_STREAK": 3}
+    order = {"DARK": 0, "NEVER_RAN": 1, "STUCK": 2, "FAILURE_STREAK": 3, "DEFERRED": 4}
     findings.sort(key=lambda f: (order[f["kind"]], f["schedule"]))
     return {"findings": findings, "schedules": rows}
 
@@ -144,12 +159,49 @@ def _row(sch: dict, status: str, last_slot: datetime | None,
     }
 
 
+def latest_deferral(events: list[dict]) -> tuple[datetime | None, list[str]]:
+    """Pure. (ts, missing) of the newest ``schedule_deferred`` event in a
+    schedule's audit stream (src/audit_log.py schedule streams); events with
+    an unparseable ``ts`` are skipped. (None, []) when there is none."""
+    best: datetime | None = None
+    missing: list[str] = []
+    for ev in events:
+        if ev.get("kind") != "schedule_deferred":
+            continue
+        try:
+            ts = datetime.fromisoformat(str(ev.get("ts")))
+        except (TypeError, ValueError):
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if best is None or ts > best:
+            best, missing = ts, [str(m) for m in (ev.get("missing") or [])]
+    return best, missing
+
+
+def deferral_covers_slot(deferred_at: datetime | None, last_slot: datetime) -> bool:
+    """Pure. A deferral at/after the latest expected slot (minus the same
+    clock slack a job gets) is the reason that slot has no job."""
+    return deferred_at is not None and deferred_at >= last_slot - timedelta(seconds=_SLOT_SLACK_S)
+
+
+def is_deferred(cron_expression: str, deferred_at: datetime | None, now: datetime) -> bool:
+    """Pure. `deferral_covers_slot` against the cron's latest slot — the
+    bot's /status and the collector share this one definition."""
+    if deferred_at is None:
+        return False
+    return deferral_covers_slot(deferred_at, croniter(cron_expression, now).get_prev(datetime))
+
+
 # ── I/O below: thin, untested by design (pure-function-first suite) ─────────
 
 async def _collect(window_days: int = 45) -> tuple[list[dict], list[dict]]:
-    """Read schedules (+ per-schedule total job count) and windowed jobs."""
+    """Read schedules (+ per-schedule total job count) and windowed jobs;
+    each schedule also carries its newest deferral from
+    volumes/audit_log/schedules/<schedule_id>.jsonl (D1)."""
     from sqlalchemy import func, select
 
+    from src import audit_log
     from src.db import async_session
     from src.models import Job, Schedule
 
@@ -162,12 +214,16 @@ async def _collect(window_days: int = 45) -> tuple[list[dict], list[dict]]:
                 .group_by(Job.schedule_id)
             )).all()
         )
-        scheds = [{
-            "id": str(r.id), "name": r.name,
-            "cron_expression": r.cron_expression,
-            "paused": r.paused, "created_at": r.created_at,
-            "total_jobs": int(counts.get(r.id, 0)),
-        } for r in (await s.execute(select(Schedule))).scalars()]
+        scheds = []
+        for r in (await s.execute(select(Schedule))).scalars():
+            deferred_at, missing = latest_deferral(audit_log.read_schedule_events(r.id))
+            scheds.append({
+                "id": str(r.id), "name": r.name,
+                "cron_expression": r.cron_expression,
+                "paused": r.paused, "created_at": r.created_at,
+                "total_jobs": int(counts.get(r.id, 0)),
+                "last_deferred_at": deferred_at, "deferred_missing": missing,
+            })
         jobs = [{
             "schedule_id": str(r.schedule_id), "status": r.status,
             "created_at": r.created_at, "started_at": r.started_at,
@@ -200,7 +256,8 @@ def main() -> None:
     for f in rep["findings"]:
         print(f"FINDING {f['kind']} {f['schedule']}: {f['detail']}")
     n_paused = sum(1 for r in rep["schedules"] if r["status"] == "paused")
-    print(f"OK {len(scheds)} schedules ({n_paused} paused), "
+    n_deferred = sum(1 for r in rep["schedules"] if r["status"] == "deferred")
+    print(f"OK {len(scheds)} schedules ({n_paused} paused, {n_deferred} deferred), "
           f"{len(rep['findings'])} finding(s)")
 
 

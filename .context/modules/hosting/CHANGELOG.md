@@ -215,6 +215,14 @@ schedule rows; `resolve_session_timeout` in `runner/main.py` reads it.
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — D1: the four swing supervise/trade rows declare `TRADIER_SANDBOX_TOKEN` (D-P1-7)
+
+**Agent task**: Observability Phase 1 re-cut plan D1 (`scripts/seed-schedules.sh` slice).
+**Files changed**: `scripts/seed-schedules.sh` — `atlas-swing-supervise-{edt,est}` and `atlas-swing-trade-{edt,est}` payload is now exactly `'{"project_slug":"atlas","env_required":["TRADIER_SANDBOX_TOKEN"]}'`; `atlas-swing-research` / `atlas-swing-evaluate` and the value rows are untouched; a comment block records why (declared on the row, not in the atlas manifest — atlas patches are never INV-4 server patches). `tests/test_scripts_syntax.py::test_seed_schedules_swing_rows_carry_env_required` pins the four literals and that nothing else carries a key.
+**Why**: the scheduler's D1 pre-check unions `job_payload.env_required` with the manifest's; this is what makes the swing rows defer (one DM, no session) instead of running four Tradier sessions a day against a missing sandbox token.
+**Side effects**: takes effect on prod only after `bash scripts/seed-schedules.sh` (the ON CONFLICT clause updates `job_payload` for declared payloads). Until the owner provisions the token in `~/Documents/repos/atlas/.env`, the four rows defer at every slot.
+**Gotchas discovered**: none.
+
 ## 2026-08-18 — healthcheck-all cadence-slip false positive (baseball-bingo, 84th recurrence)
 
 **Files changed**: `docs/TROUBLESHOOTING.md` (recurrence note appended).

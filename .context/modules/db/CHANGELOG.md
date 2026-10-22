@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — D1: per-schedule audit streams + the `schedule:gap_notified:` key
+
+**Agent task**: Observability Phase 1 re-cut plan D1.
+**Files changed**: `src/audit_log.py` — `SCHEDULES_SUBDIR`, `schedule_log_path(schedule_id)`, `append_schedule_event(schedule_id, kind, **fields)`, `read_schedule_events(schedule_id, limit=None)`: streams live at `volumes/audit_log/schedules/<schedule_id>.jsonl` (a SUBDIRECTORY — `runner/audit_index.rebuild_index` globs the top level as job logs; `tests/test_provisioning_gap.py::test_deferred_stream_is_not_indexed_as_a_job`); the record key is `schedule_id`, not `job_id`; docstring gains the `schedule_deferred` kind. `src/db.py` — `KEY_SCHEDULE_GAP_NOTIFIED_PREFIX = "schedule:gap_notified:"` (+ `<slug>:<YYYY-MM-DD>`) and `TTL_SCHEDULE_GAP_NOTIFIED = 129600`. `.context/modules/db/CONTEXT.md` — audit-log section lists the kind and the stream location.
+**Why**: a deferral creates no Job, so it has no job log to land in; the schedule-scoped stream is the record `schedule-monitor.sh` (A7) counts and `schedule_adherence` / `/status` read.
+**Side effects**: a new directory under `volumes/audit_log/` on the first deferral; no schema change (C14 — existing kinds untouched).
+**Gotchas discovered**: none.
+
 ## 2026-10-21 — B4 (docs only): `jobs.cli_version` is the lane's CLI, `executor_started.cli_version` the Codex audit field
 
 **Agent task**: Observability Phase 1 re-cut plan B4 Docs-2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).

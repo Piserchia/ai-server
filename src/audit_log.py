@@ -41,6 +41,12 @@ Kinds used (keep this list honest — update when adding new kinds):
 - notice_sent:      {"kind", "ts", "job_id", "notice_id", "external_ref"}  # the row was delivered (external_ref = Telegram message_id) — by the bot listener, `drain`, or a direct `python -m src.notify send` (A4)
 - notice_failed:    {"kind", "ts", "job_id", "notice_id", "error"}  # the row reached its terminal `failed` (MAX_ATTEMPTS, or a direct send that failed); error is token-free (TelegramSendError) and ≤ 200 chars (A4)
 
+Schedule streams (D1, 2026-10-21) live in a SUBDIRECTORY,
+`volumes/audit_log/schedules/<schedule_id>.jsonl`, written by
+`append_schedule_event` — the top-level glob of `runner/audit_index.rebuild_index`
+would otherwise index every stream as a job. The key is "schedule_id", not "job_id".
+- schedule_deferred: {"kind", "ts", "schedule_id", "schedule", "reason": "provisioning_gap", "missing", "project", "env_file"}  # the scheduler's provisioning pre-check skipped a due row (no Job, clock advanced) because the project's canonical .env lacks `missing` (names only, never values); written on EVERY deferral, the DM once per project per UTC day (src/runner/main.py); counted out-of-band by scripts/schedule-monitor.sh and read by schedule_adherence (`deferred`, never DARK) and the bot's /status
+
 Also writes a human-readable `<job_id>.summary.md` at job completion (written by the runner,
 not here — it's the last turn the assistant produces).
 """
@@ -90,6 +96,44 @@ def read(job_id: uuid.UUID | str, limit: int | None = None) -> list[dict]:
     if limit is not None:
         return entries[-limit:]
     return entries
+
+
+# ── Schedule streams (D1) ───────────────────────────────────────────────────
+
+SCHEDULES_SUBDIR = "schedules"
+
+
+def schedule_log_path(schedule_id: uuid.UUID | str) -> Path:
+    """`volumes/audit_log/schedules/<schedule_id>.jsonl` — a subdirectory on
+    purpose: `audit_index.rebuild_index` globs the top level as job logs."""
+    d = settings.audit_log_dir / SCHEDULES_SUBDIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{schedule_id}.jsonl"
+
+
+def append_schedule_event(schedule_id: uuid.UUID | str, kind: str, **fields: Any) -> None:
+    """Append one event to a schedule's stream. Synchronous, like `append`."""
+    entry = {"ts": _now_iso(), "schedule_id": str(schedule_id), "kind": kind, **fields}
+    with schedule_log_path(schedule_id).open("a") as f:
+        f.write(json.dumps(entry, default=str) + "\n")
+
+
+def read_schedule_events(schedule_id: uuid.UUID | str, limit: int | None = None) -> list[dict]:
+    """Events of a schedule's stream, oldest first. [] when there is none."""
+    path = settings.audit_log_dir / SCHEDULES_SUBDIR / f"{schedule_id}.jsonl"
+    if not path.exists():
+        return []
+    entries: list[dict] = []
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return entries[-limit:] if limit is not None else entries
 
 
 def summary_path(job_id: uuid.UUID | str) -> Path:

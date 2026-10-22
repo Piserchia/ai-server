@@ -41,16 +41,19 @@ from src.config import settings
 from src.db import (
     CHANNEL_JOB_CANCEL,
     KEY_RUNNER_HEARTBEAT,
+    KEY_SCHEDULE_GAP_NOTIFIED_PREFIX,
     QUEUE_JOBS,
     TTL_RUNNER_HEARTBEAT,
+    TTL_SCHEDULE_GAP_NOTIFIED,
     async_session,
     redis,
     session_scope,
 )
 from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
-from src.notify.outbox import build_job_notice, build_task_notice, enqueue_notice
+from src.notify.outbox import build_job_notice, build_ops_notice, build_task_notice, enqueue_notice
 from src.registry import models as models_registry
+from src.registry.manifest import Manifest, coerce_env_names
 from src.registry.skills import load as load_skill
 from src.runner import router
 from src.runner.events import event_loop
@@ -1816,8 +1819,145 @@ async def _scheduler_loop() -> None:
             continue
 
 
+# ── Provisioning pre-check (D1, 2026-10-21; spec §8.3) ──────────────────────
+#
+# A due row whose project .env lacks a key the manifest (or the row's own
+# job_payload.env_required, D-P1-7) declares cannot succeed: before D1 it ran
+# a full session and reported "completed" having produced nothing (spec §8.2:
+# 37/37 provisioning_gap runs "successful"). Defer it instead — no Job, the
+# clock still advances — write schedule_deferred to the schedule's stream on
+# every deferral, and DM once per project per UTC day. FAIL-OPEN on every
+# unknown: a pre-check that can silence 41 schedules on a file-read error is
+# worse than the waste it prevents. The ONLY thing that defers a row is a
+# positively declared name that the canonical .env positively lacks.
+
+# Names a project may never be required to carry in its own .env, because
+# this server refuses them everywhere (INV-3 / subscription auth). Verified
+# on prod: projects/atlas/manifest.yml declares env_required: [DATABASE_URL,
+# ANTHROPIC_API_KEY] and the second is absent from the atlas .env BY DESIGN —
+# without this exemption every atlas row would defer on its first tick. A
+# LOCAL set on purpose: codex_cli.DENIED_ENV_* denies exactly the broker /
+# vendor keys this check must be able to look for.
+PROVISIONING_EXEMPT: frozenset[str] = frozenset({
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+})
+PROVISIONING_EXEMPT_PREFIXES: tuple[str, ...] = ("ANTHROPIC_",)
+
+
+def env_keys_present(env_path: Path) -> set[str]:
+    """Pure-ish (one file read). The NAME= keys declared in a .env — blanks,
+    `#` comments and `export ` prefixes handled. Values are never read into
+    anything, never logged."""
+    try:
+        text = Path(env_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+    out: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name = line.split("=", 1)[0].strip()
+        if name.startswith("export "):
+            name = name[len("export "):].strip()
+        if name:
+            out.add(name)
+    return out
+
+
+def provisioning_gap(env_required: list[str] | None, present: set[str], *,
+                     exempt: frozenset[str] = PROVISIONING_EXEMPT) -> list[str]:
+    """Pure. Sorted required names the .env does not declare, minus the
+    exempt set and the ANTHROPIC_ prefix. Empty ⇒ run the row."""
+    return sorted({
+        name for name in (env_required or [])
+        if name and name not in present and name not in exempt
+        and not name.startswith(PROVISIONING_EXEMPT_PREFIXES)
+    })
+
+
+def schedule_env_required(sched: Any, manifest: Manifest | None) -> list[str]:
+    """Pure. The manifest's `env_required` ∪ the row's
+    `job_payload.env_required` (D-P1-7), deduplicated and sorted."""
+    names = set(manifest.env_required) if manifest is not None else set()
+    payload = getattr(sched, "job_payload", None) or {}
+    if isinstance(payload, dict):
+        names.update(coerce_env_names(payload.get("env_required")))
+    return sorted(n for n in names if n)
+
+
+async def _resolve_schedule_slug(sched: Any, s: Any) -> str | None:
+    """payload.project_slug first, then project_id → Project.slug in the
+    open session. None when the row has no project at all."""
+    payload = sched.job_payload if isinstance(sched.job_payload, dict) else {}
+    slug = payload.get("project_slug")
+    if slug:
+        return str(slug)
+    if sched.project_id is None:
+        return None
+    project = await s.get(Project, sched.project_id)
+    return project.slug if project is not None and project.slug else None
+
+
+def _project_env_files(slug: str, manifest: Manifest | None) -> list[Path]:
+    """The .env file(s) `provision_env_files` copies from — the SAME
+    canonical `resolve_delivery_cwd` picks for a non-deploy job (for atlas:
+    the dev clone, not the runtime clone)."""
+    cwd, _ = delivery.resolve_delivery_cwd(
+        settings.projects_dir / slug, manifest.delivery if manifest else None, is_deploy=False,
+    )
+    files = (manifest.delivery.env_files if manifest else None) or [".env"]
+    return [cwd / f for f in files]
+
+
+async def _schedule_provisioning_gap(
+    sched: Any, s: Any, cache: dict[str, tuple[Manifest | None, list[Path], set[str]]],
+) -> tuple[list[str], str | None, str]:
+    """(missing, slug, env_file label) for a due row. Manifest/.env reads
+    are cached per slug within one tick. Any exception → ([], …): the row
+    runs."""
+    slug: str | None = None
+    try:
+        slug = await _resolve_schedule_slug(sched, s)
+        if not slug:
+            return [], None, ""
+        if slug not in cache:
+            manifest = delivery.load_project_manifest(slug)
+            paths = _project_env_files(slug, manifest)
+            present: set[str] = set()
+            for path in paths:
+                present |= env_keys_present(path)
+            cache[slug] = (manifest, paths, present)
+        manifest, paths, present = cache[slug]
+        missing = provisioning_gap(schedule_env_required(sched, manifest), present)
+        return missing, slug, ", ".join(str(p) for p in paths)
+    except Exception:  # noqa: BLE001 — never let the pre-check stop a schedule
+        logger.debug("provisioning pre-check skipped — row runs",
+                     schedule=getattr(sched, "name", "?"), exc_info=True)
+        return [], slug, ""
+
+
+async def _notify_schedule_deferral(sched: Any, slug: str, env_file: str,
+                                    missing: list[str], now: datetime) -> None:
+    """One ops DM per PROJECT per UTC day. The day claim is SET NX only after
+    `enqueue_notice` returned an id, so a dropped insert does not burn the
+    day. Ops kind → delivered with the outbox switch on or off (D-P1-10)."""
+    key = f"{KEY_SCHEDULE_GAP_NOTIFIED_PREFIX}{slug}:{now:%Y-%m-%d}"
+    if await redis.exists(key):
+        return
+    nid = await enqueue_notice(build_ops_notice(
+        kind="schedule_deferred", severity="warn",
+        text=(f"⏸ {sched.name} deferred — {env_file} lacks {', '.join(missing)}; "
+              f"defers until provisioned"),
+        subject=f"schedule:{sched.id}",
+    ))
+    if nid is not None:
+        await redis.set(key, "1", nx=True, ex=TTL_SCHEDULE_GAP_NOTIFIED)
+
+
 async def _tick_schedules() -> None:
     now = datetime.now(timezone.utc)
+    gap_cache: dict[str, tuple[Manifest | None, list[Path], set[str]]] = {}
     async with session_scope() as s:
         result = await s.execute(
             select(Schedule).where(
@@ -1828,6 +1968,33 @@ async def _tick_schedules() -> None:
         due = list(result.scalars())
 
         for sched in due:
+            missing, slug, env_file = await _schedule_provisioning_gap(sched, s, gap_cache)
+            if missing:
+                # Unconditional once missing is non-empty: advance the clock,
+                # build no Job; the record and the DM are each best-effort.
+                sched.last_run_at = now
+                sched.next_run_at = croniter(sched.cron_expression, now).get_next(
+                    datetime
+                ).replace(tzinfo=timezone.utc)
+                try:
+                    audit_log.append_schedule_event(
+                        sched.id, "schedule_deferred", schedule=sched.name,
+                        reason="provisioning_gap", missing=missing, project=slug,
+                        env_file=env_file,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("schedule_deferred audit append failed", schedule=sched.name)
+                try:
+                    await _notify_schedule_deferral(sched, slug or "", env_file, missing, now)
+                except Exception:  # noqa: BLE001
+                    logger.warning("schedule_deferred notice failed", schedule=sched.name)
+                logger.warning(
+                    "schedule deferred: provisioning gap",
+                    schedule=sched.name, project=slug, missing=missing,
+                    next_run=sched.next_run_at.isoformat(),
+                )
+                continue
+
             job = Job(
                 kind=sched.job_kind,
                 description=sched.job_description,

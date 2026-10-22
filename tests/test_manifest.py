@@ -46,8 +46,10 @@ description: A demo.
 
 class TestLoaderTolerance:
     def test_unknown_top_level_keys_ignored(self, tmp_path):
-        # mission/platforms/web_strategy/env_required/services are read by the
-        # yq shell tooling, not the Python model — must not be fatal.
+        # mission/platforms/web_strategy/services are read by the yq shell
+        # tooling, not the Python model — must not be fatal. env_required IS
+        # read since D1 (2026-10-21; test_env_required_is_read below) but
+        # stays fail-open: never validated, never fatal.
         p = _write(tmp_path, BASE + textwrap.dedent("""\
             mission: "big things"
             web_strategy: native-web
@@ -244,3 +246,16 @@ class TestEnvFiles:
     def test_whitespace_rejected(self):
         with pytest.raises(ManifestError, match="non-empty"):
             self._delivery([" .env"]).validate("atlas")
+
+
+# ── env_required is READ since D1 (2026-10-21) ──────────────────────────────
+
+
+def test_env_required_is_read(tmp_path):
+    # The scheduler's provisioning_gap pre-check consumes it (D1); the loader
+    # stays fail-open: entries are str-coerced, never validated.
+    m = load(_write(tmp_path, BASE + "env_required: [DATABASE_URL, 123]\n"))
+    assert m.env_required == ["DATABASE_URL", "123"]
+    assert load(_write(tmp_path, BASE)).env_required == []
+    assert load(_write(tmp_path, BASE + "env_required:\n")).env_required == []
+    assert load(_write(tmp_path, BASE + "env_required: ONLY_ONE\n")).env_required == ["ONLY_ONE"]

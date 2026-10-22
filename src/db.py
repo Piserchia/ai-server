@@ -70,6 +70,12 @@ KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"     # per-provider lane pause (T6,
                                                   # A job on a paused lane is held: NOT run, RPUSHed to
                                                   # the TAIL after a bounded delay (plan §4g), while the
                                                   # loop keeps draining every other lane.
+KEY_SCHEDULE_GAP_NOTIFIED_PREFIX = "schedule:gap_notified:"  # D1 (2026-10-21): + "<slug>:<YYYY-MM-DD>".
+                                                  # SET NX by the scheduler AFTER the schedule_deferred
+                                                  # ops notice was inserted (a dropped insert does not
+                                                  # burn the day) → one provisioning_gap DM per project
+                                                  # per UTC day; the audit record is written every time.
+TTL_SCHEDULE_GAP_NOTIFIED = 129600                # 36 h: outlives the UTC day it names, then expires.
 
 
 @asynccontextmanager

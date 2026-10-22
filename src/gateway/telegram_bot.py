@@ -27,6 +27,7 @@ from sqlalchemy import select, update as sql_update
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
+from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_DONE, CHANNEL_NOTIFY_OUTBOX, async_session, redis
 from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
@@ -45,7 +46,7 @@ from src.notify.outbox import (
 )
 from src.notify.telegram import TelegramSendError, render_telegram, send_via_bot
 from src.registry import models as models_registry
-from src.runner import quota
+from src.runner import quota, schedule_adherence
 
 logger = structlog.get_logger()
 
@@ -537,7 +538,9 @@ async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     # One line per paused provider LANE (T6, 2026-10-21): a held lane is
     # otherwise invisible - its jobs cycle to the queue tail silently.
     # The global (Anthropic) pause has its own notifier; it is not repeated here.
-    lane_lines = await _paused_lane_lines()
+    # Plus one line per schedule row the provisioning pre-check deferred at
+    # its latest slot (D1): the row ran no session and is not dark.
+    lane_lines = await _paused_lane_lines() + await _deferred_schedule_lines()
 
     if not tasks:
         await update.message.reply_text(
@@ -593,6 +596,28 @@ async def _paused_lane_lines() -> list[str]:
         f"`/resume {_esc_md(name)}` to lift."
         for name, (reset_at, reason) in paused.items()
     ]
+
+
+async def _deferred_schedule_lines() -> list[str]:
+    """Markdown lines, one per unpaused schedule whose newest
+    `schedule_deferred` record (volumes/audit_log/schedules/<id>.jsonl)
+    covers its latest cron slot (D1). Best-effort: never breaks /status."""
+    try:
+        now = datetime.now(timezone.utc)
+        async with async_session() as s:
+            rows = list((await s.execute(
+                select(Schedule).where(Schedule.paused.is_(False)).order_by(Schedule.name)
+            )).scalars().all())
+        lines: list[str] = []
+        for r in rows:
+            at, missing = schedule_adherence.latest_deferral(audit_log.read_schedule_events(r.id))
+            if schedule_adherence.is_deferred(r.cron_expression, at, now):
+                keys = ", ".join(f"`{m}`" for m in missing) or "?"
+                lines.append(f"⏸ deferred: {_esc_md(r.name)} (provisioning_gap: {keys})")
+        return lines
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("deferred-schedule lines skipped", error=str(exc)[:120])
+        return []
 
 
 @_error_safe
