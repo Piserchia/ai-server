@@ -11,6 +11,28 @@
 > This file is seeded empty. Claude sessions working in this module should
 > append here when they learn something reusable (see `.context/PROTOCOL.md`).
 
+## 2026-10-21 — Outbox cards for child jobs: inherit the parent's ref and thread, not just its channel (A5)
+
+**Symptom.** Spec §4.2 says a dispatch-MCP / escalation / evaluator child
+"inherits the parent's eligibility", and the P0 design expresses that as
+`effective_origin_channel(own, parent)` on the CHANNEL alone. But
+`build_job_notice` turns a `telegram` channel into `target=origin_ref`
+(the chat id), and a child's own `origin_ref` is its `created_by`
+(`dispatch-mcp`, `escalation:<job8>`) — so a child of a Telegram launch
+would have been addressed to chat `dispatch-mcp` and failed every send.
+
+**Fix.** `main._enqueue_job_notice` copies the parent's
+`origin_ref`/`origin_thread` whenever the channel it passes is not the
+child's own. Pinned by
+`tests/test_notify_runner_hooks.py::TestEnqueueJobNotice::test_child_inherits_parent_channel_and_target`
+(`target == "123"`, `thread == "777"`). When you add another inherited
+field, carry the addressing columns with it.
+
+**Second trap, same task.** `test_switch_is_not_read_by_the_runner` is a
+plain token scan over `src/runner/**/*.py` for the setting's name — a
+docstring that merely names the kill switch fails it. Say "the kill switch"
+under `src/runner/`.
+
 ## 2026-10-21 — Per-provider lane holds: what holds a job and what does not (T6)
 
 **Pattern.** A paused NON-Anthropic lane does not stop the job loop (only

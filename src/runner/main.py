@@ -29,6 +29,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import structlog
 from croniter import croniter
@@ -47,6 +48,7 @@ from src.db import (
 )
 from src.gateway.jobs import enqueue_job
 from src.models import Job, JobStatus, Project, Schedule
+from src.notify.outbox import build_job_notice, build_task_notice, enqueue_notice
 from src.registry import models as models_registry
 from src.registry.skills import load as load_skill
 from src.runner import router
@@ -1065,14 +1067,12 @@ async def _maybe_escalate(job: Job) -> None:
             # Routed through _set_task_status (updated_at + awaiting_since
             # cleared) so the runner keeps one writer of tasks.status (A2).
             await _set_task_status(job.task_id, TaskStatus.failed.value)
-            from src.db import redis as _redis
-            await _redis.publish("tasks:notify", json.dumps({
-                "task_id": str(job.task_id),
-                "type": "failed",
-                "text": f"Task failed after 3 escalation attempts. "
-                        f"Last error: {(job.error_message or 'unknown')[:300]}. "
-                        f"Reply to retry or /clear to abandon.",
-            }))
+            await _notify_task(
+                job.task_id, "failed",
+                text=(f"Task failed after 3 escalation attempts. "
+                      f"Last error: {(job.error_message or 'unknown')[:300]}. "
+                      f"Reply to retry or /clear to abandon."),
+            )
         return
 
     if current_level == 0:
@@ -1232,10 +1232,99 @@ async def _set_task_status(task_id, status: str) -> None:
         )
 
 
+def effective_origin_channel(own: str | None, parent: str | None) -> str | None:
+    """Pure. Spec §4.2: dispatch-MCP / escalation / self-diagnose / evaluator /
+    writeback children INHERIT the parent's eligibility. A child's own
+    `created_by` (`dispatch-mcp`, `event-trigger*`, `escalation:<job8>`)
+    derives `origin_channel="system"`, which would silence the completion DM
+    of a child the owner launched from Telegram and DM the owner for a child
+    of a schedule row — wrong in both directions. An own human channel
+    always wins; no parent → unchanged."""
+    return parent if (own in (None, "system")) and parent else own
+
+
+def job_notice_kwargs(job: Any) -> dict[str, Any]:
+    """Pure. `build_job_notice(**kwargs)` from a Job row (or any object with
+    the same attributes). `status` is left None for the caller; the lane
+    label reads the 007 columns (`resolved_provider`/`resolved_model`/
+    `model_served`) and `num_turns` (008 — NULL until B3) straight off the
+    row."""
+    result = job.result if isinstance(job.result, dict) else None
+    duration = None
+    if job.started_at and job.completed_at:
+        duration = max(0.0, (job.completed_at - job.started_at).total_seconds())
+    return dict(
+        job_id=str(job.id), status=None, kind=job.kind, resolved_skill=job.resolved_skill,
+        summary=result.get("summary") if result else None,
+        error_message=job.error_message, terminal_reason=job.terminal_reason,
+        origin_channel=job.origin_channel, origin_ref=job.origin_ref,
+        origin_thread=job.origin_thread, created_by=job.created_by, task_id=job.task_id,
+        model_served=job.model_served, resolved_provider=job.resolved_provider,
+        resolved_model=job.resolved_model, num_turns=job.num_turns,
+        duration_seconds=duration,
+    )
+
+
+async def _enqueue_job_notice(job_id: uuid.UUID, status: str) -> None:
+    """Outbox row for a job terminal (DoneCard / FailedCard, spec §4.2). Built
+    from the ROW (`error_message`, `terminal_reason`, …), never from the
+    `jobs:done` payload. A child (`parent_job_id` set) inherits the parent's
+    channel — and with it the parent's `origin_ref`/`origin_thread`, so the
+    card lands in the chat that launched the parent (one extra indexed read,
+    children only)."""
+    async with async_session() as s:
+        job = await s.get(Job, job_id)
+        if job is None:
+            return
+        parent = await s.get(Job, job.parent_job_id) if job.parent_job_id else None
+    kwargs = job_notice_kwargs(job)
+    kwargs["status"] = status
+    if parent is not None:
+        channel = effective_origin_channel(job.origin_channel, parent.origin_channel)
+        if channel != job.origin_channel:
+            kwargs.update(origin_channel=channel, origin_ref=parent.origin_ref,
+                          origin_thread=parent.origin_thread)
+    notice = build_job_notice(**kwargs)
+    if notice is not None:
+        await enqueue_notice(notice)
+
+
+async def _task_target(task_id) -> tuple[str | None, str | None]:
+    """(chat, thread) for a task card: `origin_ref`/`origin_thread` (008)
+    first, the legacy `chat_id`/`thread_message_id` second; (None, None) →
+    the owner chat."""
+    from src.models import Task
+    async with async_session() as s:
+        task = await s.get(Task, task_id)
+    if task is None:
+        return None, None
+    target = task.origin_ref or (str(task.chat_id) if task.chat_id else None)
+    thread = task.origin_thread or (str(task.thread_message_id) if task.thread_message_id else None)
+    return target, thread
+
+
 async def _notify_task(task_id, notify_type: str, **fields) -> None:
+    """The single chokepoint for task lifecycle cards. DUAL-WRITE (D-P1-10):
+    the legacy `tasks:notify` publish is unconditional and byte-identical to
+    before A5, then a durable outbox row + nudge is written UNCONDITIONALLY
+    (the DB read and insert are non-fatal). Which renderer sends is the bot's
+    decision (`telegram_bot._task_notifier` vs the outbox listener, A6) —
+    nothing under src/runner/ reads the kill switch."""
     await redis.publish("tasks:notify", json.dumps({
         "task_id": str(task_id), "type": notify_type, **fields,
     }))
+    try:
+        target, thread = await _task_target(task_id)
+        notice = build_task_notice(
+            task_id=str(task_id), notify_type=notify_type,
+            text=str(fields.get("text", "") or ""),
+            question=fields.get("question"), choices=fields.get("choices"),
+            target=target, thread=thread,
+        )
+        await enqueue_notice(notice)
+    except Exception:  # noqa: BLE001 — the legacy card already went out
+        logger.exception("task notice enqueue failed (non-fatal)",
+                         task_id=str(task_id)[:8], notify_type=notify_type)
 
 
 async def _handle_plan_event(job: Job, plan: dict) -> None:
@@ -1453,26 +1542,13 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
     # Update task status
     if choices_event:
         await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
-        await redis.publish(
-            "tasks:notify",
-            json.dumps({
-                "task_id": str(job.task_id),
-                "type": "choices",
-                "question": choices_event.get("question", "Pick one:"),
-                "choices": choices_event.get("options", []),
-            }),
-        )
+        await _notify_task(job.task_id, "choices",
+                           question=choices_event.get("question", "Pick one:"),
+                           choices=choices_event.get("options", []))
     elif question:
         await _set_task_status(job.task_id, TaskStatus.awaiting_user.value)
-        # Notify user via Redis (Telegram bot listens)
-        await redis.publish(
-            "tasks:notify",
-            json.dumps({
-                "task_id": str(job.task_id),
-                "type": "question",
-                "text": question,
-            }),
-        )
+        # Notify user via Redis (Telegram bot listens) + the outbox row
+        await _notify_task(job.task_id, "question", text=question)
     elif is_complete:
         # task_complete = this job's work is done.
         from src.runner import plans as plans_mod
@@ -1556,14 +1632,7 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                     ),
                 ))
                 await s.commit()
-            await redis.publish(
-                "tasks:notify",
-                json.dumps({
-                    "task_id": str(job.task_id),
-                    "type": "approval_request",
-                    "text": summary,
-                }),
-            )
+            await _notify_task(job.task_id, "approval_request", text=summary)
         else:
             # Genuine multi-phase task: phase complete, auto-continue to next phase.
             logger.info("auto-continuing task to next phase",
@@ -1600,14 +1669,8 @@ async def _update_task_after_job(job: Job, result: dict | None) -> None:
                 await s.commit()
 
             # Notify user that it's continuing (informational, not blocking)
-            await redis.publish(
-                "tasks:notify",
-                json.dumps({
-                    "task_id": str(job.task_id),
-                    "type": "progress",
-                    "text": f"Phase complete. Auto-continuing... (job {str(child.id)[:8]})",
-                }),
-            )
+            await _notify_task(job.task_id, "progress",
+                               text=f"Phase complete. Auto-continuing... (job {str(child.id)[:8]})")
 
 
 def _terminal_values(
@@ -1687,6 +1750,17 @@ async def _finish_job(
     else:
         payload = {"summary": (result or {}).get("summary", "")} if result else {}
     await session_mod.publish_done(str(job_id), status.value, payload=payload)
+
+    # Outbox (A5): DoneCard / FailedCard for every eligible terminal —
+    # task-less completions, every non-internal failure, scheduled ones
+    # included. After publish_done so an INV-9-suppressed finish (returned
+    # above) writes no row; built from the ROW, never from done_payload.
+    # Unconditional: the kill switch is the bot's (D-P1-10).
+    if status in (JobStatus.completed, JobStatus.failed):
+        try:
+            await _enqueue_job_notice(job_id, status.value)
+        except Exception:  # noqa: BLE001 — the legacy publish already went out
+            logger.exception("job notice enqueue failed (non-fatal)", job_id=str(job_id)[:8])
 
     # Incremental audit index update (B2)
     try:
