@@ -9,405 +9,6 @@ failures in the wild — it's a living document.
 
 ---
 
-## Symptom: job fails almost immediately with `Control request timeout: initialize` (error_category=timeout)
-
-### Occurrences
-
-| Date (UTC)        | Job        | Skill              | Notes |
-|-------------------|------------|--------------------|-------|
-| 2026-10-17 01:42  | `2b9e6573` | atlas-swing-trade  | First observed. Daily cron recovered on next run. |
-| 2026-10-17 04:49  | `182052e2` | alpha-research     | Dispatched by alpha-scout (`5807726b`); parent completed clean. Prior 7 alpha-research runs green. |
-| 2026-10-19 09:40  | `eef498bf` | alpha-research     | Dispatched by alpha-governor (`abe9083d`). Same signature: `job_started` 09:41:06 → `job_failed` 09:43:14 (128s), zero tool events in between. Immediately prior alpha-research runs (`80625646` 04:13, `efd66924` 10-18 05:36) completed clean. Runner healthy (PID 81640, status 0). Payload was large (~15 KB idea-text) but the earlier `80625646` same-day run with similar payload size succeeded, so size isn't the discriminator. |
-
-Three occurrences in three days; all three are atlas-ecosystem skills.
-`alpha-research` now has 2 of 3 (2026-10-17 and 2026-10-19), still under
-the "3+/week/same-skill" hard escalation threshold but one hit away. If a
-third `alpha-research` instance lands within 7 days of 2026-10-17, treat as
-a building pattern — escalate per the Fix section below and open a
-server-patch to wrap the SDK session construction in a one-shot
-retry-on-init-timeout.
-
-### Root cause (diagnosed 2026-10-17, job `2b9e6573` atlas-swing-trade, self-diagnose child `470c03d6`)
-
-Transient failure in the Claude Agent SDK's startup handshake. The SDK
-(`claude_agent_sdk/_internal/query.py:546`) sends an `initialize` control
-request to the bundled Claude Code CLI subprocess over its stdin/stdout
-transport and awaits a response within an anyio `fail_after` window. If the
-subprocess doesn't reply in time (default ~60s), the SDK raises
-`Exception("Control request timeout: initialize")` and the runner records
-`error_category=timeout`.
-
-Observed signature for the 2b9e6573 instance:
-- `job_started` 01:41:31 UTC → `job_failed` 01:42:42 UTC (71s elapsed).
-- No tool-use / thinking / text events between them — the session never
-  completed init, so there is nothing to inspect in the audit log besides
-  the failure line.
-- Zero prior occurrences in the audit index (first ever).
-- The daily cron for `atlas-swing-trade` recovered on its own: the previous
-  3 scheduled runs and the next day's run (`92833b19`) all completed clean.
-
-Likely proximate causes (not deterministically distinguishable from the
-failure line alone):
-- Concurrent CLI subprocess startup contention — `alpha-scout` (`9826fea5`)
-  and another atlas session were spinning up / running in the same window.
-- Transient Anthropic API latency during the CLI's own auth/handshake
-  (subscription-auth login flow runs inside the subprocess before it
-  responds to the SDK's init).
-- macOS fork/exec slowness under memory pressure.
-
-### Diagnostics (when it recurs)
-
-```bash
-# 1. Confirm this is the same failure signature (not a different timeout)
-grep -A1 '"job_failed"' volumes/audit_log/<job>.jsonl
-#   → "error": "Control request timeout: initialize", "error_category": "timeout"
-
-# 2. Count historical frequency — if this is still rare, it's transient
-python3 -c "from src.runner.audit_index import search_index; from pathlib import Path; \
-  es = search_index(Path('volumes/audit_log/INDEX.jsonl'), status='failed'); \
-  m = [e for e in es if 'Control request timeout' in (e.get('error_first_line','') or '')]; \
-  print(len(m), 'total'); [print(e['job_id'][:8], e['skill']) for e in m[-10:]]"
-
-# 3. Check runner health — the control-request plumbing lives in the SDK
-#    the runner hosts, so a runner wedge would surface here too
-launchctl list | grep com.assistant.runner   # should show a PID, status 0
-
-# 4. Check if the next scheduled run of the same skill succeeded (daily crons)
-psql assistant -c "SELECT id, status, created_at FROM jobs \
-  WHERE kind='<skill_name>' ORDER BY created_at DESC LIMIT 5;"
-```
-
-### Fix
-
-**None required if it's a one-off**. The daily cron naturally retries at the
-next scheduled slot; this is self-healing. Treat a single instance per
-skill-per-week as noise.
-
-**If it recurs 3+ times in a week for the same skill**, escalate to a server
-patch to bump the SDK's init timeout or add retry-on-init-timeout wrapper
-around the SDK session construction. The timeout isn't configurable from the
-runner today — it would require patching the SDK call site in
-`src/runner/session.py` to catch this specific exception and retry once
-before letting it propagate to `job_failed`.
-
-### Recovery (this diagnosis)
-
-No action taken — single-instance transient, next day's run succeeded, no
-delegation needed. Recorded here so the next operator sees it and can tell
-"one-off noise" from "building pattern" without re-doing the analysis.
-
----
-
-## Symptom: `review-and-improve` fails with `error_max_turns (30)` after finishing data-gathering
-
-### Root cause (diagnosed 2026-09-14, job `a1292d78`, self-diagnose child `f9a74701`)
-
-The skill's Procedure gathered all 6 SQL snapshots in ~20 turns, identified a real
-defect (server_deploy sleep-20 too short → 17.9% SIGTERM failures), then died
-trying to record the finding. Two orthogonal defects collide:
-
-1. **Design conflict**: Rec 10 "Proposal tracking" tells the agent to call
-   `src.runner.proposals.insert_proposal(...)` for dedup — a database write.
-   But the skill's frontmatter is `privilege_class: read-only`, whose profile
-   correctly blocks `psql INSERT` and `pipenv run python3` calls that mutate
-   state. The skill's own Gotchas even say "Read-only, hook-enforced: you
-   cannot and should not modify files. Your output is analysis and a dispatch."
-   Yet Rec 10 requires a mutating call. There is no path through that succeeds
-   from a read-only session.
-2. **Guard false-positive amplifier**: the first `pipenv run python3` attempt
-   embedded the string `'nohup sleep 20 && launchctl kickstart -k … runner'`
-   in the *rationale* passed to `insert_proposal`. The `launchctl` mutation
-   guard regex (`\blaunchctl\b[^\n;|&]*\b(?:kickstart|kill|…)`) matches on
-   the raw command string with no awareness of heredoc quoting, so it fired
-   on the description of the bug rather than a real command. The agent then
-   retried with direct `psql INSERT` → correctly blocked by the write-verb
-   guard → out of turns.
-
-### Recovery (this run — nothing user-facing broke)
-
-- The interesting finding (`server_deploy` step-4 `sleep 20` vs. post-nohup
-  writes) is preserved here so it isn't lost when the audit log ages out.
-- The event-triggered self-diagnose burned no additional resources fixing;
-  see risk classification below.
-
-### Fix (owner approval required — both files are protected paths)
-
-- **Preferred (skill fix, `skills/review-and-improve/SKILL.md`)**: drop the
-  in-session `insert_proposal` call entirely. Move the proposals-table
-  insert into the dispatched `server-patch` job's payload/handler — that
-  job already has write privileges and is the natural place to record a
-  proposal it's about to implement. Keep `find_recent_duplicate` (SELECT-only)
-  in the read-only session for dedup. This resolves defect #1 permanently.
-- **Alternative (guard whitelist)**: add a narrow write allowance for
-  `INSERT INTO proposals` in `src/runner/guards.py`'s read-only profile. Less
-  clean — proposals is metadata, but every widening of a read-only profile
-  weakens the "no state change" contract; prefer the skill fix.
-- **Independent (guard robustness)**: consider making the `launchctl`
-  mutation regex ignore matches inside `<<'HEREDOC'`-bounded ranges. Low
-  priority; workaround = don't embed shell mutation keywords in text
-  payloads. Both files (`SKILL.md`, `guards.py`) are protected paths, so
-  this needs a human-approved `server-patch` — no autonomous merge.
-
-### Companion finding to preserve
-
-Before dying, the session diagnosed `server_deploy`'s 5/28 (17.9%) failures
-in the last 30 days: every failure is exit 143 (SIGTERM), followed within
-~90s by a same-commit retry that succeeds. Latest example `f937e1d5`
-(2026-09-14 18:17): step 4 fires `nohup sleep 20 && launchctl kickstart -k
-… runner` at 18:18:22; kickstart lands at 18:18:42; a `Write GOTCHAS.md`
-started at 18:18:39 is cut off at 18:18:43 when the runner restart tears
-down the SDK session. Fix candidate: bump step-4 `sleep 20` → `sleep 60`
-in `skills/server-deploy/SKILL.md`, or reorder so runtime GOTCHAS/CHANGELOG
-writes happen *before* the nohup fires. Expected impact: 17.9% → ~0-2%.
-Also a protected-path fix.
-
----
-
-## Symptom: `atlas-value-monitor` fails with `error_max_turns (30)` on `provisioning_gap` monitor output
-
-### Root cause (diagnosed 2026-09-09, job `b1f8cf18`, self-diagnose child `31d5784f`)
-
-Bootstrap + pytest + `python -m value.monitor` all succeeded (turns 1–10);
-the monitor returned `{"status": "provisioning_gap", "note":
-"TRADIER_SANDBOX_TOKEN absent from environment and repo-root .env.
-Provisioning is an OWNER ACTION..."}`. `skills/atlas-value-monitor/SKILL.md`
-Report section defines exactly three branches: `alerts` empty → one-line
-quiet report; alerts present → per-alert lines; crash → fail with traceback.
-It has NO branch for the monitor's third documented status
-(`provisioning_gap`). Session interpreted the gap as an anomaly, spent
-turns 11–30 investigating (read `monitor.py`, `env.py`, `tradier.py`, tried
-to `cat` production `.env` — blocked by INV-16/17 sandbox — then began
-authoring a CHANGELOG entry) and hit `max_turns: 30`.
-
-Cross-check: production `projects/atlas/.env` also lacks `TRADIER_*` keys.
-Atlas CHANGELOG's 2026-09-08 `DR-0002` item 3 is the durable owner
-decision — do **not** provision `TRADIER_SANDBOX_TOKEN` alone while the
-earnings feed is dark, or the first booked card carries a fabricated
-`earnings_veto` provenance string. So `provisioning_gap` is the CORRECT and
-EXPECTED daily result until the owner flips both feeds together.
-
-Distinct from the 2026-09-08 max_turns recurrence (that one was
-bootstrap-hunt caused; fix landed and worked — bootstrap now completes in
-~10 turns). This is a *reporting-branch* gap, not a budget gap.
-
-### Fix (proposed — server code, needs dev-repo edit)
-
-Add a fourth branch to `skills/atlas-value-monitor/SKILL.md` Report
-section, above the crash line:
-
-```
-- `status: provisioning_gap` → ONE line: "value monitor: provisioning
-  gap — <note>. No sweep today." Do NOT investigate; the note is
-  authoritative; owner action (per Atlas CHANGELOG `DR-0002`) is required.
-```
-
-Also append to `skills/atlas-value-monitor/GOTCHAS.md`:
-
-```
-- `provisioning_gap` is a NORMAL daily outcome while credentials are
-  intentionally un-provisioned (Atlas CHANGELOG `DR-0002` item 3, 2026-09-08).
-  Report the one-line status and exit; do not read production `.env`, do
-  not "diagnose" the missing token, do not open a CHANGELOG entry —
-  provisioning is owner action.
-```
-
-Recurrence guard: if `provisioning_gap` becomes owner-resolved (token +
-earnings feed both live), remove the branch. If a *different* new monitor
-status appears, add a generic `status != alerts` handler that echoes
-`note` and exits.
-
-### Immediate operator action
-
-None. The 2026-09-09 monitor result is expected. The failure surfaced
-because the skill didn't gracefully emit the note; the underlying signal
-("token still un-provisioned, per owner decision") is unchanged from
-yesterday. Job b1f8cf18's workspace CHANGELOG edit (turn 81) died with the
-workspace clone — no persistence, no cleanup needed.
-
-Occurrences so far: 1 (`b1f8cf18`).
-
----
-
-## Symptom: `atlas-value-monitor` fails with `error_max_turns: Reached maximum number of turns (20)`
-
-### Root cause (diagnosed 2026-09-08, job `c2a04f63`, self-diagnose child `7edb7e19`)
-
-`skills/atlas-value-monitor/SKILL.md` step 1 says "bootstrap value venv (as
-in atlas-value-theses, incl. sitecustomize script)" — a cross-skill reference
-the session cannot follow. `skills/` lives outside the workspace clone (INV-16),
-and while Read against the ai-server skills path is allowed, workspace-tier
-sessions cannot `ls` under it (INV-17 guard denial fires for the protected
-`ai-server` root even on read-only `ls`). Sessions are pushed into an
-exploratory hunt (workspace ls → value/ ls → tradingcore internals → tradier.py
-→ weekly.py → config → grep for "sitecustomize") before they can bootstrap.
-The five prior successful runs (`056000f8`, `15e59ec4`, `4af41f91`,
-`9ce32026`, `d2328352`) each finished with ~25 tool uses — essentially zero
-slack under `max_turns: 20`. `c2a04f63` took slightly worse detours (looked
-for `GOTCHAS.md` at the WORKSPACE path instead of the ai-server skills path,
-then reproduced the sitecustomize hunt) and burned all 20 turns without ever
-running pytest or `value.monitor`.
-
-Same pattern family as `_writeback` (§ error_max_turns 6) and
-`_learning_apply` (§ error_max_turns 6 above): tight `max_turns` + prompt
-that forces exploratory work = intermittent max_turns failure. The escalation
-hook spawns a `self-diagnose` child (level 2) automatically.
-
-### Fix (dispatched to server-patch `3f38044a`, 2026-09-08)
-
-Two-part edit of `skills/atlas-value-monitor/SKILL.md`:
-
-1. Replace step 1's cross-skill reference with the same inline bootstrap
-   commands atlas-value-theses uses at lines 26-28
-   (`python3.12 -m venv .venv && ... -e ../tradingcore` then
-   `bash ../scripts/install-venv-sitecustomize.sh`). Durable answer — no
-   session should need to look outside its own SKILL.md for its bootstrap.
-2. Frontmatter `max_turns: 20` → `max_turns: 30` — headroom while sessions
-   still explore GOTCHAS legitimately.
-
-### Recurrence guard
-
-If max_turns fails again after the fix lands, raise to 40 and open an
-owner-decision proposal to split bootstrap+run into two skills. Recurrence
-count so far: 1 (`c2a04f63`).
-
----
-
-## Symptom: hosted project crash-loops with `ImportError: TaskHandle` from anyio
-
-### Root cause (diagnosed 2026-09-03, job `34c9d162`, project `baseball-bingo`)
-
-> **Recurrence 2026-09-03, job `1ac2ee75`, project `baseball-bingo`**: same
-> symptom fired again ~4h later. Diagnostic step 1 passed (TaskHandle import OK
-> in the shared venv, anyio 4.14.2), process PID 50525 had been stable ~13 min
-> after the launchd KeepAlive restart cycle, both `curl
-> http://127.0.0.1:8790/healthz` and `https://bingo.chrispiserchia.com/healthz`
-> returned 200. No action taken — service had already self-recovered by the
-> time the 20-min trigger fired. Reinforces the long-term fix: separate venv per
-> hosted service.
-
-
-Any hosted project whose `manifest.yml` `start_command` runs from the shared
-`ai-server-bpzo5SVu` venv (grep `ai-server-bpzo5SVu` in `projects/*/manifest.yml`)
-is vulnerable: when server-side pip work upgrades a shared dep mid-flight, the
-running project process can crash on the FIRST request that lazy-loads
-`anyio._backends._asyncio` — typically `starlette.responses.FileResponse
-.set_stat_headers` on `/`, `/favicon.ico`, or `/static/*`. Stack trace:
-
-```
-File ".../anyio/_backends/_asyncio.py", line 95, in <module>
-  from .._core._tasks import TaskHandle
-ImportError: cannot import name 'TaskHandle' from 'anyio._core._tasks'
-```
-
-`/healthz` typically stays 200 (no file backend), so self-diagnose's 20-min
-unhealthy trigger fires from the file-serving 500s while the process appears
-"up." launchd KeepAlive restart-loop follows.
-
-### Diagnostics
-
-```bash
-# 1. Is the venv currently consistent?
-/Users/alfredbot.ai.butler/.local/share/virtualenvs/ai-server-bpzo5SVu/bin/python \
-  -c "from anyio._core._tasks import TaskHandle; print('ok')"
-
-# 2. If OK, restart the project — the current process is stuck on stale imports.
-launchctl kickstart -k gui/$(id -u)/com.assistant.project.<slug>
-
-# 3. If import still fails, force-reinstall anyio in the venv:
-/Users/alfredbot.ai.butler/.local/share/virtualenvs/ai-server-bpzo5SVu/bin/pip \
-  install --force-reinstall --no-deps anyio
-```
-
-### Fix (long-term)
-
-Give each hosted service its own venv so server-side pip operations cannot
-crash-loop a hosted project. Same class of failure will bite any project on the
-shared venv (`baseball-bingo`, and any others sharing it).
-
----
-
-## Symptom: repeated event-triggered `self-diagnose` jobs for a project that is actually healthy
-
-### Root cause (diagnosed 2026-09-03, job `53926108`, project `atlas`, 4 spurious diagnoses in ~2h)
-
-> **Recurrence 2026-09-03, job `fb99cdcc`, project `baseball-bingo`, 12 spurious diagnoses over ~8h**: same
-> pattern. `last_healthy_at` was 2 min old at diagnosis time; local `/healthz`, local `/`, and public
-> `https://bingo.chrispiserchia.com/healthz` all returned 200; PID 50521 stable under
-> `com.assistant.project.baseball-bingo`. `healthcheck.out.log` gaps of 21–86 min (23:36→23:57, 23:57→01:23,
-> 01:23→03:00, 03:00→04:09, 04:09→05:47, 05:47→07:00, 07:00→08:24, 08:24→09:46, 09:46→11:14, 11:14→12:21,
-> 12:21→13:23, 13:23→14:50, 14:50→16:08) correlate with 71 sleep/wake cycles. All 12 prior queued
-> self-diagnose jobs were auto-cancelled by dedup. No action taken — service healthy throughout.
->
-> **Recurrence 2026-09-07, job `8c2be7b9`, project `baseball-bingo`**: mac slept
-> from `2026-09-04T03:36:45Z` to `2026-09-07T18:31:54Z` (~3.5 days — single
-> gap in `healthcheck.out.log`, no rows in between). On wake, `events.py`
-> saw a ~3.5-day-old `last_healthy_at` and enqueued self-diagnose within
-> ~5 min; the first three post-wake healthchecks (18:31, 18:36, 18:41) all
-> returned `checked=3 healthy=3 failed=0`. At diagnosis: PID 4086 uptime
-> 18 min, `curl http://127.0.0.1:8790/healthz` and `curl
-> https://bingo.chrispiserchia.com/healthz` both 200, `anyio._core._tasks
-> .TaskHandle` imports cleanly. The project's stderr log did show the
-> historical anyio crash-loop from the 2026-09-03 incident, which is a
-> red herring — `project.<slug>.err.log` is not truncated on restart, so
-> stale tracebacks look current until you check PIDs. Reinforces: the
-> long-term fix is server-side (events.py freshness gate), not project-side.
-
-`events._check_project_health` fires when `Project.last_healthy_at` is older
-than 20 min. That timestamp is written **only** by `scripts/healthcheck-all.sh`
-(launchd `com.assistant.healthcheck-all`, `StartInterval` every 5 min).
-
-**launchd `StartInterval` does not fire while the Mac is asleep.** After a
-long sleep, `last_healthy_at` looks decades stale for a few seconds until the
-first post-wake healthcheck lands — but `events.py` polls every 60s and
-enqueues a self-diagnose immediately when it sees the stale value. With 71+
-sleep/wake cycles on this Mac, the trigger fires repeatedly for projects that
-are actually healthy 100% of the time they are reachable.
-
-Symptoms:
-
-- `healthcheck.out.log` shows big gaps between rows (e.g. 78 min from
-  `2026-09-03T14:50Z` to `2026-09-03T16:08Z`) with `checked=3 healthy=3 failed=0`
-  on both sides — never a `failed>0` line.
-- `SELECT description, created_at FROM jobs WHERE kind='self-diagnose' AND
-  description ILIKE '%<slug>%' ORDER BY created_at DESC LIMIT 10;` shows one
-  new entry roughly every 20–35 min for the same slug.
-- `curl -sf http://localhost:<port>/ ` returns 200 the whole time; `launchctl
-  list | grep <slug>` shows live PIDs.
-- `pmset -g log | grep -iE 'sleep|wake' | tail` — mac was asleep during the gaps.
-
-### Diagnostics
-
-```bash
-# 1. Is the project actually unhealthy right now, or only stale-in-DB?
-curl -sf -o /dev/null -w "%{http_code}\n" http://localhost:<port>/
-launchctl list | grep com.assistant.project.<slug>
-
-# 2. Is healthcheck-all firing on cadence?
-tail -50 volumes/logs/healthcheck.out.log   # gaps > 5 min = launchd missed a tick
-
-# 3. Cross-check: sleep/wake correlation.
-pmset -g log 2>/dev/null | grep -iE 'sleep|wake' | tail -40
-```
-
-### Fix (long-term, server-code, medium risk — needs `server-patch` skill or manual)
-
-In `src/runner/events.py:_check_project_health`, before enqueuing a
-self-diagnose, gate on healthcheck freshness. E.g. read the mtime of
-`volumes/logs/healthcheck.out.log` (or the last line's timestamp) and skip
-the trigger if the healthcheck script has not run since `NOW() -
-unhealthy_minutes`. This closes the "healthcheck-was-asleep" false positive
-without hiding real project outages (a project that stays down through 4+
-successful healthchecks still trips the trigger).
-
-Immediate mitigation: none needed on the project side — atlas is fine. The
-spurious self-diagnose jobs are noise: each one runs, confirms atlas is
-healthy, and exits. Optional cleanup: `psql assistant -c "UPDATE jobs SET
-status='cancelled' WHERE kind='self-diagnose' AND status='queued' AND
-description ILIKE '%atlas%';"` to keep the queue tidy (safe because these
-are duplicates of a diagnose that already ran).
-
----
-
 ## Symptom: `_writeback` fails with `error_max_turns (6)` after atlas jobs
 
 ### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`; 3rd occurrence 2026-08-13, job `dc5fad7d` — parent was `atlas-momo-research`, not `atlas-redeploy`)
@@ -443,135 +44,13 @@ trigger it — 3rd instance was `atlas-momo-research` (isolation=workspace).
    `skills/atlas-momo-research/SKILL.md`), then burned turns exploring
    `projects/atlas` and reading the parent's summary before hitting the ceiling.
 
-### Status (2026-09-01)
+### Status (2026-08-13)
 
-**Still not fixed** — 4th occurrence today: job `f6c9e375`, parent `027d959b`
-(`atlas-momo-drift`, no `project_id`, `payload.cwd=~/Documents/repos/atlas`).
-Confirmed defect #3 exclusively: the writeback session started at server root,
-ran `git status` there, listed `projects/`, drilled into `projects/atlas/` (the
-wrong tree — that's the runtime clone, not the dev repo where the modified
-files live), read the parent audit summary, and hit `max_turns: 6` before
-issuing a single Edit. No `.superpowers/` involvement this time. The parent
-job's `atlas-momo-drift` work remains uncommitted in the dev repo (7 modified
-files, 2 untracked, including `db/migrations/0048_glossary_drawing_terms.sql`
-and the ChartDrawings feature) — a human or a properly-cwd'd session needs to
-land the CHANGELOG + commit. Server-code fixes below remain the durable answer;
-prioritize `session.py` `_resolve_cwd` honoring `payload.cwd` and raising
-`_writeback` `max_turns` to 12 in the dev repo.
-
-Occurrences so far: `56c478cc`, `fc483ddb`, `dc5fad7d`, `f6c9e375`, `054408fd`
-(2026-09-29, parent `c0210752` `alpha-research` on atlas dev repo), `3c39e6cc`
-(2026-10-01, parent `3b8b075a` `alpha-research` on atlas dev repo — same files),
-`0c04056d` (2026-10-01, parent `cb648cfa` `alpha-research` on atlas dev repo —
-7th occurrence, identical untracked tree `.agents/`, `.codex/`, `AGENTS.md`
-still present 3+ days after 5th occurrence first called it out),
-`7a6e113b` (2026-10-01 ~20:40Z, parent `f8204991` `alpha-research` on atlas dev
-repo — 8th occurrence, SAME pre-existing untracked tree yet again, now 3+ days
-and 4 recurrences since 5th occurrence first flagged it), `0204fc1f`
-(2026-10-02 ~09:49Z, parent `c434fc62` `alpha-governor` on atlas dev repo —
-9th occurrence, SAME untracked tree, now 4 days / 5 recurrences unlanded).
-
-**9th occurrence (2026-10-02, job `0204fc1f`)**: identical to #5–#8 but parent
-was `alpha-governor` (not `alpha-research`) — confirms the defect is skill-
-agnostic: it fires on any atlas-scoped parent whose payload.cwd points at the
-dev repo. Parent `c434fc62` alpha-governor ran against workspace clone of
-`~/Documents/repos/atlas` (24 modified/untracked files listed —
-`.agents/skills/*.SKILL.md` ×7, `.codex/agents/*.toml` ×16, `AGENTS.md`).
-`payload.cwd` set to `~/Documents/repos/atlas`, `project_id` NULL (scheduler-
-dispatched, no project binding), no `project_slug` propagated into the child
-payload. Child `_writeback` cwd resolved via `_resolve_project` → server root
-(because `_project_slug` returned None); session ran `git status` at server
-root, listed `projects/`, found `.claude/skills/design-system/` (the WRONG
-tree — workspace clone's old path), searched `atlas/.codex/agents/` (correct
-path but on the runtime clone, not dev repo), parsed the parent audit log for
-Edit/Write events (none logged — those tool_use entries aren't in the audit
-JSONL), ran `git log` on the dev repo, and hit `max_turns: 20` before any
-Edit. Zero CHANGELOG updates. Escalation child `88faa541` (this session) is
-diagnosing. All three server-code fixes from occurrence #5 remain unlanded,
-and the atlas dev-repo untracked tree (`.agents/`, `.codex/`, `AGENTS.md`) is
-now 4 days old. **Fastest unblock still unchanged**: owner decides whether to
-`.gitignore` or commit that scaffolding in the atlas dev repo. Until done,
-every atlas-scoped parent (alpha-research, alpha-governor, momo-*, etc.) will
-spawn a doomed `_writeback` child.
-
-**8th occurrence (2026-10-01, job `7a6e113b`)**: carbon copy of #5–#7. Parent
-`f8204991` alpha-research on atlas dev repo (`payload.cwd =
-~/Documents/repos/atlas`, 23 modified/untracked files listed —
-`.agents/skills/*.SKILL.md` ×7, `.codex/agents/*.toml` ×15, `AGENTS.md`).
-Child `_writeback` cwd resolved to `/Users/.../ai-server` (server root — wrong
-again); session ran `git status` at server root (seeing unrelated edits like
-`skills/atlas-value-monitor/GOTCHAS.md`), listed `projects/`, searched for
-`SKILL.md` under `projects/atlas/` (missed — those live in the dev repo
-outside the server tree), searched workspace clones (found old
-`37adacc9-atlas` ones under `.claude/skills/`, not `.agents/skills/`), ran a
-long `find` across `/Users/alfredbot.ai.butler/` as a background task that
-was still running when turn 20 fired. Zero Edits, zero CHANGELOG updates.
-The three server-code fixes identified in occurrence #5 (`session.py::_resolve_cwd`
-honoring `payload.cwd` under `server_root`, `writeback.py::_is_doc_path`
-recognizing `.agents/`+`.codex/`+`.superpowers/` as docs, raise `_writeback`
-`max_turns`) remain unlanded. Status re-confirmed by grepping both files in
-this diagnostic session: `_resolve_cwd` still just forwards to `_resolve_project`
-(session.py:855–858), and `_is_doc_path` still has no `.codex/.agents/.superpowers`
-cases (writeback.py:78–95). The untracked atlas-dev-repo tree is now 3+ days
-old across 4 recurrences — the `.gitignore`-or-commit decision is still the
-only immediate unblock; without it, every subsequent atlas alpha-research run
-will trigger a new `_writeback` failure.
-
-**7th occurrence (2026-10-01, job `0c04056d`)**: identical to #5 and #6. Parent
-`cb648cfa` committed its A-0012 alpha-lab work cleanly to `origin/wip/cb648cfa`
-(4 files, +2501 lines, zero touches to `.agents/`/`.codex/`/`AGENTS.md`). The
-same pre-existing untracked tree in `~/Documents/repos/atlas` triggered
-writeback via `.codex/agents/*.toml` (not matched by `_is_doc_path`). Child
-session's cwd resolved to server root; spent 20 turns on filesystem hunts
-(two backgrounded `find` calls, one stuck in background), reading the parent
-audit log, then `git log` on the atlas dev repo — hit `max_turns: 20` before
-any Edit. Zero CHANGELOG updates. The three server-code fixes identified in
-occurrence 5 (`_resolve_cwd` honoring `payload.cwd`, `_is_doc_path`
-recognizing `.agents/`+`.codex/` as docs, higher `max_turns`) remain unfilled;
-without the first fix, raising max_turns just lengthens the fruitless search.
-The atlas dev repo's untracked scaffolds (`.agents/`, `.codex/`, `AGENTS.md`)
-have now gone 3+ days unhandled since the 5th occurrence first flagged them —
-owner decision (gitignore vs commit) is the fastest unblock.
-
-**6th occurrence (2026-10-01, job `3c39e6cc`)**: identical reproduction of the
-5th. Parent `3b8b075a` alpha-research scoped to atlas dev-repo (`topology:
-dev-repo`, `scoped_to_dev_repo: true` per event 0). Parent did real A-0013
-alpha work (ledger E-0083/E-0084 + INBOX + CHANGELOG) but LEFT UNTOUCHED the
-same `?? .agents/`, `?? .codex/`, `?? AGENTS.md` untracked tree from
-occurrence 5 — nothing cleaned them up in 48h. Payload.cwd correctly pointed
-at `~/Documents/repos/atlas` with 26 files listed. Child `_writeback`
-cwd resolved to server root; session ran `git status` at server root, listed
-`projects/`, re-ran the same two `find` attempts, parsed the parent audit log
-(correctly this time — used `kind` not `type`), inspected atlas commits —
-and hit `max_turns: 20` at the exact tool_use just before issuing an Edit.
-Zero Edits again. The server-code fix in `session.py::_resolve_cwd` to honor
-`payload.cwd` under `server_root` remains unfilled and is now the clear
-critical path — raising `max_turns` further will not help because the session
-first has to re-locate the dev repo by brute force. **Immediate low-risk
-remediation**: either `cd ~/Documents/repos/atlas && git add .agents .codex
-AGENTS.md && git commit -m "..."` (with owner approval — unclear what these
-scaffolds are for) or `.gitignore` them in the dev repo. Until done, every
-subsequent `alpha-research` job on atlas will re-trigger this failure.
-
-**5th occurrence (2026-09-29, job `054408fd`)**: `max_turns` has since been
-raised from 6 → 20, but the underlying `_resolve_cwd` bug still bites.
-Parent was `alpha-research` (project_id likely absent or `alpha-research`
-rather than `atlas`); payload.cwd was `~/Documents/repos/atlas` with 26
-modified/untracked files listed (`.agents/skills/*/SKILL.md`,
-`.codex/agents/*.toml`, `AGENTS.md`). The child job's top-level `cwd`
-resolved to `/Users/…/ai-server` (server root — WRONG). The session ran
-`git status` at server root (saw unrelated in-tree edits), listed
-`projects/`, searched `find` twice (one background hang), eventually
-located `~/Documents/repos/atlas/.agents`, tried to parse the parent's
-audit log via `python3 -c`, misread the event schema (`kind` vs `type`),
-retried three times — and hit `max_turns: 20` without issuing a single
-Edit. Twenty turns is now the ceiling and it STILL exhausts on the wrong
-cwd. Uncommitted atlas dev-repo state at diagnosis time: `M CHANGELOG.md`,
-`?? .agents/`, `?? .codex/`, `?? AGENTS.md` — the parent's research
-scaffolding lives, but the CHANGELOG entry and commit are missing. A human
-or a properly-cwd'd session needs to land it. Server fix (session.py
-`_resolve_cwd` honoring `payload.cwd`) is still the durable answer;
-raising max_turns without it just wastes larger budgets.
+**Not yet fixed** — three failures across three days (`56c478cc`, `fc483ddb`,
+`dc5fad7d`). The immediate remediation (delete `projects/atlas/.superpowers`
+in the dev repo + `.gitignore` it) doesn't cover the 3rd-instance path
+(workspace-isolated parents). The server-code fixes below are the durable
+answer and should be prioritized in the dev repo.
 
 ### Diagnostic
 
@@ -1015,22 +494,7 @@ of resumed `_learning_apply` jobs at 18:00:20 (`46acc317`, `b96a4976`,
 `15ffc401`) all failed identically — confirming this is deterministic for
 any job whose first attempt hit preflight rejection. Live counter:
 `grep -c "Session ID .* is already in use" volumes/logs/runner.err.log`
-= 24 as of 2026-10-05 (was 22 on 2026-08-23).
-
-**Fifth confirmed instance (2026-10-05, re-diagnosed by escalation
-`1acd73da` for `8f415798` atlas-advisors-ingest)**: shape identical to the
-`46acc317` family. First attempt 2026-09-24 10:00 was preflight-rejected
-(`rate_limit_status: rejected`, window=five_hour) and requeued; the SDK
-subprocess spawned anyway and registered the session file. The runner
-restarted on 2026-10-05 06:28, `queued_requeued: queued row had no Redis
-entry at runner startup` fired, and the retry 2 seconds later hit
-`Session ID 8f415798-… is already in use` → exit 1. Twice-weekly schedule
-healed itself — runs on 2026-09-28 and 2026-10-01 completed normally. No
-deliverable to salvage (first attempt was preflight-rejected before any
-Claude work). Remediation: job row marked `cancelled` with explanatory
-error_message. No orphan session artifacts found on disk at diagnosis time
-(already garbage-collected). Bug still unfixed — server-patch (Phase 5)
-needed per the Fix section below.
+= 22 as of last diagnosis run.
 
 **Fourth confirmed instance (same 18:00:20 batch, re-diagnosed 2026-08-23
 by escalation `7613573f` for `15ffc401`)**: identical shape to `46acc317` /
@@ -1041,419 +505,25 @@ Orphan CLI session state for `15ffc401` was cleaned by the escalation
 (`~/.claude/projects/…/15ffc401-….jsonl`,
 `~/.claude/session-env/15ffc401-…/`) — hygiene only, does not fix the bug.
 
-**Fifth / sixth confirmed instances 2026-10-05 (INV-15 variant — stale
-queued rows across runner restart)**: jobs `37adacc9` (atlas-trader-paper,
-created 2026-09-25) and `8f415798` (atlas-advisors-ingest, created
-2026-09-24). Both quota-rejected at preflight on first attempt (preflight
-registered the session file as in prior instances). Instead of being
-retried after the quota window, they sat in the `queued` DB state for
-~10 days until a runner restart at 2026-10-05 06:28, when INV-15
-(`queued_requeued`: queued row had no Redis entry) re-enqueued them.
-Same collision on both: `Session ID … is already in use` → exit 1 → failed
-→ self-diagnose escalations (`48ca3cc5`, `1acd73da`). No deliverable
-existed either time (preflight-reject on both attempts). Stale CLI
-session files and workspace clones cleaned by this escalation. Live
-counter: `grep -c "Session ID .* is already in use"
-volumes/logs/runner.err.log` = 24 at this diagnosis. This variant means
-the bug ALSO fires on long-stale queued rows revived at runner startup,
-not just within a single quota pause/resume window — any first-attempt
-preflight-reject leaves a landmine for every subsequent runner restart.
-
-**Seventh confirmed instance 2026-10-11 (`_writeback` child, re-diagnosed
-by escalation `3a16dd1e` for `3811db89`)**: in-session mid-run variant.
-Writeback for atlas parent `47357d2d` started at 17:53:43, made one Bash
-call (git-status + audit-log lookup), got `rate_limit_status:
-allowed_warning utilization=0.99` on that result, then the next SDK message
-tripped `rate_limit_status: rejected window=five_hour` (reset was ~36 min
-away at 18:30 UTC). `job_requeued_for_quota` fired, and within the SAME
-second the runner started a second `job_started` for the same job id —
-the SDK subprocess from attempt #1 had already registered the session_id,
-so attempt #2 hit `Error: Session ID 3811db89-… is already in use` → exit
-1 → failed → this escalation. Live counter: `grep -c "Session ID .* is
-already in use" volumes/logs/runner.err.log` = 25. **No deliverable to
-salvage** — the writeback was a non-critical CHANGELOG follow-up for 28
-atlas files; parent `47357d2d` had already pushed commit `c06b67e`
-(ledger `[E-0154]`) successfully, so atlas state is intact; the only loss
-is "CHANGELOG.md entries describing this hour's atlas doc edits," which
-the next governor/writeback can absorb incrementally. Confirms the bug is
-NOT limited to post-work completion (48ad692d) or preflight-reject
-(46acc317, 8f415798, 37adacc9) — ANY in-flight quota rejection that
-triggers requeue while the SDK subprocess has already registered its
-session is sufficient. The requeue→restart happened within one second
-rather than after the quota reset; need to check whether `main.py` is
-pausing the queue on in-session quota rejection the same way it does on
-preflight.
-
-**Eighth confirmed instance 2026-10-12 (`atlas-report` NXXT, re-diagnosed
-by escalation `99ad4c85` for `9c1f16dc`)**: in-session mid-run variant,
-same shape as the seventh. Report started at 14:42:14 UTC, read the
-packet + business context + both charters + both knowledge files, then
-`rate_limit_status: rejected window=five_hour` fired at 14:42:35 (reset
-~8 min away). `job_requeued_for_quota` at 14:42:40; retry 4h48m later at
-19:30:50 hit `Error: Session ID 9c1f16dc-… is already in use` → exit 1
-within 3 seconds. Both subagents (`atlas-report-business`,
-`atlas-report-technical`) had been dispatched at 14:42:24-26 but neither
-returned before the quota rejection — **no deliverable to salvage**.
-Parent `fe494620` (atlas-report NXXT at original effort) had already
-failed in a separate way earlier. Orphan session artifacts cleaned
-(`~/.claude/projects/…/9c1f16dc-….jsonl` + dir,
-`~/.claude/session-env/9c1f16dc-…/`); job row marked `cancelled` with
-explanatory message. Live counter: `grep -c "Session ID .* is already in
-use" volumes/logs/runner.err.log` = 41 (was 25 on 2026-10-11 — +16 in a
-day indicates the bug is firing on nearly every quota-rejected job
-through the active window). Confirms this is now the dominant failure
-mode for high-effort atlas-report escalations whose first attempt hits a
-five_hour window on the way out. Fix still owed by server-patch (Phase 5).
-
-**Ninth confirmed instance 2026-10-12 (`atlas-advisors-ingest`, re-diagnosed
-by escalation `921b81c6` for `88f99e74`)**: in-session mid-run variant,
-same shape as the seventh/eighth. Twice-weekly ingest started 2026-10-12
-14:48 UTC on medium Opus, pulled YouTube RSS, downloaded transcripts for
-five personas, dispatched claim-extraction subagents for the first three
-(financial-education, investing-with-brandon, jordi-visser → all returned
-and persisted claims.jsonl → 11.6KB total). At 19:53:48, after
-dispatching the humphrey + prof-g extraction subagents in parallel,
-`rate_limit_status: rejected window=five_hour` fired (utilization hit 0.99
-then 0.97 in the preceding seconds). `job_requeued_for_quota` at 19:54:02;
-retry at 19:54:43 UTC hit `Error: Session ID 88f99e74-… is already in
-use` → exit 1 within 4 seconds. Live counter: `grep -c "Session ID .*
-is already in use" volumes/logs/runner.err.log` = 43 (was 41 on 2026-10-12
-after instance #8 — +2 from this incident; the second collision at line
-10129 was unrelated job `ff4464a3`, which likely represents a tenth
-instance pending its own diagnosis). **Partial deliverable:** three of
-five personas (financial-education, investing-with-brandon, jordi-visser)
-had claims written to the WORKSPACE clone only (`volumes/workspaces/
-88f99e74-atlas/advisors/personas/*/claims.jsonl`), but no `git push` had
-run so the atlas dev repo and production never received them — those
-partial writes were lost with the workspace cleanup. Humphrey + prof-g
-extractions never returned (subagents in flight at quota hit). Twice-
-weekly schedule heals itself: next ingest job `59ec6305` is already
-queued for 2026-10-15 and will re-process everyone against the current
-RSS window. Orphan `~/.claude/session-env/88f99e74-…/` dir (empty) and
-stale workspace clone cleaned by this escalation; no
-`~/.claude/projects/…/88f99e74-….jsonl` was present (already GC'd). Job
-row marked `cancelled` with explanatory error_message. Fix still owed by
-server-patch (Phase 5). **Partial-work gotcha:** ingest skills that
-accumulate per-persona claims across many SDK turns are at especially
-high collision risk — long run time ⇒ high chance of crossing a five_hour
-reset mid-run, and workspace writes are not durable until the final
-commit/push. Next cycle (post-fix) should either (a) checkpoint after each
-persona via an interim commit the retry can resume from, or (b) make the
-skill idempotent on resume so partial workspace writes aren't thrown away.
-
-**Tenth confirmed instance 2026-10-12 (`atlas-report` BONK → self-diagnose
-cascade, re-diagnosed by LAST-RESORT escalation `6bb14430` for `ef8f70ce`)**:
-chained-cascade variant that exercised the full 3-level escalation ladder
-(the first time this bug has gone to LAST RESORT since detection). Original
-`fd373b83` (atlas-report BONK) created 2026-10-11 14:31:54 EDT → failed on
-first attempt → spawned level-1 escalation `f4a17be1` at high effort →
-`f4a17be1` ran 2026-10-12 09:58:32 UTC, got to the packet-inspection step,
-hit `rate_limit_status: rejected window=five_hour` at 09:58:50 →
-`job_requeued_for_quota` → retry 4h32m later at 14:30:22 UTC → `Error:
-Session ID f4a17be1-… is already in use` → exit 1 within 2 seconds →
-level-2 escalation `ef8f70ce` (self-diagnose) → `ef8f70ce` ran 2026-10-13
-00:30:19 UTC, hit `rate_limit_status: rejected window=seven_day` at
-00:30:34 (3-day pause ahead) → `job_requeued_for_quota`, but a second
-`job_started` for the same `ef8f70ce` was logged in the SAME second
-(00:30:34) → `Error: Session ID ef8f70ce-… is already in use` → exit 1 at
-00:30:35 → level-3 LAST-RESORT escalation `6bb14430` (this diagnosis).
-Shows the bug is a **cascade amplifier**: once it fires, every
-self-diagnose escalation triggered by it is itself vulnerable to the same
-collision whenever the escalation chain crosses a quota window — turning
-one bad quota rejection into 3-4 "failed" jobs in the DB and multiple
-spurious Telegram failure notifications. Live counter: `grep -c "Session
-ID .* is already in use" volumes/logs/runner.err.log` = 43 (unchanged
-from 2026-10-12 instance #9; this instance's two collisions on `f4a17be1`
-and `ef8f70ce` were already counted there). The near-zero gap between
-`job_requeued_for_quota` and the second `job_started` on `ef8f70ce`
-(00:30:34 → 00:30:34 → 00:30:35 failure) ALSO suggests a second,
-secondary bug: the `_job_loop` concurrency slot was already past the
-`is_paused()` check and waiting on the semaphore when the first slot's
-`QuotaExhausted` handler ran `pause_queue()` + `LPUSH`; when the first
-slot released the semaphore, the second slot acquired, BLPOP'd the
-just-requeued `ef8f70ce`, and dispatched `_run_with_held_slot` without
-re-checking `is_paused()`. This race window probably accounts for a
-large fraction of the "immediate retry → session_id collision" shape vs.
-the "~hours later → collision" shape — recommend a second `is_paused()`
-check between BLPOP and `_run_with_held_slot` in `src/runner/main.py:170-181`,
-in addition to the primary session_id rotation fix. **No deliverable to
-salvage:** 0 BONK reports in atlas DB for the last 7 days — both the
-original and the escalated retry failed before persisting. BONK is not
-on a self-healing twice-weekly schedule like the advisors-ingest case;
-remediation = owner re-triggers via `/task atlas-report BONK` after fix
-lands, or waits for the next alpha-scout cycle to re-request. Stale CLI
-session files cleaned by this escalation: 25 files, 5.6 MB total
-(includes the 3 chain-member files plus 22 orphans from prior failed
-jobs). All three chain members (`fd373b83`, `f4a17be1`, `ef8f70ce`)
-marked `cancelled` with explanatory `error_message` by this escalation.
-Fix still owed by server-patch (Phase 5): rotate session_id on requeue
-(primary) + re-check `is_paused()` post-BLPOP (secondary, closes the
-`_job_loop` race).
-
-**Eleventh confirmed instance 2026-10-16 (`alpha-scout` escalation,
-re-diagnosed by escalation `81bc6aef` for `bdcacc08`)**: three-day quota
-pause variant. Chain: parent `78d2b84c` (alpha-scout 2026-10-12 EDT run)
-failed → level-1 escalation `bdcacc08` at high effort / claude-opus-5
-started 2026-10-13 00:30:21 UTC. Completed context reads (SYSTEM.md,
-alpha-scout GOTCHAS, FAMILIES.md, LESSONS.md, budget.yaml, state.json
-glob — six tool calls, zero FAMILIES/LESSONS writes), then hit
-`rate_limit_status: rejected window=seven_day` at 00:30:36 UTC.
-`job_requeued_for_quota` fired; retry at 2026-10-16 00:00:54 UTC
-(~3 days later, i.e. the actual window reset) hit `Error: Session ID
-bdcacc08-… is already in use` → exit 1 within 3 seconds → this
-escalation. Live counter: `grep -c "Session ID .* is already in use"
-volumes/logs/runner.err.log` = 51 (was 43 on 2026-10-12 post-instance #10
-= +8 in four days; bug is still firing on roughly every quota-rejected
-job through the active window). **No deliverable to salvage** — only
-context reads completed; isolation was `none`, so no workspace clone.
-Longest observed quota pause before collision in the series (prior
-longest = ~10 days for the INV-15 stale-queued variant on `37adacc9` /
-`8f415798`; this one at 3d matches the seven_day window). Confirms the
-bug is window-agnostic: five_hour, seven_day, and stale-queued-across-
-runner-restart all produce the same deterministic session_id collision
-on retry. Orphan `~/.claude/session-env/bdcacc08-…/` dir (empty, 2026-
-10-12 20:30 EDT) cleaned by this escalation; no
-`~/.claude/projects/…/bdcacc08-….jsonl` present (already GC'd). Job row
-`bdcacc08` marked `cancelled` with explanatory `error_message`. Alpha-
-scout schedule self-heals: twice-daily cadence, four runs since the
-failed one have landed `completed` (2026-10-13 and 2026-10-15 pairs);
-2026-10-14 pair failed for an unrelated reason (not investigated here —
-flag for a separate diagnosis if the alpha-scout failure rate stays
-elevated). Fix still owed by server-patch (Phase 5): session_id
-rotation on requeue remains the clean solution; the per-window counter
-climb (+8 in four days) is the strongest signal yet that this is the
-single highest-impact runner reliability bug.
-
-**Twelfth confirmed instance 2026-10-16 (`alpha-research` escalation,
-re-diagnosed by escalation `13223a20` for `dc9d9f61`)**: seven_day quota
-pause variant, same shape as instance #11 (`bdcacc08`). Chain: `dc9d9f61`
-(alpha-research for idea A-0019 — Input-output-linked sector lead-lag,
-Opus-5 / high / max_turns=80 / isolation=workspace-clone) started
-2026-10-12 19:38 UTC, completed inbox parse → rebase → id resolution →
-A-0019 append to INBOX.md → wrote `ideas/A-0019/research/triage.md` to
-the workspace clone, then at 2026-10-16 00:29:47 UTC hit
-`rate_limit_status: rejected window=five_hour` immediately after the
-triage.md Write succeeded. `job_requeued_for_quota` + a new
-`workspace_created` for the SAME job id fired in the next 8 seconds
-(00:29:55 UTC), `job_started` at 00:29:55, `Error: Session ID
-dc9d9f61-… is already in use` → exit 1 at 00:29:56 (1-second collision —
-one of the fastest observed so far; confirms the "secondary bug" theory
-from instance #10 about `_job_loop` missing an `is_paused()` recheck
-between BLPOP and `_run_with_held_slot`). Live counter: `grep -c
-"Session ID .* is already in use" volumes/logs/runner.err.log` = 51
-(unchanged from 2026-10-16 post-instance #11; this instance's collision
-was already counted in the +8 window). **No deliverable to salvage** —
-the only writes landed in the workspace clone (`ideas/A-0019/intake.md`,
-`research/triage.md`, and the INBOX.md A-0019 append), no `git push`
-occurred before the quota rejection, and the retry attempt's fresh
-clone wiped them. Alpha-research is dispatcher-fed (not on a cadence);
-the owner or next alpha-scout cycle can re-dispatch A-0019 if the idea
-is still live. Remediation applied by this escalation: workspace
-`volumes/workspaces/dc9d9f61-atlas` removed (18GB stale clone), orphan
-CLI session dir `~/.claude/projects/…dc9d9f61-atlas/dc9d9f61-….jsonl`
-removed, empty `~/.claude/session-env/dc9d9f61-…/` removed, job row
-marked `cancelled` with explanatory `error_message`. The near-zero gap
-between `job_requeued_for_quota` (00:29:47) and the retry
-`job_started` (00:29:55 — 8 seconds, well inside the quota pause
-window) STRONGLY reinforces the instance-#10 theory of a second,
-race-based bug in `_job_loop` where a worker slot BLPOPs the just-
-requeued job before `is_paused()` can take effect. Fix still owed by
-server-patch (Phase 5): rotate session_id on requeue (primary) + add
-`is_paused()` recheck post-BLPOP in `src/runner/main.py:170-181`
-(secondary). This bug has now caused at least 12 documented false-
-failed jobs plus their escalation chains across 5 skills (atlas-report,
-_learning_apply, _writeback, atlas-advisors-ingest, alpha-scout,
-alpha-research) — it is unambiguously the single highest-impact
-reliability bug on the server.
-
-**Thirteenth confirmed instance 2026-10-16 (`atlas-evaluate` escalation,
-re-diagnosed by escalation `3b49cc1f` for `6561c5c1`)**: five_hour quota
-pause variant with a chained-collision shape — BOTH the original job
-`ff4464a3` AND its level-1 escalation `6561c5c1` hit the same session-id
-collision. Chain: `ff4464a3` (atlas-evaluate weekly, Opus-5 / xhigh)
-scheduled 2026-10-12 07:00 EDT ran against the five_hour window, got
-`job_requeued_for_quota`, retry hit `Error: Session ID ff4464a3-… is
-already in use` → exit 1 at 2026-10-12 20:30:21 EDT → level-1 escalation
-`6561c5c1`. `6561c5c1` ran at 2026-10-16 05:15 UTC, got through
-`context_budget_used` + ~5 min of tool calls (SCORECARD/CHANGELOG/web
-probe/schedules/queue state inspection — mapping atlas health for the
-scorecard) and hit `rate_limit_status: rejected window=five_hour` at
-2026-10-16 05:23:19 UTC with utilization 0.99. `job_requeued_for_quota`
-at 05:23:20. Quota reset at 10:00:00 UTC (per the `resets_at` field).
-Retry fired at 2026-10-16 10:00:27 UTC — 27s after reset — and failed in
-ONE second: `Error: Session ID 6561c5c1-… is already in use` → exit 1 at
-10:00:28 → this escalation (level-2). The orphan session file on disk
-(`~/.claude/projects/-Users-alfredbot-ai-butler-Library-Application-Support-ai-server/6561c5c1-…jsonl`,
-1.19 MB — the FULL transcript of the pre-quota 8 minutes) proves the
-first SDK subprocess registered the session_id before the quota raise
-tore it down; the retry's fresh subprocess saw it on-disk and refused.
-Live counter: `grep -c "Session ID .* is already in use"
-volumes/logs/runner.err.log` = 51 (unchanged from instance #12;
-`ff4464a3` + `6561c5c1` collisions are both already counted in the
-+8/four-day bump leading to instance #11's 51 observation). **No
-deliverable to salvage** — atlas-evaluate writes the SCORECARD.md entry
-and backlog re-route; the pre-quota 8 minutes only READ atlas state
-(no git push, isolation=none for the escalation). Weekly cadence
-self-heals: next atlas-evaluate schedule tick is 2026-10-19 07:00 EDT.
-Remediation applied by this escalation: orphan
-`~/.claude/projects/…/6561c5c1-….jsonl` + `~/.claude/session-env/6561c5c1-…/`
-+ stale `~/.claude/session-env/ff4464a3-…/` (4 days old) removed; job
-rows `ff4464a3` and `6561c5c1` marked `cancelled` with explanatory
-`error_message` pointing at this entry. **Chain shape** is important:
-both consecutive levels of the SAME chain collided — matches the
-instance-#10 observation about escalations being themselves vulnerable
-when the chain crosses quota windows. Confirms that neither (a) escalating
-to a different model/effort nor (b) waiting out the five-hour window
-breaks the pattern — the fix must be structural (session_id rotation
-on requeue). Fix still owed by server-patch (Phase 5).
-
-**Fourteenth confirmed instance 2026-10-16 (`atlas-value-research`,
-diagnosed by self-diagnose `5dffeb1c`)**: five_hour quota pause variant,
-single-level cascade. `d2cf2ce6-atlas-value-research` (Opus-5 / high, 80
-max_turns, created 2026-10-13 09:00 EDT, deferred for 3 days in queue —
-the schedule had been under quota-pause for the atlas-evaluate chain)
-popped on 2026-10-16 10:24:12 UTC, read 3 orient-phase files
-(GOTCHAS 404 / CONTEXT.md / PROJECT_PROTOCOL.md), hit
-`rate_limit_status: allowed_warning utilization=0.99` at 10:24:16, then
-`rate_limit_status: rejected window=five_hour` at 10:24:20 (reset at
-15:00:00 UTC). `job_requeued_for_quota` at 10:24:21. **Retry fired at
-10:24:46 UTC — only 25 seconds after the pause was set, 4h 35min BEFORE
-the actual reset** — and failed in ONE second: `Error: Session ID
-d2cf2ce6-… is already in use` → exit 1 at 10:24:48 → this escalation
-(level-2 self-diagnose). The 25-second retry window (rather than waiting
-~4.6h for reset) proves a **second bug layered on top of the known
-session-id collision**: a worker already BLPOP-waiting at the moment of
-`quota.pause_queue(...)` + `redis.lpush(QUEUE_JOBS, job_id)` immediately
-receives the re-pushed job WITHOUT re-checking `is_paused()`. The
-`_job_loop` iteration (`src/runner/main.py:122-181`) calls
-`is_paused()` ONCE at the top, acquires a semaphore slot with a 2s
-timeout, then BLPOPs with a 2s timeout — but a waiter already parked in
-BLPOP from the prior iteration will fulfill the lpush instantly, skipping
-step 1 entirely for the just-pushed id. Live counter: `grep -c "Session
-ID .* is already in use" volumes/logs/runner.err.log` = 51 (unchanged
-from instance #13; this collision will tick it to 52 once the next grep
-runs — the log line already landed at 10:24:47 UTC and the counter was
-read post-hoc inside this diagnose session). **No deliverable to
-salvage** — the pre-quota 2 minutes only READ project context files
-(no git push, workspace isolation; the clone had no uncommitted work).
-Remediation applied by this escalation: orphan
-`~/.claude/projects/…-volumes-workspaces-d2cf2ce6-atlas/d2cf2ce6-….jsonl`
-+ workspace clone `volumes/workspaces/d2cf2ce6-atlas/` removed; job row
-`d2cf2ce6` marked `cancelled` with explanatory `error_message` pointing
-at this entry. Weekly `atlas-value-research` cadence self-heals: next
-tick is 2026-10-20 09:00 EDT. **New structural finding**: the fix must
-cover BOTH (a) session_id rotation on requeue AND (b) a `is_paused()`
-re-check inside `_run_with_held_slot` (or after BLPOP, before
-`_process_job`) — fixing only (a) still leaves the quota-pause window
-leaky, and fixing only (b) still leaves cross-process restarts or
-long-stale-queued revivals exposed. Fix still owed by server-patch
-(Phase 5).
-
-**Fifteenth confirmed instance 2026-10-16 (`atlas-trader-research`,
-diagnosed by self-diagnose `f336a862`)**: five_hour quota pause variant,
-single-level cascade — but with the richest "real work lost" profile in
-the series so far. `60da313a-atlas-trader-research` (Opus-5 / high, 80
-max_turns, isolation=workspace-clone, created 2026-10-14 09:00 EDT and
-deferred ~2 days through the lingering atlas-evaluate quota chain)
-popped on 2026-10-16 20:13 UTC and ran ~16 minutes of productive work:
-read T-0028 score.py / tests, iterated multiple Edits on
-`research/T-0028/score.py` and `tests/research/test_t0028_score.py`
-(V8c implied-weight check / mutation i look-ahead detection), executed
-diagnostic `.venv/bin/python` probes verifying the look-ahead trade-day
-detection logic. Utilization climbed through `allowed_warning`
-0.91→0.92→0.93→0.99 across 20:28:47 → 20:29:57 UTC, then
-`rate_limit_status: rejected window=five_hour` fired at 20:29:57
-(resets_at 1792198800 = 2026-10-16 21:00 UTC). `job_requeued_for_quota`
-at 20:29:58; retry fired at 20:30:34 UTC — only 36 seconds after the
-pause, 29 min BEFORE the actual reset — and failed in ONE second:
-`Error: Session ID 60da313a-… is already in use` → exit 1 at
-20:30:35 → this escalation (level-2 self-diagnose). Matches the
-instance-#14 "25-second retry" shape proving the BLPOP-already-parked
-race in `_job_loop`. Live counter: `grep -c "Session ID .* is already
-in use" volumes/logs/runner.err.log` = 51 (unchanged pre-grep; this
-collision ticks it to 52+ at next read). **No deliverable to salvage**
-— the Edits had landed only in the workspace clone and the retry's
-fresh recreation at 20:30:34 wiped them (`git log` on the clone shows
-HEAD at `390964a` from canonical, no uncommitted work remaining; no
-`git push` ever occurred before quota). Weekly cadence self-heals:
-previous 4 runs (2026-09-16, 09-23, 09-30, 10-07) all completed; next
-tick 2026-10-21 09:00 EDT will restart the T-0028 research cycle from
-the current atlas HEAD. Remediation applied by this escalation: orphan
-`~/.claude/projects/…-volumes-workspaces-60da313a-atlas/60da313a-….jsonl`
-+ workspace clone `volumes/workspaces/60da313a-atlas/` (401 MB)
-removed; stale `~/.claude/session-env/60da313a-…/` (0 B, 2026-10-16
-16:05 EDT) removed; job row `60da313a` marked `cancelled` with
-explanatory `error_message` pointing at this entry. **New observation**:
-this is the first instance in the series where the pre-quota attempt
-did meaningful CODE EDITS (not just reads) — the T-0028 score.py and
-test file edits are the richest "real work lost" sample yet. Any
-atlas-trader-research weekly tick that fits inside a single
-five_hour window will self-heal; longer-running research tasks that
-straddle windows will keep losing work until server-patch (Phase 5)
-lands both fixes (session_id rotation on requeue + `is_paused()`
-re-check after BLPOP in `src/runner/main.py:170-181`).
-
-**Sixteenth confirmed instance 2026-10-17 (`alpha-research` 2-level
-cascade, diagnosed by LAST-RESORT escalation `b51096ac` for `c97e45a4`)**:
-five_hour quota pause variant with a NEW layered finding — the level-2
-self-diagnose exhausted its max_turns before completing remediation.
-Chain: `6637542a-0007-4fc3-b069-cd3786818e1b` (alpha-research for idea
-A-0019 "echo momentum t-12..t-7 in the US sector-sleeve cross-section",
-Opus-5 / high / max_turns=80 / isolation=workspace-clone) started
-2026-10-12 15:37 EDT, ran through filing + rebase + push → **git push
-to atlas master succeeded at 2026-10-16 00:29:08 UTC as commit `ca25b13`**
-("feat(alpha-lab): file A-0019 and triage it to `triaged`"). Immediately
-after the push (one tool call later), `rate_limit_status: allowed_warning
-utilization=0.92` fired at 00:29:04 and then within one SDK round-trip
-the window flipped to `rejected window=five_hour`. `job_requeued_for_quota`
-fired; retry hit `Error: Session ID dc9d9f61-ac33-4ba1-be04-c4dad12c6a70
-is already in use` → exit 1 → level-2 self-diagnose `c97e45a4` spawned.
-`c97e45a4` ran 2026-10-17 01:57 UTC on claude-opus-4-7 / high / **max_turns=30**
-and correctly identified the pattern (orphan session dir still on disk,
-deliverable already landed in atlas master), opened TROUBLESHOOTING.md,
-walked session.py line 717 (`session_id=str(job.id)`) and the quota
-requeue path in main.py:457, confirmed the push via `git log` in the
-dev clone, and started the standard remediation (`UPDATE jobs SET
-status='succeeded'` — hit the `ck_jobs_status_valid` constraint because
-`succeeded` is not a valid value; valid is `completed`), then tried to
-`rm` the stale workspace + session artifacts — but the cancelled-parallel
-tool call plus the already-consumed budget tripped `error_max_turns` at
-turn 30 before the cleanup landed. Level-3 LAST-RESORT escalation
-`b51096ac` (this diagnosis) finished the remediation in ~10 tool calls.
-Live counter: `grep -c "Session ID .* is already in use"
-volumes/logs/runner.err.log` = 51 (unchanged from instance #15; this
-collision ticks it to 52+ at next read — the dc9d9f61 line already
-landed on 2026-10-16 00:29). **Deliverable WAS salvaged** — ca25b13 is
-on origin/master and in production atlas state; owner-visible research
-on A-0019 is intact. Weekly / dispatcher-fed cadence; no re-dispatch
-needed. Remediation applied by this escalation: `6637542a` job row
-marked `completed` (not `cancelled`, because the deliverable landed),
-`c97e45a4` job row marked `cancelled` (max_turns truncation on
-remediation), stale `volumes/workspaces/6637542a-atlas/` (386 MB) +
-`~/.claude/projects/-…-volumes-workspaces-6637542a-atlas/*` +
-`~/.claude/session-env/{6637542a-…,c97e45a4-…}/` +
-`~/.claude/projects/-…-ai-server/c97e45a4-…{.jsonl,/}` all removed.
-**NEW LAYERED FINDING (max_turns=30 insufficient for self-diagnose
-session-collision remediation sequences)**: the standard remediation
-for this bug class is now 20+ tool calls (verify deliverable landed in
-atlas remote via `git log` + 2 psql reads, mark both chain rows with
-long explanatory messages, remove 4-5 stale paths, append to
-TROUBLESHOOTING.md), plus 10+ for the investigation itself (read
-TROUBLESHOOTING.md section, inspect session.py + main.py, confirm the
-pattern). This routinely runs 30-45 tool calls total. `max_turns=30`
-in `skills/self-diagnose/SKILL.md` therefore causes **level-2
-self-diagnose jobs to fail mid-remediation on this specific bug class**,
-triggering a LAST-RESORT level-3 escalation that then has to finish the
-same work. Each time this happens the user sees an extra Telegram
-failure notification for the level-2 job. Recommended fix: raise
-self-diagnose `max_turns` to 60 (low-risk skill-frontmatter change
-done in the dev repo); the collision-remediation sequence has a
-natural stop point (summary message) long before 60 turns, so there's
-no runaway risk, and the extra budget absorbs the full
-collision-cleanup sequence plus Troubleshooting-doc write in a single
-level-2 pass. Fix still owed by server-patch (Phase 5) for the primary
-bug; raising `max_turns` is a mitigation that stops the LAST-RESORT
-cascades.
+**Still unfixed 2026-10-22 — live counter 52 hits in runner.err.log, 61
+failed-with-exit-code-1 jobs in the DB.** Latest instance: `c1f0c44d`
+alpha-research for atlas A-0020 cycle 1 (self-diagnose escalation
+`6c0d5a68`). First attempt dispatched 01:03:42Z under alpha-governor
+`edb2f081`; model was Opus at utilization 0.91 on entry (window=five_hour)
+and climbed to 0.99 over seven minutes while the session was actively
+editing `run_cycle.py`. At 01:11:05Z the window flipped to `rejected`
+mid-edit → `QuotaExhausted` → LPUSHed to QUEUE_JOBS with status=queued.
+Runner picked the same `job_id` back up at 04:18:33Z (post reset_at
+04:30Z), opened a fresh workspace clone, and the Claude CLI died 5
+seconds in with the classic `Session ID c1f0c44d-… is already in use`.
+No deliverable landed — the first attempt had only written one partial
+edit to the workspace clone (not pushed), and the second attempt died
+before any work. Parent governor chain is live, so a fresh governor
+cycle will re-dispatch A-0020 cycle 1 with a new `job_id`. **No manual
+remediation applied here** — matches instance #2/#3 pattern (no
+deliverable to salvage, do not fake-succeed). The underlying server-patch
+(rotate session_id on requeue, OR detect "Session ID … already in use" on
+retry and short-circuit) remains unimplemented.
 
 Sequence:
 1. Job runs to actual completion (in the 48ad692d case: business lens saved
@@ -1881,50 +951,6 @@ error_category proposal remain unimplemented — this is now the **third**
 recorded occurrence (2026-07-13 `_evaluate` variant, 2026-08-15 variant,
 2026-08-17). Prevention work should be prioritized: every occurrence
 burns ~30–60k tokens on a spurious self-diagnose session.
-
-**New third-party-collateral variant 2026-08-31** (self-diagnose
-`32ab9bad` for skill `atlas-advisors-ingest`, failed job `7ce94790`):
-first observed case where the SIGTERM wave killed an **unrelated
-project skill** running concurrently — not `_evaluate`, not
-`server-deploy` itself, not an escalation child. Timeline: advisors-
-ingest started 10:00:03 (session_timeout=3600, mid-work — 23
-transcripts archived across 5 personas, reading through to extract
-claims); server_deploy `a637cb1a` started 10:02:22 (dispatched via
-`dispatch-mcp`, range `7f4854c..da83b24`); at 10:05:22 the detached
-runner-restart fired and SIGTERM'd BOTH jobs simultaneously (advisors-
-ingest exit 143 mid transcript-read, deploy exit 143 mid summary).
-Post-state: HEAD=`da83b24`=`origin/main`, health=200, runner/web/bot
-PIDs alive — deploy succeeded. But advisors-ingest's 23 archived
-transcripts sat unpushed in the workspace clone
-(`volumes/workspaces/7ce94790-atlas/advisors/personas/*`) — the ingest
-never reached the extraction/dossier/commit steps. Self-diagnose
-re-enqueued a fresh `atlas-advisors-ingest` (idempotent: cap 5
-oldest-first per channel, same feed window will re-archive the same
-videos). **Widened prevention scope**: prevention item (3)
-(`deploy_restart_sigterm` error_category) should suppress escalation
-for ALL concurrent jobs killed in the same restart wave, not just the
-deploy's own children. Detection: any job with `error_message LIKE
-'Command failed with exit code 143%'` and `completed_at` within ±2s of
-a `server_deploy` job's `completed_at`. This is the **fourth** recorded
-occurrence.
-
-**Same event, second self-diagnose (2026-08-31, `5226b4dd`)**: the same
-10:05:22 SIGTERM wave also tripped the *skill-level* self-diagnose
-threshold for `server-deploy` itself — the parent deploy `a637cb1a`
-and its escalation child `0eefd937` both landed in `failed` state
-within seconds of each other, satisfying "skill server-deploy failed
-2+ times in the last 10 minutes". So one deploy-restart-race produced
-TWO concurrent self-diagnose sessions (`32ab9bad` for advisors-ingest,
-`5226b4dd` for server-deploy) plus the escalation retry — all
-diagnosing the same non-defect. Independent verification from
-`5226b4dd`: HEAD stayed at `da83b24` = `origin/main`, alembic at
-`006 (head)`, `SELECT DISTINCT status FROM jobs` returns only valid
-values, `curl /health` = 200, `launchctl list` shows runner/web/bot/
-caddy pids alive. The proposed prevention (`deploy_restart_sigterm`
-error_category + escalation-skip) would collapse all three spurious
-jobs — kill the escalation, skip both self-diagnoses. Estimated
-waste per event: 30–60k tokens × 2–3 sessions = ~150k tokens per
-occurrence. **Fifth** recorded occurrence of the underlying race.
 
 ---
 
@@ -3108,23 +2134,7 @@ events.py fix can land through the normal patch lane. No inline action
 taken on atlas — it's healthy; the pre-existing
 `invalid input syntax for type uuid: "AAPL"` bug in
 `.next/server/app/api/atlas/{assets,candles}/route.js` is unrelated
-to healthcheck and root `/` still serves 200.); 2026-09-03 ~16:34Z
-(job `6ff47265`, atlas answered `/` 200 in 92ms on port 8791,
-`last_healthy_at` age 1m25s at diagnosis but stamp was 20m+ stale
-when the event trigger fired at 12:27:14 EDT / 16:27Z.
-`healthcheck.out.log` cadence shows large gaps throughout 09/03 UTC
-— `14:50:07Z → 16:08:31Z` = 78 min, plus earlier overnight gaps of
-60–90+ min — same macOS-sleep-cadence-slip signature. All three
-atlas launchd processes healthy with PIDs 90820 / 90822 / 90826.
-Also enqueued in the same tick: `d350390f` baseball-bingo,
-`b0fde255` content-forge (that one auto-cancelled). Fifty-ninth
-recurrence. Live-probe gate fix in `src/runner/events.py` still
-not on `origin/main` — workspace-push meta-bug still trapping
-attempted patches per the 58th-entry note. Inline
-`launchctl kickstart -k gui/$UID/com.assistant.healthcheck-all`
-executed; healthcheck-all resumed at 16:36:06Z, all three
-projects' `last_healthy_at` refreshed to ~3s old. No inline
-action on atlas itself — healthy.)
+to healthcheck and root `/` still serves 200.)
 
 **Concrete server-patch spec** (`src/runner/events.py:300` `_check_project_health`):
 insert a live-probe gate before `enqueue_job`. Between lines 323-330,
@@ -3638,241 +2648,7 @@ blocker per the 51st entry still stands. The trigger-storm
 sibling chain has now self-documented its own predicted
 tail across three consecutive fires — sufficient evidence
 that the self-suppress guard IS the right next fix
-whenever the workspace-push meta-bug unblocks it.);
-2026-09-03 ~16:27Z (job `4cbadd62`, atlas answered `/`
-HTTP 200 in 65ms on port 8791, external `atlas.chrispiserchia.com`
-HTTP 302 = expected Cloudflare Access redirect. All three
-launchd services loaded: `com.assistant.project.atlas`
-PID 90820, `-dash-scheduler` 90822, `-pm-edge` 90826.
-`com.assistant.healthcheck-all` `state = not running`,
-last exit code 0, last tick 16:08:31Z (`checked=3
-healthy=3 failed=0` for all 3 projects — shared-cadence
-fingerprint intact). DB `last_healthy_at` was 16:08:20Z
-for all three projects (~19m stale, ~4 missed 5-min
-ticks). Kickstarted inline via
-`gui/$(id -u)/com.assistant.healthcheck-all`; cadence
-resumed at 16:28:15Z (`checked=3 healthy=3 failed=0`),
-DB refreshed to 16:28:14Z (<1s) for all three projects
-so the trigger wouldn't refire within its dedup window.
-Historical intervals in healthcheck.out.log show growing
-drift throughout the day (12:21→13:23→14:50→16:08 —
-~60-90m gaps instead of 5m) consistent with macOS App
-Nap / power-throttle rather than a single sleep event.
-App-level noise in project.atlas.err.log (UUID cast
-error from `/api/atlas/candles` and FK violations on
-`stop_config_asset_fk` when deleting assets referenced
-by stop_config) is unrelated to trigger — `/` returns
-200 and healthcheck path is `/`; tracked as separate
-app-code issues, not dispatched from this diagnose.
-Eighty-fourth recurrence — canonical throttled-cadence-
-slip. Live-probe gate and self-suppress guard STILL
-un-landed; not re-dispatching a server-patch —
-workspace-push meta-bug blocker per the 51st entry
-still stands.); 2026-09-03 ~16:28Z (job `b24e1845`,
-baseball-bingo — direct twin of the atlas fire in the
-84th entry immediately above. baseball-bingo answered
-`/healthz` HTTP 200 and `/` HTTP 200 on port 8790 BEFORE
-any action, project PID 1469 healthy with 8-day uptime.
-Shared healthcheck-all cadence slip 16:08:31Z→16:28:15Z
-(~20m past the 5m tick, four missed ticks) drove the
-DB `last_healthy_at`=16:08:20Z (~19m stale at trigger
-time) that fired the event — same shared fingerprint as
-`4cbadd62`. By the time this session ran its verification
-curls, the concurrent atlas diagnose had already
-kickstarted `com.assistant.healthcheck-all` and cadence
-had resumed at 16:28:15Z, refreshing all three projects'
-DB timestamps to 16:28:14Z (<1s). No further healthcheck
-kickstart needed.
-
-**Diagnose author error worth logging**: this session's
-first move was to read `read_project_logs` output, saw
-the `ImportError: cannot import name 'TaskHandle' from
-anyio._core._tasks` traceback, and treated it as the
-active fault — restarting baseball-bingo via
-`restart_project` (~3s downtime) BEFORE reading the
-false-positive section above. The ImportError trace is
-HISTORICAL (from the pre-8-day-old uvicorn PID that was
-still holding stale in-memory `anyio._core._tasks`
-predating the July 30 anyio 4.14.2 upgrade); the running
-process itself was serving 200s cleanly on `/healthz`
-and `/`. This exactly matches the "anyio ImportError is
-NOT the source" pattern documented across recurrences
-40–83. Post-restart the new PID 50521 continues to serve
-200s — the restart neither helped nor durably harmed,
-but it caused the only actual downtime of the incident,
-which is precisely what the Fix section of this symptom
-warns against. Future self-diagnose runs on
-baseball-bingo: **read this section BEFORE reacting to
-the log tail's anyio traceback.**
-
-Eighty-fifth recurrence — canonical
-throttled-cadence-slip twin-fire; the shared-cadence
-signature makes atlas + baseball-bingo diagnose pings
-mechanically simultaneous. Live-probe gate and
-self-suppress guard STILL un-landed; not re-dispatching
-a server-patch — workspace-push meta-bug blocker per
-the 51st entry still stands. The self-suppress guard
-(skip enqueue if a running/queued self-diagnose for the
-same slug OR its shared-cadence sibling exists) would
-have collapsed 84+85 into a single fire and prevented
-the restart-mistake in this entry.);
-2026-09-03 ~16:39Z (job `4b9b4c67`, baseball-bingo
-answered `/healthz` 200 across 5 back-to-back probes on
-port 8790 and `/` 200; project PID 50521 up 12m22s (the
-same post-restart PID from the 84th recurrence);
-`healthcheck.out.log` shows severe overnight cadence
-throttling — sample gaps 09-02T23:36→23:57 (21m),
-09-03T01:23→03:00 (97m), 09-03T14:50→16:08 (78m),
-finally 16:08:31Z→16:28:15Z (20m) matching the trigger
-fire; cadence resumed cleanly at 16:33:26Z and 16:36:06Z
-which refreshed baseball-bingo `last_healthy_at` to only
-3m old by diagnosis time. The recent
-`project.baseball-bingo.err.log` tail shows anyio
-`TaskHandle` ImportError bursts but those are all from
-restart PIDs 3619 / 71686 / 73320 / 1523 during the
-anyio partial-import episode; PID 50521 (current) is
-not in the traceback. `python -c "from
-anyio._backends._asyncio import TaskHandle"` succeeds
-now. No action taken — did NOT restart, did NOT run pip
-(per recurrence 84's warning that restart is the only
-real downtime cause). Eighty-sixth recurrence — same
-throttled-cadence signature; live-probe gate and
-self-suppress guard STILL un-landed.)
-
-2026-09-03 ~16:42Z (job `5c1c8891`, baseball-bingo
-answered `/healthz` 200 in 6.4ms on port 8790, project
-PID 50521 healthy (same post-restart PID as 84th/86th
-recurrences). DB `last_healthy_at` was already fresh at
-diagnosis (1m46s old, stamp 16:41:07Z from the 16:41:08Z
-tick that landed AFTER this event trigger fired) — the
-slip window had already closed by pickup time.
-`healthcheck.out.log` shows the same overnight/afternoon
-throttling as recurrence 86 with fresh gaps
-16:08:31Z→16:28:15Z (20m), then a burst of catch-up
-ticks 16:28→16:33→16:36→16:41 — the trigger fired on the
-16:08→16:28 gap. **Also found 15 accumulated queued
-`self-diagnose` jobs for baseball-bingo backed up from
-02:42Z through 11:51Z, all cancelled inline** via the
-same `UPDATE jobs SET status='cancelled' WHERE
-kind='self-diagnose' AND status='queued' AND description
-ILIKE '%baseball-bingo%'` recipe from the 2026-09-03
-atlas root-cause entry above — those 15 duplicates would
-have run one after the other through the day if the
-runner picked them up, each doing the same false-positive
-work. `pmset -g log` confirms 71+ sleep/wake cycles on
-this Mac (matches the SlashCommand root cause). No action
-taken on the project itself. Eighty-seventh recurrence
-— same throttled-cadence signature; live-probe gate and
-self-suppress guard STILL un-landed after 87 recurrences.
-The queue backlog is a new observation this cycle:
-without a self-suppress guard the diagnose kind
-accumulates faster than the runner drains it during a
-long sleep window.)
-
-Eighty-eighth recurrence: 2026-09-07 ~18:41Z (job
-`430f671b`, project `content-forge`; parent
-`2a46c9c7` failed with `error_max_turns: 30` while
-gathering evidence and escalated → child `430f671b`
-took the finding cleanly in one pass). content-forge
-answered `/health` 200 in 1.4ms on port 8792, PID
-4081 up since 14:27:10 EDT, DB `last_healthy_at` was
-1.5 min stale (fresh — 16:02:16 EDT, from the 16:02
-tick that landed AFTER the trigger fired). All three
-service projects (atlas, baseball-bingo,
-content-forge) shared identical `last_healthy_at`
-timestamps within milliseconds — the definitive
-shared-cadence fingerprint. No action taken on the
-project itself. New observation this cycle: the
-prior self-diagnose blew its 30-turn budget doing
-first-principles archaeology instead of pattern-
-matching to this section — argues for a compact
-"known false-alarm fast-exit" checklist at the top
-of the self-diagnose SKILL so the LLM can short-
-circuit on the shared-timestamp fingerprint before
-tool-calling deep. Live-probe gate + self-suppress
-guard STILL un-landed after 88 recurrences.)
-
-## Symptom: `atlas-daily-brief` fails with `error_max_turns (14)` on the happy path — `atlas-dash packet` succeeds, brief is written and chat-saved, session dies before final summary
-
-### Root cause (diagnosed 2026-09-16, jobs `7cbba04c` + escalation child `0e733c68`, self-diagnose `c3722f18`)
-
-Two consecutive runs today (08:00 schedule + 08:02 opus/high escalation) failed
-IDENTICALLY: both completed all substantive work — three gathers succeeded
-(`chat-context --market`, `packet` returned 118 KB, `signals`), a 203-word brief
-was authored, `chat-save --market --content-file` returned a message id and
-`SAVED` — then hit `max_turns: 14` before the model could emit its final
-assistant text (the message that becomes the Telegram summary). Escalation to
-`claude-opus-4-7 effort:high` blew the same budget the same way; this is not a
-model capability issue.
-
-Turn-by-turn (parent `7cbba04c`, 26 assistant turns / 55 lines):
-- Turns 1–3: happy path (3 gathers in parallel, DB scout count) → all OK
-- Turns 4–9: SIX successive `python3 -c` inspections of the packet JSON shape
-  (top-level keys → packet keys → per_asset structure → totals → per_asset
-  rows → glossary type), because the skill doesn't tell the session what the
-  packet actually contains
-- Turns 10–12: extract trailing market chat / last user messages / glossary
-  entries — legitimate context for the brief
-- Turn 13: Write /tmp/brief-<job>.md
-- Turn 14: chat-save (SUCCESS)
-- No turn left for final assistant text → `error_max_turns: 14`
-
-Same shape in child `0e733c68` (opus): 20 tool_use blocks across 14 turns,
-same JSON-key-exploration detour, same terminal chat-save before the budget
-ran out.
-
-The seven prior daily runs 2026-09-08 → 2026-09-15 finished under 14 turns
-because the model got the packet shape right on fewer inspection passes; this
-is intermittent-under-tight-budget, same class as the `_writeback` /
-`_learning_apply` / `atlas-value-monitor` recurrences (see other sections).
-
-Distinct from the 2026-08-04 failure at this budget (that one was
-`atlas-dash packet` raising `decimal.InvalidOperation` — fixed and deployed;
-today's packet returned 118 KB cleanly).
-
-### Fix (proposed — server code, needs dev-repo commit + `/task deploy server`)
-
-Two changes in `skills/atlas-daily-brief/SKILL.md`, both belong in the dev
-repo (`~/Documents/repos/ai-server`):
-
-1. **Frontmatter**: `max_turns: 14` → `max_turns: 24`. Headroom for the
-   inspection detours the current prompt implicitly invites, matching the
-   `atlas-value-monitor` bump (20 → 30) from 2026-09-08.
-2. **Prompt hardening (durable answer)**: document the packet & chat-context
-   JSON schemas inline in the skill so sessions don't need to inspect
-   `list(pk.keys())` six times. Add a "Data shapes you'll receive" section
-   between step 1 (Gather) and step 2 (Author) listing the fields the brief
-   actually uses (VIX, VIX3M, MOVE, HY_OAS, per_asset totals, glossary
-   entries for MVRV_Z / NUPL, glossary type, last N chat messages).
-
-Optional third change: teach the skill to author the brief in the final
-assistant text rather than writing `/tmp/brief-<job>.md` + `chat-save
---content-file` — saves 2 turns, but changes the delivery contract to the
-`/indicators` market chat.
-
-### Diagnostic (repro)
-```bash
-JOB=<job_id>
-python3 -c "
-import json
-lines = open('volumes/audit_log/${JOB}.jsonl').readlines()
-turns = sum(1 for l in lines if json.loads(l).get('kind')=='tool_use')
-last = json.loads(lines[-2]); fail = json.loads(lines[-1])
-print(f'tool_uses={turns} last_tool={last.get(\"tool_name\")} last_result_ok={last.get(\"input\") is not None} err={fail.get(\"error\")}')
-"
-# → tool_uses=20 last_tool=Bash err=error_max_turns (14)   — the smoking gun:
-#   work finished, no turn left for the final assistant summary
-```
-
-### Recurrence guard
-
-If the frontmatter bump lands and this recurs, the durable answer is prompt
-hardening (schema documentation) — not raising `max_turns` further.
-Recurrence count so far: 2 (`7cbba04c`, `0e733c68`, both 2026-09-16 within 2
-minutes of each other; count parent + escalation-child as one event since
-the child inherits the same skill body).
-
----
+whenever the workspace-push meta-bug unblocks it.)
 
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
@@ -4046,72 +2822,230 @@ Job status is not proof of output. Watchdogs must check artifacts:
 schedule-born jobs (the `_evaluate` gate only covers task-linked jobs) is the
 open follow-up.
 
-## Symptom: `volumes/telemetry/schedule_adherence.json` reports `findings: []` and `launchctl list` shows `com.assistant.schedule-monitor` last exit **0**, but the file's `generated_at` is days or weeks old
+## Symptom: a `--model=codex/...` job (or a schedule carrying `{"model": "codex/..."}`) fails at once with `error_category=provider_refused` — no clone, no process, no DM summary
 
-Found 2026-09-20 by the swing governor (atlas LEDGER G-0003). The
-schedule-adherence watchdog had failed **every launchd run since 2026-09-02** —
-15 consecutive firings, all `rc=127` — while presenting as perfectly healthy.
-Its artifact stayed frozen at `2026-09-01T21:26Z` and kept answering
-`findings: []` for all 33 schedules. Tally over the whole log:
-`rc=0 × 1, rc=127 × 15`; the single success was an *interactive* run, which is
-why it was never caught.
-
-> **STILL OPEN as of 2026-09-27 — and worse.** Re-verified by the swing governor
-> one week later: the tally is now **`rc=0 × 1, rc=127 × 22`** (7 further failed
-> firings, through `2026-09-27T11:15:03Z`) and the artifact is still frozen at
-> `2026-09-01T21:26:27Z` — **26 days stale, still reporting `findings: []`**.
-> Neither fix below has been applied. Independently re-detected the same day by
-> the *trader* governor (atlas T-0022 finding F15), which additionally showed the
-> real cost: the watchdog's purpose-built `stuck` detector would have caught a
-> genuinely lost trading session on 2026-09-25 and did not. Two verticals'
-> governors converging on one defect is corroboration — treat as P0, not as a
-> duplicate filing. Tracked as swing DR-0007 / DR-0004 and trader T-0010/T-0013.
-
-Two independent defects, both required for the failure to stay invisible:
-
-1. **`pipenv` is unreachable in the launchd environment.** It lives only inside
-   the project virtualenv
-   (`~/.local/share/virtualenvs/ai-server-bpzo5SVu/bin/pipenv`), which is not in
-   the PATH that `scripts/schedule-monitor.sh:12` exports
-   (`/opt/homebrew/bin:…:/sbin:$PATH`). Reproduce:
-   `env -i PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" bash -c 'command -v pipenv'`
-   → nothing. Interactively it resolves, so manual testing always passes.
-2. **The script swallows collector failure by design.**
-   `scripts/schedule-monitor.sh:25` is
-   `(( rc != 0 )) && exit 0   # collector failure already logged; not a finding`.
-   A dead collector therefore returns success to launchd, sends **no owner DM**,
-   and leaves the previous artifact in place to be read as current.
-
-Blast radius: `skills/atlas-firm-rollup/SKILL.md:74` consumes that artifact, so
-the firm rollup reported fleet schedule health as green off a file that predated
-the reporting period. Treat all schedule-adherence assurances dated after the
-artifact's `generated_at` as void and re-derive from `jobs` rows.
-
-### Diagnosis
+### Diagnostic
 
 ```bash
-cd "$SRV"
-python3 -c "import json;print(json.load(open('volumes/telemetry/schedule_adherence.json'))['generated_at'])"
-grep -oE 'rc=[0-9]+' volumes/logs/schedule-monitor.log | sort | uniq -c
+grep -E '"kind": "(provider_selected|provider_refused)"' volumes/audit_log/<job_id>.jsonl
+grep -E '^ROUTER_(PROVIDERS_ENABLED|CODE_SERVER_PROVIDERS)=' "$HOME/Library/Application Support/ai-server/.env"
 ```
 
-`launchctl list` is **not** evidence here — a script that `exit 0`s on internal
-failure always looks green there. Read the script's own log.
+### Root cause
+
+Every model id is resolved through `src/registry/models.py` against
+`models.yml` and the lane rules in `src/runner/session.py` BEFORE the deploy
+gate and the workspace clone (T1/T4/T5, 2026-10-21). The refusal is fail-closed
+(C12) and terminal: `provider_refused{provider, model, raw, reason}` +
+`job_failed error_category=provider_refused`, no escalation. The `reason`
+field is one of:
+
+| `reason` starts with | meaning | what to do |
+|---|---|---|
+| `unknown provider '…'` / `unknown model '…' for provider '…'` / `empty model id` | the id is not in `models.yml` (a bare `gpt-6-luna` is `anthropic/gpt-6-luna` and unknown — write `codex/gpt-6-luna`) | fix the flag / skill `model:` / schedule payload; add the id to `models.yml` only if the vendor doc confirms it |
+| `provider 'codex' is not enabled (ROUTER_PROVIDERS_ENABLED='anthropic')` | the default — the slice ships dark | owner flips `ROUTER_PROVIDERS_ENABLED=anthropic,codex` in prod `.env` + restarts runner and bot (plan §7.1); until then this is correct behaviour |
+| `no executor for provider '…' in this runner` | `models.yml` names an `executor:` this build has no module for | deploy the build that carries it; never edit `models.yml` to point at another executor |
+| `isolation tier '…': non-Anthropic executors run on the 'workspace' tier only` | the skill is `isolation: host`/`none` | pin the skill to Anthropic or make it workspace-isolated |
+| `skill '…' declares subagents (…)` / `skill '…' needs MCP (…)` | capability the Codex lane does not have | run on Anthropic |
+| `skill '…' is in the code-server set; provider 'codex' is not in ROUTER_CODE_SERVER_PROVIDERS` | D-A: `server-patch`, `server-deploy`, `new-skill`, `deploy-director`, `atlas-redeploy`, `project-redeploy` are Anthropic-only | expected; lifting it is plan §7.4–7.6, owner-only |
+| `job has no project slug, so its canonical is the server root` / `canonical … is the server root` / `… inside the server root but not a project` | D-A by path (T5 review): a generic task, a router miss or a missing project dir resolves to THIS repo | give the job a project (`/task <slug>: …` or a project-scoped skill), or run it on Anthropic |
+| `payload model override to 'codex/…' on a job from 'schedule:…'`: skill pins … | a non-owner origin (schedule, dispatch MCP, event) may not override an Anthropic-pinned skill | pin `model: codex/<id>` in the skill's frontmatter, or schedule an unpinned skill (runner GOTCHAS) |
+| `the codex lane needs a git canonical for the pre-push review gate` | the project is a copied (non-git) canonical | run on Anthropic; the gate diffs a clone |
 
 ### Fix
 
-Invoke the venv interpreter directly instead of resolving `pipenv` from PATH
-(the pattern the other plists already use — see `skills/server-deploy/SKILL.md`
-"pipenv in launchd context"), and replace the `(( rc != 0 )) && exit 0` branch
-with a P0 alert path that DMs the owner and exits non-zero. Code change: goes
-through the dev repo under the normal server-patch lane.
+Per the table. For the web dropdown and `/task --model=`, the same resolution
+runs at submit time (HTTP 422 / a reply naming the reason), so a job that got
+as far as `provider_refused` came from a schedule payload or a stale client.
 
 ### Prevention
 
-A watchdog that cannot run must be its own loudest finding. Any consumer of a
-telemetry artifact must compare `generated_at` against now and refuse to report
-green on a stale file — staleness is a finding, not an absence of findings. Same
-class as the 08-17 governor-dark incident: silence read as health.
+`tests/test_models_registry.py` resolves every skill frontmatter and escalation
+target; `tests/test_provider_dispatch.py` covers each lane rule. Add the case
+there before changing a rule.
+
+## Symptom: a `codex/...` job fails with `terminal_reason=api_error` and the audit log shows an `executor_error` whose message starts with `CodexNotFound:` — "codex not found"
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "(executor_started|executor_error)"' volumes/audit_log/<job_id>.jsonl
+grep '^CODEX_BIN=' "$HOME/Library/Application Support/ai-server/.env"
+ls -l /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex; which codex
+```
+
+### Root cause
+
+`executors.codex_cli.discover_binary` tries, in order: `settings.codex_bin`
+(`CODEX_BIN`) → `shutil.which("codex")` → the ChatGPT.app bundle
+`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`. A
+configured `CODEX_BIN` that does not exist is `CodexNotFound` outright — it
+never falls through to PATH (fail closed). Launchd's PATH is frozen, so on
+prod the bundle path is the realistic default and `which codex` in a shell
+proves nothing about the runner. The error is terminal on the lane
+(`ExecutorFailed(..., "api_error")`), never escalated to Anthropic.
+
+### Fix
+
+Set `CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`
+(or wherever `codex --version` answers) in prod `.env`, or leave it empty and
+make sure the ChatGPT app is installed; restart the runner. Requeue the job.
+
+### Prevention
+
+`tests/test_codex_executor.py` pins the discovery order. Do not symlink the
+bundle binary onto PATH for launchd — a ChatGPT app update moves it; the
+executor already knows the bundle path.
+
+## Symptom: a `codex/...` job sits in `running` with an `executor_started` event and nothing after it until `terminal_reason=timeout` — `codex exec` hangs
+
+### Diagnostic
+
+```bash
+ps -o pid,ppid,etime,command -ax | grep -E 'codex(-cli)? exec' | grep -v grep
+grep -c '"kind": "' volumes/audit_log/<job_id>.jsonl     # only job_started + executor_started?
+```
+
+### Root cause
+
+`codex exec` reads a piped **stdin** as additional instructions and blocks
+until EOF (the 2026-10-21 probe hung 90 s). The executor always spawns with
+`stdin=DEVNULL` (plan §4d), so a hang from the runner means something is
+wrapping the invocation — or the hang is a hand-run `codex exec` from a shell
+without `</dev/null`. The second hang class
+is the first turn itself: a slow or rate-limited first turn can show no events
+for minutes before `turn.failed` → `rate_limited` (the recorded fixtures carry
+no retry events; T10 measures this on the Free plan). The runner's
+ceiling still applies — `main`'s `wait_for` fires `terminal_reason=timeout`
+on the lane, `session.interrupt` → `codex_cli.interrupt` sends SIGTERM then
+SIGKILL after 1.5 s (INV-8), the job is NOT escalated to Anthropic.
+
+### Fix
+
+Kill the stray process if the runner's SIGKILL missed it (`kill -9 <pid>`).
+Reproduce by hand with the exact argv from `executor_started` and
+`</dev/null`; if it completes, the hang was stdin. Requeue the job.
+
+### Prevention
+
+Never add a stdin feed to `build_argv`'s spawn; `tests/test_codex_executor.py`
+asserts `stdin=DEVNULL`. For `CODEX_RUN_AS_USER` (not yet usable, plan §6
+D-C), the sudoers rule must not use `requiretty`.
+
+## Symptom: every `codex/...` job fails with `terminal_reason=auth_expired` (`executor_error` message mentions 401 / "log in" / refresh_token)
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "executor_error"' volumes/audit_log/<job_id>.jsonl | tail -1
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}" /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex login status
+```
+
+### Root cause
+
+The ChatGPT login in `auth.json` (under `CODEX_HOME`, default `~/.codex`)
+has expired or its refresh token was rotated out from under the runner —
+the usual cause is a second `codex` process (the owner's own terminal, the
+ChatGPT app) refreshing the same `auth.json` — or two Codex JOBS running at
+once: plan §4f assumes one stream per login; since the 2026-10-21
+whole-branch review `session._run_executor` enforces it with a per-executor
+slot (`EXECUTOR_CONCURRENCY["codex_cli"] = 1`; a queued second job audits
+`executor_slot_wait` and runs after the first), so two Codex JOBS can no
+longer race the refresh token — a second `codex` PROCESS outside the runner
+still can. The
+executor classifies 401 / "login" / `refresh_token` / "unauthorized" as
+`auth_expired`; it is terminal on the lane and never escalated.
+
+### Fix
+
+Owner-only (auth config, never a job): re-login into the home the runner
+uses —
+
+```bash
+CODEX_HOME="<the CODEX_HOME from prod .env, or ~/.codex>" \
+  /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex login --device-auth
+```
+
+then requeue. If the owner's interactive `codex` shares that home, provision
+the dedicated stream home (plan §7.2) so the two never contend.
+
+### Prevention
+
+Keep `CODEX_HOME` pointed at a stream home no human session uses. Until a
+per-provider concurrency cap lands (plan §6 residual, 2026-10-21), do not
+schedule two Codex routines in the same window and do not `/task` a second
+Codex job while one is running. The T10 canary asserts a working login before
+any scheduled routine is pinned to the lane.
+
+## Symptom: a `codex/...` job stays `queued` and the audit log shows repeated `job_held{provider: "codex", reason, until}` while Anthropic jobs run normally
+
+### Diagnostic
+
+```bash
+redis-cli GET quota:provider:codex:paused_until; redis-cli GET quota:provider:codex:last_reason
+grep -E '"kind": "(job_held|job_requeued_for_quota)"' volumes/audit_log/<job_id>.jsonl
+```
+
+### Root cause
+
+A previous Codex job hit `rate_limited` (Free-plan 429 / "slow_down" / usage
+limit). Per T6, that pauses ONLY the Codex lane
+(`quota:provider:codex:paused_until`, `QUOTA_PAUSE_MINUTES` ahead — the
+stream carries no reset time) and LPUSHes the hit job to the front; every
+later Codex job is held inside the fetch transaction, never marked running,
+and RPUSHed to the TAIL after ≤ 30 s (plan §4g — the documented exception to
+INV-12's front requeue). `job_held` is written once per (job, pause window).
+The global `quota:paused_until` is never touched by this path.
+
+### Fix
+
+Wait for `until`, or `/resume codex` in Telegram (lifts the lane; bare
+`/resume` still lifts only the Anthropic/global pause). `/status` lists each
+paused lane; `GET /api/quota` carries a `providers` map.
+
+### Prevention
+
+Measure the Free plan's rate-limit rate on the canary (plan §7.3, §8) before
+scheduling more than one Codex routine; the Plus tier decision rests on it.
+
+## Symptom: a `codex/...` job fails with `Review blocked: pre-push review gate returned changes_requested|blocker|error` (error_category `review_blocked`)
+
+### Diagnostic
+
+```bash
+grep -E '"kind": "(merge_gate_verdict|code_review_done|workspace_published)"' volumes/audit_log/<job_id>.jsonl
+ls volumes/workspaces/ | grep <job8>      # the clone is KEPT with the un-pushed diff
+```
+
+### Root cause
+
+Every non-Anthropic (Codex) job's clone diff is reviewed by the fixed
+Anthropic reviewer BEFORE the runner commits and pushes (T5, 2026-10-21;
+INV-21(c)). Anything but LGTM — including a reviewer timeout (600 s, counted
+as `changes_requested`) or `error` (the reviewer could not run) — fails the
+job on the lane: nothing is committed, pushed or ff-synced, no escalation,
+`jobs.review_outcome` carries the verdict. There is no switch to bypass it.
+
+### Fix
+
+Read `code_review_done.review_text` in the audit log for the findings. Either
+re-run the job with the findings in the description, or finish the work from
+the kept clone yourself (`git -C volumes/workspaces/<job8>-<name> diff`). A
+`workspace_published{ok:false}` after an LGTM is a different case
+(`error_category=publish_failed`, review round 1): the push was rejected
+(remote moved) — `git pull --rebase && git push` from the clone, see runner
+GOTCHAS. A `merge_gate_refused{reason=denied_path, paths}` with NO
+`code_review_done` means the diff touched a denied path (`.claude/`,
+`.codex/`, `.git*`/`.github/`, `AGENTS.md`, `CLAUDE.md`, `.mcp.json`) and
+was refused before any reviewer ran — make that edit on an Anthropic lane.
+A `provider_refused` whose reason names **D-A** means the job's canonical
+resolved to the server root (no project slug / missing project dir): Codex
+may not write to this repo unless `ROUTER_CODE_SERVER_PROVIDERS` lists it.
+
+### Prevention
+
+Pin smaller tasks to the Codex lane; the gate is one Anthropic session's
+judgement over the whole diff, and a 50k-char diff is truncated for review.
 
 ## Adding entries to this file
 ## Symptom: `atlas-momo-research` hits `session_timeout` at 60 min while the engineer probe is still running
@@ -4175,217 +3109,42 @@ the skill's own gotcha names. Two independent knobs:
 
 Both are medium-risk skill/orchestration changes; neither is a `server-patch`.
 
-### Update (2026-09-03, job `f954aba2`)
-
-Third instance of this exact ceiling-hit, this time on cycle 0008 (H010,
-same probe as `44d1bc6b`). **Skill-level mitigation is now landed and
-demonstrated working.** Timeline diff vs. `44d1bc6b`:
-
-- Prior run recorded *nothing* at row 264/315 when the ceiling fired.
-- `f954aba2` re-forked the classifier with a token-bucket rate limiter
-  (~2.3 s/row vs. ~13 s/row), 8-row prefetch preserving in-order writes,
-  `--deadline-seconds`, and six resume rules that hard-refuse on cursor
-  regression. Frame stopped cleanly at row 278/315 with committed
-  `state.json`, cycle report (`cycle-0008.json`, status `partial`), full
-  test suite green (515 passed), CHANGELOG entry, and
-  `docs/SESSION_HANDOFF.md` describing the resume. Both close-out commits
-  reached `origin/master` (`aed600c`, `db89988`) BEFORE
-  `session_timeout` fired at 17:48:31.
-- The E-0032 pre-registration corrective also landed: card sealed in its
-  own commit `f8317d7` strictly before instrument commit `b13c2d8`.
-
-Diagnostic classification therefore: the `Session timed out` lifecycle
-marker is not, in this instance, a work-loss failure. It is the runner's
-60-min ceiling firing on a session that had already committed and pushed
-its close-out. Recovery: none required beyond dispatching a resume run of
-`atlas-momo-research` (or letting the weekly schedule pick it up) — the
-resume path in `docs/SESSION_HANDOFF.md` is authoritative. Do NOT restart
-from cursor 0; resume rule 3 will refuse and write nothing. The durable
-split-into-child-jobs Prevention above still stands as the right long-term
-fix; the parallel-fetch speed knob is now half-shipped inside H010.
-
-
-
-## Symptom: a job fails with `Failed to decode JSON: JSON message exceeded maximum buffer size of 1048576 bytes...`
-
-Observed in production on 2026-10-09 on two Opus-5 jobs operating on very
-large files inside atlas (ledger ~21k lines):
-
-- `4bce7355` — `alpha-governor` (effort medium)
-- `3c7c8c56` — `alpha-research` (effort high) — died mid-Edit on
-  `alpha-lab/evaluation/LEDGER.md` right as it was writing E-0144. The
-  Edit `new_string` visible in the audit log is ~11 KB + "[11073 chars
-  truncated]"; combined with the model's long thinking blocks, the
-  single JSON frame the Claude Code CLI emits for one tool_use message
-  exceeded 1 MiB and the SDK transport raised `SDKJSONDecodeError`.
-
-### Diagnostic
-
-```bash
-# search the audit index for prior occurrences
-cd "$ASSISTANT_SERVER"
-python3 -c "from src.runner.audit_index import search_index; from pathlib import Path; [print(e) for e in search_index(Path('volumes/audit_log/INDEX.jsonl'), keyword='buffer')]"
-
-# in the failing job's audit log the last tool_use before job_failed is
-# usually an Edit on a huge file, or a model response with very long
-# thinking content.
-tail -5 "$ASSISTANT_SERVER/volumes/audit_log/<job_id>.jsonl"
-```
-
-### Root cause
-
-The Claude Agent SDK's subprocess transport (`claude_agent_sdk/_internal/
-transport/subprocess_cli.py`) accumulates each JSON message from the CLI
-into a buffer. It raises `SDKJSONDecodeError("JSON message exceeded
-maximum buffer size of {N} bytes")` once the buffer passes
-`_DEFAULT_MAX_BUFFER_SIZE = 1024 * 1024` — 1 MiB. The SDK exposes
-`ClaudeAgentOptions.max_buffer_size` to override that default
-(`claude_agent_sdk/types.py` line 1735; honored by transport line 74),
-but `src/runner/session.py::_build_options()` (around line 711) never
-sets it. Opus-5 produces very long thinking blocks, and large Edit
-calls on atlas's LEDGER.md push a single JSON frame past the ceiling —
-the job dies and ALL of its work since the last commit is lost (`3c7c8c56`
-had no commits in its workspace yet).
-
-### Fix
-
-Server-code change (medium risk — needs code-reviewer sub-agent LGTM
-per INV-13). In `src/runner/session.py::_build_options()`, add
-`max_buffer_size` to the `kwargs` dict passed to `ClaudeAgentOptions`.
-A reasonable value is 64 MiB — enough for any sane model output,
-small compared to RSS. Make it configurable via `settings` so operators
-can bump it further without redeploying code:
-
-```python
-# src/runner/settings.py — add alongside default_model
-sdk_max_buffer_size: int = 64 * 1024 * 1024  # 64 MiB; SDK default is 1 MiB
-
-# src/runner/session.py::_build_options(), inside the kwargs dict
-# (around line 711):
-kwargs: dict[str, Any] = dict(
-    ...
-    model=model,
-    max_buffer_size=settings.sdk_max_buffer_size,
-)
-```
-
-Verify with:
-
-```bash
-# resubmit the failing alpha-research job (or wait for schedule)
-# then confirm the audit log shows kind=job_completed, not job_failed
-```
-
-Until the patch lands, Opus-5 alpha-* jobs operating on
-multi-megabyte files should be considered flaky — if one dies with this
-error, re-dispatch and hope the model's thinking is shorter the second
-try. Do NOT restart from cursor 0 on anything that writes an append-only
-ledger; follow the skill's resume path.
-
-### Prevention
-
-Alongside the `max_buffer_size` bump, categorize this error in
-`src/runner/errors.py` (or wherever `error_category` is assigned) as
-`sdk_buffer_overflow` instead of `unknown`, so the audit index can
-cluster these and the dashboard surfaces the class. Longer term, when
-the SDK ships a streaming/chunked parser (it currently accumulates a
-whole message before `json.loads`), drop the override.
-
-### 2026-10-10 update: fix landed, triggered a self-restart cascade
-
-Commit `abb0dae` ("fix: raise SDK transport buffer ceiling to 20 MiB")
-landed in `src/runner/session.py` at 2026-10-10 03:32 and merged to main
-as `2eec724` — the ceiling is now `20 * 1024 * 1024` (`session.py` ~L829).
-BUT the fix only takes effect after a runner restart; the runner that was
-running at 03:36 still held the pre-fix bytecode. When an `alpha-research`
-job (`1a8bfc42`) hit the old 1 MiB limit at 04:26, the escalation chain
-produced the second symptom below.
-
----
-
-## Symptom: two `self-diagnose` jobs fail back-to-back with exit 143, tripping the "2+ failures in 10 min" event trigger
-
-### Diagnostic
-
-```sql
--- recent self-diagnose outcomes
-SELECT id, status, error_message, created_at FROM jobs
-WHERE kind='self-diagnose' ORDER BY created_at DESC LIMIT 5;
-```
-
-Classic shape (2026-10-10 incident):
-- job A: `failed`, `Command failed with exit code 143` — audit log ends on
-  a `Bash` tool_use whose command contains `launchctl kickstart -k …
-  com.assistant.runner`.
-- job B: `failed`, `Runner restarted while this job was still 'running';
-  marked failed by startup reconciliation` — spawned as the L3 "LAST
-  RESORT" escalation of job A, started seconds before the restart
-  completed.
-- Then the runner starts fresh (`ps -o lstart` on the runner's bash wrapper
-  shows a start time **within a second or two of job B's created_at**),
-  loads the fixed code, and the event trigger (2+ `self-diagnose` failures
-  in 10 min) fires one more `self-diagnose` on top.
-
-### Root cause
-
-The first `self-diagnose` correctly diagnosed the SDK-buffer-overflow bug
-(see previous symptom) and correctly concluded "code is on disk, needs a
-runner restart to load." Correct fix, wrong actor. The `self-diagnose`
-job runs INSIDE the runner process, so when it shelled out
-`launchctl kickstart -k gui/$(id -u)/com.assistant.runner`, launchd sent
-SIGTERM to the runner, which killed the child shell running the kickstart
-command — exit 143 (128 + 15). The runner's `main.py` failure path saw a
-non-zero exit, marked the job failed, and spawned the L3 "LAST RESORT"
-self-diagnose child, which started executing just as the runner was coming
-back up and got caught by startup reconciliation (`marked failed by
-startup reconciliation`). The event-trigger threshold is "2+ failures in
-10 min for the same skill" — both failures qualified, trigger fired,
-third `self-diagnose` runs on top of a now-fixed runner. The underlying
-alpha-research bug was already resolved by the restart; the alarm chain
-is purely self-inflicted.
-
-### Fix
-
-**No action needed for the incident itself.** Verify the runner is
-restarted and holds the fix:
-
-```bash
-# runner start time (should be newer than the fix commit timestamp)
-ps -o pid,lstart,command -p $(launchctl list | awk '/com\.assistant\.runner/{print $1}')
-
-# fix is on disk and the running interpreter will load it
-grep -n "max_buffer_size" "$ASSISTANT_SERVER/src/runner/session.py"
-```
-
-The two failed `self-diagnose` jobs can be left as-is — their diagnosis
-was CORRECT (first) or stale (second), and no production damage occurred.
-The current `self-diagnose` (the one triggered by the event rule) should
-confirm the fix is loaded and exit without further action.
-
-### Prevention
-
-Added to `skills/self-diagnose/SKILL.md` Gotchas: a `self-diagnose` job
-MUST NOT restart the runner itself — the restart kills its own process.
-If a diagnosis's correct fix is "reload runner code," the job must either
-(a) stop and output the exact `launchctl kickstart` command for an
-out-of-band actor to run, (b) delegate to `server-deploy` (which is
-structured to survive a self-targeted restart via its `nohup sleep N`
-preamble, assuming the god-skill's mutation guard isn't on the path), or
-(c) schedule the restart via `at`/`nohup sleep` AFTER emitting the final
-summary. Target string to recognise: Bash command contains
-`kickstart -k` AND `runner`.
-
-Longer term (requires server-patch), the escalation chain in
-`src/runner/main.py` should treat exit 143 on a `self-diagnose` job whose
-last `tool_use` is a `launchctl kickstart -k … runner` Bash command as a
-**successful self-restart**, not a failure, and suppress the L3 escalation
-+ the event trigger's increment. See INV-29 (if filed) or write one.
-
 
 
 When you hit a new failure, append a section here in this shape:
 
 ```markdown
+## Symptom: a Codex job's audit log shows fewer `tool_use` events than commands the agent says it ran (or none for a command it reports as "blocked")
+
+### Diagnostic
+
+```bash
+grep -c '"kind": "tool_use"' volumes/audit_log/<job_id>.jsonl
+grep '"kind": "text"' volumes/audit_log/<job_id>.jsonl | grep -iE 'not permitted|blocked|denied'
+```
+
+### Root cause
+
+codex-cli 0.162.0-alpha.17.2 emits no `command_execution` item for a
+command the Seatbelt sandbox denies (`workspace-write` → a write outside the
+clone, or any network call): the command runs, fails with "Operation not
+permitted", and only the agent's own `agent_message` may mention it
+(recorded 2026-10-21 by the T10 canary — `tests/fixtures/codex/
+sandbox_denied.jsonl`). The denial itself holds; the audit log under-reports
+the ATTEMPT.
+
+### Fix
+
+Nothing to repair in the job. Read the agent's text events for the attempt,
+and treat the pre-push gate's diff (`merge_gate_verdict`, the reviewed
+commit in the kept clone) as the evidence of what the job actually changed.
+
+### Prevention
+
+Re-run `scripts/codex-canary.sh` after a Codex CLI upgrade; if the denied
+`touch` starts appearing as `tool_use`/`tool_result`, update the fixture and
+drop this entry. Plan §6 (T10 residual) tracks it.
+
 ## Symptom: <what the user sees>
 
 ### Diagnostic
