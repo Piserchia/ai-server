@@ -12,6 +12,33 @@ from typing import Any
 from src.db import QUEUE_JOBS, async_session, redis
 from src.models import Job, JobKind, JobStatus
 
+# Persisted origin (Observability Phase 1, migration 008). The two helpers
+# below are pure and, as of A1, UNCALLED: A2 wires them into enqueue_job
+# (deriving origin_channel/origin_ref from created_by when a producer passes
+# no explicit origin) and A4's notice builder reads the stamped columns.
+ORIGIN_CHANNELS: tuple[str, ...] = ("telegram", "web", "cli", "scheduler", "system")
+_ORIGIN_REF_MAX = 64   # jobs.origin_ref / tasks.origin_ref are String(64)
+
+
+def origin_from_created_by(created_by: str | None) -> tuple[str, str | None]:
+    """Pure. Fallback (origin_channel, origin_ref) for producers that pass no
+    explicit origin. Mirrors migration 008's `_BACKFILL_ORIGIN` CASE arm for
+    arm so backfilled and new rows agree: `telegram:<chat>` → ('telegram',
+    <chat>); `web` → ('web', None); `scheduler` → ('scheduler', None);
+    everything else (dispatch-mcp, event-trigger*, learning:, escalation*,
+    plan:, evaluator:, auto-continue:, deploy-autopilot, owner-*, …) →
+    ('system', created_by). Refs are clipped to the String(64) column and an
+    empty ref is None, never '' (the SQL side's NULLIF)."""
+    cb = (created_by or "").strip()
+    if cb.startswith("telegram:"):
+        ref = cb.split(":", 1)[1].strip()
+        return "telegram", (ref[:_ORIGIN_REF_MAX] or None)
+    if cb == "web":
+        return "web", None
+    if cb == "scheduler":
+        return "scheduler", None
+    return "system", (cb[:_ORIGIN_REF_MAX] or None)
+
 
 async def enqueue_job(
     description: str,

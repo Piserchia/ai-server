@@ -101,9 +101,12 @@ Bot's done_listener / task_notifier → DMs + thread cards (plan, completed,
 - **Audit log is append-only.** Use `audit_log.append(...)`. Never rewrite prior entries.
 - **Redis channels** live in `db.py` as named constants. Don't inline string names.
 - **Error handling**: catch `QuotaExhausted` specifically in the runner; everything else is a failure.
-- **Migrations**: Alembic, six files (`001_initial` … `006_job_status_constraint`).
-  Tables: `jobs`, `schedules`, `projects`, `proposals`, `tasks`, `task_turns`
-  (+ `alembic_version`). `tests/test_migrations.py` keeps the chain consistent.
+- **Migrations**: Alembic, eight files (`001_initial` … `007_provider_columns`,
+  `008_p0_observability`). Tables: `jobs`, `schedules`, `projects`, `proposals`,
+  `tasks`, `task_turns`, `notifications` (+ `alembic_version`).
+  `tests/test_migrations.py` keeps the chain consistent and asserts the on-disk
+  chain equals `alembic/applied_history.txt` (append the id in every migration
+  commit; never revert a migration file without `alembic downgrade -1` on prod first).
 
 ## Invariants (hard rules)
 

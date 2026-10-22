@@ -1,5 +1,5 @@
 """
-ORM models. Six tables.
+ORM models. Seven tables.
 
 - jobs:        one unit of work. Records model/effort actually used + user rating.
 - schedules:   cron recipes that enqueue jobs.
@@ -7,11 +7,13 @@ ORM models. Six tables.
 - proposals:   tuning/doc proposals from review-and-improve.
 - tasks:       multi-turn conversation wrappers around related jobs.
 - task_turns:  individual turns (user, assistant, system) within a task.
+- notifications: outbox rows for owner DMs (Observability Phase 1, spec §3);
+               written by the runner / CLI, delivered by the bot.
 
 Audit trail is JSONL files on disk, not a table. See src/audit_log.py.
 
 Model/effort tracking enables the auto-tuning loop: `review-and-improve` queries
-{kind, model, effort, outcome, user_rating, tokens_used} to propose default changes.
+{kind, model, effort, outcome, user_rating, input_tokens/output_tokens} to propose default changes.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     SmallInteger,
     String,
     Text,
@@ -113,6 +116,45 @@ class Job(Base):
     user_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)  # 1-5
     review_outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # ^ "LGTM" | "changes_requested" | "blocker" (set by code-review sub-agent)
+
+    # ── Observability Phase 1 + origin (migration 008; every column nullable) ──
+    # Spec §2.3. Stamped by runner/session.py + runner/result_capture.py
+    # (tokens, turns, API duration, the two cost columns, cli_version — B3)
+    # and runner/main.py (queue_wait_ms — A2); origin_* by the producers
+    # (gateway/jobs.py enqueue_job via origin_from_created_by, the Telegram
+    # and web launch sites — A2). lane / task_class / first_event_at are
+    # RESERVED here so Phase 3 needs no migration; they stay NULL until then.
+    # There is deliberately NO `priority` column (lanes replace it), and no
+    # `executor` / `sensitivity` (deleted vendor scope). resolved_provider,
+    # terminal_reason and model_served above are 007's and stay.
+    cli_version: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    lane: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    origin_channel: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # ^ telegram | web | cli | scheduler | system  (gateway.jobs.ORIGIN_CHANNELS)
+    origin_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ^ telegram: the chat id; system: the raw created_by; web/scheduler: NULL
+    origin_thread: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ^ telegram: the bot's root-reply message id to post under
+    queue_wait_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    first_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cache_read_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Cache writes split by TTL: the subscription writes 1-h entries ($10/M
+    # Opus, $6/M Sonnet), and a non-zero 5-m count is the usage-credits
+    # signature (spec §2.8 metered-spend tripwires).
+    cache_write_1h_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cache_write_5m_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    num_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_api_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # cost_usd_list = the RUNNER's computation from tokens (runner/pricing.py,
+    # 1-h cache-write rate); sdk_cost_usd = the SDK's ResultMessage
+    # .total_cost_usd. Two columns because they are two measurements of the
+    # same thing and the exit criterion is that they agree (spec §2.5).
+    # Neither is ever a bill.
+    cost_usd_list: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    sdk_cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    task_class: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Scoping
     project_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -295,6 +337,16 @@ class Task(Base):
     thread_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # ^ Telegram message ID of the bot's root reply — used to post in the right thread
 
+    # Observability Phase 1 origin binding (migration 008). chat_id /
+    # thread_message_id above are KEPT (keep columns, stop depending on them);
+    # new code reads origin_* first and falls back to them. Stamped by A2.
+    origin_channel: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    origin_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    origin_thread: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    awaiting_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ^ set when status enters awaiting_user/pending_approval, cleared on
+    #   active/completed — stuck asks finally have an age
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
@@ -328,3 +380,41 @@ class TaskTurn(Base):
     )
 
     task = relationship("Task", back_populates="turns")
+
+
+class Notification(Base):
+    """Outbox row for an owner-facing notice (Observability Phase 1, spec §3).
+
+    Written by the runner (job terminal + task lifecycle — A5), the bot (quota
+    pause/resume — A6) and `python -m src.notify send` (launchd alerters — A7);
+    delivered by the bot's outbox listener, which stamps status/attempts/
+    external_ref so delivery history is queryable. `target` is the destination
+    chat id (None → owner = first TELEGRAM_ALLOWED_CHAT_IDS entry); `thread`
+    the Telegram message id to reply under. Migration 008 declares `actions`
+    JSONB on Postgres; `JSON` here is the same portable declaration
+    `Job.payload` uses.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notice_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_type: Mapped[str | None] = mapped_column(String(16), nullable=True)   # job | task | schedule | ops
+    subject_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    severity: Mapped[str] = mapped_column(String(8), nullable=False, default="info")  # info | warn | critical
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    actions: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # {"buttons": [[[label, callback], ...]], ...}
+    channel: Mapped[str] = mapped_column(String(16), nullable=False, default="telegram")
+    target: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    thread: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    external_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)  # Telegram message_id once sent
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    # ^ pending | sending | sent | failed | skipped   (`sending` = claimed by one
+    #   drainer; next_attempt_at doubles as the lease expiry — src/notify/outbox.py, A4)
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )

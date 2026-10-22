@@ -2,6 +2,20 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — A1: `ORIGIN_CHANNELS` + `origin_from_created_by` born in `jobs.py` (uncalled; wired in A2)
+
+**Agent task**: Observability Phase 1 re-cut plan A1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4's pure part).
+**Files changed**:
+- `src/gateway/jobs.py` — `ORIGIN_CHANNELS = ("telegram", "web", "cli", "scheduler", "system")` and the pure `origin_from_created_by(created_by) -> (origin_channel, origin_ref | None)`: `telegram:<chat>` → `("telegram", <chat>)`, `web` → `("web", None)`, `scheduler` → `("scheduler", None)`, everything else (`dispatch-mcp`, `event-trigger*`, `learning:`, `writeback:`, `escalation*`, `plan:`, `evaluator:`, `eval-fix:`, `auto-continue:`, `bot-error-handler`, `deploy-autopilot`, `owner-*`, …) → `("system", created_by)`; refs clipped to 64 (the `String(64)` column), an empty ref is `None` never `''` (the SQL side's `NULLIF`). `enqueue_job` untouched.
+- `tests/test_origin.py` (new) — `TestOriginFromCreatedBy` (parametrized over the producer vocabulary above incl. bare `telegram:`, whitespace, `''`, `None`), `test_ref_fits_column`, `test_telegram_ref_fits_column`, `test_every_channel_is_declared`.
+- `.context/modules/gateway/CONTEXT.md` — public interface lists the two helpers and that they are uncalled until A2.
+
+**Why**: migration 008's `_BACKFILL_ORIGIN` CASE and this helper must agree arm for arm so backfilled and new rows read the same; `tests/test_migrations.py::test_008_origin_backfill_case_matches_origin_from_created_by` drives the helper over the vocabulary and pins the SQL arms textually (the CASE cannot run on SQLite). Born in A1 so the migration and its Python twin land in one reviewed commit.
+
+**Side effects**: none at runtime — nothing calls either symbol in this commit. A2 wires them into `enqueue_job(..., origin_channel=None, origin_ref=None, origin_thread=None)` and A4's notice builder reads the stamped columns.
+
+**Gotchas discovered**: the `created_by` vocabulary in the tree is wider than the P0 plan's test table (`event-trigger`, `learning:`, `writeback:`, `evaluator:`, `eval-fix:`, `bot-error-handler`, `deploy-autopilot`, `owner-*`); all of it is `system`, which is why the helper has no allow-list and never raises.
+
 ## 2026-10-21 — T9: docs, registries, runbook (no code change)
 
 **Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5). No file under

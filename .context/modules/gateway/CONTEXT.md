@@ -16,6 +16,13 @@ the single enqueue/cancel/lookup helper.
 ## Public interface
 
 - `enqueue_job(description, kind, payload, project_id, created_by) -> Job`
+- `ORIGIN_CHANNELS = ("telegram", "web", "cli", "scheduler", "system")` and
+  `origin_from_created_by(created_by) -> (origin_channel, origin_ref | None)`
+  — pure (Observability Phase 1 A1, 2026-10-21): the fallback origin for
+  producers that pass none; arm-for-arm the same mapping as migration 008's
+  `_BACKFILL_ORIGIN` CASE (`telegram:<chat>` → telegram/<chat>, `web`,
+  `scheduler`, everything else → system/<created_by>; refs clipped to 64, an
+  empty ref is `None`). **Uncalled until A2** wires them into `enqueue_job`.
 - `cancel_job(job_id)` — publishes to `jobs:cancel`
 - `find_job_by_prefix(prefix) -> Job | None` — accepts 8-char prefix or full UUID
 - FastAPI: `/health`, `/api/jobs` (GET/POST), `/api/jobs/{id}` (GET/DELETE),

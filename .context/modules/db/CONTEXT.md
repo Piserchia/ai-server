@@ -7,7 +7,7 @@
 Persistence layer. SQLAlchemy async engine, Redis client, ORM models, and the
 JSONL audit log on disk.
 
-## Schema (6 tables)
+## Schema (7 tables)
 
 - `jobs` — one unit of work. Includes `resolved_skill`, `resolved_model`,
   `resolved_effort`, `user_rating`, `review_outcome`, `parent_job_id`,
@@ -16,7 +16,18 @@ JSONL audit log on disk.
   "codex"), `terminal_reason` (executor outcome) and `model_served` (the id
   the provider reports back) — all nullable; pre-007 rows carry
   `resolved_provider='anthropic'` only where `resolved_model` is a
-  `claude-*` id.
+  `claude-*` id. Since migration 008 (Observability Phase 1, 2026-10-21)
+  17 more nullable columns: persisted origin `origin_channel` (telegram |
+  web | cli | scheduler | system), `origin_ref`, `origin_thread`;
+  `queue_wait_ms`; the result-capture columns `input_tokens`,
+  `output_tokens`, `cache_read_tokens`, `cache_write_1h_tokens`,
+  `cache_write_5m_tokens`, `num_turns`, `duration_api_ms`, `cost_usd_list`
+  (runner-computed, `pricing.py`) and `sdk_cost_usd` (the SDK's figure —
+  two columns, never one), `cli_version`; and `lane`, `task_class`,
+  `first_event_at` reserved for Phase 3 (NULL until then). 008 backfills
+  the token columns from `result->'usage'` and origin from `created_by`;
+  turns/cost/API duration are not backfillable and stay NULL on pre-008
+  rows. No `priority`/`executor`/`sensitivity` column, by design.
 - `schedules` — cron recipes that enqueue jobs.
 - `projects` — registry of hosted projects.
 - `proposals` — tuning/doc proposals emitted by `review-and-improve`.
@@ -24,8 +35,23 @@ JSONL audit log on disk.
   active → awaiting_user → pending_approval → completed. Persists `chat_id`
   for Telegram DM delivery across bot restarts. `thread_message_id` stores
   the Telegram message ID of the bot's root reply for thread-based interaction.
+  Since migration 008 also the nullable origin binding `origin_channel`,
+  `origin_ref`, `origin_thread` (new code reads these first and falls back to
+  `chat_id`/`thread_message_id`, which are kept) and `awaiting_since` (set
+  when status enters awaiting_user/pending_approval, cleared on
+  active/completed — stamped by A2).
 - `task_turns` — individual turns in a task conversation. role: user |
   assistant | system. Links to job_id for assistant turns.
+- `notifications` — the owner-DM outbox (Observability Phase 1, migration
+  008; ORM `Notification`). Columns `id, notice_kind, subject_type (job |
+  task | schedule | ops), subject_id, severity (info | warn | critical),
+  body, actions (JSONB), channel (default telegram), target (chat id; NULL →
+  owner), thread, external_ref (Telegram message_id once sent), status
+  (pending | sending | sent | failed | skipped), attempts, last_error,
+  next_attempt_at, sent_at, created_at`. Indexes `ix_notifications_status`,
+  `ix_notifications_created_at`, partial `ix_notifications_pending` on
+  `(status, created_at) WHERE status = 'pending'`. Written by the runner /
+  CLI (A4–A7), drained by the bot; the table is the alert history.
   Fields: `id`, `proposed_by_job_id` (FK→jobs, CASCADE), `target_file`,
   `change_type` ('default-model'|'context-files'|'frontmatter-tweak'|'doc-update'),
   `rationale`, `proposed_at`, `applied_pr_url`, `applied_at`, `outcome`
@@ -83,6 +109,24 @@ Migrations under `alembic/versions/`. Never edit existing ones — new file per 
   `terminal_reason`, `model_served` to `jobs`; backfills
   `resolved_provider='anthropic'` for `claude-*` rows. Round-tripped on
   SQLite in `tests/test_migrations.py` (layer 1b).
+- `008_p0_observability.py` — 2026-10-21 (Observability Phase 1, A1). Adds
+  17 nullable `jobs` columns, 4 nullable `tasks` columns and the
+  `notifications` outbox (+ 3 indexes). Three Postgres-only backfills
+  (tokens from `result->'usage'`, job origin from `created_by`, task origin
+  from `chat_id`/`thread_message_id`) are guarded by
+  `op.get_bind().dialect.name == "postgresql"` so the SQLite layer-1b
+  harness round-trips the module with the backfills skipped. `jobs.status`
+  and its 006 CHECK untouched.
+
+`alembic/applied_history.txt` (born with 008) is the append-only manifest of
+revisions applied to prod, one id per line. `tests/test_migrations.py`
+layer 1c asserts every listed id has a script on disk and that the on-disk
+chain base→head equals the list, so a `git revert` that deletes a migration
+file fails the pytest gate instead of breaking `alembic upgrade head` on
+prod. **Every migration commit appends its id in the same commit.** Rollback
+rule: revert application code by path, never the migration file; if a
+migration itself must go, `alembic downgrade -1` on prod FIRST, then remove
+the file and its manifest line together.
 
 To add a migration after editing `src/models.py`:
 ```bash
