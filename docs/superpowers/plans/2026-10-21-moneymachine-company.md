@@ -624,6 +624,11 @@ Expected: `All clean!`; all PASS.
 
 ### Task 14: Gates, review, landing (orchestrator)
 
+- [ ] **Step 0: Preconditions — Task 9 is done and origin/main is merged in**
+
+Run: `gh repo view alfredbot-ai-butler/moneymachine --json name -q .name && git -C ~/Documents/repos/moneymachine rev-parse --verify origin/main && cd $W && git fetch origin && git merge --no-edit origin/main; git diff --name-only --diff-filter=U`
+Expected: `moneymachine`; a sha; no unmerged paths (if `.context/INDEX.md` conflicts because both branches appended a 2026-10-21 section at EOF, keep BOTH sections — the earlier one first — and commit the merge). STOP if the GitHub repo or `origin/main` of the project repo does not resolve: landing the schedule rows before the project repo exists would run the first jobs unscoped.
+
 - [ ] **Step 1: Protected-path check**
 
 Run: `cd $W && git add -A && git diff --cached --name-only | grep -E '^(\.context/PROTOCOL\.md|MISSION\.md|src/runner/guards\.py|scripts/lint_docs\.py|skills/(server-patch|server-deploy|new-skill)/SKILL\.md|\.env)' ; echo "exit=$?"`
@@ -660,7 +665,7 @@ cd $W && git commit -q -m "feat(moneymachine): MoneyMachine Company — division
 Run: `cd $W && git fetch origin && git merge origin/main && $V scripts/lint_docs.py | tail -1 && git push origin moneymachine/bootstrap:main && git log --oneline -1 origin/main`
 Expected: lint `All clean!`; push accepted; `origin/main` at the new sha. On rejection: `git merge origin/main` again, re-run Step 3, retry ONCE; still failing → stop and report `git log --oneline origin/main..HEAD` and the reverse.
 
-- [ ] **Step 8: Owner notification** — the final message (§14.2 contents) including the provisioning step and the note that local `main` holds an unpushed stray commit (71bf9a9) and that the cross-vendor branch will need to merge `origin/main`.
+- [ ] **Step 8: Owner notification** — the final message (§14.2 contents) including the provisioning step and the note that the main checkout's local `main` holds an unpushed stray commit (71bf9a9, a 2-line pickem-chart EVAL.md edit) that this landing did not touch.
 
 ---
 

@@ -42,9 +42,10 @@ proposal lane.
   last; every handoff is a committed, pushed artifact with a parseable header.
 - **One writer per artifact** (`company/LOOP.md` §2): each stage writes only
   its own artifact and ledger entry; nobody flips a stage they did not
-  execute; the governor is the only mover into `closed`; ledger ids are
-  strictly increasing and append-only (`mmcore ledger append` refuses edited
-  history).
+  execute; stages close terminal outcomes; the governor grades every closed
+  cycle and is the only mover graded -> closed (and the only writer of
+  GRADE); ledger ids are strictly increasing and append-only (`mmcore ledger
+  append` refuses edited history).
 - **Caps are owner-owned** — `company/config/budget.yaml` (stage kinds only;
   governors, the resumer, the CEO and the reporter are never counted) is
   edited by the owner by hand; agents propose changes via a DECISION-REQUEST

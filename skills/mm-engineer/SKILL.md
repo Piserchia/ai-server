@@ -50,10 +50,12 @@ Grammar (`LOOP.md` §9 / spec §8.1):
 mm-engineer: bucket=<slug> cycle=<bucket>-C#### [artifact=AP-####] [mode=<word>] — <one line of human context>
 ```
 
-Required keys: `bucket`, `cycle`. `artifact=` names the plan; when absent,
-take `artifacts.plan` from `buckets/<b>/state/cycle.json`; when both are
-absent, hard stop with a clear summary — never a guess. Parse `key=value`
-tokens before the em dash; unknown keys are ignored. The `mm-engineer:`
+`bucket` and `cycle` required; `artifact` optional — defaults to the
+matching cycle.json artifacts key; hard stop only when both are absent.
+(`artifact=` names the plan; the matching key is `artifacts.plan` in
+`buckets/<b>/state/cycle.json`; a hard stop is a clear summary, never a
+guess.) Parse `key=value` tokens before the em dash; unknown keys are
+ignored. The `mm-engineer:`
 prefix is optional — Telegram strips flags and leaves bare text. The
 payload is NEVER injected into your prompt; everything rides in the
 description and committed state (`cycle.json.stage` must be `engineer`
@@ -74,34 +76,61 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    implementation beats a grander unpushed one.
 2. **Preflight.** `PYTHONPATH=shared .venv/bin/python -m mmcore preflight
    --bucket <b>`. Non-zero → stop, summary says why, no push, no dispatch.
+2a. **Attempt (right after preflight; the cap is mechanical).**
+   `PYTHONPATH=shared .venv/bin/python -m mmcore cycle attempt --bucket <b>
+   --stage engineer --job <job-id8>` increments `cycles_used` (stage jobs
+   started on this cycle) and `stage_attempts[engineer]` in `cycle.json`
+   and refreshes `last_advanced_at`/`last_job_id`; success prints `MMCORE
+   CYCLE ATTEMPT OK engineer <n>/<cap-or-inf> used
+   <cycles_used>/<max_cycles_per_card>` — `<n>` is this attempt's number
+   for the `Attempt: n/2` lines below. Exit 2 is a refusal you never
+   argue with: last line `MMCORE CYCLE ATTEMPT DENY attempt-cap`
+   (`stage_attempts[engineer]` would exceed
+   `max_engineer_attempts_per_cycle`) or `MMCORE CYCLE ATTEMPT DENY
+   budget-death` (`cycles_used` would exceed `max_cycles_per_card`) → do
+   not build: write the blocker (format in step 4) as an IMPL entry, one
+   LESSON line `- [<cycle>] <family>/<sublane> | attempt cap | <reusable
+   constraint>` (or `| budget death |`) in `buckets/<b>/evaluation/LESSONS.md`,
+   a `LESSON` ledger entry, then `PYTHONPATH=shared .venv/bin/python -m
+   mmcore cycle close --bucket <b> --outcome blocked --job <job-id8>`; go
+   to the chain mechanics with no dispatch; summary outcome `blocked`.
 3. **Read the handbook, then the specialisation, then the contract.**
    `company/officers/engineer.md`, then `buckets/<b>/officers/engineer.md`;
    then the plan `buckets/<b>/plans/AP-####.md` (every acceptance row, the
-   reuse table, the `run.py` and `metrics.json` contracts), the sealed
-   card `cards/AC-####.md` (the rules and the ≤2 parameters — the only
-   values you may encode), and `company/config/budget.yaml`
+   reuse table, the `Run.py contract:` and `metrics.json` contracts), the
+   sealed card `cards/AC-####.md` (the rules and the ≤2 parameters — the
+   only values you may encode), and `company/config/budget.yaml`
    (`max_engineer_attempts_per_cycle`; never edit).
-4. **Attempt accounting (2-attempt cap).** This cycle's prior attempts
-   are the IMPL entries for `cycle=<cycle>` in
-   `buckets/<b>/evaluation/LEDGER.md` (each carries an `Attempt: n/2`
-   line). If prior attempts ≥ `max_engineer_attempts_per_cycle`, do not
-   build: write the blocker (format below) as an IMPL entry, one LESSON
-   line, and `PYTHONPATH=shared .venv/bin/python -m mmcore cycle close
-   --bucket <b> --outcome blocked --job <job-id8>`; go to the chain
-   mechanics with no dispatch. Blocker format (atlas `engineer.md`,
-   cap adjusted): `BLOCKED — <project>: goal <acceptance row>, attempts
-   <n>/2, tried <approaches>, suspected cause <one line>, need <specific
-   ask: plan change / data fix / owner call>`.
+4. **Attempt accounting (2-attempt cap).** `cycle.json` is authoritative:
+   `PYTHONPATH=shared .venv/bin/python -m mmcore cycle show --bucket <b>`
+   → `stage_attempts.engineer` is this attempt's number `n` (step 2a
+   already incremented it and already denied a third). IMPL entries still
+   carry `Attempt: n/2` for humans, but you count from `cycle.json`, never
+   from IMPL lines. An unfixable red inside this attempt (step 7) is
+   `blocked` the same way as a DENY: the blocker as an IMPL entry, one
+   LESSON line, `PYTHONPATH=shared .venv/bin/python -m mmcore cycle close
+   --bucket <b> --outcome blocked --job <job-id8>`, no dispatch. Blocker
+   format (atlas `engineer.md`, cap adjusted): `BLOCKED — <project>: goal
+   <acceptance row>, attempts <n>/2, tried <approaches>, suspected cause
+   <one line>, need <specific ask: plan change / data fix / owner call>`.
 5. **Build to the plan, nothing beyond it.** Create
    `buckets/<b>/projects/<name>/` exactly as the plan's module tree:
    `rules.py` (pure functions, parameters as keyword defaults = the card's
    sealed values), `data.py` (every fetch through `shared/adapters` —
-   `stooq.fetch_daily_closes`, or a new adapter routed through
-   `adapters._guard.open_public`; provenance `manifest.json` with
-   source_url, fetch timestamp, sha256, row counts, adjustment note),
-   `validate.py`, `run.py --date <d>` (exit 0 ok / 2 halt / 1 error;
-   writes `buckets/<b>/runs/<date>-<name>.json` + `.manifest.json` per the
-   plan's schema), `tests/` (fixture-based, no network), `README.md`.
+   Yahoo chart v8 is THE daily-closes/benchmark source:
+   `yahoo.fetch_daily_closes("SPY", range_="1y")`, plain tickers; Stooq
+   (`<symbol>.us`) is BLOCKED behind a JavaScript challenge since
+   2026-10-21 and is never a card's named source while blocked; or a new
+   adapter routed through `adapters._guard.open_public`; provenance
+   `manifest.json` with source_url, fetch timestamp, sha256, row counts,
+   adjustment note — Yahoo `quote.close` is split-adjusted, not
+   total-return: state the card's dividend treatment), `validate.py`,
+   `run.py --date <d>` (exit 0 ok / 2 halt / 1 error; writes
+   `buckets/<b>/runs/<date>-<name>.json` + `.manifest.json` per the plan's
+   schema; Yahoo returns the in-progress session as today's row during US
+   hours, so `run.py` compares `meta.regularMarketTime` to the session end
+   and HALTs (exit 2) on a provisional bar, never reuses it), `tests/`
+   (fixture-based, no network), `README.md`.
    Stdlib + pyyaml only. A second use of an adapter moves it to
    `shared/adapters/` (with its probe test) — the only `shared/` write
    you are allowed. **Freeze the rules before validation:** `shasum -a 256
@@ -125,15 +154,24 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    (read-only; 0.95 today); `leakage.run_critic(...)` — the 8-check
    critic; random-entry placebo M ≥ 200 → the 95th percentile), writing
    `buckets/<b>/projects/<name>/validation/R-####/{metrics.json,report.md,manifest.json}`
-   (`R-` ids per project, `R-0001` first). **PASS law** (`PROTOCOL.md`
-   §3): `verdict: PASS` iff DSR > `dsr_threshold` AND worst-fold
-   walk-forward Sharpe > 0 AND no critic check is FAIL AND the candidate
-   beats the placebo's 95th percentile; otherwise `verdict: REJECT` with
-   every failing clause in `reject_reasons`. Never re-run with a different
-   window, parameter or N to flip a verdict — that is a new trial, a new
-   `trials.jsonl` line, and almost always a re-mine. Mark each evaluated
-   variant's outcome with a second `trials append` (`--verdict reject |
-   pass | placebo-fail`).
+   (`R-` ids per project, `R-0001` first). **`metrics.json` contract**
+   (the plan's; the governor recomputes from exactly these fields):
+   `{sharpe_native, n_obs, skew, kurt_raw, sr0, n_trials, var_trial_sr,
+   dsr, worst_fold_sharpe, critic: {checks: {...}, any_fail}, placebo:
+   {m, p95, candidate, beaten}, regime_pnl: {<tag>: pnl}, non_robust,
+   rules_sha256, verdict, reject_reasons}` — the six scalars
+   `sharpe_native n_obs skew kurt_raw n_trials var_trial_sr` are what
+   `quantlab.dsr.psr` + `expected_max_sr` need; `n_trials` = `N` above.
+   **PASS law** (`PROTOCOL.md` §3): `verdict: PASS` iff `dsr` > quant
+   `dsr_threshold` (owner-owned, 0.95 today) AND `worst_fold_sharpe` > 0
+   AND not `critic.any_fail` AND `placebo.beaten` AND not `non_robust`;
+   `verdict: BLOCKED` (not PASS, not REJECT) when `mmcore trials n` < 2
+   (lifetime N too small to deflate — a DECISION-REQUEST, never a padded
+   N); otherwise `verdict: REJECT` with every failing clause in
+   `reject_reasons`. Never re-run with a different window, parameter or N
+   to flip a verdict — that is a new trial, a new `trials.jsonl` line, and
+   almost always a re-mine. Mark each evaluated variant's outcome with a
+   second `trials append` (`--verdict reject | pass | placebo-fail`).
 7. **Gate (all mandatory; any red = fix within the attempt, or block).**
    `PYTHONPATH=shared .venv/bin/python -m pytest shared/tests
    buckets/<b>/projects/<name>/tests -q` green (the tripwire runs here:
@@ -164,17 +202,21 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    line `Artifacts: RB-#### AC-#### AP-#### IM-#### R-####`, then
    `Attempt: n/2`, `Verdict: …`, `Review: APPROVED`). Then:
    - PASS → `PYTHONPATH=shared .venv/bin/python -m mmcore cycle advance
-     --bucket <b> --to execute --artifact impl=IM-#### --job <job-id8>`
-     (the `R-####` id rides in the IM header and the IMPL entry — the
-     governor's recompute starts there).
+     --bucket <b> --to execute --artifact impl=IM-#### --artifact
+     validation=R-#### --job <job-id8>` (both ids land in
+     `cycle.json.artifacts`; the `R-####` id also rides in the IM header
+     and the IMPL entry — the governor's recompute starts there).
    - REJECT → the quant law said no; that is a process success. One
      LESSON line appended to `buckets/<b>/evaluation/LESSONS.md`
      (`- [<cycle>] <family>/<sublane> | <kill-class: dsr | worst-fold |
-     critic:<check> | placebo> | <reusable constraint>`), a LESSON ledger
-     entry, then `PYTHONPATH=shared .venv/bin/python -m mmcore cycle close
-     --bucket <b> --outcome rejected --job <job-id8>`. The code and the
-     report stay committed (evidence), nothing shadow-runs, no dispatch.
-   - BLOCKED (cap or an unfixable red) → as step 4.
+     critic:<check> | placebo | non-robust> | <reusable constraint>`), a
+     LESSON ledger entry, then `PYTHONPATH=shared .venv/bin/python -m
+     mmcore cycle close --bucket <b> --outcome rejected --job <job-id8>`.
+     The code and the report stay committed (evidence), nothing
+     shadow-runs, no dispatch.
+   - BLOCKED (a `cycle attempt` DENY, `mmcore trials n` < 2, or an
+     unfixable red) → as step 2a / step 4: blocker IMPL entry, LESSON
+     line + entry, `cycle close --outcome blocked`.
 
 Then the chain mechanics (`LOOP.md` §4, steps 2–5):
 
@@ -225,7 +267,7 @@ cache + provenance manifests, `validation/R-####/`),
 `buckets/<b>/evaluation/LEDGER.md` (via `mmcore ledger append` only),
 `buckets/<b>/evaluation/LESSONS.md` (append one line on REJECT/BLOCKED),
 `buckets/<b>/state/cycle.json` + `state/history/` (via `mmcore cycle
-advance|close` only), `shared/adapters/<new>.py` + its test ONLY when the
+attempt|advance|close` only), `shared/adapters/<new>.py` + its test ONLY when the
 plan's reuse table says second use, a dated deviation note appended to
 `plans/AP-####.md`, `.context/CHANGELOG.md` (one entry per run),
 `skills/GOTCHAS.md` (surprises only). Nothing else.
@@ -258,9 +300,12 @@ plan's reuse table says second use, a dated deviation note appended to
 ## Close-out
 
 Final text = the job summary (`LOOP.md` §9 / spec §8.6): first line
-`mm-engineer <bucket> <cycle> <outcome>` (outcome: `pass` | `pass
-cap-stalled` | `rejected` | `blocked` | `stopped: <reason>`); then ≤8
-sentences — IM and R ids, files touched in one line, gate tallies (tests,
+`mm-engineer <bucket> <cycle> <outcome>` where outcome is the handbook's
+enumeration, quoted verbatim: `pass | rejected | blocked | cap-stalled |
+divergence | hard-stop` (`cap-stalled` = PASS pushed but the budget said
+DENY; `divergence` = push rejected twice; `hard-stop` = a missing input
+or a preflight/state mismatch); then ≤8 sentences — IM and R ids, files
+touched in one line, gate tallies (tests,
 acceptance rows met/total, review verdict), the validation line (DSR vs N
 and threshold, worst fold, critic tally, placebo p95 vs candidate), the
 reject reasons or the blocker verbatim, `rules_sha256`, the commit sha,
@@ -292,7 +337,10 @@ the dispatched `mm-execute` job id (or why none). When task-linked
   trial counts (N<10); treat the DSR as an upper bound" (atlas
   `quant/quantlab/dsr.py`): carry `dsr_caveats` into `metrics.json`
   verbatim — a PASS on N<10 is reported as a PASS-with-caveat, never
-  rounded up to confidence.
+  rounded up to confidence. The governor recomputes DSR from the six
+  scalars (`sharpe_native n_obs skew kurt_raw n_trials var_trial_sr`) via
+  `psr` + `expected_max_sr`, tolerance 1e-6: write them from the same
+  `DsrResult` the verdict used, never from a second run.
 - quant's own buy-and-hold SPY run (`quant/reports/R-0005`) REJECTs on a
   negative worst fold (-0.0693, 2022-03..05) with DSR 0.988 — the worst-fold
   clause kills most things the DSR lets through; do not "fix" it by

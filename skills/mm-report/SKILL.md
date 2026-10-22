@@ -59,13 +59,15 @@ Binding docs: `company/officers/report.md` (read FIRST), `company/LOOP.md`
 3. **Read the handbook** `company/officers/report.md`, then
    `company/config/budget.yaml` (for the caps the scoreboard reports
    against) and `company/LEDGER.md` (the last `C-####`).
-4. **Find the CEO job** and its summary file (`SERVER_ROOT` =
-   `~/Library/Application Support/ai-server`):
+4. **Find the CEO job** and its summary file:
    ```bash
+   SERVER_ROOT="${SERVER_ROOT:-$HOME/Library/Application Support/ai-server}"
    psql assistant -tAc "SELECT id, status FROM jobs WHERE kind='mm-ceo' ORDER BY created_at DESC LIMIT 1"
    psql assistant -tAc "SELECT id, status, created_at, completed_at, LEFT(error_message,200) FROM jobs WHERE kind='mm-ceo' ORDER BY created_at DESC LIMIT 3"
    cat "$SERVER_ROOT/volumes/audit_log/<id>.summary.md"
    ```
+   (The `SERVER_ROOT` line precedes every `cat`/`grep` over the audit
+   log — the runner does not export it into your shell.)
    CEO status for this Saturday: **completed** (a `completed` job created
    after today's 17:00 UTC slot with a summary file) · **FAILED** (the
    newest job since the slot is `failed`/`cancelled`, or completed with no
@@ -74,12 +76,20 @@ Binding docs: `company/officers/report.md` (read FIRST), `company/LOOP.md`
    headline `CEO DARK: no job since <slot>`; the schedule monitor DMs the
    owner independently). A summary that says "completed" is not evidence
    of decisions; the `DECISION:` lines are.
-5. **Record decisions.** One `C-####` entry per `DECISION:` line, kind
-   `DECISION`, body = the line verbatim plus the governor job id8 it names:
-   `PYTHONPATH=shared .venv/bin/python -m mmcore ledger append --company
-   --kind DECISION --cycle week-<Saturday> --job <ceo id8> --body-file
-   <file>`. A FAILED/dark CEO gets ONE `AUDIT` entry stating it (job =
-   your id8). Never renumber, never edit an earlier entry; then
+5. **Record decisions — you are the company ledger's SOLE writer** (the
+   governor never writes it). The week key is the ISO week `YYYY-Www`
+   (`date -u +%G-W%V`, e.g. `2026-W43`). One `C-####` entry per `DECISION:`
+   line, kind `DECISION`, body = the line verbatim plus the governor job
+   id8 it names: `PYTHONPATH=shared .venv/bin/python -m mmcore ledger
+   append --company --kind DECISION --cycle 2026-W43 --job <ceo id8>
+   --body-file <file>`. One `DECISION-REQUEST` entry per `ASK-OWNER:` line
+   when no bucket ledger already carries it (grep every
+   `buckets/<b>/evaluation/LEDGER.md` for an open `DECISION-REQUEST` with
+   the same ask; cite it instead of duplicating). A FAILED/dark CEO gets
+   ONE `AUDIT` entry stating it (job = your id8). A lesson that two or more
+   buckets filed this week is ONE `LESSON` entry (cross-bucket; cite the
+   `B-` ids). Company-ledger kinds are exactly `DECISION DECISION-REQUEST
+   AUDIT LESSON`. Never renumber, never edit an earlier entry; then
    `PYTHONPATH=shared .venv/bin/python -m mmcore ledger audit --company`
    must report no findings.
 6. **Write the memo** `reports/weekly/<Saturday>.md` (≤ 1 page):
@@ -92,16 +102,20 @@ Binding docs: `company/officers/report.md` (read FIRST), `company/LOOP.md`
    (3) the scoreboard, plus jobs used / cap and liveness per bucket from
    `psql assistant -tAc "SELECT kind, status, LEFT(description,80),
    created_at FROM jobs WHERE kind ~ '^mm-' AND created_at > now() -
-   interval '7 days' ORDER BY created_at"`; (4) `GRADUATION-OFFER` entries
+   interval '7 days' ORDER BY created_at"` (a liveness listing, not a
+   budget count); (4) `GRADUATION-OFFER` entries
    from every `buckets/<b>/evaluation/LEDGER.md` (if any); (5) asks waiting
    on the owner — the CEO's `ASK-OWNER:` lines, open `DECISION-REQUEST`
    entries, D0–D8 from `docs/OWNER.md` still open; (6) `[system]` items
    proposed/adopted from every `BACKLOG.md`; (7) spend — token counts from
-   each week job's `job_completed` event (`grep -h '"job_completed"'
+   each week job's `job_completed` event (with
+   `SERVER_ROOT="${SERVER_ROOT:-$HOME/Library/Application Support/ai-server}"`
+   set first: `grep -h '"job_completed"'
    "$SERVER_ROOT/volumes/audit_log/<id8>"*.jsonl`), list-equivalent dollars
    recomputed the way `docs/superpowers/specs/2026-10-05-observability-and-
    trading-unblock-design.md` §2.5 does (read it; never invent a rate),
-   against the structural ceiling of 22 jobs/week. Stage jobs dispatched
+   against the structural ceiling of 23 jobs/week (the mmcore report
+   skeleton prints it; never restate the number). Stage jobs dispatched
    today appear in next week's memo — say so rather than guessing.
 7. **Monthly scoreboard** — on the first Saturday of a month only:
    `reports/monthly/<YYYY-MM>.md` via `PYTHONPATH=shared .venv/bin/python
@@ -119,7 +133,8 @@ Binding docs: `company/officers/report.md` (read FIRST), `company/LOOP.md`
 9. **Gates.** `PYTHONPATH=shared .venv/bin/python -m pytest shared/tests
    -q` green; `git diff | grep -iE 'api[_-]?key|token|secret|password'`
    empty beyond documented mentions; `.context/CHANGELOG.md` entry for this
-   run; ONE commit with footers `MM-Cycle: week-<Saturday>` + `Job: <id8>`.
+   run; ONE commit with footers `MM-Cycle: <YYYY-Www>` (the ISO week, e.g.
+   `MM-Cycle: 2026-W43`) + `Job: <id8>`.
    A red tripwire → nothing is pushed; say so; the governor files the
    `[system]` item.
 10. **Push.** `git pull --rebase origin main && git push origin main`; on
@@ -151,8 +166,12 @@ before the commit → abort and report.
 
 ## Close-out
 
-Final text (§8.6): first line `mm-report company week-<Saturday>
-<memo written|memo rebuilt|latest answered|preflight stopped>`; then ≤8
+Final text (§8.6): first line `mm-report company <YYYY-Www> <outcome>`
+where outcome is the handbook's enumeration, quoted verbatim:
+`memo-committed | memo-committed+ceo-failed | latest-answered | hard-stop`
+(`memo-committed+ceo-failed` = the memo was pushed with a `CEO FAILED` /
+`CEO DARK` headline; `hard-stop` = preflight red, an unknown `mode`, or a
+push rejected twice); then ≤8
 sentences: the CEO headline, C-ids recorded, memo path and commit sha,
 graduation offers and owner asks, the monthly file if written. When
 task-linked (the Telegram pull — `latest`, or any `/task`-originated run),

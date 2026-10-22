@@ -254,7 +254,9 @@ hosting), SKIP all scaffolding phases and do only:
 
 1. Verify `projects/<slug>/manifest.yml` exists and parses
    (`pipenv run python -c "from src.registry.manifest import load; load('projects/<slug>/manifest.yml')"`).
-   No manifest → STOP and report that `project-evaluate` must produce one first.
+   No manifest → STOP and report that `project-evaluate` must produce one first;
+   or `delivery.deployable` is false / no `port` → STOP, not hosted by design
+   (see Gotchas).
 2. Run § 2.7 (register-project.sh), § 2.8 (registry row if missing).
 3. Verify: healthcheck probe passes (or the project is `type: static`/content),
    DB row exists (`SELECT slug, port FROM projects WHERE slug='<slug>'`).

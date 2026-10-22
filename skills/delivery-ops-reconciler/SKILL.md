@@ -80,7 +80,7 @@ done
 ```
 
 ### 3. Diff → drift classes
-- **hosted-not-registered** — a `projects/<slug>/` exists but no `projects` DB row / registry row.
+- **hosted-not-registered** — a `projects/<slug>/` exists but no `projects` DB row / registry row (exempt: a manifest with `delivery.deployable: false` and no `port` — see Gotchas).
 - **registered-not-hosted** — a DB/registry row with no directory or route behind it.
 - **deployed-not-monitored** — a non-static project healthcheck-all skips (no top-level `port`+`healthcheck`; nested `services[]` healthchecks do NOT rescue it — the skip fires first), or `last_healthy_at` NULL/stale.
 - **served-not-supervised** — a Caddy route with no launchd plist, or vice versa.

@@ -8,10 +8,16 @@ must carry (spec §7, §6.4, §8.6; plan Task 11):
 - the verbatim dispatch sentence (no `server-patch`/`new-skill`/`atlas-*`
   dispatch from inside the company);
 - the budget psql counts list the five stage kinds exactly and never
-  `kind LIKE 'mm-%'` (the round-1 blocker: a governor counting itself);
+  `kind LIKE 'mm-%'` / `kind ~ '^mm-'` (the round-1 blocker: a governor
+  counting itself) — queries are extracted after whitespace flattening, so
+  a wrapped query line cannot hide from the check;
 - `mm-report` and `mm-govern` end with the `TASK_COMPLETE:` rule so a
   Telegram-originated run resolves instead of auto-continuing;
-- every `mmcore` subcommand a skill invokes exists in the pinned CLI;
+- every `mmcore` subcommand AND positional action a skill invokes exists in
+  the pinned CLI (`shared/mmcore/cli.py::build_parser`, mirrored below);
+- every stage skill (research, bridge, architect, engineer, execute) calls
+  `mmcore cycle attempt` right after preflight (spec §6.4 step 1a — the
+  mechanical caps); the governor, CEO, resumer and reporter never do;
 - frontmatter shape: Bash holders are workspace-isolated, the CEO and the
   resumer are read-only + acceptEdits, every skill is in the `moneymachine`
   division, models are in the gateway alias table.
@@ -37,10 +43,22 @@ DISPATCH_SENTENCE = (
     "DECISION-REQUEST ledger entry, never a dispatch."
 )
 
-PINNED_SUBCOMMANDS = {
-    "preflight", "budget", "cycle", "ledger", "trials", "families",
-    "shadow", "report", "new-bucket", "check",
+# Mirror of R/shared/mmcore/cli.py::build_parser — subcommand → its positional
+# `action` choices (empty set = the subcommand takes no positional action).
+# `cycle attempt` is spec §6.4 step 1a / §9.1 (`cycle.attempt`).
+PINNED_ACTIONS: dict[str, frozenset[str]] = {
+    "preflight": frozenset(),
+    "budget": frozenset(),
+    "cycle": frozenset({"show", "open", "advance", "close", "validate", "block", "unblock", "attempt"}),
+    "ledger": frozenset({"append", "audit"}),
+    "trials": frozenset({"append", "n"}),
+    "families": frozenset({"next", "saturate", "propose", "assert"}),
+    "shadow": frozenset({"trade", "mark", "report"}),
+    "report": frozenset({"weekly", "monthly"}),
+    "new-bucket": frozenset(),
+    "check": frozenset(),
 }
+PINNED_SUBCOMMANDS = set(PINNED_ACTIONS)
 
 STAGE_KINDS = "('mm-research','mm-bridge','mm-architect','mm-engineer','mm-execute')"
 
@@ -49,12 +67,25 @@ EXPECTED_NINE = [
     "mm-govern", "mm-report", "mm-research", "mm-resume",
 ]
 
+# The five stage kinds (spec §6.1 rows 2–6): the only callers of `cycle attempt`.
+STAGE_SKILLS = {"mm-research", "mm-bridge", "mm-architect", "mm-engineer", "mm-execute"}
 # The two skills that dispatch nothing (spec §7 "Dispatches" column).
 NON_DISPATCHERS = {"mm-execute", "mm-report"}
 # The two read-only + dispatch skills (spec §7, bold **read-only**).
 READ_ONLY = {"mm-ceo", "mm-resume"}
 
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n(.*)\Z", re.DOTALL)
+
+# A §6.4 step-4 budget count: `SELECT count(*) FROM jobs WHERE … interval '…'`
+# over a flattened body. `(?:(?!SELECT).)*?` keeps one match from swallowing a
+# later SELECT (the double-dispatch guards have no interval and precede the
+# budget block in the resumer).
+_BUDGET_QUERY_RE = re.compile(
+    r"SELECT count\(\*\) FROM jobs WHERE (?:(?!SELECT).)*? interval '[^']*'",
+    re.IGNORECASE,
+)
+_MMCORE_CALL_RE = re.compile(r"-m mmcore (\S+)(?: (\S+))?")
+_TOKEN_NOISE = "`'\",.;:)("
 
 
 def _split(name: str) -> tuple[dict, str]:
@@ -75,14 +106,27 @@ def _body(name: str) -> str:
     return _split(name)[1]
 
 
-def _budget_query_lines(body: str) -> list[str]:
-    """The §6.4 step-4 count queries: the `FROM jobs` lines that count over a
-    time window. Excludes the double-dispatch guard (no interval) and the
-    CEO's liveness listing (no count(*))."""
-    return [
-        ln for ln in body.splitlines()
-        if "FROM jobs" in ln and "count(*)" in ln.lower() and "interval" in ln
-    ]
+def _flat(text: str) -> str:
+    """Whitespace-flattened text: wrapped markdown lines become one line."""
+    return re.sub(r"\s+", " ", text)
+
+
+def _budget_queries(body: str) -> list[str]:
+    """The §6.4 step-4 count queries: windowed `count(*) FROM jobs` queries,
+    extracted after whitespace flattening. Excludes the double-dispatch guard
+    (no interval) and the CEO's/reporter's liveness listings (no count(*))."""
+    return [m.group(0) for m in _BUDGET_QUERY_RE.finditer(_flat(body))]
+
+
+def _mmcore_calls(body: str) -> list[tuple[str, str | None]]:
+    """Every `-m mmcore <sub> [<next token>]` in the flattened body."""
+    calls = []
+    for m in _MMCORE_CALL_RE.finditer(_flat(body)):
+        sub = m.group(1).strip(_TOKEN_NOISE)
+        nxt = (m.group(2) or "").strip(_TOKEN_NOISE) or None
+        if sub:
+            calls.append((sub, nxt))
+    return calls
 
 
 def _models_of(fm: dict) -> list[str]:
@@ -157,10 +201,7 @@ def test_division_and_project_slug():
 
 def test_mmcore_subcommands_are_pinned():
     for n in MM:
-        used = set(re.findall(r"-m mmcore (\S+)", _body(n)))
-        # A trailing backtick or punctuation glued to the subcommand is noise.
-        used = {u.strip("`'\",.;:)") for u in used}
-        used.discard("")
+        used = {sub for sub, _ in _mmcore_calls(_body(n))}
         unknown = used - PINNED_SUBCOMMANDS
         assert unknown == set(), (
             f"{n}: invokes mmcore subcommands not in the pinned CLI (spec §9.1): "
@@ -168,33 +209,72 @@ def test_mmcore_subcommands_are_pinned():
         )
 
 
+def test_mmcore_actions_are_pinned():
+    """For subcommands that take a positional action (`cycle show|open|…`),
+    the token after the subcommand must be one of the CLI's choices — a
+    skill cannot invoke `cycle grade` or `ledger rewrite` that `build_parser`
+    does not know. `--help` is the one non-action token allowed."""
+    for n in MM:
+        for sub, nxt in _mmcore_calls(_body(n)):
+            actions = PINNED_ACTIONS.get(sub)
+            if not actions:
+                continue  # no positional action for this subcommand
+            assert nxt is not None, f"{n}: `-m mmcore {sub}` with no action token"
+            if nxt == "--help":
+                continue
+            assert nxt in actions, (
+                f"{n}: `-m mmcore {sub} {nxt}` — {nxt!r} is not a pinned {sub} action "
+                f"(cli.py build_parser: {sorted(actions)})"
+            )
+
+
+def test_stage_skills_call_cycle_attempt():
+    """Spec §6.4 step 1a: every stage skill calls `mmcore cycle attempt` right
+    after preflight (the mechanical caps); the governor, CEO, resumer and
+    reporter never do (governors are not stage kinds)."""
+    for n in sorted(STAGE_SKILLS):
+        assert n in MM, f"{n} is missing — see test_nine_skills_exist"
+        assert "-m mmcore cycle attempt" in _flat(_body(n)), (
+            f"{n}: stage skill body must call `-m mmcore cycle attempt` after preflight"
+        )
+    for n in sorted(set(MM) - STAGE_SKILLS):
+        assert "-m mmcore cycle attempt" not in _flat(_body(n)), (
+            f"{n}: only the five stage kinds call `mmcore cycle attempt`"
+        )
+
+
 def test_budget_query_lists_stage_kinds_only():
     checked = []
     for n in MM:
         body = _body(n)
-        if "FROM jobs" not in body or "mmcore budget" not in body:
+        queries = _budget_queries(body)
+        if "mmcore budget" in body:
+            assert queries, (
+                f"{n}: body runs `mmcore budget` but has no windowed count(*) FROM jobs "
+                f"query (§6.4 step 4)"
+            )
+        if not queries:
             continue
         checked.append(n)
-        lines = _budget_query_lines(body)
-        assert lines, (
-            f"{n}: body runs `mmcore budget` but has no windowed count(*) FROM jobs "
-            f"query lines (§6.4 step 4)"
-        )
-        for ln in lines:
-            assert STAGE_KINDS in ln, (
+        for q in queries:
+            assert STAGE_KINDS in q, (
                 f"{n}: budget query must list the five stage kinds exactly "
-                f"{STAGE_KINDS}; got: {ln.strip()}"
+                f"{STAGE_KINDS}; got: {q}"
             )
-            assert "kind LIKE 'mm-%'" not in ln, (
+            assert "kind LIKE 'mm-%'" not in q, (
                 f"{n}: budget query must never count governors/resumer/CEO/reporter "
-                f"(kind LIKE 'mm-%'): {ln.strip()}"
+                f"(kind LIKE 'mm-%'): {q}"
+            )
+            assert "kind ~ '^mm-'" not in q, (
+                f"{n}: budget query must never count governors/resumer/CEO/reporter "
+                f"(kind ~ '^mm-'): {q}"
             )
     # Every skill that dispatches a stage must do the cap check; if none of
     # the existing skills did, the loop above would vacuously pass.
     dispatching_present = [n for n in MM if n not in NON_DISPATCHERS]
     if dispatching_present:
         assert checked, (
-            f"none of {dispatching_present} carries both `FROM jobs` and `mmcore budget`"
+            f"none of {dispatching_present} carries a windowed count(*) FROM jobs query"
         )
 
 
@@ -264,3 +344,12 @@ def test_models_are_in_gateway_alias_table():
             assert model in valid, (
                 f"{n}: model {model!r} not in the gateway alias table {sorted(valid)}"
             )
+
+
+def test_govern_advances_open_to_research():
+    """The governor is the mover of open -> research (spec §6.2); a freshly
+    opened cycle left at `open` would hard-stop every first research stage."""
+    body = _body("mm-govern")
+    assert "cycle advance --bucket <b> --to research" in _flat(body)
+    for name in ("mm-research", "mm-bridge", "mm-architect", "mm-engineer", "mm-execute"):
+        assert "--to research" not in _flat(_body(name)), f"{name} must not move open -> research"

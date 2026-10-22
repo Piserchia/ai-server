@@ -173,7 +173,7 @@ The reading this design takes (designer's call; the one real gap is §16 D1):
 | The dev clone is fast-forwarded only after a SUCCESSFUL workspace session; a workspace clone starts from the dev clone's HEAD (origin re-pointed, no fetch) | `src/runner/workspaces.py`; `src/runner/session.py` `sync_canonical` | §6.4 step 0: every session fetches first; writers `git pull --ff-only origin main`, read-only sessions read `git show origin/main:<path>`; `mmcore preflight` fails when behind origin |
 | Only `scripts/seed-schedules.sh` writes schedule rows (cadence); it never un-pauses; a push to `origin/main` is auto-deployed by the healthcheck autopilot within ~10–40 min; `schedule_adherence` DARK keys on a *missing* job, FAILURE_STREAK on 3 — a weekly row that fails is silent for three weeks | `scripts/seed-schedules.sh`; `scripts/healthcheck-all.sh`; `src/runner/schedule_adherence.py` | Three rows seeded at verified-free slots; the reporter is scheduled (not dispatched) so a failed CEO is written into a memo the same evening; kill switch `/schedule pause mm-ceo-weekly` |
 | The idle-queue drainers are suppressed by any stranded `queued` row; no server-side per-vertical dispatch valve or per-spawner kind allowlist exists (`_FORBIDDEN_KINDS = {"god"}` only) | `src/runner/events.py`; `src/runner/mcp_dispatch.py` | Caps are enforced in-skill by `mmcore budget` + psql counts of exact stage kinds (§12.2); the `mm-*`-only dispatch rule is a body sentence pinned by `tests/test_mm_skills.py` until D7 |
-| The in-flight `multi-model/cross-vendor-writer` branch (local, unpushed, 11 ahead) owns `src/`, runner docs, `skills/README.md`, `skills/TEMPLATE.md`, `tests/test_skill_contracts.py`, SYSTEM.md's module graph, SKILLS_REGISTRY line 24, INDEX.md line 98; local `main` carries an unpushed stray commit and is behind origin | `git diff --stat origin/main..multi-model/cross-vendor-writer`; `git branch -vv` | This build touches none of those; shared-registry edits are append-only at EOF anchors; the push goes from the worktree branch straight to `origin main` (§14.2) |
+| The `multi-model/cross-vendor-writer` branch owned `src/`, runner docs, `skills/README.md`, `skills/TEMPLATE.md`, `tests/test_skill_contracts.py`, SYSTEM.md's module graph, SKILLS_REGISTRY line 24, INDEX.md line 98 — it was merged to `origin/main` (b47ebf9) by another session while this build ran, so `models.yml` now exists and INDEX.md has two 2026-10-21 sections appended at EOF | `git log origin/main`; `git diff HEAD..origin/main` | This build touches none of those files; shared-registry edits are append-only at EOF anchors; `origin/main` is merged into the worktree branch before the gates (INDEX.md resolved by keeping both sections, cross-vendor first) and the push goes from the worktree branch straight to `origin main` (§14.2) |
 | Managers/CEO are chartered by the org CEO through the proposal lane; every skill lives in exactly one division; the Delivery charter's "atlas is the only one today" sentence drifts silently | `.context/org/ORG.md` § How to extend the org; `.context/org/divisions/delivery/CHARTER.md` | A new division `moneymachine` chartered under the owner's 2026-10-21 delegation (§16 D0); `mm-ceo` added to `system-manager`'s roster query; the Delivery sentence updated |
 | Learning extractor drops `module=project` learnings | `src/runner/learning.py` | Lessons live in-repo (`LESSONS.md` per bucket + company), one line per terminal decision |
 
@@ -420,10 +420,16 @@ open ─govern─► research ─research─► bridge ─bridge─► architect
 | `engineer → execute` | engineer | pushed commit with tests green, in-session `code-review` LGTM recorded, acceptance evidence, `validation/R-####/metrics.json` with verdict PASS under the quant law |
 | `engineer → rejected` | engineer | validation verdict REJECT recorded (IMPL entry + LESSON); no execute |
 | `execute → graded` | execute | `runs/<date>-<name>.json` + provenance manifest + shadow marks vs SPY/BIL, EXEC entry |
-| `graded → closed` / `* → closed` | governor only | GRADE entry citing artifacts and the DSR recompute; LESSON line; BACKLOG rewritten |
+| `execute → graded` (designed HALT) | execute | exit 2 with a written run file + manifest is a *graded* halt, not a failure |
+| `execute → halted` | execute | red gate, exit 1, or `rules_sha256` drift (plus a PROTOCOL-VIOLATION entry on drift) |
+| `<stage> → closed:<terminal>` | the stage that reaches the terminal outcome | its ledger entry + LESSON line are the close evidence |
+| `graded → closed` | governor only | GRADE entry citing artifacts and the DSR recompute; LESSON line; BACKLOG rewritten |
 
-Nobody flips a stage they did not execute; the governor is the only mover
-into `closed`. A `cycle.json` write always refreshes `last_advanced_at` and
+Stages close terminal outcomes themselves; the governor grades **every**
+closed cycle that has no GRADE entry yet (newest first, from
+`state/history/`), is the only mover `graded → closed`, and the only writer
+of GRADE. Nobody flips a stage they did not execute. A `cycle.json` write
+always refreshes `last_advanced_at` and
 `last_job_id`. Staleness is judged by the daily resumer: a non-terminal
 cycle whose `last_advanced_at` is > 6 h old with no queued/running job for
 its id (psql on `kind` + `description LIKE '%cycle=<id>%'`) is re-dispatched
@@ -449,13 +455,25 @@ at the same stage.
    non-empty or the branch is not `main`.
 1. **Interpreter + timer.** `python3.12 -m venv .venv && .venv/bin/pip install
    -q pytest pyyaml`; `date +%s > /tmp/mm-stage-start-<job-id8>`. Seal and
-   close out at 45 min (engineer: 70 min); reserve ~15 turns for close-out.
+   close out at 45 min (engineer: 70 min; execute: 20 min — its session is
+   1800 s); reserve ~15 turns for close-out.
    max_turns exhaustion is recorded as *completed* and deletes the workspace
    — push before the reserve, not after. Read-only sessions (CEO, resumer)
    cannot create a venv or write `/tmp` under the read-only guard profile:
    they run `PYTHONPATH=shared python3.12 -m mmcore …` on the runner's
    `python3.12` (the ai-server venv, which carries pyyaml) and keep the clock
    in the summary, not in a file.
+1a. **Attempt (every stage skill, right after preflight).** `PYTHONPATH=shared
+   .venv/bin/python -m mmcore cycle attempt --bucket <b> --stage <stage> --job
+   <id8>` increments `cycles_used` (the governor's open counts 1, then one
+   per stage job started on this cycle, so the straight path uses 6 of the 8)
+   and `stage_attempts[<stage>]` in `cycle.json`; it exits 2 with
+   `MMCORE CYCLE ATTEMPT DENY attempt-cap` (engineer beyond
+   `max_engineer_attempts_per_cycle`) or `… DENY budget-death` (beyond
+   `max_cycles_per_card`). On DENY the stage closes the cycle with its own
+   terminal outcome (research/bridge `not_actionable`, architect
+   `plan_rejected`, engineer `blocked`, execute `halted`) and writes a LESSON
+   line naming the cap. The caps are therefore mechanical, not prose.
 2. **Gates.** `PYTHONPATH=shared .venv/bin/python -m pytest shared/tests -q`
    green (plus the project's own tests for ENGINEER/EXECUTE); secrets grep on
    the diff; ONE commit with footers `MM-Cycle:` + `Job:`; `cycle.json`
@@ -521,7 +539,9 @@ never as a promise of edge.
 
 Human-only, always: any order path, broker/exchange credentials, paid data,
 new external dependency, editing `company/config/*.yaml`, `CLAUDE.md` Rule 1,
-`MM_AUTHORITY.md`, any tripwire test, `LOOP.md`/`PROTOCOL.md`, any `mm-*`
+`MM_AUTHORITY.md`, any tripwire test, `shared/mmcore/forbidden.py`,
+`shared/adapters/_guard.py` and its test (the data and the code of the
+network boundary), `LOOP.md`/`PROTOCOL.md`, any `mm-*`
 SKILL.md beyond a Gotchas append, any schedule row, any new bucket beyond the
 template stamp (D1), any hosting change, flipping a family to `open` or
 `owner-closed`. Front door (LOOP.md §7, adopted verbatim): `[system]` backlog
@@ -544,8 +564,9 @@ owner from Telegram (§8.1).
 | `mm-resume` | claude-sonnet-4-6 / low (→ sonnet-4-6 / medium) | acceptEdits / workspace / **read-only** / worker | `[Read, Glob, Grep, Bash]` | `[moneymachine, evaluation, scheduled-capable, needs-dispatch-mcp]` | none / none | the stalled stage | 25 |
 | `mm-report` | claude-opus-5 / medium (→ opus-5 / high) | bypassPermissions / workspace / guarded-writer / worker | `[Read, Write, Edit, Bash, Glob, Grep]` | `[moneymachine, reporting, scheduled-capable]` | none / none | nothing | 40 |
 
-Common frontmatter: `division: moneymachine`; `context_files` =
-`[".context/org/ORG.md"]` for `mm-ceo`, omitted for the others (the runner's
+Common frontmatter: `division: moneymachine`; no `context_files` on any skill
+(a relative entry would resolve against the project clone, where it does not
+exist; `mm-ceo` reads ORG.md by absolute path in its body, and the runner's
 directive already injects the absolute PROJECT_PROTOCOL path for
 project-scoped jobs); `## Gotchas (living section)` in every body; no skill is
 named `*-redeploy`. Model ids are in the gateway alias table today and in
@@ -640,17 +661,24 @@ run by the governor.
 | research → bridge | `RB-####` | ≥3 graded sourced claims; ranked mechanisms; who loses; free-data availability per mechanism; `Prior-art check:` across all atlas ledgers/trials and all buckets; recommended mechanism (deterministic rules only — LLM-signal ideas are INADMISSIBLE and must be flagged) |
 | bridge → architect | `AC-####` (sealed, pushed before any backtest dispatch) | deterministic rules (≤2 parameters per confirmatory cycle; every grid cell is a trial); universe; data sources with LIVE probe output and timestamps (the probe may not compute any signal × forward-return statistic — the pre-seal fence); cost model (≥3 bps/side + spread); `Success criterion:` and `Kill criterion:` with `Criteria observables:`; placebo plan (random-entry, M ≥ 200, candidate must beat the 95th percentile); `Prior-art check:`; `Survivorship probe:` for any universe-selection idea; TRAIN / VALIDATION / FORWARD windows named (validation touches logged, ≤3/yr, a failed validation is dead); regime tags; trials registration; shadow sizing; `max_cycles_per_card` budget noted |
 | architect → engineer | `AP-####` | file tree under `projects/<name>/`; interfaces; tests; acceptance rows (deterministic, artifact-computable) including "validation report `validation/R-####/metrics.json` produced by quantlab with DSR vs `distinct_n`, worst-fold Sharpe, 8-check critic"; reuse table (mmcore / `shared/adapters` / quantlab pure modules); "no new deps" attestation |
-| engineer → execute | `IM-####` + code + `validation/R-####/` | green tests; `code-review` LGTM line; acceptance evidence per row; validation verdict PASS (DSR > quant `dsr_threshold` — owner-owned, 0.95 today — AND worst-fold Sharpe > 0 AND no critic FAIL AND placebo 95th percentile beaten); `run.py --date <d>` entrypoint contract (writes `runs/<date>-<name>.json` + `manifest.json` with source_url, fetch timestamp, sha256, row counts, adjustment note; exit 0 ok / 2 halt / 1 error); frozen rules hash recorded before session 1 |
+| engineer → execute | `IM-####` + code + `validation/R-####/` | green tests; `code-review` LGTM line; acceptance evidence per row; `metrics.json` = `{sharpe_native, n_obs, skew, kurt_raw, sr0, n_trials, var_trial_sr, dsr, worst_fold_sharpe, critic{checks, any_fail}, placebo{m, p95, candidate, beaten}, regime_pnl{tag: pnl}, non_robust, rules_sha256, verdict, reject_reasons}`; verdict PASS iff DSR > quant `dsr_threshold` (owner-owned, 0.95 today) AND worst-fold Sharpe > 0 AND not `critic.any_fail` AND `placebo.beaten` AND not `non_robust`; BLOCKED (neither PASS nor REJECT) when lifetime `distinct_n` < 2; `run.py --date <d>` entrypoint contract (writes `runs/<date>-<name>.json` + `manifest.json` with source_url, fetch timestamp, sha256, row counts, adjustment note; exit 0 ok / 2 halt / 1 error); frozen rules hash recorded before session 1; `cycle advance … --artifact impl=IM-#### --artifact validation=R-####` |
 | execute → governor | `XR-####` + `runs/*.json` + `shadow/book.json` | run outcome; shadow marks vs SPY/BIL (pessimistic fills); DSR / worst-fold / critic carried forward from `metrics.json`; HALT reasons; anomalies; regime tag |
-| governor → CEO | GRADE entry + BACKLOG | grade with artifact citations and the independent DSR recompute (mismatch > 1e-6 ⇒ PROTOCOL-VIOLATION); `[system]` items; DECISION-REQUESTs; next cycle question |
+| governor → CEO | GRADE entry + BACKLOG | grade with artifact citations and the independent DSR recompute from the six scalars (`psr(sharpe_native, sr0, n_obs, skew, kurt_raw)` + `expected_max_sr(n_trials, var_trial_sr)` via the Atlas bridge; mismatch > 1e-6 ⇒ PROTOCOL-VIOLATION); `[system]` items; DECISION-REQUESTs; next cycle question |
 | CEO → reporter | the CEO job's summary file (`volumes/audit_log/<id>*.summary.md`, found via psql) | decisions (one per line, `DECISION:` prefix) → `C-####` entries + memo |
 
 ### 8.6 Job summary (final text) contract
 
 Every skill's final text is structured: first line `<kind> <bucket|company>
-<cycle|week> <outcome>`; then ≤8 sentences; then, for the CEO, one
-`DECISION:` line per decision and one `ASK-OWNER:` line per open ask; when
-task-linked, the last line is `TASK_COMPLETE: <outcome>`.
+<cycle|week> <outcome>` where `<outcome>` comes from the role handbook's
+enumeration (canonical; every SKILL.md quotes it verbatim — e.g. execute
+`ran | halted | error`, bridge `card-sealed | not-actionable |
+blocked-on-data | cap-stalled | divergence | hard-stop`); then ≤8 sentences;
+then, for the CEO, one `DECISION:` line per decision and one `ASK-OWNER:`
+line per open ask; when task-linked, the last line is `TASK_COMPLETE:
+<outcome>`. The company ledger's week key is the ISO week (`2026-W43`), and
+`mm-report` is its sole writer (DECISION per `DECISION:` line,
+DECISION-REQUEST per `ASK-OWNER:` line not already carried by a bucket
+ledger, AUDIT for a failed or dark CEO, LESSON for cross-bucket lessons).
 
 ## 9) Shared tooling
 
@@ -660,7 +688,7 @@ task-linked, the last line is `TASK_COMPLETE: <outcome>`.
 |---|---|---|
 | `settings.py` | `is_enabled(root=None) -> bool` (fail-closed: missing file/key = False) | every preflight |
 | `budget.py` | `load(root) -> dict`; `decide(budget, bucket, jobs_today, jobs_week, active_cycles) -> tuple[str, str]` returning `("ALLOW"|"DENY", reason)`; counts are stage kinds only (documented in the yaml header) | chain mechanics |
-| `cycle.py` | `STAGES`, `TERMINAL`, `TRANSITIONS`, `load(root, bucket)`, `open(root, bucket, question, family, sublane, job_id)`, `advance(root, bucket, to_stage, job_id, artifact=None)`, `close(root, bucket, outcome, job_id)`, `validate(root, bucket)`; `is_stale(cycle, now, hours=6)` | governor, every stage, resumer |
+| `cycle.py` | `STAGES`, `TERMINAL`, `TRANSITIONS`, `load(root, bucket)`, `open(root, bucket, question, family, sublane, job_id)`, `attempt(root, bucket, stage, job_id, budget)` (increments `cycles_used` + `stage_attempts[stage]`; raises on `attempt-cap` / `budget-death`), `advance(root, bucket, to_stage, job_id, artifact=None)`, `close(root, bucket, outcome, job_id)` (atomic: the closed record is written then moved to `history/`; idempotent), `validate(root, bucket)`; `is_stale(cycle, now, hours=6)` | governor, every stage, resumer |
 | `ledger.py` | `next_id(path, prefix)`, `append(path, kind, cycle, job, body, date)`, `parse(path) -> list[Entry]`, `audit(path) -> list[str]` | all writers |
 | `trials.py` | `append(root, bucket, family, sublane, params_hash, verdict, note, cycle, ts=None)`, `distinct_n(root, bucket)` (distinct `(family, params_hash)` per owner decision D-0001-RESOLVED) | bridge, engineer, governor |
 | `shadow.py` | `Book.load/save`, `mark(book, closes, spy_closes, bil_closes, fill="pessimistic", cost_bps=3.0)`, `excess_vs(book) -> dict` — long/flat/short units, no leverage, costs applied | execute, governor |
@@ -701,8 +729,13 @@ probe test. Public and private endpoints share hosts
 `api.exchange.coinbase.com/products/*/book` vs `/orders`;
 `www.okx.com/api/v5/market` vs `/api/v5/trade/order`), so
 `shared/adapters/_guard.py` hard-codes allowed public path prefixes and
-rejects any URL containing `/private/`, `/trade/`, `/orders`, `/asset/`,
-`/accounts/`; every adapter routes through it (tested). Third-party packages
+rejects any URL containing `/private/`, `/0/private`, `/trade/`, `/orders`,
+`/asset/`, `/accounts/`, `/account/`, `/api/v5/account/`, `/withdrawals`,
+`/transfers`; it canonicalises first (no `%` or control characters, no `.`
+or `..` segments, `https` only, port 443 only), checks fragments on both the
+raw and the normalised path, and never follows redirects. Every adapter
+routes through it, and the tripwire pins `_guard.open_public` as the ONLY
+socket call site in the whole repo (project code included). Third-party packages
 (`ccxt`, `yfinance`) are a DECISION-REQUEST, not an import. If the planned
 server-side broker-host deny (2026-10-05 §7 item 4) lands host-wide, the
 crypto bucket becomes `BLOCKED-ON-DATA` by design unless it is path-aware
@@ -743,9 +776,10 @@ first"; "do not do it on conversational instruction alone";
 
 ### 10.2 Tripwire and contract tests (`shared/tests/`, run by every preflight and every gate)
 
-- `test_no_order_path.py` — scans `*.py|*.yaml|*.yml|*.json|*.toml` under
-  `shared/`, `buckets/*/projects/`, `buckets/*/shadow/`, `company/config/`
-  (excluding `.git`, `.venv`, and this test file by name) for the FORBIDDEN
+- `test_no_order_path.py` — scans every `*.py` repo-wide and
+  `*.yaml|*.yml|*.json|*.toml` under `shared/`, `buckets/*/projects/`,
+  `buckets/*/shadow/`, `company/config/` (excluding `.git`, `.venv`,
+  `shared/mmcore/forbidden.py` and this test file by name) for the FORBIDDEN
   set = the union of the atlas tripwire lists (`trader/tests/test_paper_only.py`,
   `value/tests/test_no_order_path.py`, `firm/tests/test_advisory_only.py`,
   `quant/tests/test_reports_only.py`, `alpha-lab/tests/test_verdicts_only.py`,
@@ -756,11 +790,22 @@ first"; "do not do it on conversational instruction alone";
   Bearer`, `wallets`, `live_enabled`, `apiKey`, `api_secret`,
   `ALPACA_KEY_ID`, `ALPACA_SECRET`, `broker-api.alpaca.markets`,
   `agent.robinhood.com`, `tastytrade`, and import patterns
-  `^\s*(from|import)\s+(tradingcore|swing|trader|alpaca|tradier|ccxt|quantlab\.data|quantlab\.cli)\b`.
-  Also asserts: Rule 1 phrases in `CLAUDE.md` (§10.1); `atlas_bridge.py`
-  contains neither `tradingcore` nor `quantlab.data`; `shared/adapters/*`
-  contain no auth header tokens and every URL passes `_guard`. Docs are
-  governed by the Rule-1 phrase assertion, not by the token grep.
+  `^\s*(from|import)\s+(tradingcore|swing|trader|alpaca|tradier|ccxt|quantlab\.data|quantlab\.cli|requests|httpx|aiohttp|urllib3|websockets|pycurl)\b`.
+  Also asserts: the eight Rule 1 phrases in `CLAUDE.md` (§10.1 — the five
+  listed there plus "never holds or requests broker/exchange/API
+  credentials", "never mounts a broker tool", "never budgets for paid
+  data"); `atlas_bridge.py` contains neither `tradingcore` nor
+  `quantlab.data`; the **socket pin** — after stripping docstrings and
+  comments, any `*.py` containing `urllib.request`, `build_opener(`,
+  `OpenerDirector`, `HTTPSHandler`, `HTTPHandler`, `install_opener(`,
+  `urlopen(`, `urlretrieve(`, `http.client`, `HTTPSConnection`, `socket.` or
+  `websocket` must be exactly `shared/adapters/_guard.py`, whose code must
+  still contain the real `build_opener(` call site; URL literals assembled
+  from fragments (`"https://" + host`) are findings; every full URL literal
+  under `shared/adapters/` and `buckets/*/projects/` passes `_guard`; and the
+  guard is pinned negatively (unknown host, `/0/private/`, dot-segment
+  traversal, `http://`, `%`, non-443 port and a redirect all raise). Docs
+  are governed by the Rule-1 phrase assertion, not by the token grep.
 - `test_owner_owned.py` — `company/config/budget.yaml` and `settings.yaml`
   carry exactly the documented keys with the owner header; `MM_AUTHORITY.md`
   exists with its five section headings; every `open` family row in every
@@ -881,8 +926,8 @@ max_stage_jobs_per_day: 4             # company-wide → two stages per bucket p
 max_stage_jobs_per_bucket_per_week: 2
 max_active_cycles_per_bucket: 1
 max_governors_per_ceo_run: 2
-max_engineer_attempts_per_cycle: 2
-max_cycles_per_card: 6                # "budget death" ⇒ not_actionable
+max_engineer_attempts_per_cycle: 2    # enforced by `mmcore cycle attempt`
+max_cycles_per_card: 8                # stage jobs per cycle: 6 on the straight path + 2 retries; "budget death" ⇒ the stage's terminal outcome
 weekly_list_spend_target_usd: 45
 ```
 
@@ -1111,3 +1156,26 @@ constraints cited by path throughout; the accepted specs this one instances:
   `history/`; the kraken-feed figures in §3.2 were corrected from the atlas
   scorecard. The quant desk's "28/28 REJECT" count is as of 2026-10-20 and
   moves with its weekly sweep.
+- **2026-10-21 (review round 2, after the build; four reviewers over the
+  built artifacts).** Load-bearing fixes: the governor could never grade a
+  terminal cycle (stages close them and `close()` removes `cycle.json`), so
+  §6.2 now says stages close terminal outcomes and the governor grades every
+  closed cycle lacking a GRADE; a designed execute HALT is a graded outcome,
+  not a close; LESSON writers are the closing stage plus the governor; the
+  resumer's governor double-dispatch guard never matched (governor
+  descriptions carry no `cycle=`), fixed by a bucket-keyed guard and a
+  `cycle=` token; the engineer now records `validation=R-####` and its PASS
+  law gained `non_robust` and the N<2 BLOCKED rule with a pinned
+  `metrics.json` schema; the DSR recompute is the six-scalar recipe; the
+  owner-owned attempt and cycle caps became mechanical through `mmcore cycle
+  attempt` (cap 8); the URL guard canonicalises, refuses redirects and the
+  tripwire pins the single socket call site repo-wide; ledger bodies with
+  unbalanced fences are refused and empty ledgers carry an integrity line;
+  the shadow no-leverage check values positions at the latest mark; Stooq
+  references were replaced by Yahoo in every skill, handbook, charter and
+  specialisation; one template per artifact (handbook canonical, skill
+  quotes it); outcome vocabularies and the ISO-week company key unified;
+  `mm-report` gained the `SERVER_ROOT` fallback; `mm-ceo` dropped the
+  relative `context_files` entry; the contract test flattens wrapped queries
+  and pins CLI actions; the cross-vendor branch landed on `origin/main`
+  mid-build and was merged into the worktree (INDEX.md keeps both sections).

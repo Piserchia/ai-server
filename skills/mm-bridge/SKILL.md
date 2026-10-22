@@ -44,10 +44,12 @@ Grammar (`LOOP.md` §9 / spec §8.1):
 mm-bridge: bucket=<slug> cycle=<bucket>-C#### [artifact=RB-####] [mode=<word>] — <one line of human context>
 ```
 
-Required keys: `bucket`, `cycle`. `artifact=` names the brief; when
-absent, take `artifacts.brief` from `buckets/<b>/state/cycle.json`; when
-both are absent, hard stop with a clear summary — never a guess. Parse
-`key=value` tokens before the em dash; unknown keys are ignored. The
+`bucket` and `cycle` required; `artifact` optional — defaults to the
+matching cycle.json artifacts key; hard stop only when both are absent.
+(`artifact=` names the brief; the matching key is `artifacts.brief` in
+`buckets/<b>/state/cycle.json`; a hard stop is a clear summary, never a
+guess.) Parse `key=value` tokens before the em dash; unknown keys are
+ignored. The
 `mm-bridge:` prefix is optional — Telegram strips flags and leaves bare
 text. The payload is NEVER injected into your prompt; everything rides in
 the description and committed state (`cycle.json.stage` must be `bridge`
@@ -65,12 +67,26 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    *completed* and deletes the workspace — push before the reserve.
 2. **Preflight.** `PYTHONPATH=shared .venv/bin/python -m mmcore preflight
    --bucket <b>`. Non-zero → stop, summary says why, no push, no dispatch.
+2a. **Attempt (right after preflight).** `PYTHONPATH=shared
+   .venv/bin/python -m mmcore cycle attempt --bucket <b> --stage bridge
+   --job <job-id8>` increments `cycles_used` (stage jobs started on this
+   cycle) and `stage_attempts[bridge]` in `cycle.json` and refreshes
+   `last_advanced_at`/`last_job_id`; success prints `MMCORE CYCLE ATTEMPT
+   OK bridge <n>/<cap-or-inf> used <cycles_used>/<max_cycles_per_card>`.
+   Exit 2 with last line `MMCORE CYCLE ATTEMPT DENY budget-death`
+   (`cycles_used` would exceed `max_cycles_per_card`) → no card: one
+   LESSON line `- [<cycle>] <family>/<sublane> | budget death | <reusable
+   constraint>` in `buckets/<b>/evaluation/LESSONS.md`, a `LESSON` ledger
+   entry, `PYTHONPATH=shared .venv/bin/python -m mmcore cycle close
+   --bucket <b> --outcome not_actionable --job <job-id8>`, then the gates
+   and the push, no dispatch; summary outcome `not-actionable`.
 3. **Read the handbook, then the specialisation.**
    `company/officers/bridge.md`, then `buckets/<b>/officers/bridge.md`;
    then the brief `buckets/<b>/research/RB-####.md`, the bucket `CHARTER.md`
    (data policy, ceilings), `knowledge/FAMILIES.md`, `evaluation/LESSONS.md`
    (every bucket + `company/LESSONS.md`), and `company/config/budget.yaml`
-   (read `max_cycles_per_card`; never edit).
+   (read `max_cycles_per_card` — 8: 6 on the straight path + 2 retries;
+   never edit).
 4. **Judge admissibility first (cheap kills, same day).** Take the brief's
    recommended mechanism. (a) Killed elsewhere — the `Prior-art check:`
    ids (every atlas ledger/trials registry via
@@ -85,9 +101,20 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    is the record) — go to step 7 with the verdict set.
 5. **Probe the free data, live, fenced.** From this box, against the real
    public endpoint: `PYTHONPATH=shared .venv/bin/python -c "from adapters
-   import stooq; …"` for daily closes (`spy.us`, `bil.us`, the universe),
-   or a `urllib` one-liner routed through `adapters._guard.open_public`
-   for any other public endpoint (Kraken `/0/public/`, Coinbase
+   import yahoo; print(len(yahoo.fetch_daily_closes('SPY', range_='1y')))"`
+   for daily closes — Yahoo chart v8 (`shared/adapters/yahoo.py`,
+   `fetch_daily_closes(symbol, range_)`, plain tickers `SPY`, `BIL`, the
+   universe) is THE daily-closes/benchmark source; Stooq (`<symbol>.us`)
+   is BLOCKED behind a JavaScript challenge since 2026-10-21 (live probe
+   xfails) — re-probe it each cycle and record the result, but never name
+   it as a card's source while blocked. Adjustment note on the card:
+   Yahoo `quote.close` is split-adjusted, not total-return — state the
+   dividend treatment per card. Timing: Yahoo returns the in-progress
+   session as today's row during US hours — the run contract must HALT on
+   a provisional bar (compare `meta.regularMarketTime` to the session
+   end), never reuse it; say so under `Data sources`. Any other public
+   endpoint goes through a `urllib` one-liner routed via
+   `adapters._guard.open_public` (Kraken `/0/public/`, Coinbase
    `/products/`, OKX `/api/v5/market/` or `/api/v5/public/` only; the
    guard rejects everything else — do not work around it). Record the
    command, row counts, first/last dates and the UTC timestamp. **The
@@ -108,10 +135,11 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    Pairs/residual conditioners must show
    corr(conditioner, traded leg's own return) < 0.5643 on the card
    (F-04 contamination line) or it is a re-mine.
-7. **Write and seal the card** `buckets/<b>/cards/AC-####.md` (id = max
-   existing `AC-` in `cards/` + 1, `AC-0001` if none). The card carries
-   EVERY line of this template (`LOOP.md` §9 / spec §8.5 row 3); a line
-   that does not apply says `n/a — <why>`, never goes missing:
+7. **Write and seal the card** `buckets/<b>/cards/AC-####.md` through the
+   artifact helper (`PYTHONPATH=shared .venv/bin/python -c "from mmcore
+   import artifacts, root; …"` → `artifacts.new_artifact(root.root(),
+   "<b>", "AC", header, body)`; it allocates the id and writes the header
+   first). The header lines come first, in this order (spec §8.3):
 
    ```
    id: AC-####
@@ -123,29 +151,64 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    job: <job-id8>
    sealed: <ISO-8601 UTC>
    verdict: ACTIONABLE | NOT-ACTIONABLE | BLOCKED-ON-DATA
+   ```
 
-   # AC-#### — <mechanism, one line>
+   then a blank line, then the body = the `company/officers/bridge.md`
+   block ("The artifact you leave"), quoted verbatim — every line, verbatim
+   labels, in this order; a line that does not apply says `n/a — <why>`,
+   never goes missing (a card missing any line is not sealed):
 
-   Brief: RB-####
-   Mechanism: <who loses, and why the edge exists>
-   Rules (deterministic): <entry / exit / sizing as rules; ≤2 parameters per confirmatory cycle; every grid cell is a trial>
-   Parameters: <name=value, name=value (≤2)>
-   Universe: <symbols or the selection rule>
-   Data sources: <source → URL (free, keyless) per series>
-   Live probe: <command> → <rows, first/last date, truncated output> @ <UTC timestamp> (pre-seal fence respected: no signal × forward-return statistic computed)
-   Cost model: <≥3 bps/side + spread; pessimistic fills; crypto: taker fees both venues + withdrawal>
-   Success criterion: <clause(s), scored AS WRITTEN>
-   Kill criterion: <clause(s), scored AS WRITTEN>
-   Criteria observables: <artifact + field for every success/kill clause, computable by someone holding only the artifacts and this card>
-   Placebo plan: random-entry, M ≥ 200; candidate must beat the 95th percentile
-   Prior-art check: <nearest ids across every atlas ledger/trials registry and every bucket; why this is not a re-mine>
-   Survivorship probe: <for any universe-selection idea; else n/a — fixed universe>
-   Windows: TRAIN <from–to> / VALIDATION <from–to> / FORWARD <from–> (validation touches logged, ≤3/yr; a failed validation is dead)
-   Regime tags: <tags the engineer must report P&L by>
-   Trials registration: family=<family> sublane=<sublane> params_hash=<hash> → trials.jsonl (verdict registered)
-   Shadow sizing: <units / notional; long/flat/short; no leverage>
-   Budget: max_cycles_per_card=<n from company/config/budget.yaml> (budget death ⇒ not_actionable)
-   Verdict reason: <one paragraph; for NOT-ACTIONABLE / BLOCKED-ON-DATA the single strongest reason and the prior ids>
+   ```
+   Hypothesis:
+   <one falsifiable sentence; names who loses>
+
+   Rules (deterministic; ≤ 2 parameters):
+   Entry: <formula over named observables>
+   Exit: <formula>
+   Parameters: <name=value> [, <name=value>]   # every grid cell is a trial
+   Sizing (shadow): <units rule; long/flat/short; no leverage>
+
+   Universe:
+   <fixed ex ante; symbols or a point-in-time selection rule>
+
+   Data sources (free, probed live — the pre-seal fence applies):
+   Source: <adapter + endpoint or URL>        Auth: none
+   Probe: <command run> → rows=<n> first=<ts> last=<ts> fetched=<ISO UTC>
+   Probe output (truncated): <first 3 rows verbatim>
+   Adjustment note: <splits/dividends/none>
+
+   Cost model:
+   Costs: <≥ 3 bps/side + spread | taker fees both venues + withdrawal + latency>
+   Fills: pessimistic
+
+   Success criterion:
+   <net-of-cost statement with a number and a window>
+   Kill criterion:
+   <the clause that ends it>
+   Criteria observables:
+   <every quantity named above, with the file/field it will be read from>
+
+   Placebo plan:
+   Random-entry placebo, M = <≥ 200>, candidate must beat the 95th percentile.
+
+   Prior-art check:
+   <nearest ids across every atlas ledger/trials + every bucket; what is mechanically different>
+
+   Survivorship probe:
+   <universe-selection ideas: point-in-time source, or "n/a — fixed universe">
+
+   Windows:
+   TRAIN: <start..end>   VALIDATION: <start..end> (touches logged: <k>/3 this year)   FORWARD: <start..>
+   Regime tags: <which regimes the windows cover>
+
+   Trials registration:
+   <mmcore trials append … --verdict registered — one line per candidate and grid cell; lifetime N after = <n>>
+
+   Budget:
+   max_cycles_per_card: <n>   cycles_used: <k>   (budget death ⇒ not_actionable)
+
+   Verdict:
+   ACTIONABLE | NOT-ACTIONABLE — <reason, prior-art id> | BLOCKED-ON-DATA — <what is missing; DECISION-REQUEST if owner-side>
    ```
 
    `sealed:` is the time you finish writing it. After that line is
@@ -215,9 +278,10 @@ Then the chain mechanics (`LOOP.md` §4, steps 2–5):
 written), `buckets/<b>/evaluation/trials.jsonl` (via `mmcore trials
 append` only), `buckets/<b>/evaluation/LEDGER.md` (via `mmcore ledger
 append` only), `buckets/<b>/evaluation/LESSONS.md` (append one line on a
-terminal verdict), `buckets/<b>/state/cycle.json` + `state/history/` (via
-`mmcore cycle advance|close` only), `.context/CHANGELOG.md` (one entry per
-run), `skills/GOTCHAS.md` (surprises only). Nothing else.
+terminal verdict or a `cycle attempt` DENY), `buckets/<b>/state/cycle.json`
++ `state/history/` (via `mmcore cycle attempt|advance|close` only; `close`
+with `--outcome not_actionable|blocked_on_data` only), `.context/CHANGELOG.md`
+(one entry per run), `skills/GOTCHAS.md` (surprises only). Nothing else.
 
 ## Forbidden
 
@@ -240,9 +304,13 @@ run), `skills/GOTCHAS.md` (surprises only). Nothing else.
 ## Close-out
 
 Final text = the job summary (`LOOP.md` §9 / spec §8.6): first line
-`mm-bridge <bucket> <cycle> <outcome>` (outcome: `actionable` |
-`actionable cap-stalled` | `not_actionable` | `blocked_on_data` |
-`stopped: <reason>`); then ≤8 sentences — AC id, the mechanism and its
+`mm-bridge <bucket> <cycle> <outcome>` where outcome is the handbook's
+enumeration, quoted verbatim: `card-sealed | not-actionable |
+blocked-on-data | cap-stalled | divergence | hard-stop` (`card-sealed` =
+ACTIONABLE, pushed, architect dispatched; `cap-stalled` = ACTIONABLE
+pushed but the budget said DENY; `divergence` = push rejected twice;
+`hard-stop` = a missing input or a preflight/state mismatch); then ≤8
+sentences — AC id, the mechanism and its
 loser, the probe result in one line (source, rows, dates, timestamp),
 the parameters sealed, the single strongest reason for a terminal
 verdict with its prior ids, trials registration, the dispatched
@@ -273,7 +341,11 @@ verdict with its prior ids, trials registration, the dispatched
   cycle (PROTOCOL §6; alpha-lab PROTOCOL §4).
 - Probe from this box, not from cached knowledge — free endpoints drift;
   a card whose probe row is stale sends the engineer against a dead
-  endpoint (atlas-gap-scout gotcha).
+  endpoint (atlas-gap-scout gotcha). Stooq's keyless CSV went behind a
+  JavaScript browser-verification page on 2026-10-21 (`shared/adapters/stooq.py`
+  kept, live probe xfail): re-probe it each cycle, record the result, and
+  name Yahoo chart v8 (`shared/adapters/yahoo.py`) as the source while it
+  stays blocked.
 - `mmcore families saturate` needs ≥2 terminal ids and is the governor's
   call anyway: a bridge kill is ONE id — note it in the LESSON line and
   the summary, never touch `FAMILIES.md`.

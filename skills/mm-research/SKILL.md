@@ -69,6 +69,20 @@ whose `stage` must be `research` and whose `cycle_id` must equal the
    3.12 with `yaml` importable, the clone is on `main` and not behind
    `origin/main`, the bucket exists, and the tripwire tests pass. Non-zero
    → stop, summary says why, no push, no dispatch.
+2a. **Attempt (right after preflight).** `PYTHONPATH=shared
+   .venv/bin/python -m mmcore cycle attempt --bucket <b> --stage research
+   --job <job-id8>` increments `cycles_used` (stage jobs started on this
+   cycle) and `stage_attempts[research]` in `cycle.json` and refreshes
+   `last_advanced_at`/`last_job_id`; success prints `MMCORE CYCLE ATTEMPT
+   OK research <n>/<cap-or-inf> used <cycles_used>/<max_cycles_per_card>`.
+   Exit 2 with last line `MMCORE CYCLE ATTEMPT DENY budget-death`
+   (`cycles_used` would exceed `max_cycles_per_card`, 8) → no brief: one
+   LESSON line `- [<cycle>] <family>/<sublane> | budget death | <reusable
+   constraint>` in `buckets/<b>/evaluation/LESSONS.md`, a `LESSON` ledger
+   entry, `PYTHONPATH=shared .venv/bin/python -m mmcore cycle close
+   --bucket <b> --outcome not_actionable --job <job-id8>`, then the gates
+   and the push, no dispatch; summary outcome `hard-stop` with "budget
+   death" in the first sentence (the only close this stage ever makes).
 3. **Read the handbook, then the specialisation.**
    `company/officers/research.md`, then `buckets/<b>/officers/research.md`
    (domain priors, free data sources already probed, what NOT to retry,
@@ -169,8 +183,10 @@ Then the chain mechanics (`LOOP.md` §4, steps 2–5):
 `buckets/<b>/knowledge/LIBRARY.md` (append rows only),
 `buckets/<b>/research/RB-####.md` (new file), `buckets/<b>/evaluation/LEDGER.md`
 (via `mmcore ledger append` only), `buckets/<b>/state/cycle.json` (via
-`mmcore cycle advance` only), `.context/CHANGELOG.md` (one entry per run),
-`skills/GOTCHAS.md` (project gotchas, surprises only). Nothing else.
+`mmcore cycle attempt|advance` only; `cycle close --outcome not_actionable`
+and one `evaluation/LESSONS.md` line only on a `cycle attempt` DENY),
+`.context/CHANGELOG.md` (one entry per run), `skills/GOTCHAS.md` (project
+gotchas, surprises only). Nothing else.
 
 ## Forbidden
 
@@ -192,8 +208,12 @@ Then the chain mechanics (`LOOP.md` §4, steps 2–5):
 ## Close-out
 
 Final text = the job summary (`LOOP.md` §9 / spec §8.6): first line
-`mm-research <bucket> <cycle> <outcome>` (outcome: `briefed` |
-`briefed cap-stalled` | `stopped: <reason>`); then ≤8 sentences — RB id,
+`mm-research <bucket> <cycle> <outcome>` where outcome is the handbook's
+enumeration, quoted verbatim: `brief-committed | cap-stalled | divergence
+| hard-stop` (`brief-committed` = RB pushed and `mm-bridge` dispatched;
+`cap-stalled` = RB pushed but the budget said DENY; `divergence` = push
+rejected twice; `hard-stop` = a missing input, a preflight/state mismatch,
+or the budget-death close of step 2a); then ≤8 sentences — RB id,
 claims added (L-ids), the recommended mechanism and its loser, prior-art
 ids that bound it, data gaps, the dispatched `mm-bridge` job id (or why
 none). When task-linked (Telegram-originated), the last line is

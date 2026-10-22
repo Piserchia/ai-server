@@ -62,16 +62,24 @@ mechanics), §6 (recovery matrix).
    non-terminal (`closed` cycles live in `history/`, so any present file is
    non-terminal) AND either (a) `last_advanced_at` is > 6 h before now, or
    (b) `blocked_reason` is `"cap"`.
-5. **Double-dispatch guard** — never skip it; it is the real safety:
+5. **Double-dispatch guard** — never skip it; it is the real safety. Stage
+   guard (unchanged), for a cycle at `research | bridge | architect |
+   engineer | execute`:
    ```bash
    psql assistant -tAc "SELECT count(*) FROM jobs WHERE kind='mm-<stage>' AND description LIKE '%cycle=<id>%' AND status IN ('queued','running')"
    ```
    where `<stage>` is the kind for `cycle.json.stage`: `research` →
    `mm-research`, `bridge` → `mm-bridge`, `architect` → `mm-architect`,
-   `engineer` → `mm-engineer`, `execute` → `mm-execute`; `open` or
-   `graded` → `mm-govern` (the governor owns those edges; dispatch it with
-   `mode=resume`). Count > 0 → the stage is in flight; report it, do not
-   dispatch. Also check `status IN ('deferred')` separately and report it.
+   `engineer` → `mm-engineer`, `execute` → `mm-execute`. Governor guard,
+   for a stale cycle at `open` or `graded` (the governor owns those
+   edges; dispatch it with `mode=resume`) — governors are not stage kinds,
+   so the guard is per bucket, not per cycle:
+   ```bash
+   psql assistant -tAc "SELECT count(*) FROM jobs WHERE kind='mm-govern' AND description LIKE '%bucket=<b> %' AND status IN ('queued','running')"
+   ```
+   Count > 0 → the stage (or a governor for that bucket) is in flight;
+   report it, do not dispatch. Also check `status IN ('deferred')`
+   separately and report it.
 6. **Budget** (stage kinds only — governors, you, the CEO and the reporter
    are never counted):
    ```bash
@@ -82,16 +90,18 @@ mechanics), §6 (recovery matrix).
    `DENY` (exit 2) → still cap-stalled; say so and move on — tomorrow's
    run retries. Re-run the day count before EACH dispatch: your own
    dispatches count. A governor re-dispatch (`open`/`graded`) is not a
-   stage kind and needs no budget call — but never more than one per
-   bucket per run.
+   stage kind and needs no budget call — exactly one `mm-govern` per
+   bucket per run, never more.
 7. **Re-dispatch the SAME stage** via `enqueue_job`, AFTER the guard and
    the budget say yes. Description per the §8.1 grammar:
    `mm-<stage>: bucket=<b> cycle=<cycle_id> [artifact=<ID>] — resumed by
    mm-resume <id8>: <stale Nh | cap-stalled>` where `artifact` is the
    stage's input from `cycle.json.artifacts` (`bridge` → `brief`,
    `architect` → `card`, `engineer` → `plan`, `execute` → `impl`; none for
-   `research`); for the governor: `mm-govern: bucket=<b> mode=resume —
-   resumed by mm-resume <id8>: cycle <cycle_id> at stage <stage>`. Payload
+   `research`); for a stale `open` or `graded` cycle, the governor:
+   `mm-govern: bucket=<b> mode=resume cycle=<cycle_id> — resumed by
+   mm-resume <id8>: stage <stage>` (the `cycle=` token is what the
+   governor's own guard and the audit spine key on). Payload
    `{"project_slug":"moneymachine","session_timeout_seconds":<T>}` with the
    TARGET stage's timeout:
 
@@ -125,16 +135,22 @@ writer records it.
   stage you dispatch is its only mover); never dispatch without the
   double-dispatch guard; never dispatch a DIFFERENT stage than
   `cycle.json.stage` names ("skipping ahead" is a protocol violation).
-- Never dispatch `mm-ceo` or `mm-report` (scheduled rows), never a second
-  job for the same cycle in one run, never past a `DENY`.
+- Never dispatch `mm-ceo` or `mm-report` (scheduled rows — they remain
+  forbidden for the resumer), never a second job for the same cycle in one
+  run, never a second `mm-govern` for the same bucket in one run, never
+  past a `DENY`.
 
 ## Close-out
 
-Final text (§8.6): first line `mm-resume company <date> <resumed N|quiet|
-cap-stalled|disabled>`; then ≤8 sentences: per bucket — cycle id, stage,
-age, in-flight count, budget verdict, dispatched job id8 or why not. A
-quiet day ("nothing to resume, and here is how I verified that") is a
-complete, successful run — one line, no dispatch, done. A stage job that
+Final text (§8.6): first line `mm-resume company <date> <outcome>` where
+outcome is the handbook's enumeration, quoted verbatim: `resumed N |
+nothing-to-resume | disabled` (`resumed N` counts the jobs you enqueued,
+stage and governor alike; a day where every candidate is in flight or
+cap-stalled is `nothing-to-resume` with the stalls named); then ≤8
+sentences: per bucket — cycle id, stage, age, in-flight count, budget
+verdict, dispatched job id8 or why not. A quiet day ("nothing to resume,
+and here is how I verified that") is a complete, successful run — one
+line, no dispatch, done. A stage job that
 crashed or vanished (stale, no job, no artifact) is a FINDING to lead
 with, named for the governor. When task-linked, end with
 `TASK_COMPLETE: <outcome>`.

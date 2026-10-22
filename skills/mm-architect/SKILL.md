@@ -44,10 +44,12 @@ Grammar (`LOOP.md` §9 / spec §8.1):
 mm-architect: bucket=<slug> cycle=<bucket>-C#### [artifact=AC-####] [mode=<word>] — <one line of human context>
 ```
 
-Required keys: `bucket`, `cycle`. `artifact=` names the card; when absent,
-take `artifacts.card` from `buckets/<b>/state/cycle.json`; when both are
-absent, hard stop with a clear summary — never a guess. Parse `key=value`
-tokens before the em dash; unknown keys are ignored. The `mm-architect:`
+`bucket` and `cycle` required; `artifact` optional — defaults to the
+matching cycle.json artifacts key; hard stop only when both are absent.
+(`artifact=` names the card; the matching key is `artifacts.card` in
+`buckets/<b>/state/cycle.json`; a hard stop is a clear summary, never a
+guess.) Parse `key=value` tokens before the em dash; unknown keys are
+ignored. The `mm-architect:`
 prefix is optional — Telegram strips flags and leaves bare text. The
 payload is NEVER injected into your prompt; everything rides in the
 description and committed state (`cycle.json.stage` must be `architect`
@@ -65,13 +67,30 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    *completed* and deletes the workspace — push before the reserve.
 2. **Preflight.** `PYTHONPATH=shared .venv/bin/python -m mmcore preflight
    --bucket <b>`. Non-zero → stop, summary says why, no push, no dispatch.
+2a. **Attempt (right after preflight).** `PYTHONPATH=shared
+   .venv/bin/python -m mmcore cycle attempt --bucket <b> --stage architect
+   --job <job-id8>` increments `cycles_used` (stage jobs started on this
+   cycle) and `stage_attempts[architect]` in `cycle.json` and refreshes
+   `last_advanced_at`/`last_job_id`; success prints `MMCORE CYCLE ATTEMPT
+   OK architect <n>/<cap-or-inf> used <cycles_used>/<max_cycles_per_card>`.
+   Exit 2 with last line `MMCORE CYCLE ATTEMPT DENY budget-death`
+   (`cycles_used` would exceed `max_cycles_per_card`) → no plan: one
+   LESSON line `- [<cycle>] <family>/<sublane> | budget death | <reusable
+   constraint>` in `buckets/<b>/evaluation/LESSONS.md`, a `LESSON` ledger
+   entry, `PYTHONPATH=shared .venv/bin/python -m mmcore cycle close
+   --bucket <b> --outcome plan_rejected --job <job-id8>`, then the gates
+   and the push, no dispatch; summary outcome `plan-rejected`.
 3. **Read the handbook, then the specialisation, then the ground.**
    `company/officers/architect.md`, then `buckets/<b>/officers/architect.md`;
    then the card `buckets/<b>/cards/AC-####.md` (header + every template
    line), the bucket `CHARTER.md` (data policy, ceilings, substrate map),
    and the APIs you may reuse — `shared/mmcore/*.py` public surfaces
    (`data.load_closes`, `shadow.Book/trade/mark/excess_vs`, `artifacts`,
-   `ledger`, `trials`), `shared/adapters/stooq.py` + `_guard.py`, and the
+   `ledger`, `trials`), `shared/adapters/yahoo.py` (Yahoo chart v8,
+   `fetch_daily_closes("SPY", range_="1y")`, plain tickers — THE
+   daily-closes/benchmark source; `stooq.py` is kept but BLOCKED behind a
+   JavaScript challenge since 2026-10-21 and is never planned against
+   while blocked) + `_guard.py`, and the
    pure `quantlab` modules exposed by `mmcore.atlas_bridge.quantlab()`
    (`engine metrics dsr walkforward leakage trials health sizing report`;
    atlas `quant/quantlab/dsr.py::deflated_sharpe`,
@@ -80,7 +99,10 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    adapter or helper belongs in `shared/`, not in a copy.
 4. **Reject early, with the reason on the record (same day).** Verdict
    `plan_rejected` when any of these holds: the card is not `verdict:
-   ACTIONABLE`, has no `sealed:` line, or is not on `origin/main`
+   ACTIONABLE`, has no `sealed:` line, is missing a line of the card
+   template (`company/officers/bridge.md`, section "The artifact you
+   leave" — the only template; never patch a missing line in the plan),
+   or is not on `origin/main`
    (`git log origin/main -- buckets/<b>/cards/AC-####.md` empty); the
    mechanism cannot be built without a new third-party package (`ccxt`,
    `yfinance`, `numpy`, anything beyond pyyaml + pytest); it needs paid or
@@ -101,18 +123,30 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    (the deterministic daily entrypoint); `tests/` (pytest, fixture-based,
    no network). Specify every interface as a signature with types.
 6. **Pin the two contracts the next two officers depend on.**
-   - `run.py --date <YYYY-MM-DD>`: reads cached/fresh closes through the
-     adapters, applies `rules.py`, writes `buckets/<b>/runs/<date>-<name>.json`
-     with keys `date name cycle card rules_sha256 status halt_reason
+   - `Run.py contract:` — entrypoint `run.py --date <YYYY-MM-DD>`: reads
+     cached/fresh closes through the adapters (Yahoo chart v8), applies
+     `rules.py`, writes `buckets/<b>/runs/<date>-<name>.json` with keys
+     `date name cycle card rules_sha256 status halt_reason
      target_positions{symbol: units} prices{symbol: close} benchmarks{spy, bil}
      regime` plus `buckets/<b>/runs/<date>-<name>.manifest.json`
-     (provenance); exit 0 ok / 2 halt (designed outcome: stale data,
-     missing close, rule-level halt) / 1 error. Pure stdlib + pyyaml.
-   - `validation/R-####/metrics.json`: `rid cycle card params symbols
-     window{start,end,n_obs} n_trials dsr sr0 dsr_threshold dsr_caveats
-     worst_fold_sharpe wf{folds[]} critic[{name,status,detail}]
-     placebo{m,p95,candidate,beaten} verdict reject_reasons rules_sha256`
-     — the governor recomputes DSR from exactly these fields.
+     (provenance: source_url, fetch timestamp, sha256, row counts,
+     adjustment note — Yahoo `quote.close` is split-adjusted, not
+     total-return; the card's dividend treatment is stated); exit 0 ok /
+     2 halt (designed outcome: stale or provisional data — Yahoo returns
+     the in-progress session as today's row during US hours, so a run
+     before the US close HALTs on a provisional bar by comparing
+     `meta.regularMarketTime` to the session end — missing close,
+     rule-level halt) / 1 error; `rules_sha256` frozen before session 1.
+     Pure stdlib + pyyaml.
+   - `validation/R-####/metrics.json` (the engineer's output; the governor
+     recomputes DSR from exactly these fields): `{sharpe_native, n_obs,
+     skew, kurt_raw, sr0, n_trials, var_trial_sr, dsr, worst_fold_sharpe,
+     critic: {checks: {...}, any_fail}, placebo: {m, p95, candidate,
+     beaten}, regime_pnl: {<tag>: pnl}, non_robust, rules_sha256, verdict,
+     reject_reasons}`. PASS law the plan states verbatim: `dsr` > quant
+     `dsr_threshold` (owner-owned, 0.95 today) AND `worst_fold_sharpe` > 0
+     AND not `critic.any_fail` AND `placebo.beaten` AND not `non_robust`;
+     BLOCKED (not PASS, not REJECT) when `mmcore trials n` < 2.
 7. **Acceptance rows and the reuse table.** Every row deterministic and
    artifact-computable (a command + the expected output); the validation
    row is mandatory and reads, verbatim: `validation report
@@ -133,13 +167,44 @@ and `cycle_id` must equal the `cycle=` token — otherwise stop and report).
    allocates the id (`next_artifact_id`) and writes the header first.
    Header lines (spec §8.3): `cycle`, `bucket`, `family`, `sublane`,
    `stage: architect`, `job: <job-id8>`, `verdict: PLANNED |
-   PLAN-REJECTED`. Body headings, in order: `# AP-#### — <mechanism>`,
-   `## Card` (AC id, sealed timestamp, parameters restated verbatim),
-   `## Module tree`, `## Interfaces`, `## run.py contract`, `## Validation
-   layout`, `## Tests`, `## Acceptance rows`, `## Reuse table`, `## Risks`
-   (data drift, cost model, regime concentration — each with the row that
-   catches it), `## Verdict reason` (one paragraph; for PLAN-REJECTED the
-   single strongest reason).
+   PLAN-REJECTED`. Body = the `company/officers/architect.md` block ("The
+   artifact you leave"), one template, quoted in the handbook's `Label:`
+   style — these sections, in this order, every one present (`n/a —
+   <why>` when it does not apply):
+
+   ```
+   Card:
+   <AC-####, sealed <ts>; rules and the ≤2 parameters restated verbatim (no re-interpretation)>
+
+   Module tree:
+   <buckets/<b>/projects/<name>/ — README.md, rules.py, run.py, validate.py, adapters/, tests/, validation/R-####/; one line per file saying what it does>
+
+   Interfaces:
+   <function signatures with types; the data contract (dict[date, float] from mmcore.data / adapters.yahoo); the run.py JSON schema>
+
+   Run.py contract:
+   <entrypoint `run.py --date <d>`; exit 0 ok / 2 halt / 1 error; outputs runs/<date>-<name>.json + manifest.json; rules_sha256 frozen before session 1; the provisional-bar HALT>
+
+   Validation layout:
+   <validation/R-####/{metrics.json,report.md,manifest.json} written by validate.py; the metrics.json schema of step 6; the PASS law verbatim; lifetime N from `mmcore trials n`>
+
+   Tests:
+   <pytest node ids, one per rule and one per failure mode: missing data, halt, cost application, placebo seed determinism>
+
+   Acceptance rows:
+   | # | Row | Command | Expected |
+   |---|---|---|---|
+   <every row deterministic; row 4 is the verbatim validation-report row of step 7>
+
+   Reuse table:
+   | Need | Reused from | Never |
+   |---|---|---|
+   <closes → shared/adapters/yahoo.py → mmcore.data.load_closes; backtest/DSR/walk-forward/critic → mmcore.atlas_bridge.quantlab(); shadow book → mmcore.shadow; ledger/artifacts/trials → mmcore>
+   No new deps: stdlib + pyyaml + pytest only; quantlab via mmcore.atlas_bridge (read-only).
+
+   Risks and mitigations:
+   <data gaps, regime concentration (NON-ROBUST tag), cost sensitivity, halt conditions — each with the row that catches it; for PLAN-REJECTED the single strongest reason leads this section and the PLAN entry's Verdict: line>
+   ```
 9. **Ledger and state.** `PYTHONPATH=shared .venv/bin/python -m mmcore ledger
    append --bucket <b> --kind PLAN --cycle <cycle> --job <job-id8>
    --body-file <f>` (first body line `Artifacts: RB-#### AC-#### AP-####`,
@@ -194,9 +259,10 @@ Then the chain mechanics (`LOOP.md` §4, steps 2–5):
 `buckets/<b>/plans/AP-####.md` (new file; a plan is a contract — a later
 change is a dated note appended by the engineer, never a silent edit),
 `buckets/<b>/evaluation/LEDGER.md` (via `mmcore ledger append` only),
-`buckets/<b>/evaluation/LESSONS.md` (append one line on PLAN-REJECTED),
-`buckets/<b>/state/cycle.json` + `state/history/` (via `mmcore cycle
-advance|close` only), `.context/CHANGELOG.md` (one entry per run),
+`buckets/<b>/evaluation/LESSONS.md` (append one line on PLAN-REJECTED or
+a `cycle attempt` DENY), `buckets/<b>/state/cycle.json` + `state/history/`
+(via `mmcore cycle attempt|advance|close` only; `close` with `--outcome
+plan_rejected` only), `.context/CHANGELOG.md` (one entry per run),
 `skills/GOTCHAS.md` (surprises only). Nothing else — no code, no
 `projects/` directory, no tests: those are the engineer's.
 
@@ -220,8 +286,12 @@ advance|close` only), `.context/CHANGELOG.md` (one entry per run),
 ## Close-out
 
 Final text = the job summary (`LOOP.md` §9 / spec §8.6): first line
-`mm-architect <bucket> <cycle> <outcome>` (outcome: `planned` | `planned
-cap-stalled` | `plan_rejected` | `stopped: <reason>`); then ≤8 sentences —
+`mm-architect <bucket> <cycle> <outcome>` where outcome is the handbook's
+enumeration, quoted verbatim: `plan-committed | plan-rejected |
+cap-stalled | divergence | hard-stop` (`plan-committed` = PLANNED, pushed,
+engineer dispatched; `cap-stalled` = PLANNED pushed but the budget said
+DENY; `divergence` = push rejected twice; `hard-stop` = a missing input or
+a preflight/state mismatch); then ≤8 sentences —
 AP id, the card it plans, the module tree in one line, the number of
 acceptance rows and the validation row's presence, the reuse decisions
 (what came from mmcore / adapters / quantlab), the single strongest reason

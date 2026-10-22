@@ -54,10 +54,12 @@ Grammar (`LOOP.md` §9 / spec §8.1):
 mm-execute: bucket=<slug> cycle=<bucket>-C#### [artifact=IM-####] [mode=<word>] — <one line of human context>
 ```
 
-Required keys: `bucket`, `cycle`. `artifact=` names the IM record; when
-absent, take `artifacts.impl` from `buckets/<b>/state/cycle.json`; when
-both are absent, hard stop with a clear summary — never a guess. Parse
-`key=value` tokens before the em dash; unknown keys are ignored. The
+`bucket` and `cycle` required; `artifact` optional — defaults to the
+matching cycle.json artifacts key; hard stop only when both are absent.
+(`artifact=` names the IM record; the matching key is `artifacts.impl` in
+`buckets/<b>/state/cycle.json`; a hard stop is a clear summary, never a
+guess.) Parse `key=value` tokens before the em dash; unknown keys are
+ignored. The
 `mm-execute:` prefix is optional — Telegram strips flags and leaves bare
 text. The payload is NEVER injected into your prompt; everything rides in
 the description and committed state (`cycle.json.stage` must be
@@ -78,6 +80,19 @@ without a PASS never runs).
    before the reserve.
 2. **Preflight.** `PYTHONPATH=shared .venv/bin/python -m mmcore preflight
    --bucket <b>`. Non-zero → stop, summary says why, no run, no push.
+2a. **Attempt (right after preflight).** `PYTHONPATH=shared
+   .venv/bin/python -m mmcore cycle attempt --bucket <b> --stage execute
+   --job <job-id8>` increments `cycles_used` (stage jobs started on this
+   cycle) and `stage_attempts[execute]` in `cycle.json` and refreshes
+   `last_advanced_at`/`last_job_id`; success prints `MMCORE CYCLE ATTEMPT
+   OK execute <n>/<cap-or-inf> used <cycles_used>/<max_cycles_per_card>`.
+   Exit 2 with last line `MMCORE CYCLE ATTEMPT DENY budget-death`
+   (`cycles_used` would exceed `max_cycles_per_card`) → do NOT run the
+   program: one LESSON line `- [<cycle>] <family>/<sublane> | budget death
+   | <reusable constraint>` in `buckets/<b>/evaluation/LESSONS.md`, a
+   `LESSON` ledger entry, `PYTHONPATH=shared .venv/bin/python -m mmcore
+   cycle close --bucket <b> --outcome halted --job <job-id8>`, then the
+   gates and the push; summary outcome `halted`.
 3. **Read the handbook, then the specialisation, then the record.**
    `company/officers/execute.md`, then `buckets/<b>/officers/execute.md`;
    then `buckets/<b>/projects/_records/IM-####.md` (project name,
@@ -87,21 +102,25 @@ without a PASS never runs).
 4. **Red gate, no run.** `PYTHONPATH=shared .venv/bin/python -m pytest
    shared/tests buckets/<b>/projects/<name>/tests -q -x`. Red → do NOT
    run the program; the failure is the finding: write the XR with
-   `status: halted`, `halt_reason: red tests — <first failure>`, close the
-   cycle `halted` (step 8), and report. Then the frozen-rules check:
-   `shasum -a 256 buckets/<b>/projects/<name>/rules.py` must equal the IM
-   header's `rules_sha256` — a mismatch is a PROTOCOL-VIOLATION ledger
-   entry and a halt, never a run.
+   `verdict: halted` and `## Outcome` reading `red gate — <first
+   failure>`, close the cycle `halted` (step 8), and report. Then the
+   frozen-rules check: `shasum -a 256 buckets/<b>/projects/<name>/rules.py`
+   must equal the IM header's `rules_sha256` — a mismatch is a
+   PROTOCOL-VIOLATION ledger entry and a `halted` close (step 8), never a
+   run.
 5. **Run it.** `.venv/bin/python buckets/<b>/projects/<name>/run.py --date
    <today, UTC, YYYY-MM-DD>` (the program fetches closes through
-   `shared/adapters` and writes `buckets/<b>/runs/<date>-<name>.json` +
-   `<date>-<name>.manifest.json`). Exit codes: `0` ok, `2` HALT (a
-   designed outcome: stale data, missing close, rule-level halt), `1`
-   error. **A handled HALT is not a job failure** — report it plainly,
-   with the `halt_reason` verbatim; never rerun to get a "better"
-   outcome. Exit `1` with a traceback → fail THIS job with the traceback
-   in the summary (escalation machinery handles the rest; the resumer
-   re-dispatches the stage within caps).
+   `shared/adapters` — Yahoo chart v8, `yahoo.fetch_daily_closes("SPY",
+   range_="1y")`, plain tickers; Stooq is BLOCKED behind a JavaScript
+   challenge since 2026-10-21 — and writes `buckets/<b>/runs/<date>-<name>.json`
+   + `<date>-<name>.manifest.json`). Exit codes: `0` ok, `2` HALT (a
+   designed outcome: stale or provisional data, missing close, rule-level
+   halt), `1` error. **A handled HALT is not a job failure** — report it
+   plainly, with the `halt_reason` verbatim; never rerun to get a "better"
+   outcome. Exit `1` with a traceback → the XR says `verdict: error`, the
+   traceback goes verbatim into the EXEC entry and the summary, and the
+   cycle closes `halted` (step 8); the governor grades it — you never
+   retry.
 6. **Verify the side effects in the files, not the stdout.** The run
    file exists, parses, carries `date name cycle card rules_sha256 status
    halt_reason target_positions prices benchmarks{spy,bil} regime`; the
@@ -127,36 +146,55 @@ without a PASS never runs).
    via `PYTHONPATH=shared .venv/bin/python -c "from mmcore import
    artifacts, root; …"` → `artifacts.new_artifact(root.root(), "<b>",
    "XR", header, body)`. Header (spec §8.3): `cycle`, `bucket`, `family`,
-   `sublane`, `stage: execute`, `job: <job-id8>`, `verdict: OK | HALT |
-   ERROR`, plus `impl: IM-####`, `validation: R-####`, `run:
-   runs/<date>-<name>.json`, `rules_sha256: <hex>`. Body template, every
-   line present (`n/a — <why>` when it does not apply):
+   `sublane`, `stage: execute`, `job: <job-id8>`, `verdict: ran | halted |
+   error`, plus `impl: IM-####`, `validation: R-####`, `run:
+   runs/<date>-<name>.json`, `rules_sha256: <hex>`. Body = the
+   `company/officers/execute.md` block ("The artifact you leave", item 3),
+   quoted verbatim, every section present (`none` / `n/a — <why>` when it
+   does not apply):
 
    ```
-   # XR-#### — <project> session <n> (<date>)
+   ## Outcome
+   run.py --date <d> exit <0|2|1>; reason (verbatim from the run file): <…>
+   runs/<d>-<name>.json: present=<y/n> rows=<n> sha256=<…> rules_sha256=<same as R-####: y/n>
 
-   Outcome: <ok | halted: <halt_reason verbatim> | error>
-   Run file: runs/<date>-<name>.json (sha256 <hex>) · manifest: <source_url>, fetched <UTC ts>, <rows> rows, <adjustment note>
-   Positions: <symbol units … | flat> (shadow units; pessimistic fills; trades this session: <n>)
-   Shadow marks: equity <x> · SPY <y> · BIL <z> · excess vs SPY <a> · excess vs BIL <b> · sessions <k> (from mmcore shadow report)
-   Validation carried forward: DSR <v> vs N=<n> (threshold <t>) · worst fold <w> · critic <pass>/<total> (from validation/R-####/metrics.json — copied, not recomputed)
-   Regime: <tag from the run file>
-   Anomalies: <stale close / missing symbol / leverage request / second consecutive halt — or none, and how you verified that>
-   Second occurrence: <yes: <what> also on <prev date> | no>
-   Routed to: <governor (GRADE next Saturday) | CEO (ASK-OWNER material: name it)>
+   ## Shadow marks (pessimistic fills; mmcore shadow report)
+   sessions=<n> book_return=<x> spy_return=<x> bil_return=<x> excess_vs_spy=<x> excess_vs_bil=<x>
+   trades today: <count, or none>
+
+   ## Carried forward from validation R-####
+   dsr=<x> (threshold <t>, N=<n>) worst_fold=<x> critic=<clean|…> placebo_beaten=<y/n>
+
+   ## Halt reasons / anomalies
+   <none | verbatim reasons; second-occurrence lines; data gaps; stale closes>
+
+   ## Regime tag
+   <from the card's regime tags; which one today falls in>
+
+   ## Routed to the governor
+   <nothing | the one line the GRADE must see>
    ```
 
    Then the EXEC ledger entry: `PYTHONPATH=shared .venv/bin/python -m mmcore ledger append
    --bucket <b> --kind EXEC --cycle <cycle> --job
    <job-id8> --body-file <f>` (first body line `Artifacts: AC-#### AP-####
-   IM-#### R-#### XR-####`, then `Outcome: …`). Then the state edge:
-   - ok → `PYTHONPATH=shared .venv/bin/python -m mmcore cycle advance
-     --bucket <b> --to graded --artifact exec=XR-#### --job <job-id8>`.
-   - HALT (or red tests, or a hash mismatch) → one LESSON line appended
-     to `buckets/<b>/evaluation/LESSONS.md` (`- [<cycle>] <family>/<sublane>
+   IM-#### R-#### XR-####`, then `Outcome: …`). Then the state edge
+   (`LOOP.md` §3):
+   - exit `0`, OR exit `2` with a written `runs/<date>-<name>.json` +
+     `manifest.json` (a designed HALT) → `PYTHONPATH=shared
+     .venv/bin/python -m mmcore cycle advance --bucket <b> --to graded
+     --artifact exec=XR-#### --job <job-id8>` — the governor grades the
+     halt; the XR says `verdict: ran` (exit 0) or `verdict: halted`
+     (exit 2).
+   - red gate (step 4), exit `1`, exit `2` with no run file or no
+     manifest, or `rules_sha256` drift → one LESSON line appended to
+     `buckets/<b>/evaluation/LESSONS.md` (`- [<cycle>] <family>/<sublane>
      | halt:<reason-class> | <reusable constraint>`), a LESSON ledger
-     entry, then `PYTHONPATH=shared .venv/bin/python -m mmcore cycle close
-     --bucket <b> --outcome halted --job <job-id8>`.
+     entry, a `PROTOCOL-VIOLATION` ledger entry on `rules_sha256` drift
+     (quote both hashes), then `PYTHONPATH=shared .venv/bin/python -m
+     mmcore cycle close --bucket <b> --outcome halted --job <job-id8>`.
+     The XR says `verdict: halted` (red gate, drift, missing files) or
+     `verdict: error` (exit 1).
 
 Then the chain mechanics (`LOOP.md` §4, steps 2–3 only — you dispatch
 nothing, so the budget and dispatch steps do not apply to you):
@@ -183,9 +221,11 @@ if this stage dies before its push.
 program, never by hand), `buckets/<b>/shadow/book.json` + `manifest.json`
 (via `mmcore shadow trade|mark` only), `buckets/<b>/runs/_records/XR-####.md`
 (new file), `buckets/<b>/evaluation/LEDGER.md` (via `mmcore ledger append`
-only), `buckets/<b>/evaluation/LESSONS.md` (append one line on a HALT),
-`buckets/<b>/state/cycle.json` + `state/history/` (via `mmcore cycle
-advance|close` only), `.context/CHANGELOG.md` (one entry per run),
+only; kinds `EXEC LESSON PROTOCOL-VIOLATION` — the violation only on
+`rules_sha256` drift), `buckets/<b>/evaluation/LESSONS.md` (append one line
+when you close the cycle `halted`), `buckets/<b>/state/cycle.json` +
+`state/history/` (via `mmcore cycle attempt|advance|close` only; `close`
+with `--outcome halted` only), `.context/CHANGELOG.md` (one entry per run),
 `skills/GOTCHAS.md` (surprises only). Nothing else — not one byte under
 `projects/<name>/` (code, tests, README, validation) and nothing under
 `shared/`.
@@ -210,16 +250,19 @@ advance|close` only), `.context/CHANGELOG.md` (one entry per run),
 ## Close-out
 
 Final text = the job summary (`LOOP.md` §9 / spec §8.6): first line
-`mm-execute <bucket> <cycle> <outcome>` (outcome: `ok` | `halted` |
-`stopped: <reason>`; an `error` exit fails the job instead); then ≤8
-sentences, worst thing first — XR id, the run status and `halt_reason`
-verbatim, positions and trades this session, the shadow marks vs SPY/BIL
-from `mmcore shadow report`, anomalies and whether any is a second
-consecutive occurrence, what you routed to the governor or flagged as
-owner-attention material, the commit sha. "Halted as designed, and here
-is how I verified that" is a complete and successful report. When
-task-linked (Telegram-originated), the last line is `TASK_COMPLETE: <one
-line>`.
+`mm-execute <bucket> <cycle> <outcome>` where outcome is the handbook's
+enumeration, quoted verbatim: `ran | halted | error` (`ran` = exit 0 and
+advanced to `graded`; `halted` = a designed exit 2 advanced to `graded`,
+or a red gate / drift / missing-file close; `error` = exit 1, closed
+`halted`); a preflight or input stop is reported as `halted` with the
+reason in the first sentence; then ≤8 sentences, worst thing first — XR
+id, the run status and `halt_reason` verbatim, positions and trades this
+session, the shadow marks vs SPY/BIL from `mmcore shadow report`,
+anomalies and whether any is a second consecutive occurrence, what you
+routed to the governor or flagged as owner-attention material, the commit
+sha. "Halted as designed, and here is how I verified that" is a complete
+and successful report. When task-linked (Telegram-originated), the last
+line is `TASK_COMPLETE: <one line>`.
 
 ## Gotchas (living section — append when you learn something)
 
@@ -240,13 +283,21 @@ line>`.
   inline the literal (you rarely need psql here at all).
 - The program exits `2` with a JSON run file for HANDLED outcomes
   including halts (the `atlas-trader-paper` lesson): a "halted" report is
-  a successful supervision run, not a job failure — only crashes (exit
-  `1`, traceback) fail the job.
-- Stooq publishes the day's close after the US session; a `--date` of
-  today before ~21:30 UTC returns yesterday's last row — the program
-  should halt on `prices` date ≠ `--date`, and if it does not, that
-  mismatch is your anomaly, not something to paper over with a different
-  date.
+  a successful supervision run that advances to `graded` — the governor
+  grades the halt. Only a crash (exit `1`, traceback), a red gate, drift
+  or a missing run file/manifest closes the cycle `halted`; none of them
+  is a reason to rerun.
+- Yahoo chart v8 (`shared/adapters/yahoo.py`) returns the in-progress
+  session as today's row during US hours — a run before the US close must
+  HALT on a provisional bar (the program compares `meta.regularMarketTime`
+  to the session end), never reuse it; if it does not halt, a `prices`
+  row dated today before ~21:00 UTC is your anomaly, not something to
+  paper over with a different date. `quote.close` is split-adjusted, not
+  total-return — the manifest's adjustment note states the card's
+  dividend treatment. Stooq (`<symbol>.us`) has been BLOCKED behind a
+  JavaScript challenge since 2026-10-21 (live probe xfails): a program
+  still pointed at it halts on fetch, which is a finding for the
+  governor, not a reason to swap sources in-session.
 - The shadow book is one writer (`mmcore shadow`) and one reader (the
   governor): a book whose `curve` has fewer than 2 points reports zeros
   from `excess_vs` — say "first session, no excess yet", never a number.
