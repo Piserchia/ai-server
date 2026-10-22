@@ -66,6 +66,7 @@ class SkillResolutionError(RuntimeError):
 from src.runner import agents as agents_mod
 from src.runner import delivery, guards, quota, review, router, workspaces
 from src.runner.executors import codex_cli
+from src.runner.result_capture import usage_is_empty  # noqa: F401 (re-export)
 
 logger = logging.getLogger(__name__)
 
@@ -543,34 +544,9 @@ def is_api_terminal_summary(summary: str | None) -> bool:
     return bool(_API_TERMINAL_BANNER.match(text))
 
 
-_USAGE_TOKEN_KEYS: tuple[str, ...] = (
-    "input_tokens",
-    "output_tokens",
-    "cache_read_input_tokens",
-    "cache_creation_input_tokens",
-)
-
-
-def usage_is_empty(usage: dict | None) -> bool:
-    """True when a session's usage dict shows no real work.
-
-    Pure function. Considers input / output / cache-read / cache-creation
-    tokens; a real session (even a trivial one) consumes at least the
-    system-prompt input, so all-zero across the four is the SDK's signature
-    for "we never actually made it through a live Anthropic call". Missing
-    or non-integer values count as zero (SDK versions vary).
-    """
-    if not usage:
-        return True
-    for key in _USAGE_TOKEN_KEYS:
-        try:
-            if int(usage.get(key) or 0) > 0:
-                return False
-        except (TypeError, ValueError):
-            continue
-    return True
-
-
+# `usage_is_empty` lives in `runner.result_capture` since B2 (2026-10-21) and
+# is re-exported here: `is_api_terminal_session` and `tests/test_api_terminal.py`
+# import it from this module.
 def is_api_terminal_session(summary: str | None, usage: dict | None) -> bool:
     """Combined predicate: the session's final text is an API-terminal
     banner AND usage shows no work. Pure function.

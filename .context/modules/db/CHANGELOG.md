@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-21 — B2 (comment only): `jobs.terminal_reason` vocabulary pointer in `src/models.py`
+
+**Agent task**: Observability Phase 1 re-cut plan B2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).
+**Files changed**: `src/models.py` — the `terminal_reason` column comment says `ok` (the value the runner stamps) instead of `completed` and points at `src/runner/result_capture.py::TERMINAL_REASONS` (15 values, D-P1-1). No column, type or migration change.
+**Why**: the ORM comment was the only place that still named a `completed` terminal reason; the vocabulary now has one definition.
+**Side effects**: none.
+
 ## 2026-10-21 — A7 (docs only): `notifications` writers/readers and who reads `notify_outbox`
 
 **Agent task**: Observability Phase 1 re-cut plan A7, Docs-1 bucket (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6).

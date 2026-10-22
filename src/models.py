@@ -108,7 +108,7 @@ class Job(Base):
     resolved_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # ^ registry provider key: "anthropic" | "codex"
     terminal_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    # ^ how the executor ended: completed | rate_limited | auth_expired | api_error | …
+    # ^ how the executor ended: ok | rate_limited | auth_expired | api_error | … (result_capture.TERMINAL_REASONS)
     model_served: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # ^ the model id the provider reports it actually served (may differ from the pin)
 
