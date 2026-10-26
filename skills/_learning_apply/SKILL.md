@@ -6,6 +6,7 @@ effort: low
 permission_mode: bypassPermissions
 required_tools: [Read, Edit, Bash]
 max_turns: 10
+context_files: [".context/modules/runner/skills/GOTCHAS.md"]
 tags: [internal, learning]
 ---
 
