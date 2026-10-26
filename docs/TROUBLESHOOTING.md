@@ -9,6 +9,62 @@ failures in the wild — it's a living document.
 
 ---
 
+## Symptom: atlas workspace clone fails with "Resource deadlock avoided" / "bad sha1 file"
+
+### Root cause (diagnosed 2026-10-26, jobs `af3c9443`, `fba31c7b`; recurrence 2026-10-26 10:00 job `fba31c7b-bf9f-4163-a9d9-5230d3b48865` — scheduled `atlas-advisors-ingest` tick failed on dup `.git/objects/ce/1f17e9fde…`; by the time self-diagnose ran the dup files were already gone / fsck clean, confirming transient FileProvider interference. Durable prevention still pending — see Recurrence prevention section.)
+
+The atlas dev repo lives at `~/Documents/repos/atlas`, and macOS has
+registered `~/Documents` with the iCloud Drive FileProvider
+(`com.apple.file-provider-domain-id` xattr). When iCloud sync + git packfile
+operations collide, FileProvider leaves behind macOS-duplicate copies of
+loose objects — files named like `.git/objects/ce/<sha1> 2` (sha1 + space +
+"2"). They have mode `-r--------` and NO extended attributes, versus real
+objects which are `-r--r--r--@` with xattrs. `git fsck` reports them as
+`bad sha1 file`.
+
+When a workspace-tier atlas job runs, `git clone` tries to copy every file
+in `.git/objects/`, including the dup files, and APFS raises
+`copy-fd: read returned: Resource deadlock avoided` on the FileProvider-
+backed dup — aborting the clone with `workspace creation failed for a
+workspace-tier job`.
+
+### Diagnostic
+
+```bash
+# Count dup files in atlas repo:
+find ~/Documents/repos/atlas/.git/objects -name "* 2" | wc -l
+# Confirm git treats them as bad:
+cd ~/Documents/repos/atlas && git fsck --no-dangling 2>&1 | head
+```
+
+### Fix (very low risk)
+
+```bash
+find ~/Documents/repos/atlas/.git/objects -name "* 2" -type f -delete
+# Verify:
+cd /tmp && git clone ~/Documents/repos/atlas atlas-clone-test && rm -rf atlas-clone-test
+```
+
+The dup files are not valid git objects (fsck: "bad sha1 file") — git
+never references them by name, so deleting them is safe. 2026-10-26
+cleaned 11 such files; expect them to re-accumulate until the recurrence
+is addressed.
+
+### Recurrence prevention (needs user decision — NOT auto-applied)
+
+The durable fix is to stop iCloud FileProvider from touching the git
+dir. Options:
+1. Rename `.git` → `.git.nosync` is NOT viable (git won't find it).
+   The right pattern: move the whole `repos/` tree out of `~/Documents`
+   (e.g. `~/repos/atlas`), update the atlas project manifest's
+   `delivery.path`, and re-check out.
+2. Or exclude `~/Documents/repos` from iCloud via System Settings →
+   Apple ID → iCloud → iCloud Drive → Documents (per-folder opt-out
+   isn't exposed in UI; practically means toggling Documents sync off).
+3. Interim: schedule a weekly `find … -name "* 2" -delete` cron.
+
+---
+
 ## Symptom: `_writeback` fails with `error_max_turns (6)` after atlas jobs
 
 ### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`; 3rd occurrence 2026-08-13, job `dc5fad7d` — parent was `atlas-momo-research`, not `atlas-redeploy`)
