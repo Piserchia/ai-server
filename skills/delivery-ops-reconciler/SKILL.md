@@ -141,7 +141,7 @@ report a clean seam — do not invent findings.
 - Bash is read-only here: `SELECT`/`git log`/`grep`/`ls`/`curl` a healthcheck only.
 - **A runner-scoping manifest is not drift.** A manifest with
   `delivery.deployable: false` and no `port` whose PROJECTS_REGISTRY row says
-  not hosted (e.g. `moneymachine`) is a runner-scoping manifest, not
+  not hosted is a runner-scoping manifest (moneymachine was one until its page shipped 2026-10-27), not
   hosted-not-registered drift — never route it to `new-project` register-only
   (that mode would publish the directory). Treat it like the content
   projects: present on disk, no `projects` DB row, no Caddy.

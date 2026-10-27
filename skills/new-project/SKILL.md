@@ -309,7 +309,7 @@ the summary and move on.
 - `ANTHROPIC_API_KEY` must never appear in any project code or `.env`. This server
   uses subscription auth.
 - **Register-only mode: STOP if `delivery.deployable` is false** or the
-  PROJECTS_REGISTRY row says not hosted (`moneymachine`) — registering would
+  PROJECTS_REGISTRY row says not hosted — registering would
   publish the directory (`type: static` → `file_server`, no CF Access). Such a
   manifest exists only so the runner can scope jobs via `payload.project_slug`;
   report it as "not hosted by design" and dispatch nothing.
