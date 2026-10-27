@@ -50,6 +50,50 @@ never references them by name, so deleting them is safe. 2026-10-26
 cleaned 11 such files; expect them to re-accumulate until the recurrence
 is addressed.
 
+### Variant 2026-10-27 (job `1ca653d1-0d83…`, alpha-governor): corruption lands on the REAL sha1 path, not a `* 2` dup
+
+Deleting `* 2` files is NOT sufficient. In 1ca653d1 the clone still
+failed on `.git/objects/07/6e770…1295c` after the dup pass — the real
+loose object at that path had been overwritten with a FileProvider stub
+(`-r--------` mode, NO extended attributes, versus healthy objects which
+are `-r--r--r--@` with `com.apple.provenance` xattr). `git fsck` fails
+on it with `fatal: mmap failed: Resource deadlock avoided`, but
+`git cat-file -p <sha>` succeeds (different read path — inflate instead
+of mmap/copy-fd), so git CAN still read the content; only `clone`/`fsck`
+trip the deadlock.
+
+**Full diagnostic + fix (very low risk):**
+
+```bash
+# 1. Clean `* 2` dups (as above).
+find ~/Documents/repos/atlas/.git/objects -name "* 2" -type f -delete
+
+# 2. Find any loose objects with FileProvider-stub fingerprint
+#    (mode -r-------- + no xattrs). Healthy objects are -r--r--r--@.
+find ~/Documents/repos/atlas/.git/objects \
+  -type f -perm 0400 ! -name "* 2" | while read f; do
+  xattr -l "$f" 2>/dev/null | grep -q . || echo "corrupt: $f"
+done
+
+# 3. For each corrupt path, rewrite to a fresh inode. `git cat-file -p`
+#    still works, so content is recoverable in-place via copy-rename:
+for f in <paths-from-step-2>; do
+  chmod u+w "$f" && cp "$f" "$f.rescue" && rm "$f" && \
+    mv "$f.rescue" "$f" && chmod 0444 "$f"
+done
+
+# 4. Verify end-to-end:
+cd /tmp && rm -rf atlas-clone-test && \
+  git clone ~/Documents/repos/atlas atlas-clone-test && \
+  rm -rf atlas-clone-test
+cd ~/Documents/repos/atlas && git fsck --no-dangling   # expect no output
+```
+
+After rewrite the file picks up the healthy `-r--r--r--@` +
+`com.apple.provenance` xattr automatically (new inode, FileProvider
+treats it as a brand-new local file). Rename preserves git's name-by-sha
+lookup; no refs break.
+
 ### Recurrence prevention (needs user decision — NOT auto-applied)
 
 The durable fix is to stop iCloud FileProvider from touching the git
