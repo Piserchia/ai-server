@@ -719,3 +719,55 @@ class TestCli:
         names = {a.name for n in top if isinstance(n, ast.Import) for a in n.names}
         names |= {n.module or "" for n in top if isinstance(n, ast.ImportFrom)}
         assert not any(n == "src.db" or n.startswith("sqlalchemy") for n in names), names
+
+
+class TestServedModelMismatch:
+    """A `model_served` of a different family than the request is not a pricing
+    basis (prod 2026-10-22..28: the runner wrote the CLI's own auxiliary haiku
+    entry there for 39 Opus/Sonnet jobs, pricing them at Haiku rates)."""
+
+    def _events(self, requested, served, usage):
+        # Same ts as the module's other fixtures, i.e. inside SINCE..UNTIL.
+        return [{"kind": "job_started", "model": requested, "skill": "chat"},
+                {"kind": "job_completed", "model_served": served, "usage": usage,
+                 "ts": "2026-09-20T10:00:00+00:00"}]
+
+    def test_a_different_family_is_priced_at_the_request(self):
+        jc = job_cost_from_events("j", self._events(
+            "claude-opus-5", "claude-haiku-4-5-20251001", OPUS5_REAL))
+        assert jc.model == "claude-opus-5" and jc.family == "claude-opus-5"
+        assert jc.requested_model == "claude-opus-5" and jc.served_mismatch is True
+        haiku = price_usage("claude-haiku-4-5", OPUS5_REAL)
+        assert jc.usd > haiku                      # not the haiku rate any more
+
+    def test_a_dated_snapshot_of_the_same_family_still_wins(self):
+        jc = job_cost_from_events("j", self._events(
+            "claude-opus-4-7", "claude-opus-4-7-20260301", OPUS5_REAL))
+        assert jc.model == "claude-opus-4-7-20260301" and jc.served_mismatch is False
+        assert jc.family == "claude-opus-4-7"
+
+    def test_served_with_no_request_is_still_used(self):
+        jc = job_cost_from_events("j", self._events("", "claude-sonnet-4-6", OPUS5_REAL))
+        assert jc.model == "claude-sonnet-4-6" and jc.served_mismatch is False
+
+    def test_a_bare_alias_request_is_still_priced_from_the_served_id(self):
+        # The reason model_served is read at all: `sonnet` has no family, so a
+        # dated Sonnet id is a refinement, not a mismatch.
+        jc = job_cost_from_events("j", self._events(
+            "sonnet", "claude-sonnet-4-6-20260101", OPUS5_REAL))
+        assert jc.model == "claude-sonnet-4-6-20260101" and jc.served_mismatch is False
+        assert jc.family == "claude-sonnet-4-6"
+
+    def test_the_mismatch_is_counted_and_rendered_never_silent(self):
+        jobs = [job_cost_from_events("a", self._events(
+                    "claude-opus-5", "claude-haiku-4-5-20251001", OPUS5_REAL)),
+                job_cost_from_events("b", self._events(
+                    "claude-opus-5", "claude-opus-5", OPUS5_REAL))]
+        rep = summarize(jobs, since=SINCE, until=UNTIL, days=30)
+        assert rep.served_mismatches == 1
+        assert rep.to_dict()["served_mismatches"] == 1
+        out = render_sdk_reconcile(rep)
+        assert "different family than the request" in out
+        # Both jobs land in the opus-5 row — the bogus haiku row is gone.
+        assert [r.model for r in rep.per_model] == ["claude-opus-5"]
+        assert rep.per_model[0].jobs == 2

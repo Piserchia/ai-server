@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-28 — pricing: the request is the cost basis when `model_served` names another family (+ the 39-row recompute)
+
+**Agent task**: owner instruction "fix the 39 rows and re-run the baseline", following the `model_served` defect in the entry below.
+**Files changed**:
+- `src/runner/pricing.py` — `job_cost_from_events` prices `job_started.model` when `model_served` resolves to a DIFFERENT family, records it on `JobCost.served_mismatch`, counts it in `LedgerReport.served_mismatches` (also in `to_dict`) and prints a note in `render_sdk_reconcile`. A request with no resolvable family (a bare alias like `sonnet`, or an unknown id) still prices from the served id — that case is the reason the field is read at all, and the first version of this change regressed it.
+- `tests/test_pricing.py::TestServedModelMismatch` (5 cases: different family priced at the request, same-family dated snapshot still preferred, served-with-no-request, the bare-alias refinement, and the count rendered rather than silent).
+
+**Why**: the audit JSONL is append-only and still carries the wrong `model_served` on 39 jobs, so correcting the DB rows alone would have left every JSONL-derived report mispriced. Evidence for the request as the basis: those rows price to $122.66 at the request against the SDK's $121.89 (+0.6 %), versus $24.84 at the recorded served id.
+
+**Side effects**: a genuine substitution is now reported rather than silently priced at the served rate — intended, and the note persists for ~30 days while the affected JSONL stays in the window. **Prod data corrected in the same pass** (one-off, dry-run first): 39 rows got `model_served = NULL` and a recomputed `cost_usd_list`; `rows still matching the bug: 0`. Re-run baseline: 30 d ≈ $1,802.07 (789 jobs), 7 d ≈ $231.68 (137). The earlier "the CLI prices cache writes at the 5-minute rate" conclusion is **withdrawn** — post-fix the divergence is family-dependent (opus-5 −2.4 %, opus-4-8 −3.2 %, opus-4-7 −17.9 %, sonnet-4-6 −23.4 %) and the implied rates straddle both rates.
+
+**Gotchas discovered**: `ResultMessage.usage` is a per-session aggregate across every model the session touched, while the ledger prices it as one model — so any multi-model session is mispriced by construction. That is the standing limitation behind the residual divergence, and the `model_served` bug was its extreme case.
+
 ## 2026-10-28 — `model_served` names the model that did the work (Opus sessions were stamped and priced as Haiku)
 
 **Agent task**: Observability Phase 1 §8 verification, first full week of stamped jobs.

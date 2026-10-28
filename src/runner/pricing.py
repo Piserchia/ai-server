@@ -186,6 +186,9 @@ class JobCost:
     output: int
     usd_sdk: Decimal | None      # job_completed.sdk_cost_usd (B3+) — the SDK's own
                                  # total_cost_usd. `usd` below is OURS, from tokens.
+    served_mismatch: bool = False  # model_served named a DIFFERENT family than the
+                                 # request, so `model` is the request and the pair
+                                 # is reported rather than priced on the served id.
 
     @property
     def usage(self) -> dict[str, Any]:
@@ -276,8 +279,29 @@ def job_cost_from_events(job_id: str, events: Iterable[dict[str, Any]]) -> JobCo
     if started is None or done is None:
         return None
     requested = str(started.get("model") or "")
-    served = done.get("model_served")
-    model = str(served).strip() if served else requested
+    served_raw = done.get("model_served")
+    served = str(served_raw).strip() if served_raw else ""
+    # `model_served` is a pricing basis only when it names the SAME family as
+    # the request (i.e. a dated snapshot of it). When the families differ it is
+    # not trustworthy as the cost basis: a session's `model_usage` carries the
+    # CLI's own auxiliary small-model calls, and until 2026-10-28 the runner
+    # wrote `model_served` from its FIRST key, so 39 prod jobs claimed the
+    # retired haiku utility id for Opus and Sonnet work (runner CHANGELOG
+    # 2026-10-28). Those rows priced at $20.46 against the SDK's $102.30;
+    # priced at the REQUEST they come to $102.28. So price the request and
+    # count the pair — never charge a rate the request contradicts.
+    model = requested
+    served_mismatch = False
+    if served:
+        req_family, served_family = family_for(requested), family_for(served)
+        # A request with no resolvable family (a bare alias like `sonnet` from
+        # web/dispatch, or an unknown id) is NOT a mismatch: there the served
+        # id is the only usable basis and pricing it is the whole point of
+        # reading `model_served` at all.
+        if req_family is None or served_family is None or served_family == req_family:
+            model = served
+        else:
+            served_mismatch = True
     provider = _provider_of(started, done)
     # A non-Anthropic provider is never priced as a Claude family, whatever the
     # served id looks like (Review Focus 7); an absent provider is a pre-slice
@@ -302,7 +326,7 @@ def job_cost_from_events(job_id: str, events: Iterable[dict[str, Any]]) -> JobCo
         completed_at=_ts(done.get("ts")),
         input=_tok(usage, "input_tokens"), cache_read=_tok(usage, "cache_read_input_tokens"),
         cache_write_1h=w1h, cache_write_5m=w5m, output=_tok(usage, "output_tokens"),
-        usd_sdk=usd_sdk,
+        usd_sdk=usd_sdk, served_mismatch=served_mismatch,
     )
 
 
@@ -385,6 +409,9 @@ class LedgerReport:
     totals: ModelRow = field(default_factory=lambda: ModelRow("total"))
     median_job: dict[str, int] = field(default_factory=dict)
     median_usd_by_family: dict[str, Decimal] = field(default_factory=dict)
+    served_mismatches: int = 0
+    """Jobs whose `model_served` named a different family than the request, so
+    the request was priced. Reported, never silent (plan §4 'no silent caps')."""
 
     @property
     def credit_signature(self) -> bool:
@@ -401,7 +428,8 @@ class LedgerReport:
                 "per_lane": {k: str(v) for k, v in self.per_lane.items()},
                 "totals": _row_dict(self.totals), "median_job": self.median_job,
                 "median_usd_by_family": {k: str(v) for k, v in self.median_usd_by_family.items()},
-                "credit_signature": self.credit_signature, "prices_as_of": PRICES_AS_OF}
+                "credit_signature": self.credit_signature, "prices_as_of": PRICES_AS_OF,
+                "served_mismatches": self.served_mismatches}
 
 
 def summarize(jobs: Iterable[JobCost], *, since: datetime, until: datetime,
@@ -423,6 +451,8 @@ def summarize(jobs: Iterable[JobCost], *, since: datetime, until: datetime,
         else:
             label = jc.unpriced_label
             unpriced.setdefault(label, ModelRow(label)).add(jc)
+        if jc.served_mismatch:
+            rep.served_mismatches += 1
         kinds.setdefault(jc.skill, KindRow(jc.skill)).add(jc)
         lanes[jc.lane] = lanes.get(jc.lane, Decimal(0)) + (jc.usd or Decimal(0))
         rep.totals.add(jc)
@@ -516,6 +546,10 @@ def render_sdk_reconcile(rep: LedgerReport) -> str:
         lines.append(f"{r.model:<20} {usd_2dp(r.paired_usd):>11.2f} {usd_2dp(r.usd_sdk):>11.2f} "
                      f"{r.sdk_jobs:>5} {delta:>7.1f}%"
                      f" {(f'{rate:.2f}' if rate is not None else '—'):>15}{mark}")
+    if rep.served_mismatches:
+        lines.append(f"note: {rep.served_mismatches} job(s) reported a model_served of a different "
+                     f"family than the request — priced at the REQUEST (see pricing."
+                     f"job_cost_from_events).")
     if flagged:
         lines.append("⚠ >1 % divergence: record the implied cache-write rate in the Phase-1 PR. "
                      "$10.00/M is the 1-h Opus rate this plan prices at, $6.25/M the 5-m rate "
