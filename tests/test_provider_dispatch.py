@@ -222,7 +222,8 @@ class _FakeExecutor:
             final_text="Did the work.\nTASK_COMPLETE: fixed the flaky test",
             usage={"input_tokens": 10, "output_tokens": 5},
             terminal_reason="ok", model_served="gpt-6-luna-2026-10",
-            thread_id="thr_1", cli_version="0.162.0", exit_code=0, error=None)
+            thread_id="thr_1", cli_version="codex-cli 0.162.0-alpha.17.2",   # the real probe line
+            exit_code=0, error=None)
 
     async def run(self, job, **kw):
         self.calls.append({"job": job, **kw})
@@ -446,7 +447,7 @@ async def test_run_session_executor_failure_is_executor_failed(harness):
     h = harness
     h.executor.result = ExecResult(
         final_text="", usage={}, terminal_reason="rate_limited", model_served=None,
-        thread_id="thr_2", cli_version="0.162.0", exit_code=1,
+        thread_id="thr_2", cli_version="codex-cli 0.162.0-alpha.17.2", exit_code=1,
         error="codex: usage limit reached, slow_down")
     job = _job()
     with pytest.raises(session.ExecutorFailed) as ei:

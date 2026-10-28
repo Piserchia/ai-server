@@ -74,6 +74,7 @@ from src.runner.result_capture import (
     ENFORCEMENT_CATEGORIES,
     ResultCapture,
     capture_result_message,
+    cli_version_column,
     derive_terminal_reason,
     result_columns,
     served_model_violation,
@@ -1515,7 +1516,7 @@ async def run_session(job: Job) -> dict[str, Any]:
             # have no source on this lane and stay NULL.
             cost_usd_list = pricing.price_usage(model_served or model_used, usage)
             columns = dict(usage_columns(usage),
-                           cli_version=(lane_cli_version or None),
+                           cli_version=cli_version_column(lane_cli_version),
                            cost_usd_list=cost_usd_list)
             # Pre-push Anthropic review gate (T5; INV-21(c)) — a RULE keyed
             # on the provider, not a switch: every non-Anthropic diff is
@@ -1527,12 +1528,25 @@ async def run_session(job: Job) -> dict[str, Any]:
                     job, model_ref, ws, base_sha=base_sha, skill_name=skill_name)
 
         # One stamp site for both lanes (B3): the migration-008 result
-        # columns, written before `job_completed` so the row and the JSONL
-        # never disagree. main._finish_job re-stamps the token/cost subset
+        # columns, written before `job_completed` so that, when the stamp
+        # succeeds, the row and the JSONL agree (a refused stamp is audited
+        # below and the terminal transition re-stamps the token/cost subset). main._finish_job re-stamps the token/cost subset
         # from the result dict on the terminal transition.
-        async with async_session() as s:
-            await s.execute(sql_update(Job).where(Job.id == job.id).values(**columns))
-            await s.commit()
+        # A finished job is never failed by its own bookkeeping: the first
+        # real Codex job after the Phase-1 deploy (2026-10-28, 0e09233d) did
+        # its work and then died HERE on a varchar(24) overflow. The failure
+        # is audited with its error; `job_completed` still follows, and
+        # main._finish_job re-stamps the token/cost subset from the result
+        # dict on the terminal transition (so a real DB outage still fails
+        # the job loudly, one write later).
+        try:
+            async with async_session() as s:
+                await s.execute(sql_update(Job).where(Job.id == job.id).values(**columns))
+                await s.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("post-session column stamp failed for %s (job goes on)",
+                             job_id)
+            audit_log.append(job_id, "result_stamp_failed", error=str(exc)[:500])
 
         if final_summary:
             audit_log.write_summary(job_id, final_summary)

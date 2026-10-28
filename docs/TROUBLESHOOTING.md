@@ -3477,3 +3477,13 @@ checkout are the owner's — `scripts/backup.sh` seals that file nightly.
 Fail-open rules (`tests/test_provisioning_gap.py`): no project, no/invalid
 manifest, an unreadable `.env` or an empty list never defer a row — the ONLY
 trigger is a positively declared name that the file positively lacks.
+
+## Symptom: a job that visibly did its work ends `failed` with `terminal_reason=error` and a SQL error in `error_message` (e.g. `value too long for type character varying(N)`) — 2026-10-28
+
+**Seen**: Codex-lane job `0e09233d` (2026-10-28): the executor ran, `turn_completed` carried 38,799 input tokens, the pre-push gate skipped on an empty diff, then `job_failed` with `StringDataRightTruncationError … character varying(24)` on the `UPDATE jobs SET cli_version=…` stamp. The row had no tokens and a failure DM went out.
+
+**Cause**: the post-session column stamp (`session.run_session`, the one-site UPDATE of the 008 columns) raised, and until 2026-10-28 that exception failed the job. The value was `codex --version`'s first line, `codex-cli 0.162.0-alpha.17.2`, 28 chars into a 24-char column.
+
+**Fix (in tree since 2026-10-28)**: `result_capture.cli_version_column` normalises the value for both lanes; the stamp is guarded — a failure is audited as `result_stamp_failed{error}` and the job completes, with `main._finish_job` re-stamping tokens/cost from the result dict.
+
+**If you see it again**: `grep result_stamp_failed volumes/audit_log/<job>.jsonl` — the `error` names the column; compare the value the lane produced (`executor_started.cli_version` for Codex, `session.cli_version()` for Anthropic) with the ORM width in `src/models.py`. A job with a `result_stamp_failed` row but a `completed` status is the guard working; the tokens on the row come from the terminal transition. After a guarded failure three columns stay NULL on the row — `cli_version`, `duration_api_ms`, `sdk_cost_usd` — because `main._terminal_values` does not carry them; tokens, `num_turns`, `cost_usd_list`, `terminal_reason` and `model_served` are re-stamped.

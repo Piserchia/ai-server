@@ -548,7 +548,7 @@ class TestSessionWiring:
         fake = _FakeExecutor(ExecResult(
             final_text="done\nTASK_COMPLETE: x", usage={"input_tokens": 1, "output_tokens": 1},
             terminal_reason="ok", model_served="gpt-6-luna-2026-10", thread_id="t",
-            cli_version="0.162.0", exit_code=0, error=None))
+            cli_version="codex-cli 0.162.0-alpha.17.2", exit_code=0, error=None))
         monkeypatch.setattr(session, "_EXECUTORS", {"codex_cli": fake})
         monkeypatch.setattr(session, "_EXECUTOR_SLOTS", {})
         monkeypatch.setattr(session.settings, "codex_sandbox_default", "workspace-write")
@@ -561,7 +561,7 @@ class TestSessionWiring:
         text, usage, model_served, cli_version = out
         assert text.startswith("done") and usage == {"input_tokens": 1, "output_tokens": 1}
         assert model_served == "gpt-6-luna-2026-10"
-        assert cli_version == "0.162.0"
+        assert cli_version == "codex-cli 0.162.0-alpha.17.2"   # raw here; normalised at the stamp
 
     def test_cli_version_comes_from_the_sdk_package_not_a_subprocess(self, monkeypatch):
         # Spec §2.3 row 007: "= claude_agent_sdk._cli_version.__cli_version__
@@ -608,12 +608,12 @@ class TestSessionWiring:
         assert _column_stamp(h)["cli_version"] == "9.9.9"
         assert _resolved_stamp(h)["resolved_provider"] == "anthropic"
 
-        # Codex lane: the Codex CLI's version from ExecResult (0.162.0 in the
-        # harness's default result), never the SDK's.
+        # Codex lane: the Codex CLI's version from ExecResult (the harness
+        # default is the real `codex --version` line), normalised, never the SDK's.
         h.db.statements.clear()
         h.skill = _skill(isolation="workspace")
         await session.run_session(_dispatch_job())
-        assert _column_stamp(h)["cli_version"] == "0.162.0"
+        assert _column_stamp(h)["cli_version"] == "0.162.0-alpha.17.2"
         assert _resolved_stamp(h)["resolved_provider"] == "codex"
 
     async def test_terminal_reason_derived_only_on_anthropic_branch(self, harness, monkeypatch):
@@ -698,7 +698,7 @@ class TestSessionWiring:
                                        "cache_write_input_tokens": 8, "output_tokens": 7,
                                        "reasoning_output_tokens": 3}),
             terminal_reason="ok", model_served="gpt-6-luna-2026-10",
-            thread_id="thr_1", cli_version="0.162.0", exit_code=0, error=None)
+            thread_id="thr_1", cli_version="codex-cli 0.162.0-alpha.17.2", exit_code=0, error=None)
         h.skill = _skill(isolation="workspace")
         job = _dispatch_job()
         result = await session.run_session(job)
@@ -707,7 +707,7 @@ class TestSessionWiring:
         assert (stamp["input_tokens"], stamp["output_tokens"], stamp["cache_read_tokens"],
                 stamp["cache_write_1h_tokens"]) == (100, 7, 40, 8)   # flat key → the 1-h arm
         assert stamp["cache_write_5m_tokens"] == 0
-        assert stamp["cli_version"] == "0.162.0"
+        assert stamp["cli_version"] == "0.162.0-alpha.17.2"
         assert stamp["cost_usd_list"] is None            # no Codex price table in Phase 1
         for absent in ("num_turns", "duration_api_ms", "sdk_cost_usd"):
             assert stamp.get(absent) is None             # no source on that lane → NULL
@@ -977,3 +977,113 @@ class TestDominantModel:
             "claude-haiku-4-5-20251001": {"inputTokens": 10, "cacheReadInputTokens": 90_000},
             "claude-opus-5": {"inputTokens": 3},
         }) == "claude-haiku-4-5-20251001"
+
+
+# ── B3 follow-up (2026-10-28): the Codex CLI's version string overflowed
+# `jobs.cli_version` (varchar(24)) on the first real Codex job after the
+# Phase-1 deploy — `codex-cli 0.162.0-alpha.17.2` is 28 chars — so the
+# post-session column stamp raised StringDataRightTruncationError and a job
+# whose work was DONE (tokens captured, empty diff) was recorded `failed`.
+# Two belts: the value is normalised to fit, and a failing stamp is audited
+# instead of failing the finished job (the terminal transition re-stamps the
+# token/cost subset from the result dict anyway).
+
+
+class TestCliVersionColumn:
+    def test_the_tool_name_prefix_is_dropped(self):
+        # The Anthropic lane stamps a bare `2.1.139`; the Codex lane should
+        # stamp a bare version too, not `codex --version`'s whole first line.
+        from src.runner.result_capture import cli_version_column
+        assert cli_version_column("codex-cli 0.162.0-alpha.17.2") == "0.162.0-alpha.17.2"
+
+    def test_a_bare_version_is_unchanged(self):
+        from src.runner.result_capture import cli_version_column
+        assert cli_version_column("2.1.139") == "2.1.139"
+        assert cli_version_column("  0.162.0 \n") == "0.162.0"
+
+    def test_a_trailing_annotation_does_not_win(self):
+        # `codex-cli 0.170.0 (abc123)` must stamp `0.170.0`, not `(abc123)`.
+        from src.runner.result_capture import cli_version_column
+        assert cli_version_column("codex-cli 0.170.0 (abc123)") == "0.170.0"
+        assert cli_version_column("codex-cli 0.170.0 [stable]") == "0.170.0"
+        assert cli_version_column("unknown") == "unknown"        # no version-shaped token
+
+    def test_empty_is_none(self):
+        from src.runner.result_capture import cli_version_column
+        assert cli_version_column(None) is None
+        assert cli_version_column("") is None
+        assert cli_version_column("   ") is None
+
+    def test_an_overlong_value_is_clipped_to_the_column(self):
+        from src.runner.result_capture import CLI_VERSION_MAX, cli_version_column
+        long = "0.162.0-alpha.17.2+build.20261028.9"
+        assert len(long) > CLI_VERSION_MAX
+        out = cli_version_column(long)
+        assert out == long[:CLI_VERSION_MAX] and len(out) == CLI_VERSION_MAX
+
+    def test_the_cap_is_the_orm_column_width(self):
+        # If the column is ever widened, the cap must follow (and vice versa).
+        from src.models import Job
+        from src.runner.result_capture import CLI_VERSION_MAX
+        assert Job.__table__.c.cli_version.type.length == CLI_VERSION_MAX
+
+    def test_result_columns_normalises_it(self):
+        cols = result_columns(_anthropic_capture(), terminal_reason="ok", cost_usd_list=None,
+                              cli_version="codex-cli 0.162.0-alpha.17.2")
+        assert cols["cli_version"] == "0.162.0-alpha.17.2"
+
+
+class TestStampAfterTheWork:
+    async def test_executor_lane_cli_version_fits_the_column(self, harness):
+        from src.runner import session
+        from src.runner.executors.codex_cli import ExecResult
+        h = harness
+        h.executor.result = ExecResult(
+            final_text="Did it.\nTASK_COMPLETE: x",
+            usage={"input_tokens": 38799, "output_tokens": 206, "cache_read_input_tokens": 16000},
+            terminal_reason="ok", model_served="gpt-6-luna", thread_id="t",
+            cli_version="codex-cli 0.162.0-alpha.17.2",   # prod 2026-10-28, job 0e09233d
+            exit_code=0, error=None)
+        h.skill = _skill(isolation="workspace")
+        await session.run_session(_dispatch_job())
+        stamp = _column_stamp(h)
+        assert stamp["cli_version"] == "0.162.0-alpha.17.2"
+        assert len(stamp["cli_version"]) <= result_capture.CLI_VERSION_MAX
+
+    async def test_a_failing_column_stamp_does_not_fail_the_finished_job(self, harness):
+        from src.runner import session
+        h = harness
+        real_execute = h.db.execute
+
+        async def execute(stmt):
+            params = dict(stmt.compile().params)
+            if "cli_version" in params:
+                raise RuntimeError("value too long for type character varying(24)")
+            await real_execute(stmt)
+        h.db.execute = execute
+
+        h.skill = _skill(isolation="workspace")
+        job = _dispatch_job()
+        result = await session.run_session(job)           # must not raise
+
+        # The job's work is intact: result dict, summary, job_completed.
+        assert result["usage"] == {"input_tokens": 10, "output_tokens": 5}
+        assert result["terminal_reason"] == "ok"
+        done = _event(job.id, "job_completed")
+        assert done["usage"] == {"input_tokens": 10, "output_tokens": 5}
+        # …and the stamp failure is on the record, with the error, not swallowed.
+        failed = _event(job.id, "result_stamp_failed")
+        assert "varying(24)" in failed["error"]
+        kinds = _kinds(job.id)
+        assert kinds.index("result_stamp_failed") < kinds.index("job_completed")
+        # The resolved_* stamp still landed; the column stamp was the one refused.
+        assert len(h.db.statements) == 1 and "resolved_provider" in _statement_params(h)[0]
+
+    def test_audit_log_docstring_lists_result_stamp_failed(self):
+        doc = (Path(__file__).resolve().parents[1] / "src" / "audit_log.py").read_text()
+        assert "- result_stamp_failed:" in doc
+
+
+def _kinds(job_id) -> list[str]:
+    from src import audit_log
+    return [e["kind"] for e in audit_log.read(str(job_id))]

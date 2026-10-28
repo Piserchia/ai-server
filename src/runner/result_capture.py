@@ -130,6 +130,33 @@ def usage_is_empty(usage: dict | None) -> bool:
     return True
 
 
+# `jobs.cli_version` is VARCHAR(24) (migration 008; `src/models.py`). Pinned
+# against the ORM by tests/test_result_capture.py::TestCliVersionColumn.
+CLI_VERSION_MAX = 24
+_VERSION_TOKEN = re.compile(r"^v?\d+\.\d+")
+
+
+def cli_version_column(raw: str | None) -> str | None:
+    """`jobs.cli_version` for EITHER lane from whatever the lane reports.
+
+    The Anthropic lane reports a bare `2.1.139`; the Codex lane reports
+    `codex --version`'s first line, `codex-cli 0.162.0-alpha.17.2` — 28 chars,
+    which overflowed the 24-char column on the first real Codex job after the
+    Phase-1 deploy (prod 2026-10-28, job 0e09233d) and failed a job whose work
+    was done. So: the first version-shaped token (the version, without the
+    tool name or a trailing annotation; else the last token), clipped to the
+    column, None when empty.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    tokens = text.split()
+    # The first version-shaped token wins (`codex-cli 0.170.0 (abc123)` →
+    # `0.170.0`); with none, the last token (`unknown` stays `unknown`).
+    pick = next((t for t in tokens if _VERSION_TOKEN.match(t)), tokens[-1])
+    return pick[:CLI_VERSION_MAX] or None
+
+
 def usage_columns(usage: dict[str, Any] | None) -> dict[str, int]:
     """The five token columns (migration 008) from an SDK-named usage dict of
     EITHER lane — the SDK's own `ResultMessage.usage` or `codex_cli.map_usage`
@@ -374,7 +401,7 @@ def result_columns(capture: ResultCapture, *, terminal_reason: str,
     in `sdk_cost_usd`; neither is ever a bill.
     """
     cols: dict[str, Any] = {
-        "cli_version": (cli_version or None),
+        "cli_version": cli_version_column(cli_version),
         "model_served": capture.model_served,
     }
     cols.update(usage_columns(capture.usage))

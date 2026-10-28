@@ -2,6 +2,22 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-28 — B3 follow-up: the Codex CLI's version overflowed `jobs.cli_version` and failed a finished job
+
+**Agent task**: handoff item "give the Codex lane one real job so B3's executor path is exercised" — the first real `codex/*` job since the Phase-1 deploy (`0e09233d`, read-only smoke task on pickem, web-created).
+**What it found**: the executor did its work (38,799 / 206 / 16,000 tokens, empty diff, gate skipped) and the job then **failed** at the post-session column stamp: `StringDataRightTruncationError: value too long for type character varying(24)` — `codex --version` reports `codex-cli 0.162.0-alpha.17.2` (28 chars) and B3 stamped it verbatim; the row ended `failed` / `error` with no tokens, a `job_failed` DM went out (message 954). The B3 wiring test had faked `cli_version="0.162.0"`, a shape prod never produces.
+**Files changed**:
+- `src/runner/result_capture.py` — `CLI_VERSION_MAX = 24` (pinned to the ORM column by a test) and `cli_version_column(raw) -> str | None`: the first version-shaped token (the version without the tool name or a trailing annotation — the Anthropic lane already stamps a bare `2.1.139`; `unknown` stays `unknown`), clipped to the column, None when empty. `result_columns` routes `cli_version` through it.
+- `src/runner/session.py` — the executor lane stamps `cli_version_column(lane_cli_version)`; the one-site post-session column UPDATE is now guarded: an exception is logged, audited as `result_stamp_failed{error}` and the session goes on to write `job_completed` and return its result. A finished job is never failed by its own bookkeeping; `main._finish_job` re-stamps the token/cost subset from the result dict on the terminal transition, so a real DB outage still fails the job loudly one write later.
+- `src/audit_log.py` — docstring: `result_stamp_failed`.
+- `tests/test_result_capture.py::TestCliVersionColumn` (7, incl. a trailing `(abc123)` annotation not winning) and `::TestStampAfterTheWork` (3: the prod version string fits the column through the executor lane; a raising stamp still yields the result dict, `job_completed` and the audit row and never `job_failed`; the docstring lists the kind).
+
+**Why**: §8 exit row 1 claims every completed job carries tokens on both lanes; on the Codex lane it was false in production on the first try.
+
+**Side effects**: `jobs.cli_version` on the Codex lane is now `0.162.0-alpha.17.2`-shaped (no `codex-cli ` prefix); the `executor_started.cli_version` audit field keeps the raw probe line. The failed row `0e09233d` is left as the evidence (its tokens live only in its JSONL `turn_completed` event). A new audit kind `result_stamp_failed` (C14: new kinds only).
+
+**Gotchas discovered**: a wiring test that fakes a collaborator's output must use the shape prod actually produces — `codex --version` prints `<tool> <version>`, and the column was sized for the SDK's bare `2.1.139`.
+
 ## 2026-10-28 — pricing: the request is the cost basis when `model_served` names another family (+ the 39-row recompute)
 
 **Agent task**: owner instruction "fix the 39 rows and re-run the baseline", following the `model_served` defect in the entry below.
