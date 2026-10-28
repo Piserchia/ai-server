@@ -1,3 +1,18 @@
+---
+id: plan-2026-09-01-firm-ws1-schedule-monitor
+type: plan
+status: shipped
+date: 2026-09-01
+supersedes: []
+superseded_by: null
+summary: >-
+  Deterministic out-of-band watchdog answering 'did scheduled runs happen at
+  all?': DARK / NEVER_RAN / FAILURE_STREAK / STUCK findings from
+  src/runner/schedule_adherence.py, a daily 07:15 launchd timer via
+  scripts/schedule-monitor.sh, an owner DM and a JSON artifact. No status
+  line of its own; the monitor is live in SYSTEM.md's module graph.
+---
+
 # Firm WS1 — Schedule-Adherence Monitor Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

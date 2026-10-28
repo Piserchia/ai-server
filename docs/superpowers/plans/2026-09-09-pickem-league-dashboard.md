@@ -1,3 +1,18 @@
+---
+id: plan-2026-09-09-pickem-league-dashboard
+type: plan
+status: shipped
+date: 2026-09-09
+supersedes: []
+superseded_by: null
+summary: >-
+  Build and deploy pickem.chrispiserchia.com: FastAPI + SQLite with a
+  deterministic CBS GraphQL sync, a pure scoring and prize engine, a
+  Vite+React SPA, AI analysis as ai-server jobs, dev-repo topology on port
+  8793. No status line of its own; pickem is registered as a hosted service
+  in PROJECTS_REGISTRY.md.
+---
+
 # Pick'em League Dashboard Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

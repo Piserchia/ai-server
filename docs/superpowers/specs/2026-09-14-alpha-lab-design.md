@@ -1,3 +1,19 @@
+---
+id: spec-2026-09-14-alpha-lab
+type: spec
+status: shipped
+date: 2026-09-14
+supersedes: []
+superseded_by: null
+summary: >-
+  Owner-submitted alpha ideas (Telegram or a repo inbox file) are
+  researched, backtested and adversarially validated as a chain of
+  dispatched jobs under the momentum-lab constitution until a GO / NO-GO
+  verdict memo lands; a GO produces a memo only, never a build. Approved
+  design (owner, 2026-09-14) with two amendments found at implementation
+  planning.
+---
+
 # Alpha-Lab: owner-submitted alpha ideas → autonomous research → GO / NO-GO verdict
 
 **Date:** 2026-09-14

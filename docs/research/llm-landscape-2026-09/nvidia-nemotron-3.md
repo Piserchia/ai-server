@@ -1,3 +1,16 @@
+---
+id: research-2026-09-24-nvidia-nemotron-3
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): NVIDIA Nemotron
+  3 Ultra / Super. NOT FACT-CHECKED per its own banner; treat every number
+  as single-sourced.
+---
+
 # NVIDIA Nemotron 3 Ultra / Super — research (as of 2026-09-24)
 
 Research method note: the session's WebSearch budget was exhausted before this task started, so every fact below comes from direct WebFetch of primary pages (Hugging Face model cards, NVIDIA blogs and technical-report PDFs, OpenRouter's endpoints API, Ollama, DeepInfra, Nous Portal, Perplexity pricing, Artificial Analysis, Arena, Hacker News' Algolia API). Reddit could not be fetched (blocked host). Items marked "(unverified)" could not be confirmed from a fetched page.

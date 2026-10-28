@@ -1,3 +1,16 @@
+---
+id: charter-delivery
+type: charter
+status: living
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Delivery division (manager delivery-manager): turn a natural-language ask
+  into a live, documented, deployed project and keep hosted projects healthy
+  across their lifecycle (MISSION objectives C/D).
+---
+
 # Charter — Delivery division
 
 **Manager:** `delivery-manager`

@@ -1,3 +1,20 @@
+---
+id: plan-2026-07-10-eval-remediation
+type: plan
+status: historical
+date: 2026-07-10
+supersedes: []
+superseded_by: null
+summary: >-
+  Task-by-task plan (T1-T17) to repair the four silent plumbing defects
+  found in EVALUATION_2026-07-10 (post-review and escalation never firing,
+  broken review.py, stranded queued jobs, dead backups), make the atlas
+  skill family dispatch as skills, and run the repo/docs cleanup batch.
+  Progress lives in that evaluation's status table: T1-T12 landed in July
+  2026, the remaining items stayed PROPOSED; the plan's own checkboxes were
+  never ticked.
+---
+
 # Eval Remediation (2026-07-10) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

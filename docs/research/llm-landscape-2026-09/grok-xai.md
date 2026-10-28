@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-grok-xai
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): xAI Grok.
+---
+
 # xAI Grok — research (as of 2026-09-24)
 
 Scope note: xAI was acquired by SpaceX (2026-02-02) and rebranded to **SpaceXAI** on

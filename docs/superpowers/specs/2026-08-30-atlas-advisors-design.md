@@ -1,3 +1,18 @@
+---
+id: spec-2026-08-30-atlas-advisors
+type: spec
+status: shipped
+date: 2026-08-30
+supersedes: []
+superseded_by: null
+summary: >-
+  Track a curated panel of finance YouTubers as never-executing persona
+  portfolios scored against the frozen SPY/BIL benchmark:
+  transcript-extracted trade calls plus a distilled persona-mind per
+  channel, a weekly scoreboard and debate digest. APPROVED by the owner
+  in-session; shadow-only, no broker order path.
+---
+
 # Atlas Advisors — YouTuber persona shadow scoreboard (design)
 
 Date: 2026-08-30 · Status: APPROVED (owner, in-session) · Owner gate cleared:

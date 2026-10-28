@@ -1,3 +1,17 @@
+---
+id: guide-org
+type: guide
+status: living
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  The org chart for the agent workforce: the operating model (CEO agent,
+  division managers, connectors), privilege classes, who oversees whom and
+  where feedback flows. The source of truth for division membership is each
+  division's CHARTER.md (lint-enforced).
+---
+
 # ORG.md — the management hierarchy
 
 > The org chart for the agent workforce. A manager (human or CEO agent) reads

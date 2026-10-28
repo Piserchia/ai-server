@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-qwen-alibaba
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Alibaba Qwen.
+---
+
 # Alibaba Qwen — research (as of 2026-09-24)
 
 Scope note: the brief's focus list (Qwen3 / Qwen3.5 / Qwen3-Max / Qwen3-Coder / Qwen3-Next) is two generations stale. The

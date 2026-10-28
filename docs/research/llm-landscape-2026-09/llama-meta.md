@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-llama-meta
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Meta Llama.
+---
+
 # Meta Llama — research (as of 2026-09-24)
 
 > Scope note: the "Llama" brand is now Meta's legacy open-weight line. Since April 2026 Meta's frontier work ships as the proprietary **Muse Spark** family from Meta Superintelligence Labs (MSL), and Meta's first-party **Llama API** was shut down on 2026-07-06. This document therefore covers both: Llama (open weights, third-party hosted or local) and Muse (Meta's current API/CLI/consumer surface), because any "integrate Meta" decision today is really a Muse decision with Llama as the free/local fallback.

@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-crosscut-subscription-automation-tos
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Cross-cut:
+  automating consumer subscriptions — terms, caps, enforcement.
+---
+
 # Cross-cut: automating consumer subscriptions — terms, caps, enforcement — research (as of 2026-09-24)
 
 Scope: what each vendor's consumer terms and product docs actually say about running a *personal* subscription headlessly from a single-tenant server, what has been enforced in 2025–2026, how 5-hour/weekly caps interact with background jobs, and what is explicitly allowed. Vendors covered: Anthropic, OpenAI, Google, xAI, Perplexity, Z.ai, Moonshot/Kimi, MiniMax; added on the 2026-09-24 gap pass: Mistral, Alibaba Model Studio (Qwen) Coding Plan, DeepSeek, Meta Muse, Ollama Cloud (§3.7, §3.8–3.10, §4, §5.1–5.3, §8). Method note: this session's web-search budget was exhausted before the task began, so everything below comes from direct fetches of vendor pages, HN's Algolia API, and a few news articles; Reddit, X, help.x.com, Perplexity's help center, and web.archive.org were unreachable (403/451). Claims that could not be checked against a primary page are marked "(unverified)". Third pass (2026-09-24, §3.10–3.10c): search budget again exhausted; primary sources were fetched directly (code.claude.com, learn.chatgpt.com, kimi.com/code/docs) and, for the Codex app-server protocol and Kimi Code server API, read from the vendors' GitHub repositories via the GitHub API.

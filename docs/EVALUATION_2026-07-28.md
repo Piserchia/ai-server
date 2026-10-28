@@ -1,3 +1,18 @@
+---
+id: report-2026-07-28-evaluation
+type: report
+status: historical
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Full-system gap audit against the two operating goals (host projects well;
+  execute project creation and deployment) via four parallel deep-dives: top
+  blockers B1-B8 and categorised findings with a TODO/WIP/DONE/USER/WONTFIX
+  status column. docs/README.md marks this tracker superseded by the
+  2026-08-30 evaluation.
+---
+
 # System Evaluation — 2026-07-28
 
 > Full-system gap audit against the two operating goals: **(1) host projects

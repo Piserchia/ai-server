@@ -1,3 +1,17 @@
+---
+id: plan-2026-04-17-phase-6
+type: plan
+status: historical
+date: 2026-04-17
+supersedes: []
+superseded_by: null
+summary: >-
+  Phase 6 polish plan: research-deep, weekly idea-generation, per-project
+  update polls, restore, /schedule in Telegram, SSE and the remaining
+  auto-tuning infrastructure. Historical; docs/README.md records the phase
+  SHIPPED.
+---
+
 # Phase 6 — Polish
 
 > **For the Claude Code session executing this**: Phase 6 is the final planned

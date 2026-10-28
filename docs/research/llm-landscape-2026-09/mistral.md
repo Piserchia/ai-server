@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-mistral
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Mistral AI.
+---
+
 # Mistral AI — research (as of 2026-09-24)
 
 Research method: vendor docs/pricing/legal pages first, then Artificial Analysis, Hacker News, trade press and third-party pricing trackers. All prices in USD unless noted. Anything not confirmed on a primary page is marked "(unverified)". Citations are `[n]` into section 9.

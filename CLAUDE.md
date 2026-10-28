@@ -4,7 +4,7 @@ You are working inside the assistant server. This directive is always in effect.
 
 ## Before you act
 -1. Read `MISSION.md` for the overall mission and objectives.
-0. Read `.context/INDEX.md` for a complete map of all documentation.
+0. Read `.context/INDEX.md` for a complete map of all documentation, and `docs/LIBRARY.md` for every design document's id and status (`python scripts/lib.py status <id>` / `show <id> --section <n>`).
 1. Read `SERVER.md` if you need an architecture overview.
 2. For server-code work, read `.context/SYSTEM.md` and the relevant `.context/modules/<x>/CONTEXT.md`.
 3. For project-scoped work: `cd projects/<slug>` and read that project's `CLAUDE.md` and `.context/CONTEXT.md` first.
@@ -40,8 +40,8 @@ When you make a change, update the corresponding global docs:
 | Changed a module's public API | That module's `.context/modules/<x>/CONTEXT.md` |
 | Added a new script (`scripts/`) | `.context/SYSTEM.md` (module graph) |
 | Changed hosting config (Caddy, tunnel, launchd) | `.context/modules/hosting/CONTEXT.md` |
-| Added a new documentation file | `.context/INDEX.md` |
-| Added a new `docs/*.md` report or plan | `.context/INDEX.md`, `docs/README.md` |
+| Added a new documentation file | `.context/INDEX.md`; any `docs/**/*.md` or `.context/org/**/*.md` needs a front-matter block (id/type/status/date/summary) and `python scripts/lib.py index` (the deploy gate runs `lib.py check`) |
+| Added a new `docs/*.md` report or plan | `.context/INDEX.md`, `docs/README.md`, front-matter + `python scripts/lib.py index` |
 | Discovered a new failure mode | `docs/Troubleshooting.md` |
 | Discovered a non-obvious gotcha | Relevant `skills/GOTCHAS.md` or module skills dir |
 

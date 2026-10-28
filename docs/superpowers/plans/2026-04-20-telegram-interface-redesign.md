@@ -1,3 +1,16 @@
+---
+id: plan-2026-04-20-telegram-interface-redesign
+type: plan
+status: shipped
+date: 2026-04-20
+supersedes: []
+superseded_by: null
+summary: >-
+  Implementation plan for the thread-based Telegram interface: reply-chain
+  threads, inline approve/cancel/rate buttons, four-level error handling,
+  migration 004. STATUS: COMPLETE, all tasks shipped as of 2026-07-09.
+---
+
 # Telegram Interface Redesign — Implementation Plan
 
 > **STATUS: ✅ COMPLETE** — All tasks shipped as of 2026-07-09. Migration 004 applied, services running, 515 tests pass, pushed to origin/main. See commits d8c383f, 52646b0, and follow-up fixes.

@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-local-models-m4-16gb
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Local models on
+  an M4 Mac Mini 16GB.
+---
+
 # Local models on an M4 Mac Mini 16GB — research (as of 2026-09-24)
 
 Scope: what open-weight models fit on the server's M4 Mac mini (16 GB unified memory, 10-core GPU, 120 GB/s [2]) while Postgres, Redis and the Python runner hold roughly 4-6 GB, which runtime to use (Ollama / llama.cpp / MLX / LM Studio), what small models are reliable for, and a concrete recommendation. Method note: the web-search budget was exhausted before this task started, so every fact below comes from directly fetched primary pages (Ollama library, Hugging Face model cards, llama.cpp/MLX docs) and Hacker News comment threads via the Algolia API. Reddit could not be fetched. Numbers I could not verify are marked "(unverified)" or "(unverified as of 2026-09-24)"; numbers I derived are marked "(computed)". A fact-check pass on 2026-09-24 applied the corrections and additions recorded in the Verification log at the end. A second gap-fix pass the same day (web search budget again exhausted; primary pages fetched directly) corrected the Anthropic-compatibility claim in §2, added the Apple Foundation Models framework evaluation in §7, and added the cross-doc router dimensions (data handling, progress visibility, third-party serving, reliability, Telegram latency, tool churn, calibrated fit scores) in §8.

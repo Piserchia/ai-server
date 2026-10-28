@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-design-synthesis
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): Design synthesis: interface-first
+  spine, outcome-first core (2026-09-24).
+---
+
 # Design synthesis: interface-first spine, outcome-first core (2026-09-24)
 
 Synthesizing architect. Inputs: six designs, three judges, `scratchpad/current-state-map.md` (cited as "state map §n"; `file:line` are repo-relative and were re-verified against the working tree on 2026-09-24), `docs/research/llm-landscape-2026-09/*` (cited `<doc> §n`), and the approved plan `docs/superpowers/plans/2026-08-10-model-router.md` (cited `plan §n`).

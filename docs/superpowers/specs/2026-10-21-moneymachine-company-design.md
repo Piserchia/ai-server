@@ -1,3 +1,20 @@
+---
+id: spec-2026-10-21-moneymachine-company
+type: spec
+status: shipped
+date: 2026-10-21
+supersedes: []
+superseded_by: null
+summary: >-
+  A new moneymachine project repo organising money-making work into domain
+  buckets (etf, longterm, shortterm, crypto), each run by the same
+  six-officer hierarchy expressed as shared bucket-parameterised ai-server
+  skills on three schedule rows; reports only, no order path (INV-22), an
+  instance of the atlas loop constitution and the server org.
+  BUILT-IN-SESSION under the owner's 2026-10-21 delegation; the items only
+  the owner can settle are in section 16.
+---
+
 # MoneyMachine Company — a bucketed, self-running agent company for making the owner money (design)
 
 **Date:** 2026-10-21 (review round 1 folded in the same day — see Amendments)

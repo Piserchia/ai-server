@@ -1,3 +1,21 @@
+---
+id: plan-2026-10-21-cross-vendor-writer-slice
+type: plan
+status: shipped
+date: 2026-10-21
+supersedes: []
+superseded_by: null
+summary: >-
+  Codex (codex exec --json, ChatGPT Free login) as the first non-Anthropic
+  executor: a [provider/]model_id registry (models.yml), migration 007,
+  dispatch at the single executor call site, a pre-push Anthropic review
+  gate on every non-Anthropic diff, per-provider quota keys, provider on
+  every surface; fail-closed behind ROUTER_PROVIDERS_ENABLED=anthropic.
+  APPROVED TO BUILD and built 2026-10-21 on branch
+  multi-model/cross-vendor-writer; the observability re-cut plan records the
+  slice landed and deployed.
+---
+
 # Cross-vendor writer slice — Codex as the first non-Anthropic executor (2026-10-21)
 
 > **Status: APPROVED TO BUILD by owner instruction 2026-10-21** ("use other agents to make

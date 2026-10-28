@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-design-multi-bot-chat
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): Design: "The Council" — multi-bot chat
+  as the owner's front door (2026-09-24).
+---
+
 # Design: "The Council" — multi-bot chat as the owner's front door (2026-09-24)
 
 Lens: every vendor is a named persona in one Telegram workspace; the server orchestrates conversations between them, records everything as jobs, and a moderator turns talk into ledger entries. All `file:line` cites are from `scratchpad/current-state-map.md` (state map) unless prefixed; research cites are `docs/research/llm-landscape-2026-09/<doc> §n`.

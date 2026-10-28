@@ -1,3 +1,18 @@
+---
+id: report-2026-07-10-evaluation-atlas
+type: report
+status: historical
+date: 2026-07-10
+supersedes: []
+superseded_by: null
+summary: >-
+  Read-only deep evaluation of projects/atlas (runtime clone, dev repo, the
+  seven atlas-* skills, launchd services, logs and DB spot-checks) produced
+  in parallel with the 2026-07-10 system evaluation: documentation verdicts
+  per file, a contract check and ops findings. Remediation was tracked as
+  T16 of the 2026-07-10 eval-remediation plan.
+---
+
 # Atlas project — deep evaluation (read-only audit, 2026-07-10)
 
 > **Provenance**: produced by a dedicated parallel agent session during the

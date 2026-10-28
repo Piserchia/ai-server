@@ -1,3 +1,17 @@
+---
+id: spec-2026-09-16-pickem-trash-board
+type: spec
+status: shipped
+date: 2026-09-16
+supersedes: []
+superseded_by: null
+summary: >-
+  Trash-talk message board on the pickem dashboard: free-text poster names,
+  auto-created weekly threads, comments, commissioner-only moderation and
+  rate-limited public writes inside the same service, DB and SPA. APPROVED
+  by the owner in-chat.
+---
+
 # Pickem Trash-Talk Board — Design Spec
 
 - **Date**: 2026-09-16

@@ -1,3 +1,17 @@
+---
+id: plan-2026-07-31-autonomous-execution
+type: plan
+status: shipped
+date: 2026-07-31
+supersedes: []
+superseded_by: null
+summary: >-
+  Close the propose-to-execute loop: human pre-merge approval leaves the
+  execution path (INV-4 lane: gate-green + agent LGTM + owner notification)
+  while protected paths stay owner-approval-only. STATUS: IMPLEMENTED
+  2026-07-31 in a single batch of four workstreams.
+---
+
 # Autonomous Execution — closing the propose→execute loop (2026-07-31)
 
 > **STATUS: IMPLEMENTED 2026-07-31** (single batch, four workstreams).

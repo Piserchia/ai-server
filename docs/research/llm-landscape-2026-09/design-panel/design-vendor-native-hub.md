@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-design-vendor-native-hub
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): Design: Vendor-native hub — the server
+  as aggregator, ledger, review gate and dashboard.
+---
+
 # Design: Vendor-native hub — the server as aggregator, ledger, review gate and dashboard
 
 Architect lens: *let each vendor's own scheduled agents do the work on the vendor's side; ai-server subscribes to and collects the results, stores them in one ledger, shows them on one board, and executes only Anthropic-pinned work itself.* Date 2026-09-24. Citations: `R:<doc> §n` = `docs/research/llm-landscape-2026-09/<doc>.md`; `M:§n` = the current-state map; `file:line` = repo paths from the state map.

@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-design-kernel-overhaul
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): Design: Kernel overhaul —
+  provider-agnostic execution kernel (executors, policy, unified run model).
+---
+
 # Design: Kernel overhaul — provider-agnostic execution kernel (executors, policy, unified run model)
 
 Architect lens: kernel overhaul. Date: 2026-09-24. Inputs: `current-state-map.md` (state map; `file:line` cites below are its verified numbers), `docs/research/llm-landscape-2026-09/*` (cited as `<doc> §n`), `docs/superpowers/plans/2026-08-10-model-router.md` (the APPROVED plan; cited as `plan §n`). Hard constraints honoured throughout: INV-3 (no `ANTHROPIC_API_KEY`), INV-22/MISSION §M (no order path), INV-4 protected paths, INV-21 (Anthropic trust anchor; non-Anthropic only workspace-isolated), 16 GB M4 / prod concurrency 2, subscription-and-free-tier-only spend (owner decisions 2026-08-17, plan §10).

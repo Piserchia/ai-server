@@ -1,3 +1,19 @@
+---
+id: spec-2026-10-08-pickem-charts
+type: spec
+status: shipped
+date: 2026-10-08
+supersedes: []
+superseded_by: null
+summary: >-
+  Per-player 'ask for a chart' on pickem: a plain-language prompt becomes a
+  gateway job for a pickem-chart skill (Opus 5 / low) with a tool-less
+  pickem-chart-check subagent, stored as sandboxed read-only SQL plus a
+  chart spec and re-run live on every view; capability-key ownership, rate
+  caps, twelve charts per page. Status line: PROPOSED, written autonomously
+  from the owner's brief with the section 15 defaults as the author's calls.
+---
+
 # Pickem "Ask for a chart" — Design Spec
 
 - **Date**: 2026-10-08

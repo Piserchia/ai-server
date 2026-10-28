@@ -1,3 +1,19 @@
+---
+id: plan-2026-09-01-firm-ws2a-spine
+type: plan
+status: built
+date: 2026-09-01
+supersedes: []
+superseded_by: null
+summary: >-
+  New firm/ atlas vertical: migration 0049, a nightly rollup of all five
+  books into firm.book_snapshots and firm.equity_rollup, pure risk checks,
+  adherence-JSON ingest into role liveness, the advisory ceiling
+  (FIRM_AUTHORITY.md) and the manifest deploy gate. No status line of its
+  own; the firm loop skills it feeds (atlas-cio, atlas-firm-rollup) are
+  registered in INDEX.md.
+---
+
 # Firm WS2a — Risk-Book Spine Implementation Plan (atlas repo)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -1,3 +1,18 @@
+---
+id: plan-2026-09-16-quant-stack-implementation
+type: plan
+status: shipped
+date: 2026-09-16
+supersedes: []
+superseded_by: null
+summary: >-
+  Twelve-task plan for the quant validation desk: the stdlib quantlab
+  library in atlas quant/, two workspace-isolated skills with schedule rows
+  and a turn-on switch, the private /quant page, deploy and adversarial
+  review. The adversarial report (QUANT_STACK_ADVERSARIAL_2026-09-16)
+  records it committed and deployed.
+---
+
 # Quant Stack Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

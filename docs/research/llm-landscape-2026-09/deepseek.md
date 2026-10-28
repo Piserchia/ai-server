@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-deepseek
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): DeepSeek.
+---
+
 # DeepSeek — research (as of 2026-09-24)
 
 Scope: DeepSeek as a candidate model provider for the assistant server (Mac Mini M4 16 GB, Claude Agent SDK on a Claude Max subscription, Python 3.12, Telegram + web dashboard, Atlas paper-trading loops). All prices USD per 1M tokens unless stated. Bracketed numbers cite section 9.

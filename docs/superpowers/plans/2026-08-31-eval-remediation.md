@@ -1,3 +1,18 @@
+---
+id: plan-2026-08-31-eval-remediation
+type: plan
+status: shipped
+date: 2026-08-31
+supersedes: []
+superseded_by: null
+summary: >-
+  Validate and remediate the confirmed findings of the 2026-08-30 grokbot
+  evaluation (F1-F7: fail-closed skill registry and isolation, queue
+  honesty, dual-checkout leaks, doc and invariant truth, Pipfile.lock, ops
+  holes), then redeploy. Every task is checked off, including the deploy and
+  the owner notification; the deferred list closes the document.
+---
+
 # 2026-08-30 Evaluation Remediation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans (inline execution chosen — many tasks touch shared files).

@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-crosscut-benchmarks-reviews
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Cross-cut:
+  current leaderboards and review consensus.
+---
+
 # Cross-cut: current leaderboards and review consensus — research (as of 2026-09-24)
 
 Scope note: this is the cross-vendor document. Per-vendor docs cover interfaces and pricing in depth; here each section is a cross-cut comparison with the numbers needed to rank models by task class. Web-search quota was exhausted for this session, so every fact was pulled by direct fetch of the primary page listed in §9; pages that could not be retrieved are marked "Not found — searched: …". Vendor-published numbers are labelled **self-reported**; leaderboard numbers run by a third party are labelled **independent**.

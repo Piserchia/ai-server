@@ -1,3 +1,22 @@
+---
+id: spec-2026-09-25-multi-model-platform
+type: spec
+status: superseded
+date: 2026-09-25
+supersedes: [plan-2026-08-10-model-router]
+superseded_by: spec-2026-10-05-observability-and-trading-unblock
+summary: >-
+  Multi-model platform design: control plane, Deliverable Contract,
+  cross-vendor grading, provider registry and quota, executor seam, phases
+  P0-P6 and 26 owner decisions, produced from the 2026-09 LLM landscape
+  research, a six-design judge panel and three applied adversarial review
+  rounds (frozen 2026-09-27). SUPERSEDED IN SCOPE 2026-10-05 by the
+  observability-and-trading-unblock spec: the owner took the D0 'keep the
+  money rules' branch, so the cross-vendor machinery is deferred, not
+  planned. Remains the reference for everything the cut spec's section 14
+  defers.
+---
+
 # Multi-model platform — design spec (2026-09-25)
 
 > **SUPERSEDED IN SCOPE — 2026-10-05.** The project of record is now [`docs/superpowers/specs/2026-10-05-observability-and-trading-unblock-design.md`](2026-10-05-observability-and-trading-unblock-design.md), which cuts this document down to the part its own reviewers and the owner agreed is defensible: observability, control, effectiveness, the trading unblock and spend cuts. The owner took the **D0** branch **"keep the money rules"** — the 2026-08-17 decisions stand (Codex on ChatGPT Free, unpaid Gemini key, no metered spend) — so everything cross-vendor here (the Codex executor and its containment, the free HTTP utility lanes, the grading and critic belts, the provider registry, routing, quota ladders and qualification, the executor seam and its replay gate, the redacted projection, the sensitivity labels, the remote MCP doors) is **deferred, not planned**: it has no phase, only a reopening trigger. Nothing below is deleted or rewritten, and this document remains the reference for the vendor-research synthesis, the three applied adversarial review rounds and the full design of every deferred item — the new spec's **§14 "Deferred, and what would reopen it"** cites these §-numbers for exactly that, as does its §15. The phase and decision numbering below (P0–P6, D0–D25) is this document's own; the new spec re-derived it to four phases and eight decisions.

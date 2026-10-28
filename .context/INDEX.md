@@ -15,6 +15,7 @@
 | Patch a project | `skills/app-patch/SKILL.md` (reads project's own CLAUDE.md) |
 | Patch server code | `skills/server-patch/SKILL.md` (INV-4 lane: autonomous merge on gate-green + code-review LGTM + owner notification; protected paths owner-approved) |
 | Debug a failure | `docs/TROUBLESHOOTING.md`, `volumes/audit_log/<job_id>.jsonl` |
+| Find a design doc / check whether it is current | `docs/LIBRARY.md` (generated; `python scripts/lib.py status <id>` / `show <id> --section <n>`) |
 | Understand a skill | `skills/<name>/SKILL.md` (frontmatter = config, body = system prompt) |
 | Check what's hosted | `.context/PROJECTS_REGISTRY.md` |
 | Check what skills exist | `.context/SKILLS_REGISTRY.md` |

@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-gemini-google
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Google Gemini.
+---
+
 # Google Gemini — research (as of 2026-09-24)
 
 Scope: Google's Gemini models, consumer plans, developer API, and agent tooling, evaluated for a single-tenant

@@ -1,3 +1,16 @@
+---
+id: research-2026-09-24-00-comparison-matrix
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Comparison matrix synthesising the vendor and runtime research docs in
+  this folder for the subscription-first assistant server; the set's deep
+  index (start here for any vendor, model, pricing or terms question).
+---
+
 # LLM landscape 2026-09 — comparison matrix (as of 2026-09-24)
 
 Synthesis of the 25 research docs in this folder for one target: a **subscription-first, headless, single-tenant assistant server** (Mac Mini M4 16 GB, Python 3.12, Claude Agent SDK on Claude Max, Postgres/Redis, Telegram + web dashboard, launchd) with a **paper-trading finance lab** (Atlas). Every number below is taken from a doc in this folder and cited by doc path (`§` = section of that doc); nothing new was fetched. Where docs disagree, §5 says which one to believe.

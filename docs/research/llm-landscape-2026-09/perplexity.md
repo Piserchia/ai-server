@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-perplexity
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Perplexity.
+---
+
 # Perplexity — research (as of 2026-09-24)
 
 Scope: Perplexity AI as a candidate research backend / auxiliary model provider for a

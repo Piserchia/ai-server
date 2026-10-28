@@ -1,3 +1,19 @@
+---
+id: plan-2026-08-30-trading-bots-implementation
+type: plan
+status: built
+date: 2026-08-30
+supersedes: []
+superseded_by: null
+summary: >-
+  Eighteen-task plan for the accepted v3 two-trading-bots spec: the
+  tradingcore shared library (Tradier client, options math, guards), the
+  swing/ risk kernel and setups, the value/ advisor with its shadow ledger,
+  dashboard pages, eight ai-server skills and schedule rows. No status line
+  of its own; the spec records T1-T17 executed on 2026-08-30, armed pending
+  the owner's tokens and funding.
+---
+
 # Trading Bots (swing + value advisor) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

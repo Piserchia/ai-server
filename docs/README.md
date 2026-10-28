@@ -1,3 +1,16 @@
+---
+id: guide-docs-readme
+type: guide
+status: living
+date: 2026-04-17
+supersedes: []
+superseded_by: null
+summary: >-
+  Reading guide for the docs/ set: a table of every major document with its
+  purpose and when to read it, plus recommended reading orders for debugging
+  and for improvement work.
+---
+
 # docs/
 
 Reading guide for this documentation set. Start here if you're a Claude Code
@@ -8,6 +21,7 @@ session picking up work on this repo, or a human returning after a break.
 | Doc | Purpose | When to read |
 |---|---|---|
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Failure-mode-first debugging guide | **Always** when something's broken |
+| [`LIBRARY.md`](LIBRARY.md) | **Generated** index of every design document (specs, plans, reports, charters, guides, research) with its `id`, `status` and supersession links; regenerate with `python scripts/lib.py index`, query with `python scripts/lib.py status <id>` / `show <id> --section <n>` / `grep <term>` | Before citing or building on any spec or plan — check it is current |
 | [`AUDIT_2026-07-12.md`](AUDIT_2026-07-12.md) | Full-system audit vs the four mission directives + P0–P4 remediation (implemented same day — see its status table) | Understanding why isolation/plan/evaluate exist |
 | [`EVALUATION_2026-08-30.md`](EVALUATION_2026-08-30.md) | **Latest** full-system audit (third-party "grokbot" holistic evaluation) + 2026-08-31 remediation disposition | Understanding current gaps + what was fixed/deferred |
 | [`EVALUATION_2026-07-28.md`](EVALUATION_2026-07-28.md) | Historical full-system gap audit (deploy/UI/testing/lifecycle/docs) — remediation tracker, superseded 2026-08-30 | Historical context |

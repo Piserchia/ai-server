@@ -1,3 +1,18 @@
+---
+id: report-2026-09-16-quant-stack-adversarial
+type: report
+status: reference
+date: 2026-09-16
+supersedes: []
+superseded_by: null
+summary: >-
+  Adversarial execution review of the shipped quant validation desk against
+  the '$200K quant stack' blueprint and the owner's prompt: five independent
+  auditors told to refute every claim, a clause-by-clause verdict table (all
+  MET; money-logic PARTIAL), the surviving findings with their same-session
+  remediation, and the desk's own first catch, D-0001.
+---
+
 # Quant stack — adversarial execution review (2026-09-16/17)
 
 How the shipped quant validation-desk vertical matches (a) the source

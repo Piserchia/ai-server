@@ -1,3 +1,17 @@
+---
+id: plan-2026-08-26-autonomous-trading
+type: plan
+status: built
+date: 2026-08-26
+supersedes: []
+superseded_by: null
+summary: >-
+  Autonomous paper-trading atlas vertical (trader/) designed from an 8-agent
+  recon: a deterministic kernel disposes, the LLM proposes, and live money
+  stays behind the existing human ceiling with no live code in v1. Status:
+  FINAL for the 2026-08-26 session's build.
+---
+
 # Autonomous Trading Vertical — Design + Rollout (2026-08-26)
 
 > Owner directive (2026-08-26, in-session): build autonomous trading via API

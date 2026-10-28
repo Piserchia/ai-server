@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-aws-kiro
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): AWS Kiro /
+  Amazon Q Developer (and Windsurf).
+---
+
 # AWS Kiro / Amazon Q Developer (and Windsurf) — research (as of 2026-09-24)
 
 Scope note: three products are covered because they have converged. **Amazon Q Developer** (IDE plugins, `q` CLI) is

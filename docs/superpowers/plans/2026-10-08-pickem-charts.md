@@ -1,3 +1,18 @@
+---
+id: plan-2026-10-08-pickem-charts
+type: plan
+status: shipped
+date: 2026-10-08
+supersedes: []
+superseded_by: null
+summary: >-
+  Eleven-task plan for the pickem chart feature: migration v3, the read-only
+  SQL sandbox, chart spec, request service and routes, one SPA route, then
+  the ai-server helper script, the pickem-chart and pickem-chart-check
+  skills, a golden eval and an ordered rollout. No status line of its own;
+  PROJECTS_REGISTRY.md lists pickem-chart among pickem's dedicated skills.
+---
+
 # Pickem "Ask for a chart" Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

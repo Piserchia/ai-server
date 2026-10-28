@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-minimax
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): MiniMax.
+---
+
 # MiniMax — research (as of 2026-09-24)
 
 Research method note: this session's web-search budget was exhausted before this task started, so every fact below comes from direct fetches of primary pages (MiniMax platform docs via their `llms.txt` index, Hugging Face, Artificial Analysis, OpenRouter's endpoints JSON, Arena, the HN Algolia API, GitHub READMEs) plus three hands-on reviews. Reddit could not be fetched (blocked host). Anything not confirmable is marked "(unverified)" or "Not found".

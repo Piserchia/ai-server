@@ -1,3 +1,18 @@
+---
+id: spec-2026-04-16-assistant-system-design
+type: spec
+status: historical
+date: 2026-04-16
+supersedes: []
+superseded_by: null
+summary: >-
+  The original system design written before any code: mission and non-goals,
+  the six nouns, the 18-skill catalog, orchestration, the model-selection
+  framework, context and documentation, self-evaluation, self-improvement,
+  self-management, self-expansion, hooks/sub-agents/MCP, invariants and the
+  MVP cut. Historical background reading; the phases that followed shipped.
+---
+
 # Assistant Server — System Design
 
 *Chris · 2026-04-16 · Design document (no code yet)*

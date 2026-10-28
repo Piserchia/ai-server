@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-chatgpt-openai
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): OpenAI ChatGPT /
+  Codex.
+---
+
 # OpenAI ChatGPT / Codex — research (as of 2026-09-24)
 
 Scope note: openai.com and help.openai.com return HTTP 403 to direct fetches

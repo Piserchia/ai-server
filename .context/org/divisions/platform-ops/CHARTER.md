@@ -1,3 +1,16 @@
+---
+id: charter-platform-ops
+type: charter
+status: living
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Platform Ops division (manager ops-manager): the server stays healthy,
+  deploys are safe, and failures are detected and recovered fast; owns
+  server code changes, the deploy pipeline, DR and incident response.
+---
+
 # Charter — Platform Ops division
 
 **Manager:** `ops-manager`

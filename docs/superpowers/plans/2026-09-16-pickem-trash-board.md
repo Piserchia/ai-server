@@ -1,3 +1,17 @@
+---
+id: plan-2026-09-16-pickem-trash-board
+type: plan
+status: shipped
+date: 2026-09-16
+supersedes: []
+superseded_by: null
+summary: >-
+  Ship the trash-talk board on the live pickem dashboard: app/board.py
+  (validation, rate limiting, soft-delete over three SQLite tables,
+  migration v2), thin routes, weekly threads inserted by the sync, one lazy
+  SPA route. INDEX.md records the board LIVE the same day.
+---
+
 # Pickem Trash-Talk Board Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

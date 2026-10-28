@@ -1,3 +1,19 @@
+---
+id: guide-phase1-ops-hygiene
+type: guide
+status: reference
+date: 2026-10-21
+supersedes: []
+superseded_by: null
+summary: >-
+  Owner runbook for the by-hand steps of Observability Phase 1 (task C1):
+  entry probes, pmset autorestart, the R2 bucket and rclone remote, the
+  backup seal key, the restore drill, install-launchd timers-only, Ollama
+  prune, D4 confirmations, the bingo hook, and what to write back to the
+  plan's section 8. The steps need sudo, credentials, money or a judgement
+  call, so no job runs them.
+---
+
 # Observability Phase 1 — ops-hygiene owner runbook (2026-10-21)
 
 Plan: `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` (task

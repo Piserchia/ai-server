@@ -1,3 +1,17 @@
+---
+id: plan-2026-04-17-phase-3
+type: plan
+status: historical
+date: 2026-04-17
+supersedes: []
+superseded_by: null
+summary: >-
+  Phase 3 build plan: a registered domain on Cloudflare, a named tunnel
+  under launchd, Caddy reverse-proxying per project, register-project.sh,
+  bingo as the first hosted project and the healthcheck-all timer.
+  Historical; docs/README.md records the phase SHIPPED.
+---
+
 # Phase 3 — Domain + tunnel + Caddy + first hosted project
 
 > **For the Claude Code session executing this**: you should be able to build

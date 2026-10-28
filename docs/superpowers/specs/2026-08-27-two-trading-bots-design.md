@@ -1,3 +1,19 @@
+---
+id: spec-2026-08-27-two-trading-bots
+type: spec
+status: built
+date: 2026-08-27
+supersedes: []
+superseded_by: null
+summary: >-
+  Two atlas verticals: swing/ (aggressive 1-10 day auto-trader on Tradier
+  behind a 22-rule risk kernel, sandbox-first, live money gated by
+  LADDER.md) and value/ (advisory only: sized, invalidation-tagged theses
+  graded weekly in a shadow ledger, no order path). v3 2026-08-30; BUILT
+  2026-08-30 (plan T1-T17 executed), armed pending owner P0 (Tradier/Finnhub
+  tokens, funding).
+---
+
 # Two Trading Bots — Design & Implementation Plan
 
 **Date:** 2026-08-27 · **v3: 2026-08-30** · **Status:** BUILT 2026-08-30 (plan T1–T17 executed; atlas `tradingcore/`+`swing/`+`value/`+migrations 0044–0046+`/trading` pages; 8 ai-server skills + schedules; baselines B-0001/2 on real data; code-review round applied). **Armed pending owner P0** (Tradier sandbox tokens + FINNHUB_TOKEN in atlas `.env`, funding decisions) and prod deploy (`/task deploy server` + `/task redeploy atlas`). Live money remains gated by `swing/LADDER.md`.

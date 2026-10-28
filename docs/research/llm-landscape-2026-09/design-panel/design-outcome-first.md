@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-design-outcome-first
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): Design: Outcome-first — definitions of
+  done, evidence, cross-vendor grading, measured routing.
+---
+
 # Design: Outcome-first — definitions of done, evidence, cross-vendor grading, measured routing
 
 Architect lens: **deliverable effectiveness**. Date 2026-09-24. Inputs: `scratchpad/current-state-map.md` (state map; `file:line` cites below are from it and were spot-verified on 2026-09-24), `docs/research/llm-landscape-2026-09/*` (cited as `<doc> §n`), `docs/superpowers/plans/2026-08-10-model-router.md` (cited as `plan §n`).

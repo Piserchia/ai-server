@@ -1,3 +1,14 @@
+---
+id: research-2026-09-24-kimi-moonshot
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Moonshot Kimi.
+---
+
 # Moonshot Kimi — research (as of 2026-09-24)
 
 Research method note: the session's WebSearch budget was already exhausted when this task started, so every fact below comes from direct fetches of primary pages (platform.kimi.ai docs, kimi.ai blog, Hugging Face, GitHub, OpenRouter API, Artificial Analysis, arena.ai) plus Hacker News threads via the Algolia API. Reddit and X could not be fetched (blocked). Anything not reachable is marked "Not found — searched: …". The 2026-09-24 verification pass (see the Verification log after §9) ran under the same constraint: WebSearch still exhausted, all re-checks by direct fetch. A second 2026-09-24 gap-fix pass (same constraint) recovered the official membership price page through a text-rendering proxy (r.jina.ai), Moonshot's ZDR and privacy pages, the status page, OpenRouter's ZDR endpoint list and the Kimi Code server usage endpoint; see the Gap-fix log at the end. A third 2026-09-24 pass (WebSearch still exhausted; direct fetches + `gh api` code search) recovered the consumer User Agreement, Privacy Policy and Paid Services Agreement via the URLs the iOS App Store listing publishes (kimi.moonshot.cn → www.kimi.com/user/agreement/…?version=v2), the official Kimi Code membership page (5-hour window), the official Kimi-Code-key-in-Claude-Code guide, and the kimi-code OAuth source (credential storage and refresh); see the third-pass log at the end.

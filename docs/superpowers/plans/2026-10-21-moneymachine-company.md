@@ -1,3 +1,18 @@
+---
+id: plan-2026-10-21-moneymachine-company
+type: plan
+status: shipped
+date: 2026-10-21
+supersedes: []
+superseded_by: null
+summary: >-
+  Stand up the moneymachine project (canonical repo + runtime clone), the
+  mmcore tooling, four bucket directories, nine mm-* skills, the
+  moneymachine org division, three schedule rows and the registry paperwork.
+  The spec records it BUILT-IN-SESSION; amendment 2026-10-27: the project
+  became a hosted service (port 8794, /healthz).
+---
+
 # MoneyMachine Company Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

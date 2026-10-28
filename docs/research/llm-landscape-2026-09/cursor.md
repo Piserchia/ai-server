@@ -1,3 +1,16 @@
+---
+id: research-2026-09-24-cursor
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Cursor
+  (cloud/background agents API, headless `agent` CLI, multi-model plan;
+  SpaceX-owned since 2026-08-14).
+---
+
 # Cursor (cloud/background agents API, headless `agent` CLI, multi-model plan; SpaceX-owned since 2026-08-14) — research (as of 2026-09-24)
 
 Method note: this session's web-search budget was exhausted before this task started, so every fact below comes from direct fetches of vendor docs, vendor blog/changelog/status pages, the Cursor forum (Discourse JSON), HN (Algolia API), Wikipedia, and a handful of secondary news/analysis pages. Reddit, Reuters, Bloomberg, BBC, CNBC and openai.com blocked fetches; where a claim rests on one of those, it is routed through a page that quotes it and marked accordingly. "(unverified)" means no primary source was reachable.
