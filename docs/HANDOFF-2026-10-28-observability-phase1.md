@@ -22,7 +22,7 @@ summary: >-
 ## STATE
 
 **Everything built is merged, pushed and deployed. Nothing is in flight.** `main` == `origin/main`
-== prod HEAD at `c4dbb0b`; alembic head **008**; working tree clean apart from three items to leave
+== prod HEAD at `e08521a`; alembic head **008**; working tree clean apart from three items to leave
 alone: modified `.claude/settings.local.json`, untracked `.superpowers/` and `AGENTS.md`.
 
 - **Codex lane** — live since 2026-10-21 (migration 007, `ROUTER_PROVIDERS_ENABLED=anthropic,codex`
@@ -160,3 +160,10 @@ off for four days. `pmset autorestart` is still `0`, so nothing would have resta
 - `tests/test_cross_vendor_docs.py` and `tests/test_haiku_retirement.py` pin doc strings and ban the
   retired model literal under `src/` — read them before editing SYSTEM.md, INDEX.md, README.md,
   TROUBLESHOOTING.md or the runner/db CONTEXT files.
+- **New since 2026-10-28 (landed from the fleet mid-session, `1457d0e`):** a docs *library* —
+  `docs/LIBRARY.md`, `scripts/lib.py`, `tests/test_library.py`. Every `docs/**/*.md` and
+  `.context/org/**/*.md` needs a front-matter block (id/type/status/date/summary); after adding or
+  changing one run `pipenv run python scripts/lib.py index`, and `scripts/lib.py check` is now part
+  of the deploy gate. `scripts/lib.py status <id>` / `show <id> --section <n>` reads a document
+  without loading all of it — useful when context is tight. Read the updated `CLAUDE.md` §"Before
+  you act" and its documentation-update map; this handoff and the recut plan are already compliant.
