@@ -4,7 +4,7 @@ You are working inside the assistant server. This directive is always in effect.
 
 ## Before you act
 -1. Read `MISSION.md` for the overall mission and objectives.
-0. Read `.context/INDEX.md` for a complete map of all documentation.
+0. Read `.context/INDEX.md` for a complete map of all documentation, and `docs/LIBRARY.md` for every design document's id and status (`python scripts/lib.py status <id>` / `show <id> --section <n>`).
 1. Read `SERVER.md` if you need an architecture overview.
 2. For server-code work, read `.context/SYSTEM.md` and the relevant `.context/modules/<x>/CONTEXT.md`.
 3. For project-scoped work: `cd projects/<slug>` and read that project's `CLAUDE.md` and `.context/CONTEXT.md` first.

@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-design-interface-first
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): Design: Interface-first — one command
+  grammar, one control plane (2026-09-24).
+---
+
 # Design: Interface-first — one command grammar, one control plane (2026-09-24)
 
 Lens: start from the owner's hands. Every surface (Telegram on the phone, PWA/web and the `ai` CLI on the laptop, Claude Desktop / Codex as MCP clients) is a *view* of one typed state and speaks one grammar. Multi-vendor routing is a feature behind that plane, not the plane itself. Citations: `file:line` are from the current-state map (`scratchpad/current-state-map.md`, read 2026-09-24); research cites are `docs/research/llm-landscape-2026-09/<doc> §n`; the plan is `docs/superpowers/plans/2026-08-10-model-router.md`.

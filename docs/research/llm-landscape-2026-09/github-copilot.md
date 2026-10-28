@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-github-copilot
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): GitHub Copilot
+  (Pro/Pro+ plans, Copilot CLI, coding agent / cloud agent).
+---
+
 # GitHub Copilot (Pro/Pro+ plans, Copilot CLI, coding agent / cloud agent) — research (as of 2026-09-24)
 
 Method note: this session's web-search budget was exhausted before this task started, so every fact below comes from direct fetches of primary pages (docs.github.com, github.blog, githubstatus.com API, the copilot-cli/copilot-sdk repos, GitHub Community discussions, HN Algolia API) plus `gh api`, `npm view` and `pip index`. Reddit blocks this host; community sentiment is drawn from GitHub Community discussions and HN instead. Numbers not found are marked as such. Newer-than-doc sweep (unverified as of 2026-09-24 beyond direct fetches): the github.blog Copilot changelog shows nothing after 2026-09-23 ("More ways to request and configure Copilot code reviews", "Local sandboxing in the GitHub Copilot app"); no new models or price changes found between 09-22 and 09-24.

@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-claude-anthropic
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Anthropic
+  Claude.
+---
+
 # Anthropic Claude — research (as of 2026-09-24)
 
 Scope: vendor facts verified against Anthropic's own docs/pricing pages on 2026-09-24 unless marked otherwise. Numbers in square brackets cite the Sources list (section 9). Anything marked "(unverified)" came from a single secondary source or a search snippet and should be re-checked before it drives a decision.

@@ -1,3 +1,20 @@
+---
+id: plan-2026-10-21-observability-phase1-recut
+type: plan
+status: built
+date: 2026-10-21
+supersedes: []
+superseded_by: null
+summary: >-
+  Observability Phase 1 re-cut against the landed Codex slice: the P0 plan's
+  tasks renumbered to migration 008, de-duplicated, and split into Tier A
+  (notify outbox + origin, cost columns + reconcile, ops hygiene,
+  provisioning gap) and Tier B. Status: GO, Tier A approved by the owner
+  2026-10-21; section 11 logs Tier A deployed (migration 008 live, restore
+  drill PASS, reconcile run); Tier B is unbuilt and the open owner items are
+  in section 7.
+---
+
 # Observability Phase 1 — re-cut implementation plan (2026-10-21)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

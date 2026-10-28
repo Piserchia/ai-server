@@ -1,3 +1,18 @@
+---
+id: plan-2026-07-27-project-delivery-segregation
+type: plan
+status: shipped
+date: 2026-07-27
+supersedes: []
+superseded_by: null
+summary: >-
+  Make how a project is delivered a machine-readable per-project delivery
+  contract that the runner enforces (dev-repo split, deploy contract, Phases
+  A-E). STATUS 2026-07-28: Phases A-E SHIPPED on dev main; enforcement is
+  opt-in per project via a manifest delivery block, and the live-project
+  migrations (atlas, baseball-bingo) remain owner-gated.
+---
+
 # Project Delivery Segregation — Implementation Plan (2026-07-27)
 
 > **STATUS (2026-07-28): Phases A–E SHIPPED** on dev main (`636cf86..b5123b2`;

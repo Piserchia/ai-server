@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-glm-zai
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Z.ai GLM
+  (Zhipu).
+---
+
 # Z.ai GLM (Zhipu) — research (as of 2026-09-24)
 
 Method note: this session's web-search budget was exhausted before this task started, so

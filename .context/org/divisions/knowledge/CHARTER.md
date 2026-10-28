@@ -1,3 +1,16 @@
+---
+id: charter-knowledge
+type: charter
+status: living
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Knowledge division (manager knowledge-manager): produce research, ideas
+  and content that compound over time (MISSION objectives B/E and section L)
+  and keep the content stores useful, deduplicated and backed up.
+---
+
 # Charter — Knowledge division
 
 **Manager:** `knowledge-manager`

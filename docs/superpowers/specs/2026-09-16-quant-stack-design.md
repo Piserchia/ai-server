@@ -1,3 +1,19 @@
+---
+id: spec-2026-09-16-quant-stack
+type: spec
+status: accepted
+date: 2026-09-16
+supersedes: []
+superseded_by: null
+summary: >-
+  Validation-desk atlas vertical mimicking the '$200K quant stack'
+  blueprint: a stdlib backtest engine with the shift(1) guard, fees and
+  slippage, DSR/PBO metrics, walk-forward, regime filter, portfolio and
+  health checks, a weekly reports loop behind a fail-closed turn-on switch,
+  and a private /quant page. APPROVED: the owner delegated research, spec,
+  plan, implementation, deploy and adversarial review.
+---
+
 # Quant Stack — validation-desk vertical (design)
 
 Date: 2026-09-16

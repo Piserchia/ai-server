@@ -1,3 +1,19 @@
+---
+id: plan-2026-08-10-model-router
+type: plan
+status: superseded
+date: 2026-08-10
+supersedes: []
+superseded_by: spec-2026-09-25-multi-model-platform
+summary: >-
+  Dynamic multi-provider model router: every LLM call routed across
+  Anthropic, Codex, Gemini, OpenRouter or a local model by task class, trust
+  tier, health and quota (R0-R5), with INV-21 containment. APPROVED
+  2026-08-17 by the owner and never started; the 2026-09-25 multi-model
+  platform spec folded its R0-R5 into phases P3-P5 and so superseded its
+  scope (that spec was itself cut on 2026-10-05).
+---
+
 # Dynamic multi-provider model router — plan (2026-08-10)
 
 > Owner ask: "What models could we use on this repo other than just Claude?

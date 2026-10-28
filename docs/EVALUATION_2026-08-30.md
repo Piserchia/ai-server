@@ -1,3 +1,19 @@
+---
+id: report-2026-08-30-evaluation
+type: report
+status: reference
+date: 2026-08-30
+supersedes: []
+superseded_by: null
+summary: >-
+  Third-party ('grokbot') holistic evaluation imported 2026-08-31 with the
+  same-day remediation disposition: findings F1-F7 (isolation/dispatch,
+  queue lies, dual-checkout leaks, doc drift, mission/Atlas/live-money,
+  Pipfile.lock, ops holes) all CONFIRMED and FIXED or PARTIAL, with the
+  deferred items listed per finding; the original brief is preserved
+  verbatim below the table. The latest full-system evaluation.
+---
+
 # EVALUATION 2026-08-30 — third-party ("grokbot") holistic evaluation
 
 > Imported 2026-08-31 from `~/Downloads/ai-server-evaluation-2026-08-30.md`

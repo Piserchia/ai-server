@@ -1,3 +1,17 @@
+---
+id: research-2026-09-24-server-as-connector-reachability
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Driving this
+  server FROM the vendors' own apps: custom MCP connectors, ChatGPT
+  apps/connectors, Gemini extensions, Claude connectors/channels,
+  Telegram/Slack bots.
+---
+
 # Driving this server FROM the vendors' own apps: custom MCP connectors, ChatGPT apps/connectors, Gemini extensions, Claude connectors/channels, Telegram/Slack bots — research (as of 2026-09-24)
 
 Reader: single-tenant assistant server on a Mac Mini M4 (Python 3.12, Claude Agent SDK on Claude Max, Postgres/Redis, Telegram bot + web dashboard, launchd, Cloudflare Tunnel + Caddy; ~30–60 agent jobs/day; Atlas paper-trading loops, no live order path). Question: how does the owner **launch jobs, query status and receive deliverables** from inside claude.ai, Claude Code, ChatGPT, Gemini/Antigravity, Grok, Perplexity, Cursor and iOS Shortcuts, and which surfaces give a real "one server, many front doors" experience today.

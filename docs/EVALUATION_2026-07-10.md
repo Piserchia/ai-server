@@ -1,3 +1,17 @@
+---
+id: report-2026-07-10-evaluation
+type: report
+status: historical
+date: 2026-07-10
+supersedes: []
+superseded_by: null
+summary: >-
+  Runtime audit of the whole repo and the live Mac Mini: loop defects (the
+  review sub-agent never fired, stranded queued jobs, dead backups), a
+  cleanup batch and the subagent-suite plan, with a T1-T17 status table
+  maintained as work landed. Companion plan: 2026-07-10-eval-remediation.
+---
+
 # ai-server: Evaluation 2026-07-10 — runtime audit, cleanup & subagent-suite plan
 
 > **Audience**: Chris (owner) and future Claude sessions.

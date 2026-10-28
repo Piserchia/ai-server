@@ -1,3 +1,18 @@
+---
+id: report-2026-07-27-sdk-migration
+type: report
+status: shipped
+date: 2026-07-27
+supersedes: []
+superseded_by: null
+summary: >-
+  Phase 8 SDK-native overhaul: the container lane and every self-managed
+  claude CLI subprocess removed, hook-enforced guards replace containers,
+  skills compile to SDK subagents with SKILL.md as the source of truth,
+  structured outputs, and the silent review.py no-op bug fixed. Status:
+  SHIPPED.
+---
+
 # SDK-native overhaul — 2026-07-27
 
 > Phase 8. Requested as: "overhaul the setup — it depends on executing claude

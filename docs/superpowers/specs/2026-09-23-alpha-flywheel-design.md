@@ -1,3 +1,18 @@
+---
+id: spec-2026-09-23-alpha-flywheel
+type: spec
+status: accepted
+date: 2026-09-23
+supersedes: []
+superseded_by: null
+summary: >-
+  Turn alpha-lab into a self-feeding generate, evaluate, learn loop: an
+  alpha-scout generator (families + mining), an idle-capacity drainer and a
+  LESSONS feedback file, with evaluation rigor and the INV-22 ceiling
+  unchanged (a GO is a memo plus a graduation offer). APPROVED after the
+  owner's Q&A on throughput, sources and GO handling.
+---
+
 # Alpha flywheel — continuous generate→evaluate→learn loop (design)
 
 Date: 2026-09-23

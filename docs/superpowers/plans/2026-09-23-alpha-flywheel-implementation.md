@@ -1,3 +1,17 @@
+---
+id: plan-2026-09-23-alpha-flywheel-implementation
+type: plan
+status: shipped
+date: 2026-09-23
+supersedes: []
+superseded_by: null
+summary: >-
+  Six-task plan for the alpha flywheel (alpha-scout skill, idle drainer,
+  LESSONS loop, schedule rows, gates/review/push/deploy and live
+  acceptance), executed inline by the authoring session. INDEX.md carries
+  the 2026-09-23 additions block it names.
+---
+
 # Alpha Flywheel Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans.

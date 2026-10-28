@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-crosscut-finance-trading-ai
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Cross-cut: AI
+  for trading research in 2026.
+---
+
 # Cross-cut: AI for trading research in 2026 — research (as of 2026-09-24)
 
 Scope: this is a cross-cut, not a single-vendor sheet. "Snapshot", "Interfaces", "Headless" and "Cost" are written per *finance surface* (LLM finance products + market-data MCP servers + broker APIs), and the per-vendor sibling docs in this folder hold the general model/plan detail. Research method note: the session's WebSearch budget was exhausted before this task started, so everything below was gathered with direct fetches of vendor docs, GitHub READMEs, arXiv abstracts, the HN Algolia API, and Brave search result pages. Reddit and the Wayback Machine were unreachable from this sandbox; nof1.ai (Alpha Arena) returned HTTP 429 on every attempt and is cited through a secondary source.

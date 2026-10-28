@@ -1,3 +1,17 @@
+---
+id: charter-executive
+type: charter
+status: living
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Executive division (CEO system-manager): keep every division aligned to
+  MISSION.md, own the org structure itself, evolve the platform's
+  capabilities, and decide when divisions conflict; hosts the gap-auditor
+  and the cross-division connectors.
+---
+
 # Charter — Executive division
 
 **Manager:** `system-manager` (CEO)

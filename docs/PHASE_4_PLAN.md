@@ -1,3 +1,17 @@
+---
+id: plan-2026-04-17-phase-4
+type: plan
+status: historical
+date: 2026-04-17
+supersedes: []
+superseded_by: null
+summary: >-
+  Phase 4 build plan: six expansion skills (new project, fix, new skill,
+  diagnose and more) plus two MCP servers, automated post-review on code-
+  touching jobs and event-triggered self-diagnose on repeated failures.
+  Historical; docs/README.md records the phase SHIPPED.
+---
+
 # Phase 4 — Expansion skills
 
 > **For the Claude Code session executing this**: this phase is big. Build the

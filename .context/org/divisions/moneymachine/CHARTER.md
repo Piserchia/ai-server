@@ -1,3 +1,17 @@
+---
+id: charter-moneymachine
+type: charter
+status: living
+date: 2026-10-21
+supersedes: []
+superseded_by: null
+summary: >-
+  MoneyMachine division (manager mm-ceo): run the MoneyMachine Company, four
+  domain buckets with one shared officer hierarchy expressed as nine mm-*
+  skills parameterised by bucket, reports only with no order path (INV-22);
+  chartered under the owner's 2026-10-21 delegation.
+---
+
 # Charter — MoneyMachine division
 
 **Manager:** `mm-ceo`

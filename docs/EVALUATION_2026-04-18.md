@@ -1,3 +1,17 @@
+---
+id: report-2026-04-18-evaluation
+type: report
+status: historical
+date: 2026-04-18
+supersedes: []
+superseded_by: null
+summary: >-
+  Full evaluation of the repo at commit a399cc7: goals and how they are
+  pursued, a model of ideal Claude context injection, the gap against it,
+  and fifteen ROI-ordered recommendations with a live implementation-status
+  table (docs/README.md counts 14 shipped, 1 deferred).
+---
+
 # ai-server: Full Evaluation
 
 > **Audience**: Chris (owner) and future Claude sessions reviewing the repo's

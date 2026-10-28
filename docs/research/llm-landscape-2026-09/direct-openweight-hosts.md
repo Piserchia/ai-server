@@ -1,3 +1,16 @@
+---
+id: research-2026-09-24-direct-openweight-hosts
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Direct open-
+  weight inference hosts (Groq, Cerebras, Fireworks, Together, DeepInfra,
+  SambaNova) incl. free tiers.
+---
+
 # Direct open-weight inference hosts (Groq, Cerebras, Fireworks, Together, DeepInfra, SambaNova) incl. free tiers — research (as of 2026-09-24)
 
 Scope: the six hosts that serve open-weight models from their own hardware, compared with the two "cheap open-weight lane" alternatives already in this research set (Ollama Cloud Pro and OpenRouter). All numbers are from vendor pages fetched 2026-09-24 unless marked. Web search was unavailable in this session (budget exhausted); every fact below comes from a directly fetched primary page, the OpenRouter/ArtificialAnalysis public endpoints, the HN Algolia API, or the in-repo comparison matrix (§9 #88). Numbers I could not confirm on a primary page are marked "(unverified)". Both the original session and the 2026-09-24 verification pass ran with web search unavailable (budget exhausted): every number is a single-day vendor-page snapshot with no independent sweep for newer announcements — re-run the "newer than doc" check with search enabled (unverified as of 2026-09-24).

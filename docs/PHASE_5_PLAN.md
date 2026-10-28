@@ -1,3 +1,17 @@
+---
+id: plan-2026-04-17-phase-5
+type: plan
+status: historical
+date: 2026-04-17
+supersedes: []
+superseded_by: null
+summary: >-
+  Phase 5 operations plan: nightly backup, daily server-upkeep, monthly
+  review-and-improve PRs, server-patch behind a code-review gate and
+  Cloudflare Access on the dashboard, so the server runs for a week with
+  zero intervention. Historical; docs/README.md records the phase SHIPPED.
+---
+
 # Phase 5 — Operations
 
 > **For the Claude Code session executing this**: Phase 5 is the "don't think

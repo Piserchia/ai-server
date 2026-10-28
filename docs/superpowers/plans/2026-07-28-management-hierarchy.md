@@ -1,3 +1,19 @@
+---
+id: plan-2026-07-28-management-hierarchy
+type: plan
+status: shipped
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Design and rollout of the self-managing agent hierarchy: a CEO agent
+  anchored to MISSION.md, division managers that evaluate, enforce and
+  refactor, and cross-division connectors. STATUS: P1-P3 SHIPPED
+  (foundation, gap-auditor, remaining managers, first connector); P4
+  privilege guardrails and P5 management surfaces were the open rollout
+  phases.
+---
+
 # Self-Managing Agent Hierarchy — Design + Rollout (2026-07-28)
 
 > **STATUS: P1–P3 SHIPPED** (P1 foundation + gap-auditor 2026-07-28; P2

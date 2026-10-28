@@ -1,3 +1,18 @@
+---
+id: spec-2026-09-01-atlas-firm-org
+type: spec
+status: accepted
+date: 2026-09-01
+supersedes: []
+superseded_by: null
+summary: >-
+  Cross-vertical firm layer for atlas: a deterministic risk-book spine
+  (WS2a), an out-of-band schedule-adherence monitor (WS1), role charters and
+  handbooks (WS3), and an advisory CIO whose authority changes only through
+  graduation gates. ACCEPTED: the owner approved Approach 1 ('firm vertical
+  with a deterministic spine').
+---
+
 # Atlas Firm — cross-vertical firm layer, oversight, role depth (design)
 
 Status: **ACCEPTED** — owner approved Approach 1 ("firm vertical with a

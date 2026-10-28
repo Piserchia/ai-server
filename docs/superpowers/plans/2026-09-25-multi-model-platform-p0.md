@@ -1,3 +1,21 @@
+---
+id: plan-2026-09-25-multi-model-platform-p0
+type: plan
+status: reference
+date: 2026-09-25
+supersedes: []
+superseded_by: null
+summary: >-
+  The 20-task Phase 0 plan (migration 007, full ResultMessage capture,
+  notify outbox, Telegram hygiene, settings-override refusal, audit
+  redactor, credential canary, pricing.py and cost reconcile, alembic
+  manifest, ops runbook) with verbatim code and tests, about 10,700 lines.
+  Re-pointed 2026-10-05 at the cut spec as the executable form of its Phase
+  1 (the SDK_RECORD recorder left with the cut), then re-cut on 2026-10-21
+  by the observability-phase1-recut plan, whose tasks cite this plan's
+  sections as the design of record.
+---
+
 # Multi-Model Platform — Phase 0 (foundations + hygiene) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

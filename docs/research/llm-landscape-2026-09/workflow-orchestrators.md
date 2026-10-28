@@ -1,3 +1,17 @@
+---
+id: research-2026-09-24-workflow-orchestrators
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Self-hosted
+  workflow orchestrators as the run/visibility layer (n8n, Temporal,
+  Prefect, Windmill, Trigger.dev, Hatchet, LangGraph Platform, Inngest,
+  Dagster, Airflow).
+---
+
 # Self-hosted workflow orchestrators as the run/visibility layer (n8n, Temporal, Prefect, Windmill, Trigger.dev, Hatchet, LangGraph Platform, Inngest, Dagster, Airflow) — research (as of 2026-09-24)
 
 Scope: can one of these replace or wrap the bespoke Python job runner (Postgres `jobs` table + Redis queue + croniter scheduler + launchd, ~11k lines) on a 16 GB Mac Mini M4 with ~6 GB headroom, for ~30–60 agent jobs/day at 2 concurrent, where each job is a 5–90 min Claude Agent SDK subprocess that streams events? Research method: primary vendor docs/pricing/GitHub API fetched 2026-09-24; community sentiment from Hacker News via the Algolia API. The session's web-search budget was exhausted before this task started, so every fact below comes from a directly fetched URL (listed in §9); Reddit could not be fetched. Anything not directly confirmed is marked "(unverified)".

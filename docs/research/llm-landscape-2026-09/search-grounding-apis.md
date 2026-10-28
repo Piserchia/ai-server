@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-search-grounding-apis
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Search/grounding
+  APIs — Brave Search, Tavily, Exa, Parallel.
+---
+
 # Search/grounding APIs — Brave Search, Tavily, Exa, Parallel — research (as of 2026-09-24)
 
 Scope note: these are retrieval vendors, not LLM vendors, so "model lineup" below means

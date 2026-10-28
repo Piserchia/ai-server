@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-design-incremental
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): Design: Incremental — execute R0–R5
+  and bolt on the missing surfaces (2026-09-24).
+---
+
 # Design: Incremental — execute R0–R5 and bolt on the missing surfaces (2026-09-24)
 
 Lens: least change that satisfies the ask. Reuse `docs/superpowers/plans/2026-08-10-model-router.md` (APPROVED 2026-08-17) where it still holds, amend where `docs/research/llm-landscape-2026-09/` shows it is stale, and add only the visibility/effectiveness/surface pieces it lacks. Every `file:line` below is from the 2026-09-24 state map (`scratchpad/current-state-map.md`, relative to the repo root); research citations are `<doc>.md §N` in `docs/research/llm-landscape-2026-09/`.

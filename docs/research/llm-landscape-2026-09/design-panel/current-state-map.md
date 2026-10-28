@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-current-state-map
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Design-panel document (2026-09-24): ai-server current-state map
+  (2026-09-24).
+---
+
 # ai-server current-state map (2026-09-24)
 
 **Sources.** Eight subsystem maps (executor-path, job-lifecycle, user-surfaces, skills-schedules-evals, routing-quality-loop, atlas-trading-integration, governance-constraints, ops-hosting-resources) plus 17 adversarial spot-checks and four cross-map conflicts resolved against the code on 2026-09-24. Where a spot-check or re-read contradicted a map, the correction is used in the body and listed in §7. All `file:line` citations are relative to the repo root `~/Documents/repos/ai-server` unless prefixed `atlas/`. Counts are live values read on 2026-09-24 (dev DB + prod audit dir); "last 400 jobs" and "fleet-wide (2102 files)" are different windows and are labelled as such.

@@ -1,3 +1,21 @@
+---
+id: spec-2026-10-05-observability-and-trading-unblock
+type: spec
+status: proposed
+date: 2026-10-05
+supersedes: [spec-2026-09-25-multi-model-platform]
+superseded_by: null
+summary: >-
+  The project of record: make the server observable (tokens, cost, turns and
+  terminal reason on every job), one command grammar and control plane, a
+  durable notify outbox with cards that move, approvals as buttons, a
+  runner-checked Deliverable Contract, lanes and budgets, the two trading
+  tokens and a trading-health page, and measured spend cuts; Anthropic-only,
+  four phases with kill switches. Status line: PROPOSED, awaiting owner
+  review; only Phase 1 is planned (its executable form is the 2026-09-25 P0
+  plan, re-cut on 2026-10-21).
+---
+
 # Observability, control and the trading unblock — design spec (2026-10-05)
 
 > **Status: PROPOSED — awaiting owner review.** Nothing here is implemented. It **supersedes `docs/superpowers/specs/2026-09-25-multi-model-platform-design.md`** (frozen 2026-09-27 after three applied adversarial review rounds) and narrows it to the project that spec's own reviewers and the owner agreed is defensible. Every mechanism kept below carries the citation that spec gave it; where it marked something unverified, the marking is kept. `docs/superpowers/plans/2026-09-25-multi-model-platform-p0.md` remains the executable form of Phase 1, minus the one task named in §10.

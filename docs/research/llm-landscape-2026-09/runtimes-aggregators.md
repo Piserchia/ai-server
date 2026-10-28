@@ -1,3 +1,16 @@
+---
+id: research-2026-09-24-runtimes-aggregators
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Aggregators &
+  agent harnesses (OpenRouter, LiteLLM, Ollama, opencode, aider, goose,
+  Cline, vendor CLIs).
+---
+
 # Aggregators & agent harnesses (OpenRouter, LiteLLM, Ollama, opencode, aider, goose, Cline, vendor CLIs) — research (as of 2026-09-24)
 
 Scope: the "one interface, many models" layer for a headless macOS server that must audit-log every tool call. Benchmark harness = Claude Agent SDK (already in production here). Web search budget was exhausted for this session, so every fact below comes from direct fetches of primary docs, GitHub, and the HN Algolia API; nothing is from memory unless marked "(unverified)".

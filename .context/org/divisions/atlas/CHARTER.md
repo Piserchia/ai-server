@@ -1,3 +1,17 @@
+---
+id: charter-atlas
+type: charter
+status: living
+date: 2026-07-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Atlas division (manager atlas-manager): run the atlas product (private
+  financials/trading dashboard and agent platform), its reports, scouting,
+  briefs, portfolio interaction and deploys; a product sub-org with its own
+  dev-repo topology.
+---
+
 # Charter — Atlas division
 
 **Manager:** `atlas-manager`

@@ -1,3 +1,17 @@
+---
+id: report-2026-07-27-containers
+type: report
+status: historical
+date: 2026-07-27
+supersedes: []
+superseded_by: null
+summary: >-
+  Stub for the retired isolation: container tier (claude -p inside docker,
+  written 2026-07-12 and removed 2026-07-27): why it was removed and what
+  replaced each property (guard hooks, the Bash denylist, in-process
+  subscription auth). The full original document lives in git history.
+---
+
 # Containerized sessions — HISTORICAL (lane removed 2026-07-27)
 
 > The `isolation: container` tier (`claude -p` inside docker, written

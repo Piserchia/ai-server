@@ -1,3 +1,15 @@
+---
+id: research-2026-09-24-openclaw-hermes-agent
+type: research
+status: reference
+date: 2026-09-24
+supersedes: []
+superseded_by: null
+summary: >-
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): OpenClaw /
+  Hermes Agent (open multi-channel personal-assistant runtimes).
+---
+
 # OpenClaw / Hermes Agent (open multi-channel personal-assistant runtimes) — research (as of 2026-09-24)
 
 Scope note: neither project is a model vendor. Both are MIT-licensed, self-hosted agent
