@@ -1,3 +1,17 @@
+---
+id: report-2026-10-28-handoff-observability-phase1
+type: report
+status: reference
+date: 2026-10-28
+supersedes: []
+superseded_by: null
+summary: >-
+  Session handoff for Observability Phase 1 (Tier A deployed, Tier B unbuilt),
+  verified against the tree and prod as of 2026-10-28; read before the recut
+  plan's section 0 deltas, section 3 decisions, section 7 owner actions and
+  section 11 deployment log.
+---
+
 # Handoff — ai-server, Observability Phase 1 (as of 2026-10-28)
 
 > Written to reset a session's context. Read this, then

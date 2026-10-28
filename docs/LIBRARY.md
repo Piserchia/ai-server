@@ -56,10 +56,11 @@ Use `python scripts/lib.py status <id>` to check whether a document is current, 
 | `plan-2026-04-17-phase-4` | historical | 2026-04-17 | Phase 4 build plan: six expansion skills (new project, fix, new skill, diagnose and more) plus two MCP servers, automated post-review on code- touching jobs and event-triggered self-diagnose on repeated failures. … | `docs/PHASE_4_PLAN.md` |
 | `plan-2026-04-17-phase-3` | historical | 2026-04-17 | Phase 3 build plan: a registered domain on Cloudflare, a named tunnel under launchd, Caddy reverse-proxying per project, register-project.sh, bingo as the first hosted project and the healthcheck-all timer. Historical … | `docs/PHASE_3_PLAN.md` |
 
-## Reports (9)
+## Reports (10)
 
 | id | status | date | summary | path |
 |---|---|---|---|---|
+| `report-2026-10-28-handoff-observability-phase1` | reference | 2026-10-28 | Session handoff for Observability Phase 1 (Tier A deployed, Tier B unbuilt), verified against the tree and prod as of 2026-10-28; read before the recut plan's section 0 deltas, section 3 decisions, section 7 owner … | `docs/HANDOFF-2026-10-28-observability-phase1.md` |
 | `report-2026-09-16-quant-stack-adversarial` | reference | 2026-09-16 | Adversarial execution review of the shipped quant validation desk against the '$200K quant stack' blueprint and the owner's prompt: five independent auditors told to refute every claim, a clause-by-clause verdict table … | `docs/QUANT_STACK_ADVERSARIAL_2026-09-16.md` |
 | `report-2026-08-30-evaluation` | reference | 2026-08-30 | Third-party ('grokbot') holistic evaluation imported 2026-08-31 with the same-day remediation disposition: findings F1-F7 (isolation/dispatch, queue lies, dual-checkout leaks, doc drift, mission/Atlas/live-money … | `docs/EVALUATION_2026-08-30.md` |
 | `report-2026-07-28-evaluation` | historical | 2026-07-28 | Full-system gap audit against the two operating goals (host projects well; execute project creation and deployment) via four parallel deep-dives: top blockers B1-B8 and categorised findings with a … | `docs/EVALUATION_2026-07-28.md` |
