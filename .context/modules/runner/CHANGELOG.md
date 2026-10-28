@@ -2,6 +2,19 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-28 — `model_served` names the model that did the work (Opus sessions were stamped and priced as Haiku)
+
+**Agent task**: Observability Phase 1 §8 verification, first full week of stamped jobs.
+**Files changed**:
+- `src/runner/result_capture.py` — new `dominant_model(model_usage)`; `ResultCapture.model_served` uses it instead of `next(iter(model_usage))`. The bundled CLI makes its own small-model calls inside a session, so `model_usage` carries a second, tiny entry — `claude-haiku-4-5-20251001` on prod — and it is often FIRST in the dict. Degenerate shapes (no countable tokens) still yield the first key, so `{"<model>": {}}` captures are unchanged.
+- `tests/test_result_capture.py::TestDominantModel` (5 cases, incl. a genuinely haiku-dominated session still reporting haiku).
+
+**Why**: measured on prod 2026-10-22..28 — `model_served` was `claude-haiku-4-5-20251001` on **39 of 111** completed jobs whose `resolved_model` was opus-5 (28), sonnet-4-6 (9) or opus-4-8 (2). Because `pricing.price_usage` keys on `model_served`, those jobs' `cost_usd_list` was computed at Haiku rates: $24.84 against the SDK's $121.89 for the same 39 jobs (+390.7 %, implied cache-write rate $25.60 — the giveaway that the pairing was wrong, not the rate). `served_model_violation` did not fire and could not: it checks that the requested model is PRESENT among the keys, which it was.
+
+**Side effects**: new jobs stamp the right id and price correctly. **Rows already written stay wrong** — `jobs.model_served` and `jobs.cost_usd_list` on those 39 rows, and the §8 30-day baseline (≈ $2,101.63) that was computed from the same `job_completed.model_served` values in the append-only JSONL. Recompute is a one-off over `jobs` (see the handoff doc); it is a prod data write and is left for the owner.
+
+**Gotchas discovered**: `model_usage` is `dict[str, Any]` in the pinned SDK with no declared value shape; counters appear camelCase (`inputTokens`) from the CLI, and `costUSD`/`contextWindow` sit in the same dict.
+
 ## 2026-10-22 — cost-reconcile: the computed-vs-SDK comparison is paired
 
 **Agent task**: Observability Phase 1 §8 measurement (first prod `scripts/cost-reconcile.py --db` run after B3 stamped the first job).

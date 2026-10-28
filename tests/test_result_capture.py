@@ -928,3 +928,52 @@ class TestMainWiring:
         src = ast.unparse(generic[0])
         assert "terminal_reason_for_exception(exc)" in src
         assert "terminal_reason='api_error'" not in src and 'terminal_reason="api_error"' not in src
+
+
+class TestDominantModel:
+    """`model_served` must name the model that did the work, not whichever
+    `model_usage` key happens to come first (prod, 2026-10-22..28: the CLI's
+    own haiku call was first on 39 of 111 jobs, so Opus sessions were stamped
+    — and priced — as Haiku)."""
+
+    def test_model_served_is_the_dominant_model_not_the_first_key(self):
+        from src.runner.result_capture import dominant_model
+        usage = {                                   # the real prod shape
+            "claude-haiku-4-5-20251001": {"inputTokens": 12, "outputTokens": 31},
+            "claude-opus-5": {"inputTokens": 40, "cacheReadInputTokens": 2_180_898,
+                              "cacheCreationInputTokens": 52_000, "outputTokens": 12_400},
+        }
+        assert dominant_model(usage) == "claude-opus-5"
+        assert capture_result_message(_msg(model_usage=usage)).model_served == "claude-opus-5"
+
+    def test_snake_case_counters_count_too(self):
+        from src.runner.result_capture import dominant_model
+        assert dominant_model({
+            "claude-haiku-4-5-20251001": {"input_tokens": 9, "output_tokens": 4},
+            "claude-sonnet-4-6": {"input_tokens": 8, "cache_read_input_tokens": 500_000},
+        }) == "claude-sonnet-4-6"
+
+    def test_cost_and_context_fields_never_decide_it(self):
+        from src.runner.result_capture import dominant_model
+        assert dominant_model({
+            "claude-haiku-4-5-20251001": {"costUSD": 99.0, "contextWindow": 200_000,
+                                          "inputTokens": 5},
+            "claude-opus-4-7": {"costUSD": 0.01, "inputTokens": 4_000},
+        }) == "claude-opus-4-7"
+
+    def test_countless_shapes_keep_the_first_key(self):
+        # Pins the pre-fix behaviour the older cases rely on.
+        from src.runner.result_capture import dominant_model
+        assert dominant_model({"claude-sonnet-4-6": {}}) == "claude-sonnet-4-6"
+        assert dominant_model({"claude-opus-4-7": None, "claude-sonnet-4-6": {}}) \
+            == "claude-opus-4-7"
+        assert dominant_model({}) is None and dominant_model(None) is None
+
+    def test_a_haiku_dominated_session_still_reports_haiku(self):
+        # Not a blanket "never haiku" rule: a session that really ran on the
+        # utility model must still report it.
+        from src.runner.result_capture import dominant_model
+        assert dominant_model({
+            "claude-haiku-4-5-20251001": {"inputTokens": 10, "cacheReadInputTokens": 90_000},
+            "claude-opus-5": {"inputTokens": 3},
+        }) == "claude-haiku-4-5-20251001"
