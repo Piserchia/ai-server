@@ -199,7 +199,50 @@ class ResultCapture:
 
     @property
     def model_served(self) -> str | None:
-        return next(iter(self.model_usage), None) if self.model_usage else None
+        return dominant_model(self.model_usage)
+
+
+_MODEL_USAGE_TOKEN_KEYS = (
+    "inputTokens", "input_tokens",
+    "outputTokens", "output_tokens",
+    "cacheReadInputTokens", "cache_read_input_tokens",
+    "cacheCreationInputTokens", "cache_creation_input_tokens",
+)
+
+
+def dominant_model(model_usage: dict[str, Any] | None) -> str | None:
+    """The model that did the session's work: the `model_usage` entry with the
+    most tokens, NOT the first key.
+
+    The bundled CLI makes its own small-model calls inside a session, so
+    `model_usage` routinely carries a second, tiny entry — on prod that is the
+    retired haiku-4-5 utility id — and it is often FIRST in the dict. Taking
+    `next(iter(...))` therefore stamped haiku as `jobs.model_served` on 39 of
+    111 jobs in Phase 1's first week (2026-10-22..28) and, because
+    `pricing.price_usage` keys on `model_served`, priced Opus and Sonnet work
+    at Haiku rates — understating that week's ledger by ≈ $97 of $122. Summing
+    the four token counters (either naming) makes the auxiliary entry lose by
+    orders of magnitude; cost and context-window fields are ignored.
+
+    Degenerate shapes keep the old behaviour: with no countable tokens
+    anywhere (values absent, empty or non-numeric) the first key wins, so a
+    `{"<model>": {}}` capture still reports that model.
+    """
+    if not model_usage:
+        return None
+    best: str | None = None
+    best_tokens = -1
+    for name, stats in model_usage.items():
+        total = 0
+        if isinstance(stats, dict):
+            for key in _MODEL_USAGE_TOKEN_KEYS:
+                value = stats.get(key)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                total += int(value)
+        if total > best_tokens:
+            best, best_tokens = name, total
+    return best
 
 
 def capture_result_message(message: Any, *,
