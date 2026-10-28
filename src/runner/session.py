@@ -1484,6 +1484,7 @@ async def run_session(job: Job) -> dict[str, Any]:
     published = False
     capture: ResultCapture | None = None
     columns: dict[str, Any]
+    by_model: dict[str, dict[str, Any]] | None = None
 
     try:
         if options is not None:
@@ -1500,7 +1501,15 @@ async def run_session(job: Job) -> dict[str, Any]:
             # billed; the requested id is the fallback for the shapes where
             # model_usage is absent. None when the id is unknown to the price
             # table — the reconcile reports it as `unpriced`, never as $0.
-            cost_usd_list = pricing.price_usage(capture.model_served or model_used, usage)
+            # Per model first (2026-10-28): `usage` is one aggregate across
+            # every model the session touched, so a multi-model session is
+            # priced from its `model_usage` breakdown when that breakdown
+            # covers the aggregate; otherwise the aggregate at the served
+            # model, as before.
+            by_model = capture.usage_by_model or None
+            cost_usd_list = pricing.price_model_usage(by_model, aggregate=usage)
+            if cost_usd_list is None:
+                cost_usd_list = pricing.price_usage(capture.model_served or model_used, usage)
             columns = result_columns(capture, terminal_reason=terminal_reason,
                                      cost_usd_list=cost_usd_list,
                                      cli_version=cli_version())
@@ -1581,6 +1590,9 @@ async def run_session(job: Job) -> dict[str, Any]:
             cost_usd_list=cost_usd_float,
             sdk_cost_usd=capture.total_cost_usd if capture else None,
             stop_reason=capture.stop_reason if capture else None,
+            # 2026-10-28 (additive): the per-model breakdown, so the ledger
+            # can attribute a multi-model session — None on the executor lane.
+            model_usage=by_model,
         )
 
         return {
@@ -1598,6 +1610,8 @@ async def run_session(job: Job) -> dict[str, Any]:
             # jobs.result). Phase-1 cards read num_turns from the row.
             "num_turns": capture.num_turns if capture else None,
             "cost_usd_list": cost_usd_float,
+            # → jobs.result JSON: the breakdown persisted per job, no migration.
+            "model_usage": by_model,
         }
     except BaseException:
         session_failed = True

@@ -169,6 +169,50 @@ def price_usage(model: str | None, usage: dict[str, Any] | None) -> Decimal | No
     return total.normalize() if total else Decimal(0)
 
 
+def price_model_usage(by_model: dict[str, dict[str, Any]] | None, *,
+                      aggregate: dict[str, Any] | None) -> Decimal | None:
+    """List-price equivalent of a session priced PER MODEL from its
+    `model_usage` breakdown (`result_capture.usage_by_model` shape), each
+    model's counters at that model's own rate — the only honest basis for a
+    session whose `usage` aggregates several models (the main model plus the
+    CLI's own small-model calls).
+
+    The breakdown is the basis when it COVERS the aggregate: each of the four
+    counters summed over the models is ≥ the aggregate's. In the bundled CLI
+    (2.1.139, read during review 2026-10-28) `usage` is the main loop's own
+    messages while `modelUsage` is every call in the process — Agent-tool
+    subagents and the CLI's utility calls included — so in prod the breakdown
+    is a strict superset whenever a session had subagents, and the figure
+    priced here then covers tokens the row's five token columns do not. That
+    is also what the SDK's own `total_cost_usd` is summed from (per-model
+    `costUSD`), so `cost_usd_list` finally compares like with like.
+
+    None — so the caller falls back to `price_usage(model, usage)` on the
+    aggregate — whenever the breakdown is not a substitute for it: empty; a
+    model with no price family (never a partial sum); a counter BELOW the
+    aggregate's (an older shape or a partial capture); or the aggregate
+    carries 5-m cache writes (the credits signature), which the per-model
+    counters cannot split by TTL. With `aggregate=None` the breakdown is
+    taken as complete. Keys other than the four counters are ignored.
+    """
+    if not by_model:
+        return None
+    if aggregate is not None:
+        if cache_write_buckets(aggregate)[1] > 0:
+            return None
+        for key in ("input_tokens", "output_tokens",
+                    "cache_read_input_tokens", "cache_creation_input_tokens"):
+            if sum(_tok(u, key) for u in by_model.values()) < _tok(aggregate, key):
+                return None
+    total = Decimal(0)
+    for model, usage in by_model.items():
+        part = price_usage(model, usage)
+        if part is None:
+            return None
+        total += part
+    return total.normalize() if total else Decimal(0)
+
+
 @dataclass(frozen=True)
 class JobCost:
     job_id: str
@@ -189,6 +233,13 @@ class JobCost:
     served_mismatch: bool = False  # model_served named a DIFFERENT family than the
                                  # request, so `model` is the request and the pair
                                  # is reported rather than priced on the served id.
+    usd_per_model: Decimal | None = None  # price_model_usage(job_completed.model_usage)
+                                 # when the breakdown covers the aggregate (2026-10-28+
+                                 # rows); then `usd` is this, not the one-model figure.
+
+    @property
+    def per_model_priced(self) -> bool:
+        return self.usd_per_model is not None
 
     @property
     def usage(self) -> dict[str, Any]:
@@ -205,6 +256,8 @@ class JobCost:
 
     @property
     def usd(self) -> Decimal | None:
+        if self.usd_per_model is not None:
+            return self.usd_per_model
         if self.family is None:
             return None
         return price_usage(self.model, self.usage)
@@ -308,6 +361,14 @@ def job_cost_from_events(job_id: str, events: Iterable[dict[str, Any]]) -> JobCo
     # Anthropic row.
     family = family_for(model) if provider is None or provider in ANTHROPIC_PROVIDERS else None
     usage = done.get("usage") if isinstance(done.get("usage"), dict) else {}
+    # 2026-10-28+: the per-model breakdown, when it covers the aggregate, is
+    # the cost basis — each model at its own rate. `served_mismatch` stays
+    # as computed: it is a REPORT flag (plan §4 "reported, never silent"),
+    # and on a post-fix row it is the signal that `dominant_model` named a
+    # different family than the request — pricing never read it anyway.
+    usd_per_model = None
+    if family is not None and isinstance(done.get("model_usage"), dict):
+        usd_per_model = price_model_usage(done["model_usage"], aggregate=usage)
     # The SDK's figure lives in its own field from B3 on; cost_usd_list in the
     # same event is the runner's computation of `usd`, so reading it here
     # would compare this module to itself (round-3 #10).
@@ -326,7 +387,7 @@ def job_cost_from_events(job_id: str, events: Iterable[dict[str, Any]]) -> JobCo
         completed_at=_ts(done.get("ts")),
         input=_tok(usage, "input_tokens"), cache_read=_tok(usage, "cache_read_input_tokens"),
         cache_write_1h=w1h, cache_write_5m=w5m, output=_tok(usage, "output_tokens"),
-        usd_sdk=usd_sdk, served_mismatch=served_mismatch,
+        usd_sdk=usd_sdk, served_mismatch=served_mismatch, usd_per_model=usd_per_model,
     )
 
 
@@ -412,6 +473,9 @@ class LedgerReport:
     served_mismatches: int = 0
     """Jobs whose `model_served` named a different family than the request, so
     the request was priced. Reported, never silent (plan §4 'no silent caps')."""
+    per_model_priced: int = 0
+    """Jobs priced per model from a `job_completed.model_usage` breakdown that
+    covers the aggregate (2026-10-28+ rows) rather than as one model."""
 
     @property
     def credit_signature(self) -> bool:
@@ -429,7 +493,8 @@ class LedgerReport:
                 "totals": _row_dict(self.totals), "median_job": self.median_job,
                 "median_usd_by_family": {k: str(v) for k, v in self.median_usd_by_family.items()},
                 "credit_signature": self.credit_signature, "prices_as_of": PRICES_AS_OF,
-                "served_mismatches": self.served_mismatches}
+                "served_mismatches": self.served_mismatches,
+                "per_model_priced": self.per_model_priced}
 
 
 def summarize(jobs: Iterable[JobCost], *, since: datetime, until: datetime,
@@ -453,6 +518,8 @@ def summarize(jobs: Iterable[JobCost], *, since: datetime, until: datetime,
             unpriced.setdefault(label, ModelRow(label)).add(jc)
         if jc.served_mismatch:
             rep.served_mismatches += 1
+        if jc.per_model_priced:
+            rep.per_model_priced += 1
         kinds.setdefault(jc.skill, KindRow(jc.skill)).add(jc)
         lanes[jc.lane] = lanes.get(jc.lane, Decimal(0)) + (jc.usd or Decimal(0))
         rep.totals.add(jc)
@@ -546,6 +613,11 @@ def render_sdk_reconcile(rep: LedgerReport) -> str:
         lines.append(f"{r.model:<20} {usd_2dp(r.paired_usd):>11.2f} {usd_2dp(r.usd_sdk):>11.2f} "
                      f"{r.sdk_jobs:>5} {delta:>7.1f}%"
                      f" {(f'{rate:.2f}' if rate is not None else '—'):>15}{mark}")
+    if rep.per_model_priced:
+        lines.append(f"note: {rep.per_model_priced} job(s) priced per model from their "
+                     f"model_usage breakdown (each model at its own rate, subagent/utility "
+                     f"tokens included; the rest are priced as one model from the aggregate "
+                     f"usage, which the token columns above are).")
     if rep.served_mismatches:
         lines.append(f"note: {rep.served_mismatches} job(s) reported a model_served of a different "
                      f"family than the request — priced at the REQUEST (see pricing."

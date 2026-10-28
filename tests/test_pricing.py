@@ -771,3 +771,124 @@ class TestServedModelMismatch:
         # Both jobs land in the opus-5 row — the bogus haiku row is gone.
         assert [r.model for r in rep.per_model] == ["claude-opus-5"]
         assert rep.per_model[0].jobs == 2
+
+
+class TestPerModelPricing:
+    """`model_usage` (the per-model breakdown, persisted since 2026-10-28)
+    prices a multi-model session per model — the only honest basis, since
+    `usage` is one aggregate across every model the session touched."""
+
+    OPUS = {"input_tokens": 14, "output_tokens": 9361,
+            "cache_read_input_tokens": 379_675, "cache_creation_input_tokens": 12_000}
+    HAIKU = {"input_tokens": 1, "output_tokens": 2,
+             "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+    AGG = {"input_tokens": 15, "output_tokens": 9363,
+           "cache_read_input_tokens": 379_675, "cache_creation_input_tokens": 12_000}
+
+    SUBAGENT = {"input_tokens": 40, "output_tokens": 2_000,
+                "cache_read_input_tokens": 150_000, "cache_creation_input_tokens": 9_000}
+
+    def test_sums_each_model_at_its_own_rate(self):
+        from src.runner.pricing import price_model_usage
+        by_model = {"claude-opus-5": self.OPUS, "claude-haiku-4-5-20251001": self.HAIKU}
+        out = price_model_usage(by_model, aggregate=self.AGG)
+        assert out == price_usage("claude-opus-5", self.OPUS) + price_usage("claude-haiku-4-5", self.HAIKU)
+        assert out < price_usage("claude-opus-5", self.AGG)   # the haiku part is no longer at opus rates
+
+    def test_the_prod_shape_is_a_superset_and_prices_the_extra_tokens(self):
+        # Prod (bundled CLI 2.1.139): `usage` = the main loop's own messages;
+        # `modelUsage` = every call in the process, subagents included. The
+        # breakdown covers the aggregate and is the basis; the subagent's
+        # tokens are priced although no row column carries them.
+        from src.runner.pricing import price_model_usage
+        by_model = {"claude-opus-5": self.OPUS, "claude-haiku-4-5-20251001": self.HAIKU,
+                    "claude-sonnet-4-6": self.SUBAGENT}
+        out = price_model_usage(by_model, aggregate=self.AGG)
+        assert out == (price_usage("claude-opus-5", self.OPUS)
+                       + price_usage("claude-haiku-4-5", self.HAIKU)
+                       + price_usage("claude-sonnet-4-6", self.SUBAGENT))
+        assert out > price_usage("claude-opus-5", self.AGG)
+
+    def test_extra_keys_in_the_breakdown_are_ignored(self):
+        from src.runner.pricing import price_model_usage
+        by_model = {"claude-opus-5": dict(self.OPUS, sdk_cost_usd=0.08)}
+        assert price_model_usage(by_model, aggregate=self.OPUS) == price_usage("claude-opus-5", self.OPUS)
+
+    def test_an_unpriceable_model_means_no_figure(self):
+        # Never a partial sum: the caller falls back to the aggregate instead.
+        from src.runner.pricing import price_model_usage
+        by_model = {"claude-opus-5": self.OPUS, "claude-future-9": self.HAIKU}
+        assert price_model_usage(by_model, aggregate=self.AGG) is None
+
+    def test_a_breakdown_smaller_than_the_aggregate_is_refused(self):
+        # A counter BELOW the aggregate's means the breakdown does not cover
+        # the session (an older CLI shape, or a partial capture) → None.
+        from src.runner.pricing import price_model_usage
+        short = {"claude-opus-5": {"input_tokens": 15, "output_tokens": 9363}}
+        assert price_model_usage(short, aggregate=self.AGG) is None
+        one_short = {"claude-opus-5": dict(self.OPUS, cache_read_input_tokens=379_674),
+                     "claude-haiku-4-5-20251001": self.HAIKU}
+        assert price_model_usage(one_short, aggregate=self.AGG) is None
+        assert price_model_usage({}, aggregate=self.AGG) is None
+        assert price_model_usage(None, aggregate=self.AGG) is None
+
+    def test_five_minute_writes_in_the_aggregate_are_refused(self):
+        # The per-model counters carry no TTL split, so a 5-m write (the
+        # credits signature) can only be priced from the aggregate.
+        from src.runner.pricing import price_model_usage
+        agg = dict(self.AGG, cache_creation={"ephemeral_1h_input_tokens": 0,
+                                             "ephemeral_5m_input_tokens": 12_000})
+        by_model = {"claude-opus-5": self.OPUS, "claude-haiku-4-5-20251001": self.HAIKU}
+        assert price_model_usage(by_model, aggregate=agg) is None
+
+    def test_without_an_aggregate_the_breakdown_is_taken_as_complete(self):
+        from src.runner.pricing import price_model_usage
+        by_model = {"claude-opus-5": self.OPUS}
+        assert price_model_usage(by_model, aggregate=None) == price_usage("claude-opus-5", self.OPUS)
+
+    def _events(self, requested, served, usage, model_usage, cost=None):
+        started = {"kind": "job_started", "model": requested, "skill": "chat"}
+        done = {"kind": "job_completed", "model_served": served, "usage": usage,
+                "model_usage": model_usage, "ts": "2026-09-20T10:00:00+00:00"}
+        if cost is not None:
+            done["sdk_cost_usd"] = cost
+        return [started, done]
+
+    def test_the_ledger_prices_a_job_per_model_when_the_breakdown_is_there(self):
+        from src.runner.pricing import price_model_usage
+        by_model = {"claude-opus-5": self.OPUS, "claude-haiku-4-5-20251001": self.HAIKU}
+        jc = job_cost_from_events("j", self._events("claude-opus-5", "claude-opus-5",
+                                                    self.AGG, by_model, cost=3.1))
+        assert jc.per_model_priced is True
+        assert jc.usd == price_model_usage(by_model, aggregate=self.AGG)
+        assert jc.family == "claude-opus-5" and jc.model == "claude-opus-5"
+        rep = summarize([jc], since=SINCE, until=UNTIL, days=30)
+        assert rep.per_model_priced == 1
+        assert rep.to_dict()["per_model_priced"] == 1
+        assert "priced per model" in render_sdk_reconcile(rep)
+
+    def test_a_served_mismatch_stays_reported_when_the_breakdown_prices(self):
+        # The 39-row bug's shape: model_served names the haiku utility entry.
+        # The breakdown prices the pair correctly, but the flag is a REPORT
+        # ("reported, never silent"): on a post-fix row it is the signal that
+        # dominant_model named another family than the request.
+        by_model = {"claude-opus-5": self.OPUS, "claude-haiku-4-5-20251001": self.HAIKU}
+        jc = job_cost_from_events("j", self._events(
+            "claude-opus-5", "claude-haiku-4-5-20251001", self.AGG, by_model))
+        assert jc.per_model_priced is True and jc.served_mismatch is True
+        assert jc.model == "claude-opus-5" and jc.usd == jc.usd_per_model
+        rep = summarize([jc], since=SINCE, until=UNTIL, days=30)
+        assert rep.served_mismatches == 1 and rep.per_model_priced == 1
+
+    def test_an_incomplete_breakdown_leaves_the_old_path_untouched(self):
+        short = {"claude-opus-5": {"input_tokens": 15, "output_tokens": 9363}}
+        jc = job_cost_from_events("j", self._events("claude-opus-5", "claude-opus-5",
+                                                    self.AGG, short))
+        assert jc.per_model_priced is False
+        assert jc.usd == price_usage("claude-opus-5", self.AGG)
+        rep = summarize([jc], since=SINCE, until=UNTIL, days=30)
+        assert rep.per_model_priced == 0 and "priced per model" not in render_sdk_reconcile(rep)
+
+    def test_no_breakdown_field_at_all_is_the_pre_2026_10_28_row(self):
+        jc = job_cost_from_events("j", _events("claude-opus-5", self.AGG))
+        assert jc.per_model_priced is False and jc.usd == price_usage("claude-opus-5", self.AGG)

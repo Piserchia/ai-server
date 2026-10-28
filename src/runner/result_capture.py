@@ -228,6 +228,11 @@ class ResultCapture:
     def model_served(self) -> str | None:
         return dominant_model(self.model_usage)
 
+    @property
+    def usage_by_model(self) -> dict[str, dict[str, Any]]:
+        """`usage_by_model(self.model_usage)` — the per-model breakdown."""
+        return usage_by_model(self.model_usage)
+
 
 _MODEL_USAGE_TOKEN_KEYS = (
     "inputTokens", "input_tokens",
@@ -270,6 +275,61 @@ def dominant_model(model_usage: dict[str, Any] | None) -> str | None:
         if total > best_tokens:
             best, best_tokens = name, total
     return best
+
+
+_MODEL_USAGE_KEY_MAP = {
+    "inputTokens": "input_tokens", "input_tokens": "input_tokens",
+    "outputTokens": "output_tokens", "output_tokens": "output_tokens",
+    "cacheReadInputTokens": "cache_read_input_tokens",
+    "cache_read_input_tokens": "cache_read_input_tokens",
+    "cacheCreationInputTokens": "cache_creation_input_tokens",
+    "cache_creation_input_tokens": "cache_creation_input_tokens",
+}
+_USAGE_KEYS = ("input_tokens", "output_tokens",
+               "cache_read_input_tokens", "cache_creation_input_tokens")
+_MODEL_COST_KEYS = ("costUSD", "cost_usd", "sdk_cost_usd")
+
+
+def usage_by_model(model_usage: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """`ResultMessage.model_usage` normalised to the SDK's usage key names:
+    `{<model id>: {input_tokens, output_tokens, cache_read_input_tokens,
+    cache_creation_input_tokens[, sdk_cost_usd]}}`.
+
+    The CLI reports camelCase counters next to non-counters; the four
+    counters are kept (a missing or non-numeric one is 0) plus the CLI's own
+    per-model cost (`costUSD` → `sdk_cost_usd`, only when numeric — the one
+    figure that lets a reconcile compare computed-vs-SDK per model);
+    `contextWindow`/`webSearchRequests` drop. Already-normalised input passes
+    through; an entry that is not a dict, or an empty model id, is dropped.
+    Per-model cache writes have no TTL split (only the aggregate
+    `usage.cache_creation` does), so the flat count is what
+    `pricing.cache_write_buckets` puts in the 1-h arm.
+
+    What the bundled CLI (2.1.139) puts here, read from its source during
+    review 2026-10-28, stated not asserted: `usage` accumulates the main
+    loop's own messages only, while `modelUsage` accumulates EVERY API call
+    in the process — Agent-tool subagents and the CLI's utility calls
+    included — so in prod this breakdown is a superset of `usage`.
+
+    This is what `job_completed.model_usage` and `result["model_usage"]`
+    carry since 2026-10-28, so a multi-model session can be priced per model
+    (`pricing.price_model_usage`) instead of as one model.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for name, stats in (model_usage or {}).items():
+        if not name or not isinstance(stats, dict):
+            continue
+        row: dict[str, Any] = {k: 0 for k in _USAGE_KEYS}
+        for key, value in stats.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            target = _MODEL_USAGE_KEY_MAP.get(key)
+            if target is not None:
+                row[target] = int(value)
+            elif key in _MODEL_COST_KEYS:
+                row["sdk_cost_usd"] = float(value)
+        out[str(name)] = row
+    return out
 
 
 def capture_result_message(message: Any, *,

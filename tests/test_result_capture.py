@@ -1087,3 +1087,154 @@ class TestStampAfterTheWork:
 def _kinds(job_id) -> list[str]:
     from src import audit_log
     return [e["kind"] for e in audit_log.read(str(job_id))]
+
+
+# ── Per-model usage persisted per job (2026-10-28) ───────────────────────────
+#
+# `ResultMessage.usage` is one aggregate across every model a session touched
+# (the main model plus the CLI's own small-model calls), while the ledger
+# priced it as one model — so every multi-model session was mispriced by
+# construction (runner GOTCHAS 2026-10-28). `model_usage` is the per-model
+# breakdown the CLI already reports; Phase 1 never persisted it. Now it is
+# normalised to the SDK's key names, written on `job_completed` and into the
+# result dict (→ jobs.result, no migration), and priced per model.
+
+CLI_SHAPED_MODEL_USAGE = {
+    # A FIXTURE in the CLI's shape (camelCase counters next to non-counters),
+    # not a prod capture: the numbers are synthetic. What is known about prod
+    # (read from the bundled 2.1.139 CLI, review 2026-10-28): `usage` counts
+    # the main loop's own messages only, while `modelUsage` counts every API
+    # call in the process — subagents and the CLI's utility calls included —
+    # so in prod the breakdown is a SUPERSET of the aggregate (equal only for
+    # a single-model session with no subagent and no utility call).
+    "claude-haiku-4-5-20251001": {"inputTokens": 1, "outputTokens": 2,
+                                  "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0,
+                                  "webSearchRequests": 0, "costUSD": 0.0001,
+                                  "contextWindow": 200_000},
+    "claude-opus-5": {"inputTokens": 14, "outputTokens": 9361,
+                      "cacheReadInputTokens": 379_675, "cacheCreationInputTokens": 12_000,
+                      "webSearchRequests": 0, "costUSD": 0.0811, "contextWindow": 1_000_000},
+}
+NORMALISED_MODEL_USAGE = {
+    "claude-haiku-4-5-20251001": {"input_tokens": 1, "output_tokens": 2,
+                                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+                                  "sdk_cost_usd": 0.0001},
+    "claude-opus-5": {"input_tokens": 14, "output_tokens": 9361,
+                      "cache_read_input_tokens": 379_675, "cache_creation_input_tokens": 12_000,
+                      "sdk_cost_usd": 0.0811},
+}
+
+
+class TestUsageByModel:
+    def test_camel_case_counters_become_sdk_keys_and_nothing_else_survives(self):
+        # The four counters plus the SDK's own per-model cost (`costUSD` →
+        # `sdk_cost_usd`, the one figure that lets a reconcile compare
+        # computed-vs-SDK PER MODEL); `contextWindow`/`webSearchRequests` drop.
+        from src.runner.result_capture import usage_by_model
+        assert usage_by_model(CLI_SHAPED_MODEL_USAGE) == NORMALISED_MODEL_USAGE
+
+    def test_already_normalised_input_passes_through(self):
+        from src.runner.result_capture import usage_by_model
+        assert usage_by_model(NORMALISED_MODEL_USAGE) == NORMALISED_MODEL_USAGE
+
+    def test_missing_counters_are_zero_and_junk_is_ignored(self):
+        from src.runner.result_capture import usage_by_model
+        out = usage_by_model({"claude-sonnet-4-6": {"inputTokens": "x", "outputTokens": True},
+                              "claude-opus-5": None, "": {"inputTokens": 1}})
+        assert out == {"claude-sonnet-4-6": {"input_tokens": 0, "output_tokens": 0,
+                                             "cache_read_input_tokens": 0,
+                                             "cache_creation_input_tokens": 0}}
+
+    def test_empty_is_empty(self):
+        from src.runner.result_capture import usage_by_model
+        assert usage_by_model(None) == {} and usage_by_model({}) == {}
+
+    def test_capture_exposes_it(self):
+        cap = capture_result_message(_msg(model_usage=CLI_SHAPED_MODEL_USAGE))
+        assert cap.usage_by_model == NORMALISED_MODEL_USAGE
+        assert cap.model_served == "claude-opus-5"          # dominant_model agrees
+
+
+class TestPerModelPricingWiring:
+    """Anthropic lane: `job_completed.model_usage` + `result["model_usage"]`
+    carry the normalised breakdown; `cost_usd_list` is priced per model when
+    the breakdown is complete; the executor lane has no breakdown (None)."""
+
+    AGG = {"input_tokens": 15, "output_tokens": 9363,
+           "cache_read_input_tokens": 379_675, "cache_creation_input_tokens": 12_000,
+           "cache_creation": {"ephemeral_1h_input_tokens": 12_000,
+                              "ephemeral_5m_input_tokens": 0}}
+
+    async def _run(self, harness, monkeypatch, *, model_usage, usage=None):
+        from src.runner import session
+        h = harness
+        usage = usage or self.AGG
+
+        async def fake_run_in_process(job_id, prompt, options):
+            return "SDK did it.", usage, _anthropic_capture(usage=usage, model_usage=model_usage)
+        monkeypatch.setattr(session, "_run_in_process", fake_run_in_process)
+        monkeypatch.setattr(session, "cli_version", lambda: "2.1.139")
+        h.skill = _skill(isolation="workspace", model="claude-opus-5")
+        job = _dispatch_job(payload={"model": "claude-opus-5"})
+        result = await session.run_session(job)
+        return h, job, result
+
+    async def test_breakdown_is_persisted_and_priced_per_model(self, harness, monkeypatch):
+        from src.runner import pricing
+        h, job, result = await self._run(harness, monkeypatch, model_usage=CLI_SHAPED_MODEL_USAGE)
+        done = _event(job.id, "job_completed")
+        assert done["model_usage"] == NORMALISED_MODEL_USAGE
+        assert result["model_usage"] == NORMALISED_MODEL_USAGE
+        assert done["usage"] == self.AGG                      # C14: the aggregate is unchanged
+        expected = pricing.price_model_usage(NORMALISED_MODEL_USAGE, aggregate=self.AGG)
+        assert isinstance(expected, Decimal) and expected > 0
+        assert _column_stamp(h)["cost_usd_list"] == expected
+        assert done["cost_usd_list"] == float(expected)
+        # …and it is NOT the all-at-opus figure the aggregate alone would give.
+        assert expected != pricing.price_usage("claude-opus-5", self.AGG)
+
+    async def test_the_prod_shape_prices_subagent_tokens_the_aggregate_lacks(self, harness, monkeypatch):
+        # Prod: `usage` is the main loop only; the breakdown also carries the
+        # Agent-tool subagents' calls. The breakdown is the cost basis, so
+        # cost_usd_list covers tokens the row's five token columns do not.
+        from src.runner import pricing
+        with_subagents = {
+            "claude-haiku-4-5-20251001": {"inputTokens": 1, "outputTokens": 2},
+            "claude-opus-5": {"inputTokens": 14, "outputTokens": 9361,
+                              "cacheReadInputTokens": 379_675, "cacheCreationInputTokens": 12_000},
+            "claude-sonnet-4-6": {"inputTokens": 40, "outputTokens": 2_000,      # a subagent
+                                  "cacheReadInputTokens": 150_000, "cacheCreationInputTokens": 9_000},
+        }
+        h, job, result = await self._run(harness, monkeypatch, model_usage=with_subagents)
+        stamp = _column_stamp(h)
+        assert (stamp["input_tokens"], stamp["cache_read_tokens"]) == (15, 379_675)   # columns: aggregate
+        assert stamp["cost_usd_list"] > pricing.price_usage("claude-opus-5", self.AGG)  # cost: breakdown
+        assert stamp["cost_usd_list"] == pricing.price_model_usage(
+            _event(job.id, "job_completed")["model_usage"], aggregate=self.AGG)
+
+    async def test_a_breakdown_smaller_than_the_aggregate_falls_back(self, harness, monkeypatch):
+        from src.runner import pricing
+        # The old _msg fixture shape: per-model counters below the aggregate
+        # (no cache counters) cannot be the basis → the aggregate at the
+        # served model, as before.
+        partial = {"claude-opus-5": {"inputTokens": 15, "outputTokens": 9363}}
+        h, job, result = await self._run(harness, monkeypatch, model_usage=partial)
+        assert _column_stamp(h)["cost_usd_list"] == pricing.price_usage("claude-opus-5", self.AGG)
+        # The breakdown is still on the record, so the reconcile can see why.
+        assert _event(job.id, "job_completed")["model_usage"] == {
+            "claude-opus-5": {"input_tokens": 15, "output_tokens": 9363,
+                              "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}
+
+    async def test_executor_lane_has_no_breakdown(self, harness):
+        from src.runner import session
+        h = harness
+        h.skill = _skill(isolation="workspace")
+        job = _dispatch_job()
+        result = await session.run_session(job)
+        assert _event(job.id, "job_completed")["model_usage"] is None
+        assert result["model_usage"] is None
+
+    def test_audit_log_docstring_lists_the_field(self):
+        doc = (Path(__file__).resolve().parents[1] / "src" / "audit_log.py").read_text()
+        line = next(l for l in doc.splitlines() if l.startswith("- job_completed:"))
+        assert "model_usage" in line
