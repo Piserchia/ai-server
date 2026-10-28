@@ -6,8 +6,8 @@ date: 2026-09-24
 supersedes: []
 superseded_by: null
 summary: >-
-  Design-panel document (2026-09-24): Design: Kernel overhaul — provider-
-  agnostic execution kernel (executors, policy, unified run model).
+  Design-panel document (2026-09-24): Design: Kernel overhaul —
+  provider-agnostic execution kernel (executors, policy, unified run model).
 ---
 
 # Design: Kernel overhaul — provider-agnostic execution kernel (executors, policy, unified run model)

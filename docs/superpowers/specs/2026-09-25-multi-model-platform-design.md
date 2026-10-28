@@ -6,14 +6,15 @@ date: 2026-09-25
 supersedes: [plan-2026-08-10-model-router]
 superseded_by: spec-2026-10-05-observability-and-trading-unblock
 summary: >-
-  Multi-model platform design: control plane, Deliverable Contract, cross-
-  vendor grading, provider registry and quota, executor seam, phases P0-P6
-  and 26 owner decisions, produced from the 2026-09 LLM landscape research,
-  a six-design judge panel and three applied adversarial review rounds
-  (frozen 2026-09-27). SUPERSEDED IN SCOPE 2026-10-05 by the observability-
-  and-trading-unblock spec: the owner took the D0 'keep the money rules'
-  branch, so the cross-vendor machinery is deferred, not planned. Remains
-  the reference for everything the cut spec's section 14 defers.
+  Multi-model platform design: control plane, Deliverable Contract,
+  cross-vendor grading, provider registry and quota, executor seam, phases
+  P0-P6 and 26 owner decisions, produced from the 2026-09 LLM landscape
+  research, a six-design judge panel and three applied adversarial review
+  rounds (frozen 2026-09-27). SUPERSEDED IN SCOPE 2026-10-05 by the
+  observability-and-trading-unblock spec: the owner took the D0 'keep the
+  money rules' branch, so the cross-vendor machinery is deferred, not
+  planned. Remains the reference for everything the cut spec's section 14
+  defers.
 ---
 
 # Multi-model platform — design spec (2026-09-25)

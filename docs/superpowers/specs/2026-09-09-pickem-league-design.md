@@ -1,14 +1,14 @@
 ---
 id: spec-2026-09-09-pickem-league
 type: spec
-status: accepted
+status: shipped
 date: 2026-09-09
 supersedes: []
 superseded_by: null
 summary: >-
   Public dashboard for the owner's 81-player CBS Sports NFL+college pick'em
-  pool: authenticated GraphQL ingest, leaderboards for every prize, per-
-  player analytics, head-to-head comparison and cached AI analysis at
+  pool: authenticated GraphQL ingest, leaderboards for every prize,
+  per-player analytics, head-to-head comparison and cached AI analysis at
   pickem.chrispiserchia.com. APPROVED by the owner 2026-09-09.
 ---
 

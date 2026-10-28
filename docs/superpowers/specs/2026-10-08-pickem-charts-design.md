@@ -1,7 +1,7 @@
 ---
 id: spec-2026-10-08-pickem-charts
 type: spec
-status: proposed
+status: shipped
 date: 2026-10-08
 supersedes: []
 superseded_by: null

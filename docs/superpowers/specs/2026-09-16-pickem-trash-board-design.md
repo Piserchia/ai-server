@@ -1,7 +1,7 @@
 ---
 id: spec-2026-09-16-pickem-trash-board
 type: spec
-status: accepted
+status: shipped
 date: 2026-09-16
 supersedes: []
 superseded_by: null

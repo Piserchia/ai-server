@@ -1,7 +1,7 @@
 ---
 id: spec-2026-09-16-quant-stack
 type: spec
-status: accepted
+status: shipped
 date: 2026-09-16
 supersedes: []
 superseded_by: null

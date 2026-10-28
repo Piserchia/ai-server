@@ -1,7 +1,7 @@
 ---
 id: spec-2026-09-01-atlas-firm-org
 type: spec
-status: accepted
+status: shipped
 date: 2026-09-01
 supersedes: []
 superseded_by: null

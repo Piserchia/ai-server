@@ -7,8 +7,8 @@ supersedes: []
 superseded_by: null
 summary: >-
   Phase 6 polish plan: research-deep, weekly idea-generation, per-project
-  update polls, restore, /schedule in Telegram, SSE and the remaining auto-
-  tuning infrastructure. Historical; docs/README.md records the phase
+  update polls, restore, /schedule in Telegram, SSE and the remaining
+  auto-tuning infrastructure. Historical; docs/README.md records the phase
   SHIPPED.
 ---
 

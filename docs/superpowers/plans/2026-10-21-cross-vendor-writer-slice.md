@@ -11,9 +11,9 @@ summary: >-
   dispatch at the single executor call site, a pre-push Anthropic review
   gate on every non-Anthropic diff, per-provider quota keys, provider on
   every surface; fail-closed behind ROUTER_PROVIDERS_ENABLED=anthropic.
-  APPROVED TO BUILD and built 2026-10-21 on branch multi-model/cross-vendor-
-  writer; the observability re-cut plan records the slice landed and
-  deployed.
+  APPROVED TO BUILD and built 2026-10-21 on branch
+  multi-model/cross-vendor-writer; the observability re-cut plan records the
+  slice landed and deployed.
 ---
 
 # Cross-vendor writer slice — Codex as the first non-Anthropic executor (2026-10-21)

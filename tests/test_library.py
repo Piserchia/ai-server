@@ -230,3 +230,28 @@ def test_real_repo_check_is_clean():
     out = _run(REPO_ROOT, "check")
     assert out.returncode == 0, out.stdout
     assert out.stdout.strip().splitlines()[-1] == "LIB CHECK OK"
+
+
+def test_hyphen_wrapped_summary_is_a_finding(corpus: Path):
+    plan = corpus / "docs" / "superpowers" / "plans" / "2026-01-05-gamma.md"
+    plan.write_text(plan.read_text().replace(
+        "summary: >-\n  Implementation plan for alpha; shipped.",
+        "summary: >-\n  Implementation plan for alpha; cross-\n  vendor; shipped."))
+    findings = lib.validate_docs(lib.load_docs(corpus))
+    assert any("summary line ends with `-`" in f for f in findings)
+
+
+def test_check_refuses_an_empty_corpus(tmp_path: Path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "LIBRARY.md").write_text(lib.render_library([]))
+    out = _run(tmp_path, "check")
+    assert out.returncode == 2 and "0 docs scanned" in out.stdout
+
+
+def test_usage_error_exits_1():
+    out = _run(REPO_ROOT, "bogus-command")
+    assert out.returncode == 1
+
+
+def test_real_repo_has_many_docs():
+    assert len(lib.load_docs(REPO_ROOT)) >= 90

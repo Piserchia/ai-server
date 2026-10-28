@@ -1,7 +1,7 @@
 ---
 id: spec-2026-09-14-alpha-lab
 type: spec
-status: accepted
+status: shipped
 date: 2026-09-14
 supersedes: []
 superseded_by: null

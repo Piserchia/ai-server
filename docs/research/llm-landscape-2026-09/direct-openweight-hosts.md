@@ -6,9 +6,9 @@ date: 2026-09-24
 supersedes: []
 superseded_by: null
 summary: >-
-  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Direct open-
-  weight inference hosts (Groq, Cerebras, Fireworks, Together, DeepInfra,
-  SambaNova) incl. free tiers.
+  Research sheet (LLM landscape 2026-09, as of 2026-09-24): Direct
+  open-weight inference hosts (Groq, Cerebras, Fireworks, Together,
+  DeepInfra, SambaNova) incl. free tiers.
 ---
 
 # Direct open-weight inference hosts (Groq, Cerebras, Fireworks, Together, DeepInfra, SambaNova) incl. free tiers — research (as of 2026-09-24)

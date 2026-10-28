@@ -1,14 +1,14 @@
 ---
 id: spec-2026-04-20-telegram-interface-redesign
 type: spec
-status: accepted
+status: shipped
 date: 2026-04-20
 supersedes: []
 superseded_by: null
 summary: >-
   Thread-based Telegram conversations replacing the 16 slash commands: every
-  /task opens a reply chain, inline buttons for approve/cancel/rate, four-
-  level error handling. Status line: approved design, ready for
+  /task opens a reply chain, inline buttons for approve/cancel/rate,
+  four-level error handling. Status line: approved design, ready for
   implementation planning (its companion plan records all tasks shipped
   2026-07-09).
 ---

@@ -1,7 +1,7 @@
 ---
 id: spec-2026-09-23-alpha-flywheel
 type: spec
-status: accepted
+status: shipped
 date: 2026-09-23
 supersedes: []
 superseded_by: null

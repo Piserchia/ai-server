@@ -69,6 +69,7 @@ class Doc:
     fm: dict | None
     body: str
     errors: list[str] = field(default_factory=list)
+    summary_lines: list[str] = field(default_factory=list)  # raw YAML lines of `summary:` (hyphen-wrap check)
 
     @property
     def id(self) -> str | None:
@@ -125,6 +126,16 @@ def load_doc(root: Path, path: Path) -> Doc:
     if isinstance(fm.get("date"), (_dt.date, _dt.datetime)):
         fm["date"] = fm["date"].isoformat()[:10]
     doc.fm = fm
+    in_summary = False
+    for line in yaml_text.split("\n"):
+        if line.startswith("summary:"):
+            in_summary = True
+            continue
+        if in_summary:
+            if line.startswith((" ", "\t")):
+                doc.summary_lines.append(line)
+            else:
+                in_summary = False
     return doc
 
 
@@ -164,6 +175,8 @@ def validate_docs(docs: list[Doc]) -> list[str]:
             findings.append(f"{d.rel}: {e}")
         if d.fm is None:
             continue
+        if any(line.rstrip().endswith("-") for line in d.summary_lines):
+            findings.append(f"{d.rel}: a summary line ends with `-` (YAML folds it as `word- next`; re-wrap)")
         fm = d.fm
         missing = [k for k in REQUIRED_KEYS if k not in fm or fm[k] in (None, "")]
         if missing:
@@ -307,11 +320,12 @@ def render_library(docs: list[Doc]) -> str:
         for d in rows:
             fm = d.fm
             ident = f"`{d.id}`"
+            limit = 100 if typ == "research" else INDEX_SUMMARY_CHARS
             if fm.get("superseded_by"):
                 ident = f"~~`{d.id}`~~ → `{fm['superseded_by']}`"
             lines.append(
                 f"| {ident} | {fm.get('status', '')} | {fm.get('date', '')} | "
-                f"{_cell(_brief(fm.get('summary', '')))} | `{d.rel}` |")
+                f"{_cell(_brief(fm.get('summary', ''), limit))} | `{d.rel}` |")
         lines.append("")
     lines.append(FOOTER)
     return "\n".join(lines) + "\n"
@@ -400,7 +414,7 @@ def grep_docs(docs: list[Doc], term: str, limit: int) -> list[tuple[str, str, st
 
 def cmd_index(root: Path) -> int:
     docs = load_docs(root)
-    findings = [f for f in validate_docs(docs) if "LIBRARY.md" not in f]
+    findings = validate_docs(docs)
     out = root / LIBRARY_REL
     out.write_text(render_library(docs), encoding="utf-8")
     n = sum(1 for d in docs if d.fm is not None)
@@ -413,6 +427,8 @@ def cmd_index(root: Path) -> int:
 def cmd_check(root: Path) -> int:
     docs = load_docs(root)
     findings = validate_docs(docs)
+    if not docs:
+        findings.append("0 docs scanned under docs/ and .context/org/ — nothing to check (wrong --root?)")
     lib = root / LIBRARY_REL
     if not lib.exists():
         findings.append(f"{LIBRARY_REL} missing (run `python scripts/lib.py index`)")
@@ -478,7 +494,13 @@ def cmd_grep(root: Path, term: str, limit: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="lib.py", description=__doc__.split("\n\n")[0])
+    class _Parser(argparse.ArgumentParser):
+        def error(self, message):  # usage errors are exit 1; 2 is reserved for `check` FAIL
+            self.print_usage(sys.stderr)
+            print(f"LIB USAGE FAIL: {message}", file=sys.stderr)
+            raise SystemExit(1)
+
+    ap = _Parser(prog="lib.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--root", type=Path, default=repo_root_default(),
                     help="repo root (default: parent of scripts/)")
     sub = ap.add_subparsers(dest="cmd", required=True)

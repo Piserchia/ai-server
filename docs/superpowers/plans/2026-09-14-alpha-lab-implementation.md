@@ -6,11 +6,11 @@ date: 2026-09-14
 supersedes: []
 superseded_by: null
 summary: >-
-  Alpha-lab as a thin atlas vertical plus three ai-server skills (read-
-  only+dispatch intake, workspace-isolated stage worker, daily governor)
-  chaining dispatched jobs to a GO / NO-GO / BLOCKED-ON-DATA memo; two spec
-  amendments were discovered at planning. No status line of its own; the
-  alpha-lab skills and schedule it wires are registered.
+  Alpha-lab as a thin atlas vertical plus three ai-server skills
+  (read-only+dispatch intake, workspace-isolated stage worker, daily
+  governor) chaining dispatched jobs to a GO / NO-GO / BLOCKED-ON-DATA memo;
+  two spec amendments were discovered at planning. No status line of its
+  own; the alpha-lab skills and schedule it wires are registered.
 ---
 
 # Alpha-Lab Implementation Plan
