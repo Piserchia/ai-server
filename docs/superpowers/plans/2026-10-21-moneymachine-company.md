@@ -1,7 +1,7 @@
 ---
 id: plan-2026-10-21-moneymachine-company
 type: plan
-status: built
+status: shipped
 date: 2026-10-21
 supersedes: []
 superseded_by: null
