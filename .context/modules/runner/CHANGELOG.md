@@ -786,6 +786,101 @@ checkout; the `PIPENV_DONT_LOAD_ENV=1` workaround in
 that reads through `settings.server_root`. The two `llm_route` tests also
 patch `src.registry.skills.list_all` so the catalog build is
 filesystem-independent.
+## 2026-10-16 — self-diagnose 13223a20: SDK session_id collision — 12th instance recorded (alpha-research dc9d9f61)
+
+**Files created**: none
+**Files changed**: `docs/TROUBLESHOOTING.md` (twelfth confirmed instance
+appended to the "Session ID already in use" section). Live counter 51
+(same as 2026-10-16 post-instance #11 — this collision was already in the
++8 window from instance #11's observation). No runner source changes —
+the fix (`session_id` rotation on quota requeue + `is_paused()` recheck
+between BLPOP and `_run_with_held_slot`) is still owed by server-patch
+(Phase 5).
+**Why**: alpha-research `dc9d9f61` (idea A-0019, Opus-5 / high / 80 turns
+/ workspace clone) ran 2026-10-12 19:38 UTC — completed inbox parse,
+rebase, id resolution, A-0019 INBOX.md append, and wrote
+`ideas/A-0019/research/triage.md` to the workspace clone. Hit
+`rate_limit_status: rejected window=five_hour` at 00:29:47 UTC the next
+day; `job_requeued_for_quota` fired at 00:29:47, a fresh
+`workspace_created` + `job_started` landed at 00:29:55 (within 8 seconds,
+inside the pause window — the fastest-ever retry gap in this bug family,
+strongly reinforcing the instance-#10 race theory about `_job_loop`
+missing an `is_paused()` recheck post-BLPOP). Session-id collision
+→ exit 1 at 00:29:56. Shape identical to instance #11 (bdcacc08).
+**Remediation applied**: cleaned stale workspace clone
+`volumes/workspaces/dc9d9f61-atlas` (18 GB atlas clone); removed orphan
+CLI session file `~/.claude/projects/…dc9d9f61-atlas/dc9d9f61-….jsonl`
+and empty `~/.claude/session-env/dc9d9f61-…/`; marked `dc9d9f61`
+`cancelled` with explanatory `error_message` citing TROUBLESHOOTING.md
+L900. No deliverable to salvage — zero git pushes occurred, workspace
+re-clone wiped the A-0019 writes. Alpha-research is dispatcher-fed (not
+cadenced); owner or next alpha-scout cycle can re-dispatch A-0019.
+**Risk**: medium (server-code bug, delegated to server-patch Phase 5).
+Not applying autonomously per self-diagnose risk tier.
+**Follow-up**: this is the 12th documented instance across 5 skills
+(atlas-report, _learning_apply, _writeback, atlas-advisors-ingest,
+alpha-scout, alpha-research). The repeat rate is still climbing and this
+remains the single highest-impact runner reliability bug; the fix (two-
+part: session_id rotation + is_paused recheck) is specified in
+TROUBLESHOOTING.md L1175-1190 and L1082-1089 and is ready for Phase 5
+server-patch to implement.
+**Related**: dc9d9f61 (failed job), 13223a20 (this self-diagnose),
+80 queued self-diagnose siblings from the same collision window.
+
+## 2026-10-16 — self-diagnose 81bc6aef: SDK session_id collision — 11th instance recorded
+
+**Files created**: none
+**Files changed**: `docs/TROUBLESHOOTING.md` (eleventh confirmed instance
+appended to the "Session ID already in use" section). Live counter now 51
+(was 43 on 2026-10-12 instance #10 = +8 in four days). No runner source
+changes — the fix (`session_id` rotation on quota requeue) is still owed
+by server-patch (Phase 5).
+**Why**: alpha-scout escalation `bdcacc08` (level 1 of parent `78d2b84c`)
+hit `rate_limit_status: rejected window=seven_day` 15 seconds into its
+2026-10-13 run after only reading context files. The requeue slept for
+the real seven-day window (~3 days) and still collided on resume
+2026-10-16 00:00:54 UTC with `Error: Session ID bdcacc08-… is already in
+use` → exit 1 in 3s. Confirms the collision is window-agnostic (now seen
+on five_hour, seven_day, and stale-queued-across-runner-restart variants).
+No deliverable to salvage — only context reads completed, `isolation=none`
+so no workspace writes existed.
+**Remediation applied**: cleaned orphan `~/.claude/session-env/bdcacc08-…/`
+(empty dir from 2026-10-12 20:30 EDT); marked `bdcacc08` `cancelled` with
+explanatory error_message citing TROUBLESHOOTING.md L900. Alpha-scout
+schedule self-heals (twice daily; last two days both pairs green, today's
+two runs queued).
+**Follow-up**: 2026-10-14 alpha-scout pair also `failed` — unrelated to
+this collision, flag for a separate diagnosis if the alpha-scout failure
+rate stays elevated. Server-patch to rotate `session_id` on requeue is
+now the single highest-impact runner reliability fix (+8 collisions in
+four days).
+
+## 2026-10-12 — self-diagnose 99ad4c85: SDK session_id collision — 8th instance recorded
+
+**Files created**: none
+**Files changed**: `docs/TROUBLESHOOTING.md` (eighth confirmed instance
+appended to "Session ID already in use" section). No runner source
+changes — the underlying bug (SDK subprocess registers session_id on
+first-attempt spawn, requeue→retry collides) is still owed a Phase 5
+server-patch fix.
+**Why**: atlas-report job `9c1f16dc` (NXXT, escalation of `fe494620`)
+tripped the five_hour window mid-run at 14:42:35 UTC after reading the
+packet + both charters/knowledge files and dispatching both lens
+subagents. Requeue + 4h48m retry hit `Error: Session ID 9c1f16dc-… is
+already in use` → exit 1. Known recurring pattern.
+**Remediation applied**: orphan CLI session artifacts cleaned
+(`~/.claude/projects/.../9c1f16dc-….jsonl` + its sibling dir and
+`~/.claude/session-env/9c1f16dc-…/`); job row marked `cancelled` with
+explanatory `error_message` citing TROUBLESHOOTING.md. No NXXT report
+deliverable existed to salvage — both subagents had been dispatched but
+neither returned before the rate-limit rejection.
+**Follow-up**: live `grep -c "Session ID .* is already in use"
+volumes/logs/runner.err.log` = 41 (was 25 on 2026-10-11; +16 in one
+day). The uptick suggests the five_hour window saturation is firing on
+nearly every atlas-report escalation this week. Phase 5 server-patch
+should rotate `session_id` on requeue OR short-circuit the SDK spawn
+when the collision error surfaces (both options noted earlier in
+TROUBLESHOOTING.md).
 
 ## 2026-10-10 — session: raise SDK transport buffer ceiling to 20 MiB
 

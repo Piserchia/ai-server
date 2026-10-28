@@ -155,3 +155,302 @@ check the live schema. This run found the combination that a hash diff alone und
 schema at migration 0046 while live *code* is three commits behind, i.e. schema leading code with
 new schedules about to fire against it. `/portfolio` 200 + `/trading` 404 is the evidence line that
 makes "pushed but undeployed" undeniable in a report.
+
+## Shell cwd resets between Bash calls — source `.env` by ABSOLUTE path (2026-09-07)
+
+`cd ~/Documents/repos/atlas && ... ; . .env` fails with `(eval):.:1: no such file or directory:
+.env` because the working directory does not persist across tool calls the way you expect. The
+failure is **silent in the thing that matters**: with no `DATABASE_URL`, the glossary scanner falls
+back to a file-based `defined` set and reported **19 false undefined terms** this run before the
+mistake was caught.
+
+Always: `set -a; . "$HOME/Documents/repos/atlas/.env"; set +a` (absolute path), and chain with `&&`
+inside one invocation. Sanity-check the scanner's own header line — it prints
+`defined terms: N (source: db)`. If it does not say `source: db`, the result is garbage.
+
+## `DASH_TEST_DATABASE_URL=$DATABASE_URL` is not how you run the suite (2026-09-07)
+
+Pointing the test env var at the live DB yields `224 passed, 224 errors` with `RuntimeError: ref...`.
+That is **conftest's live-DB guard working correctly** — `_ensure_test_db()` refuses any database
+whose name does not end in `_test`. Do not "fix" it and do not report it as a red suite.
+
+`unset DASH_TEST_DATABASE_URL CREW_TEST_DATABASE_URL` and let `resolve_test_db_url()` auto-derive
+the sibling `<db>_test` from `DATABASE_URL`. Correct invocation this run: `1 failed, 447 passed`.
+
+## Count coverage-matrix rows with a parser, never a grep (2026-09-07)
+
+Published per-sector denominators had been wrong for at least one run: a naive `grep -c LIVE` counts
+`DEFERRED — paid-only` **prose bullets**, section headers and note text as table rows, which is why
+08-31 reported crypto 12/21 and stocks 26/32 against true values of 8/16 and 25/28.
+
+Split each line on `|`, take the *status* cell, and match it exactly-equal-to or prefixed-by a status
+token. Cross-check with a second stricter parser and hand-verify one sector before publishing. If the
+numbers move a lot versus last run, suspect your predecessor's arithmetic before suspecting the repo.
+
+## A gap at `specced` is not necessarily scout-approved (2026-09-07)
+
+The builder trusts `specced` as "researched, probed, ready". But `atlas-refresh-knowledge`'s
+matrix-sync can **insert gaps directly at `specced`**, skipping `filed`/`triaged` entirely — the
+09-01 run created five that way, one of which (`16785548`, crypto exchange flows) resurrected an
+owner-settled paid-only rejection whose matrix row has read `DEFERRED` since 08-24.
+
+When sweeping `specced`, check provenance: a spec block must exist in the sector's `pipelines.md`.
+No spec block = it is not really specced, and if the matrix row says `DEFERRED` you are looking at a
+policy inversion, not a work item. Route it as a `[pipeline]` fix, not as buildable work.
+
+## Ordered triage rulesets need specific-before-generic — and a per-cluster count check (2026-09-07)
+
+In the 127-gap sweep, `3ab53b90` ("Insider activity not piped — ... would sharpen the OBV
+distribution read") was captured by the `obv-subtrend` rule because a gap's *title* often mentions
+the indicator it would improve, not the data it needs. Rules must be ordered by specificity of the
+**subject**, not by how the text reads: `insider` above `obv-subtrend`, etc.
+
+Never ship on `assert not unrouted` alone — that only proves everything matched *something*. Print
+the per-cluster counts in the dry run and eyeball them; a cluster that swelled unexpectedly is a
+mis-route. Leave an inline comment on any rule whose position is load-bearing, or the next run will
+"tidy" it back.
+
+## Grade the CONTENTS of a pending deploy range, not its size (2026-09-07)
+
+Runtime `ce82c14` vs `origin/master` `6a3425d` looked alarming — 38 files, 65,666 insertions — and
+last run's headline finding was exactly this shape. But `git diff --stat` on the range showed it was
+**entirely research artifacts**: twelve multi-MB CSVs and dossier prose, no `src/` change and no
+migration. That is deploy *lag*, which costs nothing, not deploy *drift*, which is a finding.
+
+Read the range before scoring it. The line that separates the two is: does it contain a migration or
+app code? If not, say so explicitly in the scorecard so the next run does not re-raise it.
+
+## The `assistant` schema in this file's example SQL is wrong — check `\d` first (2026-09-14)
+
+Three column names used by the procedure's own example queries do not exist:
+
+- `jobs.finished_at` → the column is **`completed_at`**
+- `schedules.cron` → the column is **`cron_expression`**
+- `feed_status.status` → there is **no** status column. Derive freshness:
+  `CASE WHEN last_success IS NULL THEN 'NEVER'
+        WHEN now()-last_success > stale_after THEN 'STALE' ELSE 'FRESH' END`
+
+And in the `atlas` DB the domain tables are **plural**: `assets`, `holdings` (not `asset`/`holding`).
+Open with `psql assistant -c '\d jobs'` / `\dt public.*` rather than trusting a remembered column
+name; each wrong guess costs a round trip and the psycopg error names the column, not the fix.
+
+## macOS has no `shuf` and no `timeout` (2026-09-14)
+
+Both appear in habit-formed one-liners and both fail with `command not found` on the Mini. Sample a
+file with `awk 'NR%36==1'` instead of `shuf -n`; for pytest just run it without a timeout wrapper
+(the suite is ~45s). `gtimeout` exists only if coreutils is installed — do not assume it.
+
+## A `completed` job can leave its whole output uncommitted in the shared tree (2026-09-14)
+
+The 09-13 `atlas-value-evaluate` job wrote a complete G-0004 grade into `value/evaluation/LEDGER.md`
+and exited `completed` without committing. This run met it as
+`error: cannot pull with rebase: You have unstaged changes` on the opening command.
+
+Do **not** stash or discard. Check for a live sibling first (`.git/index.lock`, rebase-in-progress,
+and the owning job's status in `jobs`) — if a job is still running, stop and report per the
+shared-working-tree rule. If the owner has finished, the content is orphaned work: commit it
+**verbatim** under its own message attributing the originating job, then proceed with your pull. It
+is also a `[ops]`-class finding for the scorecard, not just a chore.
+
+## Closing order is stage → commit → pull --rebase → push (2026-09-14)
+
+The SKILL text reads `git pull --rebase origin master && git push origin master` as the last
+commands. Taken literally that fails on your own dirty tree — you have just written the scorecard,
+the backlog, the matrices and the CHANGELOG. Commit first, then rebase, then push.
+
+## Coverage-matrix status parsing: `LIVE-with-signal` is the trap (2026-09-21)
+
+Counting LIVE rows per sector looks like a one-line grep and is not. Three stocks rows and four
+crypto rows read **`LIVE-with-signal`**, and a strict `cell == "LIVE"` test drops them silently —
+this run's first parser reported crypto 5/13 and stocks 22/26 against the previous run's 8/16 and
+25/28. Nothing errors; you just publish a fabricated regression.
+
+Three rules for the parser, all learned the hard way here:
+
+1. Match on a **word boundary**, not a prefix: `re.match(rf"^{tok}\b", up) or up.startswith(tok+"-")`.
+   A bare `up.startswith(tok)` is worse than useless — my *cross-check* script used it and
+   confidently reported zero unmatched rows while three rows were being dropped.
+2. Order the token list so **`LIVE` is LAST**. `PIPELINE_BUILT`, `FEED_SPECCED`, `DEFERRED` and
+   `DEGRADED` must all get first refusal, otherwise a status containing the substring wins early.
+3. Make the parser print an **UNMATCHED list that must be empty**, and skip the header row
+   explicitly (`cells[0].lower() == "indicator"`). A count with no unmatched-row assertion is an
+   unverified count.
+
+Then reconcile against the previous scorecard entry before writing. A sector count that moves by
+more than the promotions you personally made this run is a parser bug until proven otherwise.
+
+## Rank the backlog for the builder's selection rule, not for your own sense of priority (2026-09-21)
+
+`atlas-build` takes the **topmost builder-eligible item** and a window has ~2 slots. An item parked
+at slot 4 with a green probe and a READY spec is not "queued" — it is **unreachable**, and it will
+stay unreachable forever while you keep writing "carried, still unpicked" in the scorecard.
+
+Commodities proved this over **seven consecutive windows**: EIA petroleum and CFTC COT sat at slots
+4–5 the whole time, and five separate scorecards blamed throughput. Throughput was never the cause;
+the ordering was, and the ordering is the evaluator's own lever. If you have written "still unpicked"
+about the same item twice, stop diagnosing the builder and **move it to slot 1**.
+
+## Backlog SLOT POSITION is a confirmed actuator — and effort-tier ranking is what buries items (2026-09-28)
+
+This is the single most useful thing the evaluator has learned about its own job,
+and it was established by a controlled test, not a hunch.
+
+**The setup.** Commodities held two items (EIA petroleum `fde3615d`, CFTC COT
+`a75f8173`) that were spec-READY with green live probes since 2026-08-04. For
+**seven consecutive windows** they were ranked at backlog slots 4–5 and were never
+picked, while the builder shipped 2–3 items a week from slots 1–3. Four separate
+runs wrote "still unpicked" and blamed builder capacity.
+
+**The test.** The 09-21 run moved exactly those two items to slots **1 and 2** and
+changed nothing else — not the builder, not the schedule, not the budget, not the
+item text. **Both shipped that week** (`5aaa003` 09-22, `50894e6` 09-25) and both
+promoted `built → live` on row evidence. Commodities moved 2.0 → 3.5.
+
+**The rule that follows.** LOOP.md §4.3 says the builder takes the *topmost eligible*
+item, and a two-build week never reaches slot 4. So:
+
+- If you have written "still unpicked" about an item **twice**, stop diagnosing the
+  builder. Move it to slot 1. The next run has a clean falsification: if it is *still*
+  unpicked from slot 1, the defect really is in the builder's selection rule, and the
+  right move then is to read `atlas-build`'s session transcript to see what it ranked
+  on — not to re-rank again.
+- Every starvation in the ledger is **the evaluator's fault** until it has been ranked
+  at the top and still gone unpicked. "The builder didn't pick it" is not a finding
+  when you put it at slot 6.
+
+**The trap that caused it, which is subtler.** The starvation was not carelessness —
+it was a *policy*: "rank M items below the S block, because throughput is uncertain."
+That sounds prudent and is actively harmful. It is a proxy for throughput, throughput
+was measurably ~2 builds/week for six weeks, and the proxy was permanently burying the
+highest-value items in the file (the #1 filing cluster sat at slots 4–6 for six windows
+because it happened to be sized M). **Retired 2026-09-28.** Rank strictly by
+(money-decision impact × score delta) ÷ effort and let the ratio handle effort — do not
+apply a second, categorical effort penalty on top of the one already in the denominator.
+
+Corollary for writing the file: the rationale header should name which slot assignments
+are *experiments* and state the falsification condition, so the next run can read the
+result instead of re-deriving the hypothesis. Both the 09-21 and 09-28 runs did this and
+it is why the result was legible at all.
+
+## A predecessor's UNCOMMITTED run is also an unreliable NARRATOR (2026-10-12)
+
+The 09-14 gotcha says: find orphaned output in the shared tree, check the owner is finished, commit
+it verbatim. Correct, and that is what this run did (`eff94b1`, `937ac77` — the 10-05 evaluator's
+whole output plus a value `[G-0009]` grade, 4 dirty files, 7 days unpublished; independently spotted
+by alpha-governor `a3d771d` as *"two [files] holding 106h of unpublished scorecard"*).
+
+But there is a second-order trap. **An uncommitted run's claims about the repo are unverified by
+construction.** The 10-05 scorecard states, in its own prose, *"I re-landed the orphan's content on
+master from the dev clone this run (CHANGELOG, 10-01 firm rollup, attributed)"* — and presents that
+as the run's most useful act, the thing converting the deploy fix "from a judgement call into a
+mechanical one". **It never happened.** That run committed nothing, so the re-landing could not
+exist; `git log --all --grep='af660cda'` is empty and the runtime clone was still `1 ahead` on
+orphan `84f026a` a week later, having drifted from 46 behind to **105 behind**.
+
+So when you rescue orphaned output:
+
+1. Commit it verbatim — it is still the best record of that week, and attribution is not yours.
+2. **Then re-verify every repo-state claim it makes before carrying any of them forward.** Treat
+   "I fixed X" in an uncommitted entry as a *stated intention*, never as done. The cheap test is
+   whether the claim implies a commit: if it does and the run has no commits, the claim is false.
+3. Say so explicitly in your own entry. The next run inherits the corrected record, not the
+   optimistic one. (This run re-landed the orphan for real and said which commit did it.)
+
+The failure mode this prevents: a backlog that keeps "mechanically unblock the deploy" at slot 1
+while believing the prerequisite is already satisfied — i.e. a slot-1 item nobody can action.
+
+## Grade the four loop schedules on JOBS, not on `last_run_at` (2026-10-12)
+
+All four loop rows read healthy this run — unpaused, every `last_run_at` inside cadence+25 h — and
+the build stage had still delivered **nothing for two consecutive slots**. `schedules.last_run_at`
+is stamped when the row *fires*, not when the spawned job accomplishes anything, so a schedule
+sweep alone cannot see a dark stage. (The alpha-lab governor hit the identical blind spot and
+recorded it as duty-5c: read liveness as *fired AND the job reached a durable artifact*.)
+
+For `atlas-build` the durable artifact is a commit. The honest liveness query is:
+
+```bash
+git log --since='8 days ago' --grep='^Loop-Item:' --format='%h %s'   # empty ⇒ dark, whatever the schedule says
+```
+
+Cross-check it against the job rows, and read the **shape** of those rows (duration, tokens, where
+`result.summary` stops), per the 08-31 gotcha. Four green schedule rows plus an empty `Loop-Item:`
+log is a `[system]` finding, not a healthy loop.
+
+## `jobs.review_outcome` has been NULL on every build for four windows (2026-10-12)
+
+The skill instructs you to read the build job's post-session verdict because *"atlas-build is
+unattended — this weekly read is how a flagged diff surfaces"*. That mechanism is **not running**:
+`aefe2fa3` (09-29), `c3fa7845` (10-02), `2d4dba59` (10-06), `bdfacc6a` (10-09) all carry
+`review_outcome` NULL, and no `post_review_flagged` event exists in any of their audit logs. It last
+populated on 2026-09-28.
+
+Do not record "no blockers flagged" as a clean bill of health — it is an **absence of signal**, and
+the two readings are indistinguishable from this column alone. Say "the detector is dark" and keep
+the `[system]` item open. Note the plausible interaction with the dark-completion class above: a
+session that dies before its final message may never reach the post-review hook at all, in which
+case this column being NULL is a *symptom* of the same defect, not a separate one.
+
+## The scanner reads the LIVE db; the pytest gate reads the TEST db — they can disagree (2026-10-19)
+
+The standing gotchas tell you to run the glossary scanner last and to confirm `source: db` in its
+header. Both were done this run and the scanner reported **`RESULT: PASS` — 0 undefined, 133 defined**.
+The dashboard suite reported **`1 failed, 538 passed`**: `test_glossary_audit.py::test_zero_undefined_terms`,
+undefined term `implied-volatility-expected-move`. Same term, same repo, opposite verdicts, neither tool
+broken.
+
+The scanner resolves `defined` against **`$DATABASE_URL`** (production). The pytest gate resolves it
+against the auto-derived **`<db>_test`**, which is built by replaying the **migration files**. A term
+seeded straight into the live DB — with no migration file — is therefore defined for the scanner and
+undefined for the gate. That is exactly what had happened (next gotcha).
+
+Consequences you must not get wrong:
+- **Grade Educational depth on the GATE, not the scanner.** The gate is what `atlas_redeploy` runs, so
+  it is what decides whether anything ships. A green scanner over a red gate is the evaluator certifying
+  its own blindness.
+- Always reconcile the two counts explicitly:
+  `ls db/migrations/*.sql | wc -l` vs `psql "$DATABASE_URL" -c 'select count(*) from schema_migrations'`.
+  **57 files / 58 applied** was the tell this run.
+- Run the suite yourself (09-07 gotcha) — the scanner alone cannot see this class at all.
+
+## A build that dies before pushing is NOT side-effect-free — it can leave an orphan MIGRATION (2026-10-19)
+
+LOOP.md §5 R2 states the recovery for "atlas-build dies before push" is to *"rebuild from scratch in a
+fresh clone (idempotent — **nothing external happened**)"*. **That premise is false when the item
+touches the schema.** The workspace clone copies the repo `.env`, whose `DATABASE_URL` points at the
+**production** database, so `dbmate up` during the build applies the migration to live *before* the
+commit exists. If the session then dies at the commit step, you get:
+
+- live DB at `0058`, repo at `0057` — schema drift with **no file to review, revert, or replay**;
+- a green live-DB scanner masking a red file-derived gate (previous gotcha);
+- and a `[glossary]`/`[pipeline]` defect that looks fixed from production and broken from CI.
+
+This happened to job `22ba8777` (10-16, 1257 s, `review_outcome` LGTM, **0 commits**) whose summary
+stops at *"Now the full suite and glossary scanner."* Its sibling `c863d795` shipped `44fbff0` and
+even warned in its own commit body that the glossary gate was red and would block the deploy lane.
+
+So when you grade a dark-completed build, **do not record it as a lost slot and move on**:
+
+1. Diff migration files against `schema_migrations` — every run, it is one cheap query.
+2. If an applied version has no file, that is a top-of-backlog item, and the content is recoverable
+   verbatim from the live rows (here: `SELECT * FROM glossary WHERE term=…` gave the full
+   `definition_md`, `formula` and `related[]` to rebuild the seed).
+3. Route it as **builder-eligible S** — it is a file-creation task with a deterministic gate — and put
+   it at slot 1 if it is blocking the deploy lane, because it blocks *every other item too*.
+
+## Verify "the universe is collapsing" against a WEEKLY rollup before scoring it (2026-10-19)
+
+The 10-12 entry's headline data-quality finding was a constituent universe *"collapsing: 520 → **399
+on 10-09**, −23% and steepening"*, and it cost the dimension −0.5. Re-measuring 10-09 this run returned
+**517**. Nothing was repaired in between.
+
+`constituent_bars` **backfills**: the most recent 2–4 days are always partially fetched, so a per-day
+`count(DISTINCT symbol)` read at the leading edge is a measurement of *fetch lag*, not of universe size.
+Grouped by week over 60 days the series is flat — 523, 523, 523, 523, 523, 520, 521, 520, 518 — i.e.
+−5 symbols in eight weeks, ordinary index turnover.
+
+Before scoring any "X is shrinking" claim: re-measure the **same dates** the previous run cited (if
+today's number for an old date differs, the metric backfills and the prior reading was an artifact),
+and aggregate by week. The underlying fetch errors were real and still growing (169 × `unable to open
+database file`, 199 failed downloads, 4,159 "possibly delisted") — report *those* as the defect, but do
+not convert a lagging edge into a collapsing universe.

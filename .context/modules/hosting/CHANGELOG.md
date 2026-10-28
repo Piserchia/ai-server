@@ -163,6 +163,26 @@ had for a while) — re-running that one-time bootstrap on a live host would
 silently revert this. Noted in CONTEXT.md Gotchas; the template itself was
 deliberately left alone as out of scope for this wave.
 
+## 2026-09-03 — healthcheck-all cadence-slip false alarm (atlas 84th recurrence)
+
+**Agent task**: self-diagnose job `4cbadd62` — atlas flagged unhealthy 20+ min.
+
+**Runtime action**: none to atlas (project was HTTP 200 on port 8791 throughout,
+external 302 = CF Access as expected, all 3 launchd services healthy).
+Kickstarted `com.assistant.healthcheck-all` inline via
+`launchctl kickstart -k gui/$UID/com.assistant.healthcheck-all`; cadence
+resumed and all 3 projects' `last_healthy_at` refreshed to <1s.
+
+**Files changed**:
+- `docs/TROUBLESHOOTING.md` — appended 84th recurrence entry to the
+  shared-cadence-slip running log (throttled to ~60-90m gaps throughout
+  the day rather than a single sleep event; noted app-level UUID cast +
+  FK violation noise in project.atlas.err.log is unrelated).
+
+**Why**: canonical macOS launchd `StartInterval` throttling; the live-probe
+gate and self-suppress guard fixes remain blocked by the workspace-push
+meta-bug per the 51st entry, so still not re-dispatching a server-patch.
+
 ## 2026-09-01 — atlas-weekly-reports session_timeout_seconds → 3600
 
 **Agent task**: review-and-improve — raise session_timeout_seconds to 3600

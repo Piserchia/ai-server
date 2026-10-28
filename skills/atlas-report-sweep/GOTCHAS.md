@@ -52,3 +52,22 @@ reaches a terminal state — same behaviour as the MCP tool's
 one session budget = impossible. The skill explicitly notes fan-out is
 "preferred" for a reason — each target gets its own budget/charter/eval
 loop and failures stay isolated.
+
+## Simpler HTTP fallback: POST /api/jobs (2026-09-07)
+
+If the MCP dispatch tool is missing and you don't want to write a
+`src.gateway.jobs` python one-shot, `curl -X POST
+$BASE/api/jobs -H "Authorization: Bearer $WEB_AUTH_TOKEN"` with
+`{"description": "atlas-report: asset <SYM>", "kind": "task"}` enqueues
+each target as an independent runner job — same isolation, same
+per-target budget. Trade-off: the HTTP endpoint has no `depends_on`
+field, so ordering relies on FIFO + `max_concurrent_jobs=4`
+draining. Enqueue in **assets → sectors → portfolio** order; the last
+sector/portfolio jobs will start after ~34/4 batches of assets, so most
+assets finish first. `latest_suggestion` for any still-running asset
+falls back to prior-week values (mildly stale, not wrong). If you need
+strict ordering, use the deferred-row workaround above instead.
+
+Env gotcha: don't `source .env` — the file has unquoted paths with
+spaces on later lines that zsh chokes on. Just `export
+WEB_AUTH_TOKEN=…` and `WEB_PORT=8080` directly.

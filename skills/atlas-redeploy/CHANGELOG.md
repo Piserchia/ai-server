@@ -1,5 +1,41 @@
 # atlas-redeploy CHANGELOG
 
+## 2026-09-20 — deploy ad3ee7b..f91b519 (quant weekly sweep R-0009..R-0012 + swing C-0003 close-out)
+
+- Range: 4 commits — research(quant): weekly sweep R-0009..R-0012 (4/4 REJECT, sma_gate first DSR crossing); research(swing): C-0003 close-out INDETERMINATE; chore(advisors): 2026-09-19 digest; docs(swing): trade run blocked gotcha
+- Gates: dashboard 472 passed, pmedge 67 passed, quant 72 passed/1 skipped, swing 72 passed — all green
+- Web build: skipped (no web/ changes in range)
+- Services restarted: none (no web/dashboard/pmedge changes); all 3 services confirmed RUNNING, healthcheck 200
+- Marker advanced to f91b519
+
+## 2026-09-17 — deploy 5e8d3b0..16966f8 (quant adversarial-audit remediation + R-0005..R-0008)
+
+- Range: 2 commits — fix(quant): adversarial-audit remediation (real fills check, turnover/cost-drag, live sizing config, redeploy dispatch step, cadence/tripwire fixes); research(quant): weekly sweep R-0005..R-0008 (4/4 REJECT, health clean, D-0001 filed)
+- No migrations
+- Gates: dashboard pytest 233 passed ✅; pmedge pytest 45 passed ✅; quant pytest 72 passed, 1 skipped ✅ (triggered by quant/ path change); web build SKIPPED (no web/ changes)
+- Services restarted: atlas-dash-scheduler (pid 91925) → RUNNING ✅; atlas + atlas-pm-edge already running
+- Healthcheck: / → 200 ✅
+- Marker advanced: 16966f88c31f821cdacb6e609fc85a0b2cb72471
+
+## 2026-09-01 — deploy 3fdb696..ce82c14 (firm vertical)
+
+- Range: 11 commits — feat(firm): full vertical scaffold (migration 0049, books/risk/rollup/liveness/cli, advisory-ceiling guard, CIO+risk-officer charters, atlas-cio+atlas-firm-rollup loop skills); feat(web): /firm consolidated risk-book page + Nav link; tradingcore.marks graduated from advisors; knowledge role-archetype handbooks
+- Migration 0049_firm.sql: applied ✅
+- Gates: dashboard pytest 448 passed ✅; pmedge pytest 45 passed ✅; tradingcore pytest 37 passed ✅; swing pytest 72 passed ✅ (tradingcore reinstalled per GOTCHAS); value pytest 46 passed ✅ (tradingcore reinstalled); firm pytest 28 passed ✅ (new gate, venv self-healed with python3.12); web build ✅ (grep '^web/' hit 3 files — Nav.tsx, firm/page.tsx, firm-queries.ts)
+- Services restarted: all three (atlas pid 90820, atlas-dash-scheduler pid 90822, atlas-pm-edge pid 90826) → all RUNNING ✅
+- Healthcheck: / → 200 ✅
+- Marker advanced: ce82c146...
+
+## 2026-09-01 — deploy 2482986..3fdb696
+
+- Range: 5 commits — feat(web): earnings tables → hover tooltips + ChartDrawings.tsx (drawing tools on price charts); research(value): C-0001 TTM EBIT measured, NOT ADOPTED; data(momentum): retention drift point 2026-09-01 (data-only JSON); docs: CHANGELOG + knowledge monthly refresh (inert)
+- Migration 0048_glossary_drawing_terms.sql: applied ✅
+- Gates: dashboard pytest 448 passed ✅; pmedge pytest 67 passed ✅; momentum pytest 447 passed ✅ (data-only change, expected green); web build ✅ (grep '^web/' hit 7 files → npm run build ran); trader gate SKIPPED (no trader/ changes); advisors gate SKIPPED (no advisors/ changes)
+- ⚠️ MANIFEST DRIFT (not a blocker): manifest.yml declares a `value` gate (value/,tradingcore/) NOT implemented in SKILL.md — value/value/fundamentals.py + value/tests/test_ttm_ebit.py shipped without executor running them. Filed as follow-up: add value/swing/tradingcore gate blocks to SKILL.md mirroring momentum/trader/advisors pattern.
+- Services restarted: all three (atlas pid 59363, atlas-dash-scheduler pid 59365, atlas-pm-edge pid 59370) → all RUNNING ✅
+- Healthcheck: / → 200 ✅
+- Marker advanced: 3fdb69607770085fced684e60608c17a6b8417e4
+
 ## 2026-08-28 — deploy 69be6b2..97bde6b
 
 - Range: 5 commits — feat(trader): autonomous PAPER trading vertical (executor, risk, portfolio, signals, alpaca, ledgerlink, http); research T-0003 fixtures; test(dashboard) full-chain conftest hard-fail; docs/plans/knowledge (inert); trader test suite
