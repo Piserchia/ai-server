@@ -687,3 +687,8 @@ Run: `cd "$SRV" && pipenv run python scripts/lint_docs.py | tail -1`
 Expected: `All clean!` (the deployed registry row covers the new directory).
 
 - [ ] **Step 4: Record in memory and report** — the first fires (`mm-resume-daily` next 10:30 UTC; `mm-ceo-weekly` Sat 17:00 UTC; `mm-report-weekly` Sat 19:30 UTC), what to watch in the first audit logs (`project_cwd_resolved` → dev clone; `workspace_synced`), and D0–D8.
+
+
+## Amendment 2026-10-27 — the project became a hosted service
+
+Task 1 Step 4's expected loader output (`moneymachine static dev-repo pull-only False`) is historical: on 2026-10-27 the owner asked for a read-only page, so `manifest.yml` is now `type: service`, port 8794, `healthcheck: /healthz`, `start_command: bash web/run.sh`, `deployable: true` with three gates (mmcore pytest; `web/.venv` + web pytest; `/healthz` 200). The loop's scoping (`payload.project_slug` → the Mini dev clone) is unchanged. Registration in prod (`scripts/register-project.sh moneymachine`) is an owner-run step; the page is fail-closed (403) until the Cloudflare Access application for `moneymachine.chrispiserchia.com` exists.
