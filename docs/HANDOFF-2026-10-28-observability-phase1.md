@@ -7,9 +7,10 @@ supersedes: []
 superseded_by: null
 summary: >-
   Session handoff for Observability Phase 1 (Tier A deployed, Tier B unbuilt),
-  verified against the tree and prod as of 2026-10-28; read before the recut
-  plan's section 0 deltas, section 3 decisions, section 7 owner actions and
-  section 11 deployment log.
+  verified against the tree and prod as of 2026-10-28; the second session of
+  that day exercised the Codex lane (found and fixed a B3 defect), persisted
+  per-job model_usage and merged the runtime learnings — read the UPDATE
+  section first, then the recut plan's sections 0, 3, 7, 8 and 11.
 ---
 
 # Handoff — ai-server, Observability Phase 1 (as of 2026-10-28)
@@ -19,15 +20,43 @@ summary: >-
 > §7 owner actions, §8 exit criteria, §11 deployment log). Everything below is verified against
 > the tree and prod, not recalled.
 
+## UPDATE — second session, 2026-10-28 (read this first; the sections below it are the morning's state)
+
+Three commits on top of `e43c397`, pushed together; the autopilot deploys them (expect 10–30 min
+after the push; check `/health` and `git -C "$HOME/Library/Application Support/ai-server" rev-parse
+--short HEAD`).
+
+| Commit | What |
+|---|---|
+| `94a057f` | **Merged `origin/runtime-learnings` into main** (20 syncs, docs only: runner/hosting CHANGELOGs, runner GOTCHAS, TROUBLESHOOTING, six atlas skill GOTCHAS/CHANGELOGs). Nine additive conflicts resolved as a union; one duplicated GOTCHAS entry deduplicated. |
+| `9d31e28` | **The Codex lane was exercised and it was broken.** The handoff's "give the Codex lane one real job" item: smoke job `0e09233d` (web, `codex/gpt-6-luna`, pickem, read-only) did its work — 38,799 / 206 / 16,000 tokens, empty diff — and then **failed** at B3's post-session column stamp: `codex --version` reports `codex-cli 0.162.0-alpha.17.2` (28 chars) into `cli_version` varchar(24). B3's wiring test had faked `"0.162.0"`. Fix: `result_capture.cli_version_column` (+ `CLI_VERSION_MAX` pinned to the ORM) for both lanes, and the stamp is guarded — a failure is audited `result_stamp_failed{error}` and the job completes (the terminal transition re-stamps tokens/cost; `cli_version`, `duration_api_ms`, `sdk_cost_usd` stay NULL in that case). A `job_failed` DM for `0e09233d` went to the owner (message 954). The row is left as evidence; repairing its token columns from its JSONL `turn_completed` event is an owner call (see owner item 11). |
+| `95e1ac5` | **`model_usage` persisted per job** (the other "smaller, unblocked" item): `job_completed.model_usage` and `result["model_usage"]` (→ `jobs.result`, no migration) carry the per-model breakdown normalised to the SDK key names plus the CLI's per-model `costUSD` as `sdk_cost_usd`; `pricing.price_model_usage` prices an Anthropic session per model when the breakdown **covers** the aggregate, else the old one-model figure. **The independent review read the bundled CLI (2.1.139) and found three things, recorded in the runner CHANGELOG as "stated, to be verified on the first rows"**: `usage` counts the main loop only while `modelUsage` counts every call (subagents and utility calls included), so the per-model figure covers tokens the five token columns do not; the CLI's own price table prices every cache write at 1.25× input (the 5-minute rate, no TTL notion); and `sdk_cost_usd` is Σ per-model `costUSD`, subagent tokens included. Together these plausibly explain §8's "NOT a single rate" row without a TTL mystery — the withdrawn '5-minute rate' reading may have been right. |
+
+**Verify after the deploy (nobody has yet)**: (1) one more Codex smoke job — same curl shape as `0e09233d`
+(`POST /api/jobs` with `{"model":"codex/gpt-6-luna","project_slug":"pickem", "description": "<read-only ls task>"}`
+and the `WEB_AUTH_TOKEN` bearer) — must complete with `cli_version='0.162.0-alpha.17.2'`, tokens on the row
+and no `result_stamp_failed`; (2) on the first Anthropic rows, per counter `Σ job_completed.model_usage` vs
+`usage` (expect ≥, strictly > with subagents), `result["model_usage"]` on the row, and `cost_usd_list` vs
+`sdk_cost_usd`; (3) the Monday `cost-reconcile` prints `N job(s) priced per model` — but note owner item 5:
+that timer is **still not installed** until `install-launchd.sh timers-only` runs on prod, so run
+`scripts/cost-reconcile.py` by hand if Monday passes without it. Then update plan §8's cost row from data.
+
+Baselines for the next session: suite **2860 passed, 1 skipped**; `lint_docs.py` clean; `lib.py check` OK.
+Owner items 1–9 below are unchanged (none done this session). New: **11.** decide whether to repair
+`0e09233d`'s token columns from its JSONL (status stays `failed`; a `note` audit event would record the
+source) — zero monetary effect (Codex is unpriced), it only buys an honest per-provider token view.
+
+**Next task is still the owner's pick** — Tier B (needs the owner's word; E9 needs the D6 MISSION §M PR
+first) or the trading-unblock plan (cut spec §7 items 3–8). Both "smaller, unblocked" items are done.
+
 ## STATE
 
-**Everything built is merged, pushed and deployed. Nothing is in flight.** `main` == `origin/main`
-== prod HEAD at `e08521a`; alembic head **008**; working tree clean apart from three items to leave
+**As of the morning session: everything built was merged, pushed and deployed; nothing in flight** —
+`main` == `origin/main` == prod HEAD at `e43c397` (superseded by the UPDATE above); alembic head **008**; working tree clean apart from three items to leave
 alone: modified `.claude/settings.local.json`, untracked `.superpowers/` and `AGENTS.md`.
 
 - **Codex lane** — live since 2026-10-21 (migration 007, `ROUTER_PROVIDERS_ENABLED=anthropic,codex`
-  in prod `.env`). Unchanged by this work and **still unexercised since**: no `codex/*` job has run,
-  so the executor-lane half of B3 (token columns, `cli_version` from `ExecResult`) is untested live.
+  in prod `.env`). ~~Still unexercised~~ **Exercised in the second session: broken, fixed in `9d31e28`, re-verification pending the deploy** (UPDATE above).
 - **Protected bundle** (slice T8) — owner-approved 2026-10-21, merged as `2fb6012`, deployed. Prod's
   `guards.py` and `lint_docs.py` match the merge. Vendor-credential denies, INV-22 broker-order
   denies, lint rules 14/15 are all live. **This branch is done; do not re-merge it.**
@@ -123,10 +152,9 @@ off for four days. `pmset autorestart` is still `0`, so nothing would have resta
   an owner PR, `db_row` DoD checks, the trading-health page, the two-repo skill drift lint, the
   atlas-side patches). This is the next plan to be *written*, and arguably worth more than Tier B
   now that the swing rows are visibly blocked on one token.
-- **Smaller, unblocked**: give the Codex lane one real job so B3's executor path is exercised; or
-  persist `model_usage` per job so the ledger can attribute a multi-model session per model (the
-  residual computed-vs-SDK divergence, and the only honest way to settle which cache-write TTL the
-  vendor billed).
+- ~~**Smaller, unblocked**: give the Codex lane one real job; persist `model_usage` per job~~ — **both done
+  in the second session** (`9d31e28`, `95e1ac5`; see UPDATE). What remains of them is the post-deploy
+  verification listed there.
 
 ## HOW TO BUILD HERE (each of these cost real time this session)
 
