@@ -589,3 +589,7 @@ the plan payload.
 ## 2026-10-28 — `ResultMessage.model_usage` has more than one model in it
 
 A session's `model_usage` carries the CLI's own small-model calls alongside the main model, and the auxiliary entry (prod: `claude-haiku-4-5-20251001`) is often the FIRST key. Anything deriving "the model that ran" from `next(iter(model_usage))` is wrong roughly a third of the time — and because `pricing.price_usage` keys on `model_served`, it mispriced Opus work at Haiku rates for Phase 1's first week. Use `result_capture.dominant_model` (most tokens wins, either key naming; cost and context fields ignored). Note also that `served_model_violation` cannot catch this: it asserts the requested model is PRESENT among the keys, which it is.
+
+## 2026-10-28 — `usage` is one aggregate for a multi-model session
+
+`ResultMessage.usage` sums the token counters across every model a session touched (the main model plus the CLI's own auxiliary calls), but the ledger prices that single bundle at one model's rates. Any multi-model session is therefore mispriced by construction, in whichever direction the mix runs — this is the standing explanation for the residual computed-vs-SDK divergence (−2.4 % on opus-5 to −23.4 % on sonnet-4-6 as of 2026-10-28), and the `model_served` first-key bug was its extreme case. Per-model attribution needs `model_usage` persisted per job, which Phase 1 does not do; do not read a family's implied cache-write rate as proof of which TTL the vendor billed.

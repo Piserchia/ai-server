@@ -37,7 +37,7 @@ alone: modified `.claude/settings.local.json`, untracked `.superpowers/` and `AG
 | Outbox | 11 notices, all `sent` first attempt, no errors: 3 `schedule_deferred`, 3 `job_failed`, 5 `ops_alert` (A7's alerters delivering through the outbox, not raw curl) |
 | Provisioning pre-check | 4 deferrals, **0 sessions burned**: the two EDT swing rows defer daily on `TRADIER_SANDBOX_TOKEN` with a notice each and a `DEFERRED` line in the 07:15 DM |
 | Backups | atlas `-Fc` dump **529 MB** in ≈35 s, tarball 19 MB; `restore-drill.sh` **PASS** both legs (2477 jobs; atlas ≈2.5 min), throwaway DBs dropped |
-| Cost | Trailing 30 d ≈ **$2,101.63** list-equivalent (understated, see below); `alpha-research` ≈49 % of it. **The CLI prices cache writes at the 5-minute rate** — implied $6.25/M on opus-5 and opus-4-8, $3.75/M on sonnet-4-6, over 69 paired jobs. `cost_usd_list` at the 1-h rate is the figure of record |
+| Cost | Trailing 30 d ≈ **$1,802.07** list-equivalent (789 priced jobs, 09-28 → 10-28), 7 d ≈ **$231.68** — both measured *after* the `model_served` fix and the 39-row recompute. Computed vs SDK is **family-dependent**, not one rate: opus-5 −2.4 %, opus-4-8 −3.2 %, opus-4-7 −17.9 %, sonnet-4-6 −23.4 %, implied cache-write rates straddling the 1-h and 5-m rates. `cost_usd_list` at the 1-h rate is the figure of record |
 | Entry probes | `WEB_AUTH_TOKEN` → 401; zero `CLAUDE_CODE_OAUTH_TOKEN` across the 14 `com.assistant.*` plists |
 
 ## WHAT WENT WRONG, AND WHAT IT COST
@@ -60,10 +60,20 @@ Both were found and fixed in-session; both are recorded in the plan's §11 and t
    `served_model_violation` could not have caught it: it asserts the requested model is *present*
    among the keys, which it was.
 
-**Consequence still open (needs the owner's call, deliberately not done):** those 39 rows keep their
-wrong `model_served`/`cost_usd_list`, and the §8 30-day baseline was computed from the same wrong
-values in the append-only JSONL, so **≈ $2,101.63 is understated**. Recomputing means a prod `UPDATE`
-over `jobs` plus a fresh `scripts/cost-reconcile.py --db`; nobody asked for that data to change.
+**Closed 2026-10-28 on the owner's instruction** ("fix the 39 rows and re-run the baseline"):
+`pricing.job_cost_from_events` now prices the *request* when `model_served` names a different family,
+counting and printing the mismatch rather than silently re-rating (a bare-alias request still prices
+from the served id — that case is why the field is read). The 39 prod rows got `model_served = NULL`
+(the true id is unrecoverable: `model_usage` was never persisted, and the JSONL is append-only) with
+`cost_usd_list` recomputed at the requested model's price — $24.84 → $122.66 against the SDK's
+$121.89. Baseline re-run: 30 d ≈ $1,802.07, 7 d ≈ $231.68. **One conclusion was withdrawn in the
+process:** "the CLI prices cache writes at the 5-minute rate" was computed over a population the bug
+had split; post-fix the divergence is family-dependent. The standing explanation is that
+`ResultMessage.usage` is a per-session aggregate across every model a session touched while the
+ledger prices it as one model, so multi-model sessions are mispriced by construction — per-model
+attribution needs `model_usage` persisted per job, which Phase 1 does not do (Phase 3 work).
+The reconcile will print `note: 39 job(s) reported a model_served of a different family` for about
+30 days, because only the DB rows were corrected.
 
 **Also noticed, unrelated:** no job ran between 2026-10-22 05:27 and 2026-10-26 09:44 — the host was
 off for four days. `pmset autorestart` is still `0`, so nothing would have restarted it or alerted.
@@ -88,7 +98,7 @@ off for four days. `pmset autorestart` is still `0`, so nothing would have resta
 8. Ollama: 14 GB of weights untouched since ~April; spec D5 says delete.
 9. Retire or relocate bingo's PostToolUse hook (`projects/baseball-bingo/.claude/settings.json`)
    through the bingo repo — **before E1**, which otherwise ships an observe-only carve-out (D-P1-12).
-10. Decide the 39-row cost recompute above.
+10. ~~Decide the 39-row cost recompute~~ — **done 2026-10-28** (approved and applied; see above).
 
 ## NEXT TASK — the owner picks; confirm before building
 
@@ -100,7 +110,9 @@ off for four days. `pmset autorestart` is still `0`, so nothing would have resta
   atlas-side patches). This is the next plan to be *written*, and arguably worth more than Tier B
   now that the swing rows are visibly blocked on one token.
 - **Smaller, unblocked**: give the Codex lane one real job so B3's executor path is exercised; or
-  the 39-row recompute once the owner decides.
+  persist `model_usage` per job so the ledger can attribute a multi-model session per model (the
+  residual computed-vs-SDK divergence, and the only honest way to settle which cache-write TTL the
+  vendor billed).
 
 ## HOW TO BUILD HERE (each of these cost real time this session)
 
