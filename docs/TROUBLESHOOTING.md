@@ -1,3 +1,16 @@
+---
+id: guide-troubleshooting
+type: guide
+status: living
+date: 2026-04-17
+supersedes: []
+superseded_by: null
+summary: >-
+  Failure-mode-first debugging guide organised by symptom, each mapped to
+  root causes and exact diagnostic commands; a living document extended
+  whenever a new failure is met in the wild.
+---
+
 # TROUBLESHOOTING
 
 Common failure modes and exact debug steps. Add to this as you encounter new
