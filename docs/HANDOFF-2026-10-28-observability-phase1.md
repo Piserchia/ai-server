@@ -22,9 +22,9 @@ summary: >-
 
 ## UPDATE — second session, 2026-10-28 (read this first; the sections below it are the morning's state)
 
-Three commits on top of `e43c397`, pushed together; the autopilot deploys them (expect 10–30 min
-after the push; check `/health` and `git -C "$HOME/Library/Application Support/ai-server" rev-parse
---short HEAD`).
+Four commits on top of `e43c397`, pushed as `ff61e56` and **deployed by the autopilot 2026-10-28 21:05Z**
+(gate 2860 passed; the deploy job then records `failed`/exit 143 because its own runner restart kills its
+session — a known once-per-deploy artefact that also spawns a `self-diagnose` escalation; plan §11).
 
 | Commit | What |
 |---|---|
@@ -32,7 +32,13 @@ after the push; check `/health` and `git -C "$HOME/Library/Application Support/a
 | `9d31e28` | **The Codex lane was exercised and it was broken.** The handoff's "give the Codex lane one real job" item: smoke job `0e09233d` (web, `codex/gpt-6-luna`, pickem, read-only) did its work — 38,799 / 206 / 16,000 tokens, empty diff — and then **failed** at B3's post-session column stamp: `codex --version` reports `codex-cli 0.162.0-alpha.17.2` (28 chars) into `cli_version` varchar(24). B3's wiring test had faked `"0.162.0"`. Fix: `result_capture.cli_version_column` (+ `CLI_VERSION_MAX` pinned to the ORM) for both lanes, and the stamp is guarded — a failure is audited `result_stamp_failed{error}` and the job completes (the terminal transition re-stamps tokens/cost; `cli_version`, `duration_api_ms`, `sdk_cost_usd` stay NULL in that case). A `job_failed` DM for `0e09233d` went to the owner (message 954). The row is left as evidence; repairing its token columns from its JSONL `turn_completed` event is an owner call (see owner item 11). |
 | `95e1ac5` | **`model_usage` persisted per job** (the other "smaller, unblocked" item): `job_completed.model_usage` and `result["model_usage"]` (→ `jobs.result`, no migration) carry the per-model breakdown normalised to the SDK key names plus the CLI's per-model `costUSD` as `sdk_cost_usd`; `pricing.price_model_usage` prices an Anthropic session per model when the breakdown **covers** the aggregate, else the old one-model figure. **The independent review read the bundled CLI (2.1.139) and found three things, recorded in the runner CHANGELOG as "stated, to be verified on the first rows"**: `usage` counts the main loop only while `modelUsage` counts every call (subagents and utility calls included), so the per-model figure covers tokens the five token columns do not; the CLI's own price table prices every cache write at 1.25× input (the 5-minute rate, no TTL notion); and `sdk_cost_usd` is Σ per-model `costUSD`, subagent tokens included. Together these plausibly explain §8's "NOT a single rate" row without a TTL mystery — the withdrawn '5-minute rate' reading may have been right. |
 
-**Verify after the deploy (nobody has yet)**: (1) one more Codex smoke job — same curl shape as `0e09233d`
+**Verified after the deploy (21:05–21:07Z; plan §11)**: (1) Codex smoke job `8cbabaab` completed `ok`, `cli_version`
+`0.162.0-alpha.17.2`, tokens on the row, no `result_stamp_failed` — §8 row 1 is closed on both lanes; (2) first
+per-model row `bdef2a99` (opus-4-7, single model): breakdown persisted on `job_completed` and in `jobs.result`,
+equal to `usage`; **`cost_usd_list` $0.8813 vs SDK $0.6963, and the same tokens priced with cache writes at the
+5-m rate give $0.69628725 = the SDK figure to 8 decimals** — the CLI's `total_cost_usd` prices cache writes at
+1.25× input, full stop; it is not evidence of the billed TTL. Still to see: a session WITH subagents (expect
+Σ breakdown > `usage`, `per_model_priced` in the reconcile). The verify list as it was written: (1) one more Codex smoke job — same curl shape as `0e09233d`
 (`POST /api/jobs` with `{"model":"codex/gpt-6-luna","project_slug":"pickem", "description": "<read-only ls task>"}`
 and the `WEB_AUTH_TOKEN` bearer) — must complete with `cli_version='0.162.0-alpha.17.2'`, tokens on the row
 and no `result_stamp_failed`; (2) on the first Anthropic rows, per counter `Σ job_completed.model_usage` vs
