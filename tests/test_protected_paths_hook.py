@@ -105,7 +105,8 @@ def test_the_list_is_missions_list():
     deliberately."""
     section = _mission_section_m()
     patterns = _patterns()
-    by_description = {"src/gateway/web.py": "chat-ID/web-auth checks"}
+    by_description = {"src/gateway/web.py": "chat-ID/web-auth checks",
+                      "src/gateway/telegram_bot.py": "chat-ID/web-auth checks"}
     for pat in patterns:
         if pat in by_description:
             assert by_description[pat] in section, pat
@@ -120,6 +121,7 @@ def test_the_list_is_missions_list():
     missing = sorted(named_paths - set(patterns))
     assert not missing, f"MISSION §M names these and the guard does not cover them: {missing}"
     assert "src/gateway/web.py" in patterns and ".context/org/ORG.md" in patterns
+    assert "src/gateway/telegram_bot.py" in patterns          # the chat-ID half of §M item 2
 
 
 def test_install_targets_commit_msg_and_reads_the_message_argument():
@@ -134,7 +136,10 @@ def test_install_targets_commit_msg_and_reads_the_message_argument():
     assert "pre-commit" not in installer, "cmd_install must not touch the CHANGELOG pre-commit hook"
     assert "COMMIT_EDITMSG" not in src, "never read the message from COMMIT_EDITMSG"
     assert '"$1"' in installer or "\\$1" in installer, "the generated hook must pass its own $1 as the message file"
-    assert "git diff --cached --name-only --diff-filter=ACMRD" in src
+    # --no-renames: `git mv MISSION.md docs/OLD.md` otherwise lists only the
+    # destination; T: a file replaced by a symlink is a typechange, which the
+    # old filter excluded (whole-branch review 2026-10-29, reproduced).
+    assert "git diff --cached --no-renames --name-only --diff-filter=ACMRDT" in src
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
@@ -185,6 +190,48 @@ def test_the_installed_hook_refuses_a_protected_commit_end_to_end(tmp_path):
     assert refused.returncode != 0 and "REFUSED" in refused.stderr
     allowed = _git(repo, "commit", "-q", "-m", "docs: approved\n\nApproved-Protected-Path: ap-7f3a91")
     assert allowed.returncode == 0, allowed.stderr
+    # A rename of a protected file is refused (the SOURCE path is protected).
+    _git(repo, "mv", "MISSION.md", "OLD.md")
+    moved = _git(repo, "commit", "-q", "-m", "chore: move it")
+    assert moved.returncode != 0 and "REFUSED" in moved.stderr, moved.stderr
+    _git(repo, "reset", "-q", "--hard")
+    # Replacing a protected file with a symlink (typechange) is refused.
+    (repo / "MISSION.md").unlink()
+    (repo / "MISSION.md").symlink_to("ok.txt")
+    _git(repo, "add", "MISSION.md")
+    typed = _git(repo, "commit", "-q", "-m", "chore: link it")
+    assert typed.returncode != 0 and "REFUSED" in typed.stderr, typed.stderr
+
+
+def test_the_auth_files_are_guarded_by_hunk_not_by_path(tmp_path):
+    # Whole-branch review 2026-10-29: §M item 2 names "the chat-ID/web-auth
+    # checks", not every line of web.py — plan §4 expects JobOut/route-body
+    # edits without a trailer. The installed hook lists the two gateway files
+    # only when their staged hunks touch an auth-check line.
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "src" / "gateway").mkdir(parents=True)
+    _git(repo, "init", "-q")
+    (repo / "scripts" / "install-dev-hooks.sh").write_bytes(SCRIPT.read_bytes())
+    web = repo / "src" / "gateway" / "web.py"
+    web.write_text("def _check_auth(request):\n    return request.token == settings.web_auth_token\n\n"
+                   "class JobOut:\n    id: str\n")
+    env = {"GIT_DIR": str(repo / ".git"), "PATH": "/usr/bin:/bin"}
+    assert subprocess.run(["bash", "scripts/install-dev-hooks.sh", "install"], cwd=repo,
+                          capture_output=True, text=True, env=env).returncode == 0
+    _git(repo, "add", "-A")
+    assert _git(repo, "commit", "-q", "-m", "chore: initial — includes the auth check\n\nApproved-Protected-Path: ap-initial1").returncode == 0
+    # A JobOut edit: no auth line in the hunk → allowed without a trailer.
+    web.write_text(web.read_text() + "    model_served: str | None\n")
+    _git(repo, "add", "src/gateway/web.py")
+    r = _git(repo, "commit", "-q", "-m", "feat: JobOut.model_served")
+    assert r.returncode == 0, r.stderr
+    # Touching the auth check → refused.
+    web.write_text(web.read_text().replace("return request.token == settings.web_auth_token",
+                                           "return True  # _check_auth disabled"))
+    _git(repo, "add", "src/gateway/web.py")
+    r = _git(repo, "commit", "-q", "-m", "fix: loosen auth")
+    assert r.returncode != 0 and "REFUSED" in r.stderr, r.stderr
 
 
 def test_p0_limitation_is_stated_not_hidden(tmp_path):
@@ -195,3 +242,7 @@ def test_p0_limitation_is_stated_not_hidden(tmp_path):
     assert "not resolved" in r.stderr and "009" in r.stderr
     src = SCRIPT.read_text(encoding="utf-8")
     assert "migration 008" not in src and "pipenv run" not in src
+    # The break-glass pointer is honest: --no-verify, documented in the runbook
+    # (skills/god/SKILL.md documents PROD's pre-commit bypass, not this hook).
+    assert "god/SKILL.md documents the bypass" not in src
+    assert "--no-verify" in src and "runbook" in src

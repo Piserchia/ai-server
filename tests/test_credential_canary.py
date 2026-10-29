@@ -149,6 +149,11 @@ class TestSettingsPrecheck:
             {"autoMode": True, "model": "opus", "enabledPlugins": {}, "tui": {}}))
         assert settings_precheck() is None
 
+    def test_the_user_scope_set_is_the_specs(self):
+        from src.runner.credential_canary import USER_SETTINGS_REFUSED_KEYS
+        from src.runner.session import SETTINGS_AUTH_KEYS
+        assert set(USER_SETTINGS_REFUSED_KEYS) == set(SETTINGS_AUTH_KEYS) | {"hooks", "env", "apiKeyHelper", "statusLine"}
+
     def test_statusline_is_the_only_allowed_user_key(self, monkeypatch, tmp_path):
         # D-P1-9: the owner's status-line feed (D8) lives in ~/.claude/settings.json;
         # `statusLine` is allowed there and NOWHERE else is widened.
@@ -168,14 +173,32 @@ class TestSettingsPrecheck:
         ({"env": {"ANTHROPIC_BASE_URL": "https://proxy"}}, "ANTHROPIC_BASE_URL"),
         ({"env": {"CLAUDE_CODE_OAUTH_TOKEN": "x"}}, "CLAUDE_CODE_OAUTH_TOKEN"),
         ({"env": {"PATH": "/tmp/evil"}}, "env"),
-        ({"permissions": {"allow": ["Bash"]}}, "permissions"),     # no tracked-file allowance in user scope
-        ({"mcpServers": {"x": {}}}, "mcpServers"),
+        ({"hooks": {"SessionStart": [{"command": "id"}]}}, "hooks"),
+        ({"ANTHROPIC_BASE_URL": "https://proxy"}, "ANTHROPIC_BASE_URL"),
     ])
-    def test_user_scope_refuses_auth_and_code_channel_keys(self, monkeypatch, tmp_path, payload, key):
+    def test_user_scope_refuses_auth_hooks_env_and_apikeyhelper(self, monkeypatch, tmp_path, payload, key):
+        # Spec §6 / plan E10: "any auth or `hooks` key" (+ `env`, `apiKeyHelper`).
         root, home = self._scopes(monkeypatch, tmp_path)
         (home / ".claude" / "settings.local.json").write_text(json.dumps(payload))
         found = settings_precheck()
         assert found is not None and found[0] == key and found[1].endswith("settings.local.json")
+
+    @pytest.mark.parametrize("payload", [
+        {"permissions": {"allow": ["Bash"]}},
+        {"mcpServers": {"x": {}}},
+        {"enableAllProjectMcpServers": True},
+        {"enabledMcpjsonServers": ["x"]},
+        {"autoMode": True, "model": "opus", "statusLine": {"type": "command", "command": "x"}},
+    ])
+    def test_user_scope_leaves_the_owners_editor_settings_alone(self, monkeypatch, tmp_path, payload):
+        # Whole-branch review 2026-10-29: the fleet runs with setting_sources=
+        # ["project"], so a user-scope `permissions`/`mcpServers` never reaches
+        # a job; refusing it would turn the owner's "always allow" in their own
+        # Claude Code into a red canary — and this check sits in the prod
+        # deploy gate through test_the_real_user_scope_is_clean_today.
+        root, home = self._scopes(monkeypatch, tmp_path)
+        (home / ".claude" / "settings.json").write_text(json.dumps(payload))
+        assert settings_precheck() is None
 
     def test_project_scope_uses_e1s_rule(self, monkeypatch, tmp_path):
         # The server root's own tracked `permissions` is allowed per E1; a hook is not.
@@ -192,10 +215,12 @@ class TestSettingsPrecheck:
         # Verified 2026-10-29: autoMode / effortLevel / enabledPlugins /
         # inputNeededNotifEnabled / model / modelSettings / skipWorkflowUsageWarning
         # / tui — none refused. Keeps the green canary a fact, not an assumption.
-        from src.runner.session import SETTINGS_AUTH_KEYS, SETTINGS_OVERRIDE_KEYS
+        from src.runner.credential_canary import USER_SETTINGS_REFUSED_KEYS
         data = json.loads((Path.home() / ".claude" / "settings.json").read_text())
-        refused = (set(SETTINGS_OVERRIDE_KEYS) | set(SETTINGS_AUTH_KEYS)) - USER_SETTINGS_ALLOWED_KEYS
+        refused = set(USER_SETTINGS_REFUSED_KEYS) - USER_SETTINGS_ALLOWED_KEYS
         assert not (set(data) & refused), sorted(set(data) & refused)
+        env = data.get("env") if isinstance(data.get("env"), dict) else {}
+        assert not (set(env) & set(USER_SETTINGS_REFUSED_KEYS)), sorted(env)
 
 
 class TestMain:
@@ -238,6 +263,21 @@ class TestMain:
         tel = tmp_path / "t.json"
         assert canary.main(["--model", MODEL, "--telemetry", str(tel)]) == 1
         assert called == [] and "settings_override:apiKeyHelper@" in json.loads(tel.read_text())["detail"]
+
+    @pytest.mark.parametrize("name", ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                                      "ANTHROPIC_API_KEY", "GEMINI_API_KEY"])
+    def test_any_redirecting_or_rebilling_variable_in_the_env_fails(self, monkeypatch, tmp_path, name):
+        # Whole-branch review 2026-10-29: ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL
+        # redirect or re-bill the ping while model_usage still names the model,
+        # so a token-only check could print `ok`. E7's refusal set is the contract.
+        tel = self._patch_clean(monkeypatch, tmp_path)
+        from src.runner.claude_env import vendor_keys_in
+        for k in vendor_keys_in(dict(os.environ)):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv(name, "x")
+        monkeypatch.setattr(canary, "query", _query_yielding(_result()))
+        assert canary.main(["--model", MODEL, "--telemetry", str(tel)]) == 1
+        assert name in json.loads(tel.read_text())["detail"]
 
     def test_canary_never_reads_the_setup_token(self, monkeypatch, tmp_path):
         # A pass must prove the KEYCHAIN login: with CLAUDE_CODE_OAUTH_TOKEN in

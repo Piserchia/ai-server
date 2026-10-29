@@ -14,9 +14,10 @@
 # SHAPE only. Resolving the id against approvals(kind=protected_path) begins
 # with the Phase-2 approvals migration (009); until then the run prints
 # "trailer recorded, not resolved". It is never a substitute for the owner
-# approval — it is the thing that notices when one is missing. The god
-# break-glass (`git commit --no-verify`, skills/god/SKILL.md) is the documented
-# bypass and must be pushed in the same session.
+# approval — it is the thing that notices when one is missing. The break-glass
+# is `git commit --no-verify` (documented in the Phase-1 ops runbook §8b; the
+# god skill documents PROD's own pre-commit bypass, a different hook) and a
+# bypassed commit must be pushed in the same session.
 #
 # Usage:  bash scripts/install-dev-hooks.sh install
 #         bash scripts/install-dev-hooks.sh check <paths-file> <message-file>
@@ -30,7 +31,11 @@ cd "$(dirname "$0")/.." || exit 2
 # are not paths and are enforced elsewhere (deleting a project/skill dir →
 # Telegram Y/N; TELEGRAM_ALLOWED_CHAT_IDS → an env NAME inside `.env`, which
 # IS listed). Item 2's code half, "the chat-ID/web-auth checks", is
-# src/gateway/web.py (`_check_auth`). D6's first half (owner PR) adds
+# src/gateway/web.py (`_check_auth`) and src/gateway/telegram_bot.py
+# (`_is_authorized`) — for those TWO files the installed hook lists them only
+# when the staged hunks touch the auth check itself (AUTH_LINES below), so a
+# JobOut or /jobs copy edit needs no trailer and the trailer stays rare and
+# meaningful (whole-branch review 2026-10-29). D6's first half (owner PR) adds
 # .claude/settings.json, .claude/settings.local.json and THIS script's list to
 # §M; extend this array only with that PR. tests/test_protected_paths_hook.py
 # pins the array two-way against MISSION §M.
@@ -42,11 +47,16 @@ PROTECTED_PATTERNS=(
   'MISSION.md'
   '.context/org/ORG.md'
   'src/gateway/web.py'
+  'src/gateway/telegram_bot.py'
   'skills/server-patch/SKILL.md'
   'skills/server-deploy/SKILL.md'
   'skills/new-skill/SKILL.md'
 )
 TRAILER_RE='^Approved-Protected-Path:[[:space:]]*ap-[A-Za-z0-9_-]{4,}[[:space:]]*$'
+# The auth-check lines of the two gateway files: a staged hunk adding or
+# removing one of these marks the file protected for this commit.
+AUTH_LINES='_check_auth|_is_authorized|telegram_allowed_chat_ids|web_auth_token|HTTPBasic|TELEGRAM_ALLOWED_CHAT_IDS|WEB_AUTH_TOKEN'
+AUTH_SCOPED_FILES='src/gateway/web.py src/gateway/telegram_bot.py'
 MARK_BEGIN='# >>> ai-server protected-path guard >>>'
 MARK_END='# <<< ai-server protected-path guard <<<'
 
@@ -71,8 +81,8 @@ REFUSED: a protected path needs an owner approval (MISSION §M).
   1. get the approval from the owner (approvals kind=protected_path)
   2. add the trailer to the commit message:
        Approved-Protected-Path: ap-<id>
-God break-glass: skills/god/SKILL.md documents the bypass (--no-verify); a
-bypassed commit must be pushed in the same session.
+Break-glass: `git commit --no-verify` (Phase-1 ops runbook §8b); a bypassed
+commit must be pushed in the same session.
 MSG
     return 1
   fi
@@ -93,7 +103,14 @@ cmd_install() {
   local block
   block="$MARK_BEGIN
 staged=\$(mktemp)
-git diff --cached --name-only --diff-filter=ACMRD > \"\$staged\"
+git diff --cached --no-renames --name-only --diff-filter=ACMRDT > \"\$staged\"
+# the two auth files count only when their auth-check lines are in the staged hunks
+for f in $AUTH_SCOPED_FILES; do
+  if grep -qx \"\$f\" \"\$staged\" && ! git diff --cached -U0 -- \"\$f\" | grep -Eq '^[-+].*($AUTH_LINES)'; then
+    grep -vx \"\$f\" \"\$staged\" > \"\$staged.tmp\" || true   # grep -v exits 1 when nothing is left
+    mv \"\$staged.tmp\" \"\$staged\"
+  fi
+done
 bash scripts/install-dev-hooks.sh check \"\$staged\" \"\$1\" || { rm -f \"\$staged\"; exit 1; }
 rm -f \"\$staged\"
 $MARK_END"

@@ -2,6 +2,11 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E10 after the whole-branch review: any E7-set variable in the canary's env is a FAIL; user scope narrowed to the spec's set
+
+**Files changed**: `src/runner/credential_canary.py` — `main()` fails (exit 1, naming the keys) on `claude_env.vendor_keys_in(os.environ)` instead of `CLAUDE_CODE_OAUTH_TOKEN` alone: `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` / a vendor key re-bill or redirect the ping while `model_usage` still names the model, so the old check could print `ok` under a redirected call. `USER_SETTINGS_REFUSED_KEYS` is now exactly `session.SETTINGS_AUTH_KEYS ∪ {hooks, env, apiKeyHelper, statusLine}` (pinned) with `statusLine` the one allowed key (D-P1-9) — the first cut refused every `SETTINGS_OVERRIDE_KEYS` entry in `~/.claude/settings*.json`, which the fleet never reads (`setting_sources=["project"]`) and which would have turned the owner's own "always allow" or a global MCP setting into a red canary — inside the prod deploy gate, via `test_the_real_user_scope_is_clean_today` (now on the narrowed set). `tests/test_credential_canary.py` (33).
+**Why**: the whole-branch review's two E10 findings (falsely green under a redirecting variable; falsely red on an editor setting).
+
 ## 2026-10-29 — E10: the daily credential canary through the runner's own SDK path
 
 **Agent task**: Observability Phase 1 Tier B E10 (recut plan; design of record P0 plan Task 12, renamed `credential_canary` and made self-contained; spec §0a, §6; D-P1-9).

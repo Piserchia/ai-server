@@ -241,11 +241,17 @@ the message carries `Approved-Protected-Path: ap-<id>`:
 
 It is a **commit-msg** hook on purpose (git hands only that hook the message
 file); it is idempotent (marker-delimited, re-armable) and appends to an
-existing hook rather than overwriting it. Phase-1 limit, printed by the hook
+existing hook rather than overwriting it. Renames and file→symlink typechanges
+of a protected file count (`--no-renames --diff-filter=ACMRDT`). For the two
+gateway files (`web.py`, `telegram_bot.py`) only a staged hunk that touches an
+auth-check line (`_check_auth`, `_is_authorized`, the chat-ID / web-auth
+settings) makes the commit protected — a `JobOut` or `/jobs` copy edit needs
+no trailer. Phase-1 limit, printed by the hook
 itself: the id's shape is checked, resolving it against
 `approvals(kind=protected_path)` begins with the Phase-2 approvals migration
-(009). The god break-glass is `git commit --no-verify` (skills/god/SKILL.md) —
-a bypassed commit must be pushed in the same session. Never install it on
+(009). The break-glass is `git commit --no-verify` (this section is its
+documentation; `skills/god/SKILL.md` documents PROD's pre-commit bypass, a
+different hook) — a bypassed commit must be pushed in the same session. Never install it on
 prod (prod has `scripts/install-prod-hooks.sh`, re-armed on every deploy).
 **D6's first half** (owner PR) adds `.claude/settings.json`,
 `.claude/settings.local.json` and this script's path list to MISSION §M; until

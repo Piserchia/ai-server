@@ -1,5 +1,9 @@
 # Changelog: hosting
 
+## 2026-10-29 — E9 after the whole-branch review: rename/typechange bypass closed; the two auth files guarded by hunk
+
+- `scripts/install-dev-hooks.sh`: the installed hook now lists staged paths with `--no-renames --diff-filter=ACMRDT` — `git mv MISSION.md x` listed only the destination and a file→symlink typechange (`T`) was filtered out, so both passed with no trailer (reproduced by the reviewer; pinned end to end). `src/gateway/telegram_bot.py` joins the list (the chat-ID half of §M item 2), and for the two gateway files the hook counts them only when a staged hunk touches an auth-check line (`AUTH_LINES`: `_check_auth`, `_is_authorized`, `telegram_allowed_chat_ids`, `web_auth_token`, `HTTPBasic`, …) — a `JobOut`/route-body edit needs no trailer, so the trailer stays rare and meaningful instead of becoming a reflex `--no-verify`. The break-glass pointer now names `--no-verify` + runbook §8b (the god skill documents PROD's pre-commit bypass, a different hook). Re-armed in the dev checkout.
+
 ## 2026-10-29 — E10: com.assistant.credential-canary timer (daily 06:50) + scripts/credential-canary.sh
 
 - `scripts/install-launchd.sh`: `install_timer "credential-canary" "scripts/credential-canary.sh"` at 06:50 local and the label in `TIMER_LABELS` (so `uninstall` removes it); the timer env block already carries `VENV_PY` + the two telemetry flags (C1). `scripts/credential-canary.sh` (new): venv per §4, `python -m src.runner.credential_canary --telemetry volumes/telemetry/credential_canary.json --timeout 180`, FAIL → `notify send --kind credential_canary --severity critical` (curl fallback), log `volumes/logs/credential-canary.log`. Reaches prod with `install-launchd.sh timers-only` (runbook §5).

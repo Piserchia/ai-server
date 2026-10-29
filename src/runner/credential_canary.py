@@ -48,7 +48,7 @@ from claude_agent_sdk import (
 )
 
 from src.config import settings
-from src.runner.claude_env import claude_subprocess_env
+from src.runner.claude_env import claude_subprocess_env, vendor_keys_in
 from src.runner.result_capture import (
     ResultCapture,
     capture_result_message,
@@ -58,13 +58,24 @@ from src.runner.result_capture import (
 PING_PROMPT = "Reply with exactly the word: pong"
 DEFAULT_TIMEOUT_S = 180
 
-#: USER scope carries one channel project scope does not: `statusLine` runs a
-#: command on every session, so it is in the refused set there …
-USER_SETTINGS_REFUSED_KEYS: tuple[str, ...] = ("statusLine",)
-#: … EXCEPT that D-P1-9 allows exactly it: D8 asks the owner to put a
-#: `statusLine` command into ~/.claude/settings.json (the rate-limit feed).
-#: Nothing else is ever allowed in user scope; widening this is an owner
-#: decision, not a drift.
+#: What the canary refuses in USER scope (~/.claude/settings*.json): the auth
+#: keys (they outrank /login for every session on the host), the two code
+#: channels the SDK honours from any scope (`hooks`, `env`), `apiKeyHelper`,
+#: and `statusLine` (a command run on every session) — spec §6 "any auth or
+#: `hooks` key", plan E10. NOT the editor-side keys (`permissions`,
+#: `mcpServers`, …): the fleet runs with `setting_sources=["project"]`, so a
+#: user-scope `permissions` never reaches a job, and refusing it would turn
+#: the owner's own Claude Code choices into a red canary — inside the prod
+#: deploy gate (whole-branch review 2026-10-29). Pinned equal to
+#: `session.SETTINGS_AUTH_KEYS ∪ {hooks, env, apiKeyHelper, statusLine}`.
+USER_SETTINGS_REFUSED_KEYS: tuple[str, ...] = (
+    "apiKeyHelper", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL",
+    "hooks", "env", "statusLine",
+)
+#: … and D-P1-9 allows exactly `statusLine`: D8 asks the owner to put a
+#: status-line command into ~/.claude/settings.json (the rate-limit feed).
+#: Widening this is an owner decision, not a drift.
 USER_SETTINGS_ALLOWED_KEYS: frozenset[str] = frozenset({"statusLine"})
 
 
@@ -102,7 +113,7 @@ def settings_precheck() -> tuple[str, str] | None:
     key refused plus `statusLine`, with `statusLine` then exempted as the one
     allowed key (D-P1-9). The auth key inside `env` is named before the
     container, as in E1."""
-    from src.runner.session import SETTINGS_AUTH_KEYS, SETTINGS_OVERRIDE_KEYS, settings_override
+    from src.runner.session import SETTINGS_AUTH_KEYS, settings_override
 
     project, home = settings_scopes()
     found = settings_override(project, canonical=project)
@@ -118,12 +129,10 @@ def settings_precheck() -> tuple[str, str] | None:
         if not isinstance(data, dict):
             continue
         env = data.get("env") if isinstance(data.get("env"), dict) else {}
-        for key in SETTINGS_AUTH_KEYS:
-            if key in USER_SETTINGS_ALLOWED_KEYS:
-                continue
-            if key in env or key in data:
+        for key in SETTINGS_AUTH_KEYS:          # the auth key inside `env` is named first
+            if key in env:
                 return key, str(path)
-        for key in (*SETTINGS_OVERRIDE_KEYS, *USER_SETTINGS_REFUSED_KEYS):
+        for key in USER_SETTINGS_REFUSED_KEYS:
             if key in USER_SETTINGS_ALLOWED_KEYS:
                 continue
             if key in data:
@@ -207,11 +216,17 @@ def main(argv: list[str] | None = None) -> int:
         print(detail)
         return rc
 
-    # A pass must prove the KEYCHAIN login: with the token in the process env
-    # the ping would be served by the token instead (it outranks /login).
-    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        return _finish(False, "CLAUDE_CODE_OAUTH_TOKEN is set in the canary's environment — "
-                              "a ping here would prove the token, not the Keychain login", 1)
+    # A pass must prove the KEYCHAIN login. The setup token would be served
+    # instead of /login; ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / a vendor
+    # key would re-bill or redirect the ping while `model_usage` still names
+    # the model — so the whole E7 refusal set (the contract the runner itself
+    # refuses to start on) is a FAIL here (whole-branch review 2026-10-29).
+    leaked = vendor_keys_in(os.environ)
+    if leaked:
+        what = ("the setup token" if leaked == ["CLAUDE_CODE_OAUTH_TOKEN"]
+                else "a re-billed or redirected call")
+        return _finish(False, f"{', '.join(leaked)} set in the canary's environment — a ping "
+                              f"here would prove {what}, not the Keychain login", 1)
 
     # Prove the credential SOURCE before trusting the ping (spec §6).
     scope_hit = settings_precheck()
