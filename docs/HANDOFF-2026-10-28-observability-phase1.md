@@ -26,8 +26,10 @@ summary: >-
 (`c4ed48f` E1 … `dc5c755` E10), tests first, full suite **3092 passed, 2 skipped**, `lint_docs` clean,
 `lib.py check` OK. Per-task independent reviews for E1, E3, E6, E7 (all findings applied — see the
 runner/gateway CHANGELOG entries dated 2026-10-29); E2/E4/E5/E8/E9/E10 rely on the whole-tier review.
-**Merge status is in the ledger** `.superpowers/sdd/2026-10-21-observability-phase1-recut/progress.md`
-(every `Ruling:` the session made on the owner's behalf is there) and in the final line of this section.
+**Merged `--no-ff` as `cba9c8b`, pushed 2026-10-29 21:55Z (owner: "Merge back to main locally") and DEPLOYED by the
+autopilot at 22:12Z** (`server-deploy a6f374cc` completed `ok`; the runner restarted and stayed up through E7's and E8's
+startup checks; `/health` ok). Every `Ruling:` the session made on the owner's behalf is copied into the recut plan's §10 review log
+(the sdd workspace ledger was deleted after the merge, as the process prescribes).
 
 | Task | What landed | Notable |
 |---|---|---|
