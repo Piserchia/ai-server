@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E6: always-on audit/stream secret redactor, both lanes
+
+**Agent task**: Observability Phase 1 Tier B E6 (recut plan; design of record P0 plan Task 20 + E6 Deltas; spec §2.4 "Audit/stream redaction", §8.3).
+**Files changed**:
+- `src/runner/secret_redact.py` (new, pure, import-free) — `redact(text)`, `redact_tree(value)`, `REDACTED`; name set `NAME_PREFIXES` + `NAME_SUFFIXES` (the P0 set widened per the Deltas with `TELEGRAM_`, `POSTGRES_`, `ALPACA_`, `TRADIER_`, `FINNHUB_`, `WEB_AUTH_` and the `*_URL`/`*_DSN` suffixes — a DSN carries its password in the URL), bare `sk-ant-…`, `Authorization: Bearer`, `NAME=value`/`NAME: value` at line start and mid-line, JSON/YAML credential values, every PEM/OpenSSH/PGP private-key armour — truncated bodies included — and the bare OpenSSH blob. The NAME survives; only the VALUE is replaced.
+- `src/runner/session.py` — `_handle_message`: `text` (audit + stream), `thinking`, `tool_use.input` (after truncation), `tool_result` preview (after `_preview_text`) pass through the redactor; `final_text_chunks` stays raw (it is the job result and the `TASK_COMPLETE` parser input).
+- `src/runner/executors/codex_cli.py` — `default_sink.on_event` runs `redact_tree(fields)` before the audit append and the stream view (the fifth wire point, E6 Delta); the canary sink in `run_canary` is excluded on purpose.
+- `tests/test_audit_redactor.py` (new, 40: the printenv dump with eleven names, DSN/URL names, every PEM armour, the bare blob, bearer headers, bare keys, byte-identical innocent text, every prefix and suffix, mid-line, JSON/YAML shapes, trees, **the name set ⊇ `DENIED_ENV_PREFIXES ∪ DENIED_ENV_NAMES ∪ CANARY_SENTINEL_NAMES`**, `_handle_message` on real SDK blocks for all four block kinds incl. truncation-then-redaction and the un-redacted summary, the Codex sink before both sinks, the canary exclusion).
+
+**Why**: without it the always-on JSONL and `jobs:stream` kept a `printenv` or a `curl -H 'Authorization: …'` verbatim, and `learning.py` reads Bash command text back; a leaked `CLAUDE_CODE_OAUTH_TOKEN` is a one-year credential.
+
+**Independent review (2026-10-29, applied before commit)** — seven probes got a value past the first cut, each now a pinned corpus case (`TestBypassCorpus`, 20 strings): a PEM cut short by the 500-char preview (no END armour — the body is now base64-only and END is optional; PGP `… BLOCK` covered; also kills a quadratic scan on many BEGINs), a quoted mid-line value and a json.dumps'd `\n` before the name (list-shaped tool results), lower-case names (`print(settings)` → `telegram_bot_token='…'`; the name patterns are case-insensitive now — a `base_url = "…"` in a Write is redacted in the trace, accepted), the Telegram bot token inside its API URL, `Authorization: Basic`, `curl -u user:password`, a bare `scheme://user:password@host` DSN, `?token=`/`&api_key=` query strings, `secret_access_key = …` (rclone.conf), `x-api-key:`, plutil's `"NAME" => "value"`, tabs and ANSI codes between name and value. The marker parser's derived rows (`task_complete.summary`, `eval_fail.feedback`, …) were appended RAW from `final_text_chunks` — now `redact_tree(evt)` after parsing, before the append. One vacuous test (the truncation-ordering case cut the secret out before redaction could) rewritten to pin the order via the cut marker's count.
+
+**Side effects**: trace text can now contain `[REDACTED]` where a value was — including inside a code snippet a session wrote (`password = get_pw()` in a Write's trace; the file itself is untouched); innocent text is byte-identical. A URL-shaped value under any `*_URL` name is redacted even when harmless (`GITHUB_URL=…`) — the name is the finding, the value was never needed in a trace. No audit kind or field changes (C14).
+
 ## 2026-10-29 — E5: the autonomous `server-patch` idle dispatcher is removed unconditionally
 
 **Agent task**: Observability Phase 1 Tier B E5 (recut plan; design of record P0 plan Task 13 Step 6b; spec §4.3, §6).

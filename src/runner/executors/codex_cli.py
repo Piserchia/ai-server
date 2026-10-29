@@ -81,6 +81,7 @@ import structlog
 from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_STREAM, redis
+from src.runner import secret_redact
 
 logger = structlog.get_logger(__name__)
 
@@ -461,6 +462,10 @@ def default_sink(job_id: str) -> OnEvent:
     so the dashboard SSE and the Telegram stream see a Codex job live."""
 
     async def on_event(kind: str, fields: dict[str, Any]) -> None:
+        # E6: redacted BEFORE both sinks, like session._handle_message. The
+        # canary sink (run_canary) is deliberately not — it asserts the
+        # sentinel's absence in a scrubbed throwaway clone.
+        fields = secret_redact.redact_tree(fields)
         audit_log.append(job_id, kind, **fields)
         try:
             await redis.publish(f"{CHANNEL_JOB_STREAM}:{job_id}",

@@ -333,7 +333,7 @@ Fresh reviewer over `git diff main...observability/phase-1` (four dimensions: ru
 - **Files**: `src/gateway/telegram_bot.py` (`import time`; `_CLEAR_TOKEN_TTL_SECONDS = 120`; pure `clear_token_valid(stored, token, now)`; `_do_clear` iterates queued/deferred rows through E3's `cancel_job_durable(stage="cleared")`, then `DELETE jobs:queue`, publishes cancel for running; `cmd_clear` (:609) shows the count + `clear_confirm:<8-hex>` / `clear_abort:0` keyboard, token in `ctx.bot_data`; the two branches in `_handle_button` go **between :961 and :964** (before the task lookup), `_` → `ctx`), gateway CHANGELOG.
 - **Tests** (`tests/test_telegram_commands.py`, append `TestClearConfirm`): `test_cmd_clear_no_longer_clears_directly`, `test_token_expires`, `test_confirm_clears_queued_and_deferred`, `test_abort_leaves_queue`, `test_deferred_job_is_cancelled_by_clear`.
 - **Size**: S.
-- [ ] Steps: S1 → S6.
+- [x] Steps: S1 → S6 — **built 2026-10-29** (10 tests; `_do_clear` runs on E3's `cancel_job_durable`, so running rows get the publish the old body lacked). Notes: gateway CHANGELOG 2026-10-29.
 
 ### E5 — The autonomous `server-patch` idle dispatcher is removed unconditionally
 
@@ -348,7 +348,7 @@ Fresh reviewer over `git diff main...observability/phase-1` (four dimensions: ru
 - **Files**: create `src/runner/secret_redact.py` (`REDACTED = "[REDACTED]"`, `redact(text) -> str`, `redact_tree(value)`; patterns: `sk-ant-…`, `Authorization: Bearer …`, `NAME=value` for `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_*`, `GEMINI_*`, `CEREBRAS_*`, `GROQ_*`, `CODEX_*`, `OPENROUTER_*`, `OPENAI_*`, `XAI_*`, `TELEGRAM_*`, `POSTGRES_*`, `ALPACA_*`, `TRADIER_*`, `FINNHUB_*`, `WEB_AUTH_*`, any `*_TOKEN|*_SECRET|*_API_KEY|*_PASSWORD|*_URL` name, the PEM private-key shape, the literal path `~/.config/ai-server/publish-key`); wire the four `_handle_message` sites (`session.py:1839-1862`: text→audit, text→stream, tool_use input, thinking, tool_result preview; `final_text_chunks` stays raw) **and** `codex_cli.default_sink.on_event` (:462-467: `redact_tree(fields)` before `audit_log.append` and `_stream_view`); the canary sink (:1024) is **excluded** on purpose — it runs only against the throwaway canary clone with a scrubbed env and asserts the sentinel's *absence*; runner CONTEXT Paths; SYSTEM.md row + Depends-on on `session.py` (:33) and `codex_cli.py` (:38).
 - **Tests**: new `tests/test_audit_redactor.py` — the P0 plan's cases + `test_name_set_is_a_superset_of_the_codex_deny_sets` (`DENIED_ENV_PREFIXES ∪ DENIED_ENV_NAMES ∪ CANARY_SENTINEL_NAMES`), `test_codex_sink_redacts_before_append_and_stream`, `test_database_and_redis_urls_are_redacted`; `tests/test_codex_canary.py` stays green.
 - **Size**: M.
-- [ ] Steps: S1 → S6.
+- [x] Steps: S1 → S6 — **built 2026-10-29** (40 tests; `*_DSN` added beside `*_URL` since `POSTGRES_DSN` is this repo's own name). Notes: runner CHANGELOG 2026-10-29.
 
 ### E7 — Telemetry-off env overlay on every Claude subprocess; the runner refuses to start with a planted key
 

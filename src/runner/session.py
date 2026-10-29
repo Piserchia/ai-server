@@ -70,7 +70,7 @@ class SkillResolutionError(RuntimeError):
     """
 from src.runner import agents as agents_mod
 from src.runner import delivery, guards, quota, review, router, workspaces
-from src.runner import pricing
+from src.runner import pricing, secret_redact
 from src.runner.executors import codex_cli
 from src.notify.outbox import build_ops_notice, enqueue_notice
 from src.runner.result_capture import (
@@ -1879,7 +1879,9 @@ async def run_session(job: Job) -> dict[str, Any]:
                 for evt in extract_text_events(final_summary):
                     kind = evt.pop("kind")
                     if kind not in existing_kinds:
-                        audit_log.append(job_id, kind, **evt)
+                        # E6: parsed from the RAW text (so markers still work),
+                        # redacted before it lands in the trace.
+                        audit_log.append(job_id, kind, **secret_redact.redact_tree(evt))
             except Exception:
                 logger.exception("text-event extraction failed (non-fatal)")
 
@@ -2298,22 +2300,25 @@ async def _handle_message(
     if isinstance(message, AssistantMessage):
         for block in message.content:
             if isinstance(block, TextBlock):
-                audit_log.append(job_id, "text", text=block.text)
+                # E6: the durable trace is redacted, ALWAYS; the result text
+                # (final_text_chunks → job result / TASK_COMPLETE parser) is not.
+                safe = secret_redact.redact(block.text)
+                audit_log.append(job_id, "text", text=safe)
                 final_text_chunks.append(block.text)
-                await _publish_stream(job_id, {"kind": "text", "text": block.text})
+                await _publish_stream(job_id, {"kind": "text", "text": safe})
             elif isinstance(block, ToolUseBlock):
                 audit_log.append(
                     job_id, "tool_use",
                     tool_name=block.name,
                     tool_use_id=block.id,
-                    input=_truncate_for_log(block.input),
+                    input=secret_redact.redact_tree(_truncate_for_log(block.input)),
                 )
                 await _publish_stream(
                     job_id,
                     {"kind": "tool_use", "tool_name": block.name, "tool_use_id": block.id},
                 )
             elif isinstance(block, ThinkingBlock):
-                audit_log.append(job_id, "thinking", text=block.thinking)
+                audit_log.append(job_id, "thinking", text=secret_redact.redact(block.thinking))
 
     elif isinstance(message, UserMessage):
         for block in message.content:
@@ -2322,7 +2327,8 @@ async def _handle_message(
                     job_id, "tool_result",
                     tool_use_id=block.tool_use_id,
                     is_error=bool(block.is_error),
-                    result_preview=_preview_text(block.content),
+                    # After truncation, so the pattern set sees whole lines.
+                    result_preview=secret_redact.redact(_preview_text(block.content)),
                 )
 
 
