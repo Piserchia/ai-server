@@ -645,3 +645,176 @@ class TestStatusPrefix:
         assert seen == [str(row.id)[:8]]
         args, kwargs = upd.message.reply_text.call_args
         assert args[0] == f"RENDERED {row.id}" and "parse_mode" not in kwargs
+
+
+# ── E4: /clear requires a confirm button ────────────────────────────────────
+
+class TestClearConfirm:
+    def test_token_valid_within_ttl(self):
+        from src.gateway.telegram_bot import clear_token_valid
+        assert clear_token_valid(("abcd1234", 1000.0), "abcd1234", 1050.0)
+
+    def test_token_expires(self):
+        from src.gateway.telegram_bot import clear_token_valid
+        assert not clear_token_valid(("abcd1234", 1000.0), "abcd1234", 1121.0)   # 121 s > 120
+        assert not clear_token_valid(("abcd1234", 1000.0), "zzzz0000", 1001.0)
+        assert not clear_token_valid(None, "abcd1234", 1001.0)
+        assert not clear_token_valid(("abcd1234", 1000.0), "abcd1234", 999.0)    # clock went back
+
+    def test_callbacks_fit_64_bytes(self):
+        cb = "clear_confirm:" + "a" * 8
+        assert len(cb.encode()) <= 64
+        assert tg._parse_callback(cb) == ("clear_confirm", "a" * 8, None)
+        assert tg._parse_callback("clear_abort:0") == ("clear_abort", "0", None)
+
+    def test_cmd_clear_no_longer_clears_directly(self):
+        import inspect
+        src = inspect.getsource(tg.cmd_clear)
+        assert "clear_confirm:" in src and "sql_update(Job)" not in src
+        assert "clear_token" in src
+
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_cmd_clear_previews_counts_and_arms_a_token(self, monkeypatch):
+        class _Counts:
+            def __init__(self):
+                self.n = iter([3, 2])
+
+            def __call__(self):
+                return self
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                v = next(self.n)
+                return SimpleNamespace(scalar=lambda: v)
+        monkeypatch.setattr(tg, "async_session", _Counts())
+        upd = _tg_update("/clear")
+        ctx = SimpleNamespace(args=[], bot_data={})
+        await tg.cmd_clear(upd, ctx)
+        args, kwargs = upd.message.reply_text.call_args
+        assert "3" in args[0] and "2" in args[0] and "Confirm within 120 s" in args[0]
+        token, issued = ctx.bot_data["clear_token"]
+        assert len(token) == 8
+        buttons = [b for row in kwargs["reply_markup"].inline_keyboard for b in row]
+        assert buttons[0].callback_data == f"clear_confirm:{token}"
+        assert buttons[1].callback_data == "clear_abort:0"
+        assert "3 job(s), 2 task(s)" in buttons[0].text
+
+    async def test_abort_leaves_queue(self, monkeypatch):
+        calls = []
+
+        async def fake_do_clear():
+            calls.append(1)
+            return (0, 0)
+        monkeypatch.setattr(tg, "_do_clear", fake_do_clear)
+        from tests.test_notify_bot import _button_update
+        upd = _button_update("clear_abort:0")
+        ctx = SimpleNamespace(bot_data={"clear_token": ("abcd1234", 0.0)})
+        await tg._handle_button(upd, ctx)
+        upd.callback_query.edit_message_text.assert_awaited_once_with("Clear aborted.")
+        assert calls == []
+
+    async def test_expired_confirm_does_not_clear(self, monkeypatch):
+        import time as _time
+        calls = []
+
+        async def fake_do_clear():
+            calls.append(1)
+            return (0, 0)
+        monkeypatch.setattr(tg, "_do_clear", fake_do_clear)
+        from tests.test_notify_bot import _button_update
+        upd = _button_update("clear_confirm:abcd1234")
+        ctx = SimpleNamespace(bot_data={"clear_token": ("abcd1234", _time.time() - 200)})
+        await tg._handle_button(upd, ctx)
+        text = upd.callback_query.edit_message_text.await_args.args[0]
+        assert "expired" in text and "/clear" in text
+        assert calls == []
+        # A wrong token is refused the same way, and a missing one too.
+        upd2 = _button_update("clear_confirm:zzzz0000")
+        ctx2 = SimpleNamespace(bot_data={"clear_token": ("abcd1234", _time.time())})
+        await tg._handle_button(upd2, ctx2)
+        assert "expired" in upd2.callback_query.edit_message_text.await_args.args[0]
+        assert calls == []
+
+    async def test_confirm_clears_through_the_durable_path(self, monkeypatch):
+        import time as _time
+        cancelled = []
+
+        async def fake_do_clear():
+            cancelled.append("ran")
+            return (3, 2)
+        monkeypatch.setattr(tg, "_do_clear", fake_do_clear)
+        from tests.test_notify_bot import _button_update
+        upd = _button_update("clear_confirm:abcd1234")
+        ctx = SimpleNamespace(bot_data={"clear_token": ("abcd1234", _time.time() - 5)})
+        await tg._handle_button(upd, ctx)
+        assert cancelled == ["ran"]
+        upd.callback_query.edit_message_text.assert_awaited_once_with("Cleared 3 job(s) and 2 task(s).")
+        assert "clear_token" not in ctx.bot_data            # single use
+
+    async def test_do_clear_cancels_queued_deferred_and_running_then_fails_tasks(self, monkeypatch, fake_redis):
+        # _do_clear routes EVERY open job through cancel_job_durable(stage="cleared")
+        # — queued and deferred flip, running gets the publish (the old body
+        # flipped running rows in SQL with no publish, leaving live sessions
+        # running into a suppressed finish) — then fails the open tasks and
+        # flushes jobs:queue.
+        q, d, r = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        rows = [SimpleNamespace(id=q, status="queued"), SimpleNamespace(id=d, status="deferred"),
+                SimpleNamespace(id=r, status="running")]
+        seen = []
+
+        async def fake_durable(job, *, stage):
+            seen.append((job.id, job.status, stage))
+            return "cancel_requested" if job.status == "running" else "cancelled_queued"
+        monkeypatch.setattr(tg, "cancel_job_durable", fake_durable)
+        monkeypatch.setattr(tg, "redis", fake_redis)
+        await fake_redis.rpush("jobs:queue", str(q))
+
+        class _DB:
+            def __init__(self):
+                self.statements = []
+
+            def __call__(self):
+                return self
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                self.statements.append(stmt)
+                if len(self.statements) == 1:                       # the open-jobs SELECT
+                    return SimpleNamespace(scalars=lambda: rows, all=lambda: rows)
+                return SimpleNamespace(rowcount=2)                  # the Task UPDATE
+
+            async def commit(self):
+                pass
+        db = _DB()
+        monkeypatch.setattr(tg, "async_session", db)
+        jobs_cleared, tasks_cleared = await tg._do_clear()
+        assert sorted(s for _, _, s in seen) == ["cleared"] * 3
+        assert {st for _, st, _ in seen} == {"queued", "deferred", "running"}
+        assert (jobs_cleared, tasks_cleared) == (3, 2)
+        assert await fake_redis.llen("jobs:queue") == 0
+        where = str(db.statements[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "deferred" in where and "queued" in where and "running" in where
+        # No direct cancel UPDATE on jobs any more — the durable path owns that.
+        assert len(db.statements) == 2 and "tasks" in str(db.statements[1]).lower()
+
+    def test_deferred_job_is_cancelled_by_clear(self):
+        # The semantic widening the P0 plan calls out: plan-DAG children parked
+        # in `deferred` used to survive /clear; "clear everything" means them.
+        import inspect
+        src = inspect.getsource(tg._do_clear)
+        assert "_CLEAR_JOB_STATUSES" in src and "cancel_job_durable(" in src
+        assert 'stage="cleared"' in src
+        assert set(tg._CLEAR_JOB_STATUSES) == {"queued", "deferred", "running"}

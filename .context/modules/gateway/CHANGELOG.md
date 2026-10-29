@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E4: `/clear` requires a confirm button
+
+**Agent task**: Observability Phase 1 Tier B E4 (recut plan; design of record P0 plan Task 9; spec §4.1).
+**Files changed**: `src/gateway/telegram_bot.py` — `import time`; `_CLEAR_TOKEN_TTL_SECONDS = 120`; pure `clear_token_valid(stored, token, now, ttl)`; `_do_clear()` rebuilt on E3's durable cancel: every queued / deferred / running job through `cancel_job_durable(stage="cleared")` (running rows get the publish — the old body flipped them in SQL with no publish), then the open tasks fail and `jobs:queue` is flushed; `cmd_clear` previews the counts and issues a `clear_confirm:<8-hex>` / `clear_abort:0` keyboard with the token in `ctx.bot_data`; `_handle_button` (its second parameter is now `ctx`) handles the two callbacks before the task lookup — the token is single-use and expires after 120 s. `tests/test_telegram_commands.py::TestClearConfirm` (10).
+**Why**: `/clear` wiped the fleet on a single keystroke, and left running sessions alive.
+**Side effects (deliberate semantic widening, from the P0 plan)**: `deferred` joins the job set — plan-DAG children parked in `deferred` used to survive a `/clear` and be promoted later; "clear everything" means them too. Cancelled rows now carry the one cancel vocabulary (`terminal_reason=interrupted`, `error_message="cancelled by user (cleared)"`, a `job_cancelled{stage="cleared"}` row each).
+
 ## 2026-10-29 — E3: ghost commands become real; one cancel semantics; `/rate` leaves the copy
 
 **Agent task**: Observability Phase 1 Tier B E3 (recut plan; design of record P0 plan Task 8 + D-P1-4).
