@@ -291,6 +291,208 @@ _Evidence: recurrence #92 of the "project 'X' unhealthy 20+ min but actually
 up" false positive (docs/TROUBLESHOOTING.md line 1175). Fix commit lands on
 `server-patch/events-dedup-by-kind`._
 
+## A Codex job that passed the pre-push gate can still FAIL with `publish after LGTM failed: git push rejected` (2026-10-21, T5)
+
+`workspaces.publish_workspace` makes ONE push attempt and never rebases or
+forces: if the remote moved between the clone and the push (another job,
+the owner's laptop), the reviewed commit stays in the KEPT clone
+(`volumes/workspaces/<job8>-<name>/`, audit `workspace_published{ok:false,
+commit}`), the job ends `terminal_reason=publish_failed` (`job_failed
+error_category=publish_failed`; review round 1 — it was `api_error`, which
+hid "approved but rejected" behind vendor errors) and nothing is synced. A
+rebase would change the base of a diff Anthropic already
+approved, so it is deliberately not automated. Recovery is the owner's:
+`git -C <clone> pull --rebase origin <branch> && git push`, or re-run the
+job. Also: the gate's diff is `git diff <base_sha>` + untracked, so a job
+that `git commit`s on its own is reviewed all the same and gets an empty
+provenance commit (trailers) on top — never an amend. The commit is made
+with `--no-verify` (a clone has no hooks anyway; a canonical's
+`core.hooksPath` would otherwise run the owner's hooks on a job's behalf).
+
+## A Codex diff touching `.claude/`, `AGENTS.md`, `CLAUDE.md`, `.github/` … is refused with NO reviewer run (`merge_gate_refused`) (2026-10-21, T5 review round 1)
+
+`review.gate_path_denials` runs before `run_code_review`: any path under
+`.claude/ .codex/ .git/ .githooks/ .github/`, the files `.gitmodules
+.gitattributes .gitconfig .mcp.json`, or any `AGENTS.md`/`CLAUDE.md` fails
+the job as `ReviewBlocked(verdict="blocker", denied_paths=[…])` — audit
+`merge_gate_refused{reason=denied_path, paths}`, no `code_review_done`, no
+`merge_gate_verdict`. These files are *instructions or executable config*
+for the next agent that opens the checkout (Claude Code hooks run as the
+owner; Codex reads AGENTS.md; every Anthropic project session loads
+CLAUDE.md), so a prompt-injected job must not be able to push them through
+one reviewer's judgement. Legit edits to them go through an Anthropic lane.
+Related: the reviewer itself now runs with `setting_sources=[]` — it would
+otherwise have loaded the clone's `.claude/settings.json` hooks before
+reading the diff. Also: a slug-less `codex/…` job (generic task, router
+miss, missing project dir) is `ProviderRefused` naming D-A *by canonical
+path* — its canonical is `settings.server_root`, i.e. this repo, and the
+publish path would push to `origin/main`; `ROUTER_CODE_SERVER_PROVIDERS`
+is the only way through.
+
+## Non-Anthropic lanes do not run belt 2 (`post_review`) — look at `merge_gate_verdict` instead (2026-10-21, T5)
+
+`main._maybe_review` audits `post_review_skipped{reason=pre_push_gate}` for
+every non-Anthropic job: the pre-push gate (same fixed Anthropic reviewer,
+same `run_code_review`) already graded the diff before the push, and its
+verdict is stamped as `jobs.review_outcome` and audited as
+`merge_gate_verdict`. `/status` and the retrospective read the column as
+usual; the `reason` differs from the Anthropic lanes' `stale_head|no_diff|
+timeout` so the two belts never get conflated in sweeps.
+
+
+## A schedule row's `{"model": "codex/…"}` is refused when the skill pins an Anthropic model (2026-10-21)
+
+`session.lane_refusal` honours a `payload.model` that moves an
+Anthropic-pinned skill to another provider ONLY from an owner origin
+(`created_by` = `telegram:*`, `web`, `cli`). The scheduler's `created_by` is
+`scheduler`, so a schedule payload override of e.g. `atlas-report`
+(`model: claude-opus-4-8`) fails with `provider_refused … only the owner
+(telegram/web/cli) may override it`. That is by design (plan T4: an
+autonomous origin — scheduler, escalation, dispatch MCP, event trigger —
+must not be able to retarget a pinned skill onto a vendor lane). To
+"schedule routines using other agents": pin `model: codex/<id>` in the
+skill's own frontmatter (then `reason=pin`), or schedule a skill with no
+`model:` pin. The refusal audit names the origin and the pin.
+
+## Non-Anthropic lanes keep their clone and never ff-sync (T4, 2026-10-21)
+
+After a successful Codex job `run_session` does NOT call
+`workspaces.sync_canonical` and passes `keep=True` to
+`cleanup_workspace` — the executor cannot push (network off, no
+credentials), so the edits sit uncommitted in
+`volumes/workspaces/<job>…` until the T5 pre-push Anthropic gate commits
+and syncs them. Until T5 lands, a completed Codex job's work is only in
+that clone (audit `note` names the path); `server-upkeep` prunes old
+workspaces, so do not expect it to survive a week. Also: `learning`'s
+Write/Edit gate will not fire for Codex jobs (its writes are audited as
+`Bash` `command_execution`); decide modified files from `git status
+--porcelain` in the clone. And `post_review` (belt 2, `_maybe_review`) is a
+`stale_head` no-op for every completed Codex job until T5: it resolves the
+CANONICAL cwd, whose HEAD predates the job because nothing was synced, so
+each such job logs `post_review_skipped reason=stale_head` plus the
+"canonical sync failed or nothing committed" WARNING — expected noise, not
+a fault; T5 must either point `_maybe_review` at the kept clone for
+non-Anthropic providers or make the pre-push gate the review of record.
+
+## Non-Anthropic failures are terminal on every path — do not "fix" the missing escalation (review round 1, 2026-10-21)
+
+A Codex job that times out at main's ceiling, crashes before the executor
+process starts (`CodexNotFound`, bad sandbox), or dies in a generic
+exception stamps `terminal_reason=timeout|api_error`, audits a `note`, and
+STOPS — `main._non_anthropic_lane(job)` short-circuits `_maybe_escalate`
+in the `asyncio.TimeoutError` and generic `Exception` branches. This is
+deliberate (T4 note 4): the skill's `on_failure` target is an Anthropic
+model, and escalating would silently re-run the job on another vendor.
+The 2026-08-07 "timeouts must escalate" contract
+(`tests/test_timeout_escalation.py`) still holds for Anthropic jobs and for
+jobs that died before the session stamped `resolved_provider`. T6 adds the
+per-provider `rate_limited` hold + front-requeue, which is the retry story
+for these lanes.
+
+## 2026-10-21 — Codex writes files through `Bash`, so the Write/Edit gates do not see them
+
+**Trap**: `learning.should_extract` (and anything else keyed on
+`tool_use.tool_name in ("Write", "Edit")`) decides "this job modified
+files" from tool kinds. The recorded Codex fixture
+(`tests/fixtures/codex/command_and_file.jsonl`) shows the CLI writing a file
+with `printf ... > hello.txt` inside a `command_execution` item, which the
+executor audits as `tool_use{tool_name:"Bash"}` — only `file_change` items
+become `Edit`. The C14 shapes are honoured; the semantic gate silently
+misses most Codex edits.
+
+**Rule**: for non-Anthropic executors, derive "modified files" from
+`git status --porcelain` in the per-job clone (T4/T5), never from tool
+kinds. Related: `ExecResult.model_served` is None unless the stream carried
+a `model` field — do not read a None there as "same as requested".
+
+## 2026-10-21 — `codex exec` blocks on a piped stdin, and a zero exit proves nothing
+
+**Trap**: `codex exec` treats whatever arrives on stdin as additional
+instructions and waits for EOF before starting; a job spawned with
+`stdin=PIPE` (or inheriting the runner's) hangs until the session timeout
+(probe #1, 2026-10-21: 90 s of nothing). Separately, the CLI can exit 0
+with no `turn.completed` event (e.g. an early auth/config failure printed
+to stderr), so "exit code 0 and some stdout" is not a finished turn.
+
+**Rule**: `src/runner/executors/codex_cli.py` always passes
+`stdin=asyncio.subprocess.DEVNULL` and classifies any stream that ends
+without `turn.completed` as `terminal_reason=api_error` whatever the exit
+code. Also: `settings.codex_bin` set to a path that does not exist is
+`CodexNotFound` (fail closed) — it never falls through to PATH or the
+ChatGPT.app bundle, so a typo in `.env` surfaces as a refused job, not a
+different binary. The bundle binary
+(`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`) is
+not on PATH under launchd, which is why discovery ends there.
+
+## 2026-08-21 — `ResultMessage.is_error` is NOT a reliable "session succeeded" flag
+
+**Trap**: The bundled Claude CLI, on an Anthropic-side 5xx (e.g. 529
+Overloaded) or a request timeout, emits the failure as a plain `TextBlock`
+inside an `AssistantMessage` — the visible "API Error: 529 Overloaded. This
+is a server-side issue, usually temporary — try again in a moment. ..."
+banner — and then returns a `ResultMessage` whose `usage` dict is all
+zeros AND whose `is_error` is NOT usefully set (either False or the
+session's earlier is_error-and-no-text guard doesn't trip because there IS
+text, just error text).
+
+**Where it bit us**: Job 143c8cfb (atlas-evaluate, 2026-08-17 13:48Z) ran
+200s, its summary was verbatim the 529 banner above, and it was recorded
+as `completed`. Because it did not fail, `escalation.on_failure` never
+fired, no self-diagnose was enqueued, `schedules.last_run_at` looked
+healthy, and the Telegram summary looked normal. The atlas governor was
+silently dark for 10 days as a result.
+
+**Fix**: `runner/session.py` now runs a two-signal shape check in
+`_run_in_process` before returning: `is_api_terminal_summary(summary)`
+(banner-shape regex anchored to start-of-string, 800-char cap) AND
+`usage_is_empty(usage)` (all four token counters zero). When both hold,
+raise RuntimeError; the existing `_process_job` exception path fails the
+job and calls `_maybe_escalate`. Two signals, not one, keeps the classifier
+conservative — a self-diagnose report that mentions "API error" in its
+prose is not caught (it will have real usage and/or exceed the length
+cap).
+
+**For future work here**: any new "did the session succeed?" logic must
+inspect the final-text SHAPE + `usage` shape, not just `ResultMessage.is_error`.
+The `is_error` field is best-effort on the SDK side.
+
+**Regression pin**: `tests/test_api_terminal.py::TestIsApiTerminalSession::test_job_143c8cfb_full_shape_classified`
+tests the verbatim (summary, usage) pair from job 143c8cfb.
+
+## 2026-08-21 — Event-trigger dedup: filter by Job.kind, not Job.resolved_skill
+
+**Trap**: `Job.resolved_skill` is NULL for every queued job. The runner only
+populates `resolved_skill` when it *starts* running a job (via `_process_job`
+after the router resolves the skill). Any DB query that filters by
+`resolved_skill == "self-diagnose"` (or any other skill name) SILENTLY MISSES
+every queued instance of that skill.
+
+**Where this bit us**: `src/runner/events.py` `_check_skill_failures` and
+`_check_project_health` both used
+`Job.resolved_skill == "self-diagnose"` for their dedup lookback. Between the
+first event-triggered enqueue and the runner picking that job off the queue
+(a 20-min window at MAX_CONCURRENT_JOBS=4 saturation), each 60-s event cycle
+saw ZERO existing diagnoses for the same target and re-enqueued. On
+2026-08-21 06:34–06:36Z this spawned six duplicates (three per project) for
+baseball-bingo + atlas from one cadence-slip false-positive.
+
+**Fix**: filter by `Job.kind == "self-diagnose"`. `kind` is set at INSERT in
+`gateway/jobs.py:enqueue_job` and is never NULL — visible to dedup the moment
+the row commits.
+
+**Rule of thumb**: any dedup / rate-limit / "already-enqueued?" query in the
+event loop, scheduler, or an escalation guard MUST filter on `Job.kind`, not
+`Job.resolved_skill`. Use `resolved_skill` only when you actually need the
+router's decision (retrospective, learning classifier, review dedup on
+completed work). Corollary: this also means `Job.kind` stores whatever string
+the caller passes (usually the hyphenated skill slug — the `JobKind` enum's
+underscore values are NOT the source of truth for dedup filters; match the
+literal that `enqueue_job(kind=...)` writes).
+
+_Evidence: recurrence #92 of the "project 'X' unhealthy 20+ min but actually
+up" false positive (docs/TROUBLESHOOTING.md line 1175). Fix commit lands on
+`server-patch/events-dedup-by-kind`._
+
 ## 2026-08-03 — server-patch skill silently drops the commit/push step (ROOT CAUSE: max_turns=60 exhausted)
 
 **ROOT CAUSE CONFIRMED (2026-08-03, job `2e92aaae`)**: `max_turns: 60` in `skills/server-patch/SKILL.md` is too low for typical server-patch sessions that read substantial context before coding.
@@ -606,12 +808,48 @@ origin_from_created_by(created_by)` on the two direct constructors is a
 named task with the GOTCHA updated, never by threading a message id through
 the plan payload.
 
+## 2026-10-22 — A test that calls a runner function unpatched can touch PRODUCTION
+
+`main.py`, `jobs.py`, `telegram_bot.py` and `notify/outbox.py` each bind `redis`/`async_session` at import (`from src.db import …`), so `monkeypatch.setattr(src.db, "redis", …)` patches nothing they use. The dev `.env` points `POSTGRES_DSN`/`SERVER_ROOT` at the production checkout and `pydantic-settings` reads it even under `PIPENV_DONT_LOAD_ENV=1`; the prod deploy gate exports prod's `.env`. `tests/conftest.py` therefore dead-ends both DSNs at `127.0.0.1:1` before `src.db` builds its engine/client (exempt: `AI_SERVER_RUN_DB_TESTS=1`). Symptom of a leak now: `ConnectionRefusedError … ('127.0.0.1', 1)` in a test — patch the MODULE that bound the name (`runner_main.redis`, `runner_main.enqueue_notice`, `outbox_mod.async_session`), never `src.db`.
+
 ## 2026-10-26 — Two governors in the same CEO run collide on budget checks
 
 When a CEO run fans out two governors concurrently (e.g. `mm-govern etf` and `mm-govern crypto`), both read the day's `jobs_today` counter before either pushes its dispatch. The second governor therefore sees a count that excludes the first governor's dispatch, so both can believe they have headroom and both fire — potentially overcounting the daily cap by one. The fix: `mmcore budget` must be called **after** the push succeeds (not before), because the ledger entry is only written when the push lands; calling it pre-push on the second governor gives a stale count. In practice the collision showed up as `jobs_today=1/4` on the crypto governor even though the etf governor had already dispatched — the 1 was correct only because etf pushed first; had crypto pushed first both would have read 0. Always run the budget check immediately before dispatching, never during the gates phase, and always after the push has been confirmed.
 
 _Evidence: job `73cdf844`_
 
-## 2026-10-22 — A test that calls a runner function unpatched can touch PRODUCTION
+## 2026-10-28 — `ResultMessage.model_usage` has more than one model in it
 
-`main.py`, `jobs.py`, `telegram_bot.py` and `notify/outbox.py` each bind `redis`/`async_session` at import (`from src.db import …`), so `monkeypatch.setattr(src.db, "redis", …)` patches nothing they use. The dev `.env` points `POSTGRES_DSN`/`SERVER_ROOT` at the production checkout and `pydantic-settings` reads it even under `PIPENV_DONT_LOAD_ENV=1`; the prod deploy gate exports prod's `.env`. `tests/conftest.py` therefore dead-ends both DSNs at `127.0.0.1:1` before `src.db` builds its engine/client (exempt: `AI_SERVER_RUN_DB_TESTS=1`). Symptom of a leak now: `ConnectionRefusedError … ('127.0.0.1', 1)` in a test — patch the MODULE that bound the name (`runner_main.redis`, `runner_main.enqueue_notice`, `outbox_mod.async_session`), never `src.db`.
+A session's `model_usage` carries the CLI's own small-model calls alongside the main model, and the auxiliary entry (prod: `claude-haiku-4-5-20251001`) is often the FIRST key. Anything deriving "the model that ran" from `next(iter(model_usage))` is wrong roughly a third of the time — and because `pricing.price_usage` keys on `model_served`, it mispriced Opus work at Haiku rates for Phase 1's first week. Use `result_capture.dominant_model` (most tokens wins, either key naming; cost and context fields ignored). Note also that `served_model_violation` cannot catch this: it asserts the requested model is PRESENT among the keys, which it is.
+
+## 2026-10-28 — `usage` is one aggregate for a multi-model session
+
+`ResultMessage.usage` sums the token counters across every model a session touched (the main model plus the CLI's own auxiliary calls), but the ledger prices that single bundle at one model's rates. Any multi-model session is therefore mispriced by construction, in whichever direction the mix runs — this is the standing explanation for the residual computed-vs-SDK divergence (−2.4 % on opus-5 to −23.4 % on sonnet-4-6 as of 2026-10-28), and the `model_served` first-key bug was its extreme case. Per-model attribution needs `model_usage` persisted per job, which Phase 1 does not do; do not read a family's implied cache-write rate as proof of which TTL the vendor billed.
+
+_Persisted since the same day_: `job_completed.model_usage` carries the normalised per-model breakdown (+ the CLI's per-model `costUSD` as `sdk_cost_usd`) and `pricing.price_model_usage` prices it per model when it COVERS the aggregate (runner CHANGELOG 2026-10-28). Mind the accounting: the bundled CLI's `usage` is the main loop only, `modelUsage` is every call in the process (subagents included) — so a per-model figure covers tokens the row's five token columns do not, and an equality rule would never fire. Rows before that keep the one-model figure — there is nothing to re-attribute them from. The CLI's own price table has no TTL notion (every cache write at 1.25× input, the 5-m rate), which on a cache-write-heavy session alone would read as ≈ −19…−23 % while subagent tokens (in the SDK figure, not in `usage`) push it back up — likely the bulk of the computed-vs-SDK gap. **Measured 2026-10-28 on the first per-model row** (`bdef2a99`, single model, no subagents): `cost_usd_list` $0.8813 vs `sdk_cost_usd` $0.6963, and the same tokens priced with cache writes at the 5-m rate equal the SDK figure to 8 decimals — on a single-model session the gap is entirely the CLI's cache-write rate.
+
+## 2026-10-28 — alpha-governor hits max_turns=51 and dies exactly one turn before git commit
+
+The alpha-governor skill has a hard `max_turns` ceiling that has been hit in exactly 3 of 27 runs (11.1%) over 14 days, always at turn 51, and always after staging all files but before executing `git commit`. All three runs touched `LEDGER.md`, all three were lost silently (`terminal_reason: max_turns`, workspace GC'd) — a combined $10.39 and three complete audit entries permanently gone. The pattern also falsifies any downstream "unbroken audit record" assumption, since a 4.7-day, 4-run hole exists in the ledger. Mitigation: reorder the skill so `git commit` (and push) of the ledger entry happens **before** the GOTCHAS/CHANGELOG update steps — commit-first guarantees the primary output survives even if the session expires on the documentation tail. Longer term: raise the `max_turns` budget or split the skill into a commit phase and a documentation phase.
+
+_Evidence: job `3697d380`_
+
+## 2026-10-28 — `codex --version` is `codex-cli <version>`, and `jobs.cli_version` is 24 chars wide
+
+The Codex executor's version probe returns the whole first stdout line — `codex-cli 0.162.0-alpha.17.2`, 28 chars — while the column was sized for the SDK's bare `2.1.139`. The first real Codex job after the Phase-1 deploy (`0e09233d`) finished its work and then failed on the row stamp with `value too long for type character varying(24)`. Stamp through `result_capture.cli_version_column` (last token, clipped to `CLI_VERSION_MAX`), and never let a test fake a collaborator's output in a shape prod does not produce (B3's test used `"0.162.0"`). The post-session stamp is guarded now (`result_stamp_failed` audit kind) — a `result_stamp_failed` row in a job's JSONL means the row's tokens came from `main._finish_job`'s re-stamp, not the session. After a guarded failure three columns stay NULL on the row — `cli_version`, `duration_api_ms`, `sdk_cost_usd` — because `main._terminal_values` does not carry them; tokens, `num_turns`, `cost_usd_list`, `terminal_reason` and `model_served` are re-stamped.
+
+## 2026-10-29 — Spec §14 Q2 answered on the pinned CLI 2.1.139: project-scope `ANTHROPIC_BASE_URL` IS honoured
+
+`bash scripts/q2-settings-sandbox-probe.sh` (E1; throwaway dir, localhost target). **Q2b — honoured**: a `<cwd>/.claude/settings.json` carrying `{"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:1"}}` made the pinned CLI retry ten times (`system/api_retry`) and end `ResultMessage success is_error=True "API Error: Unable to connect to API (ConnectionRefused)"` — so a project-scope settings file CAN redirect the fleet's Anthropic traffic; the auth half of spec §6's hole is real, not theoretical, and E1's `SETTINGS_AUTH_KEYS` refusal stays. **Q2a — accepted**: `{"sandbox": {"failIfUnavailable": true, "strictAllowlist": true}}` from project scope produced a normal successful run (no refusal, no "sandbox unavailable"); whether the sandbox was actually enforced is not visible from the stream, so the Claude lane cannot yet be called "A-rated with the sandbox forced on" on this evidence alone. Re-run on the next CLI pin bump (D13). **Q2c (added at review) — lenient JSON is NOT parsed**: the same base-URL file with a trailing comma, and again with a `// comment` line, produced a normal `ok` on the Keychain login — the pinned CLI ignores a settings file Python's `json` would also reject, so E1's "malformed JSON is not an override" holds for 2.1.139.
+
+## 2026-10-29 — "Byte-identical to the canonical's copy" must mean the TRACKED copy too
+
+E1's provenance allowance compares a clone's `.claude/settings*.json` with the canonical's. A workspace is `git clone` of the canonical, so it carries **HEAD's** bytes — and on the dev box `.claude/settings.local.json` is routinely dirty (Claude Code appends `permissions.allow` entries as a session approves tools). Comparing with the working copy alone would have refused every workspace job on a dirty checkout. `session._matches_canonical` accepts the working copy OR `git -C <canonical> show HEAD:.claude/<name>`. Prod is pull-only and clean, so the two agree there.
+
+## 2026-10-29 — An observed settings key can mask a refused one in the same file
+
+E1's `settings_override` walks `SETTINGS_OVERRIDE_KEYS` in order and `hooks` comes first. With D-P1-12's observe arm, bingo's own `hooks` is observed — so a `mcpServers` committed into the SAME file would have been reported as "hooks, observed" and the job would have run. Caught by the sized-arm test; the function now collects every hit in a file and reports the first REFUSED one before any observed one. Lesson for any allow-list beside a deny-list: never return on the first allowed match.
+
+## 2026-10-29 — `_process_job`'s queued→running flip is an unguarded ORM write (INV-9 window)
+
+`main._process_job` reads the row, awaits the provider-hold check (a Redis round trip), then sets `job.status = running` and commits — SQLAlchemy emits `UPDATE jobs SET status='running' WHERE id=:id` with no status predicate. A durable cancel (`gateway.jobs.cancel_job_durable`, E3) that commits inside that window is overwritten: the job runs with a `job_cancelled` audit row that lies. Pre-existing (the old button path had the same race); found by E3's review. Fix when touching `_process_job`: a guarded core `update(Job).where(Job.id == id, Job.status == 'queued').values(status='running', …)` and return on rowcount 0.
