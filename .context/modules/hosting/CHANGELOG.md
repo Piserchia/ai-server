@@ -1,5 +1,9 @@
 # Changelog: hosting
 
+## 2026-10-29 — E9: scripts/install-dev-hooks.sh — the dev protected-path commit-msg guard
+
+- New `scripts/install-dev-hooks.sh`: `install` arms `.git/hooks/commit-msg` in the DEV checkout (honours `GIT_DIR`; idempotent marker block; appends to an existing hook, never overwrites; the CHANGELOG pre-commit hook is a separate file and untouched); `check <paths-file> <message-file>` is the pure decision — a staged diff touching a MISSION §M path is REFUSED unless the message carries `Approved-Protected-Path: ap-<id>`. The path list is §M's ten path-shaped items (incl. `.context/org/ORG.md` and `src/gateway/web.py`, the two the first cut missed), pinned two-way against MISSION.md by `tests/test_protected_paths_hook.py` (24, incl. a real `git init` + install + refused/allowed commit). Phase-1 limit printed by the hook: the id's SHAPE is checked; resolution against `approvals(kind=protected_path)` begins with the Phase-2 approvals migration (009). God break-glass = `--no-verify`, pushed in the same session. **Armed in the dev checkout 2026-10-29.** Owner-gated: D6's first half adds `.claude/settings.json`, `.claude/settings.local.json` and this script's list to §M — until then those three are not guarded (runbook §8b).
+
 ## 2026-10-29 — E8: scripts/alembic-current-check.sh (owner-run diagnostic)
 
 - New `scripts/alembic-current-check.sh`: `alembic current` must name a revision with a script under `alembic/versions/` — exit 0 ok · 1 mismatch (prints the `downgrade -1` rule) · 2 cannot tell; venv resolved per §4 (never `pipenv run`); run by hand after a migration revert. NOT wired into `skills/server-deploy/SKILL.md` (protected) — the pytest manifest tests and the runner's own startup check are the belts.
