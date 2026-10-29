@@ -13,7 +13,7 @@ Four async tasks running in one process:
 1. `_job_loop` — BLPOPs from `jobs:queue`, respects `quota.is_paused()` (the global = Anthropic pause), runs sessions under a semaphore gated by `MAX_CONCURRENT_JOBS`. A job whose NON-Anthropic provider lane is paused (`quota.is_provider_paused`) is HELD inside `_process_job`'s fetch transaction — never marked running, `job_held` audited once per pause window, RPUSHed to the TAIL after `hold_delay(until, now)` (≤ `HOLD_RECHECK_SECONDS` = 30 s) by a slot-free task — while every other lane keeps draining (T6, 2026-10-21; plan §4g).
 2. `_scheduler_loop` — every 30s, picks schedules with `next_run_at <= now` and enqueues jobs from their templates — after the D1 provisioning pre-check (below): a due row whose project `.env` lacks a declared key is DEFERRED (clock advanced, no Job) instead of run.
 3. `_cancel_listener` — subscribes to `jobs:cancel` channel, calls `session.interrupt(job_id)` for matches.
-4. `event_loop` — every 60s, checks skill-failure + project-unhealthy + idle-queue rules, auto-enqueues self-diagnose or review-and-improve.
+4. `event_loop` — every 60s, checks skill-failure + project-unhealthy rules (auto-enqueues self-diagnose; breaker-gated) and the idle-queue alpha drainer (`_check_idle_queue_alpha`, not breaker-gated). **E5 (2026-10-29) removed the idle-queue `review-and-improve` trigger unconditionally** — no self-improvement loop until the Phase-4 `retro`; interim = CostCard + owner-run `/task review-and-improve`.
 
 ## Public interface
 

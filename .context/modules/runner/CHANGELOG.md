@@ -8,6 +8,7 @@
 **Files changed**: `src/runner/events.py` — deleted `REVIEW_COOLDOWN_HOURS`, `_should_trigger_idle_review`, `_check_idle_queue_review` and the `event_loop` dispatch block that enqueued `review-and-improve` on an idle queue; the alpha drainer keeps its place and its breaker exemption. `tests/test_events.py` — `TestIdleQueueReview` deleted; `TestEventLoopBreakerGating` rewritten for three checks; new `TestTheAutonomousServerPatchDispatcherIsGone` (the names and the literal are gone from the module; the alpha drainer still enqueues under its predicate — idle queue, stale governor, under the daily valve, 4 h cooldown).
 **Why**: the idle trigger was the one place the fleet dispatched a server-patching retrospective on its own, with no owner in the loop. **No self-improvement loop until the Phase-4 `retro`; interim = CostCard + owner-run `/task review-and-improve`** (spec §4.3). The `review-and-improve` skill file stays.
 **Side effects**: quiet hours no longer produce a `review-and-improve` job (≈ $34 over 30 d was its line in the ledger); `/task review-and-improve` still works by hand; the `/proposals` command (E3) is where its pending proposals surface.
+**Commit note**: this entry landed with E3's docs commit (`fd5e60b`); the code deletion is the commit that follows it.
 
 ## 2026-10-29 — E3: the cancel listener stamps `interrupted` + `cancelled by user (running)`
 
