@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E10: the daily credential canary through the runner's own SDK path
+
+**Agent task**: Observability Phase 1 Tier B E10 (recut plan; design of record P0 plan Task 12, renamed `credential_canary` and made self-contained; spec §0a, §6; D-P1-9).
+**Files changed**: `src/runner/credential_canary.py` (new) — `canary_options`, `settings_scopes`, `settings_precheck` (E1's rule over the server root + a stricter user-scope pass, `statusLine` the one allowed extra key), `run_ping`, `evaluate_ping` (the runner's `served_model_violation` + the probe tightening), `telemetry_record`, `main` (exit 0/1/2; a `CLAUDE_CODE_OAUTH_TOKEN` in the process env is a FAIL — a pass proves the Keychain login); `scripts/credential-canary.sh` (new timer wrapper; venv per §4; `notify send` first, curl fallback; `unset ANTHROPIC_API_KEY`); `scripts/install-launchd.sh` — `install_timer "credential-canary"` daily 06:50 + the `TIMER_LABELS` entry for `uninstall`; `tests/test_scripts_syntax.py` — `TIMER_SCRIPTS` gains the script; `tests/test_credential_canary.py` (new, 25: options = the runner's; evaluate incl. no result / is_error / missing `model_usage` / wrong served model / no API time or empty usage; run_ping captures through a fake query; both scopes incl. `statusLine` allowed and every other key refused in user scope and E1's per-key allowance in project scope; the real user scope clean today (Mini only); main's exit codes, the telemetry file, the scope short-circuit before any ping, the setup-token refusal; the timer script's contract).
+**Why**: if the Max login lapses, the first job of the day fails only after burning a slot and an escalation; this probe fails BEFORE that, through the same path the fleet runs on, and says which credential served.
+**Side effects**: a new daily timer (installed on prod by `install-launchd.sh timers-only` — owner runbook §5); `volumes/telemetry/credential_canary.json`; the `credential_canary` ops-notice kind (already in `OPS_NOTICE_KINDS`) gets its first producer. User-scope `statusLine` is allowed (D-P1-9) so the canary does not go red the day the owner does D8.
+
 ## 2026-10-29 — E8: alembic runner-startup check + the owner diagnostic script
 
 **Agent task**: Observability Phase 1 Tier B E8 (recut plan; design of record P0 plan Task 18 steps b–d — the manifest itself landed in A1; spec §9 rollback paragraph).

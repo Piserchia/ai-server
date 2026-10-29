@@ -56,7 +56,7 @@ SERVICES=(
 # review 2026-10-22: the timers used to stay loaded and keep firing against a
 # checkout that may no longer exist). tests/test_scripts_syntax.py pins the
 # two lists against each other.
-TIMER_LABELS=(backup healthcheck-all schedule-monitor cost-reconcile)
+TIMER_LABELS=(backup healthcheck-all schedule-monitor cost-reconcile credential-canary)
 
 uninstall() {
     echo "Uninstalling launchd services..."
@@ -251,6 +251,11 @@ install_timer "schedule-monitor" "scripts/schedule-monitor.sh" \
 # non-zero exit (rc=1 = 5-minute cache writes seen, the credits signature).
 install_timer "cost-reconcile" "scripts/cost-reconcile-run.sh" \
   "<key>StartCalendarInterval</key><dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>"
+# E10: the daily credential canary — one ping through the runner's own SDK path
+# (Keychain login, runner env overlay, served-model rule), 06:50 local; FAIL →
+# `notify send --kind credential_canary --severity critical` (curl fallback).
+install_timer "credential-canary" "scripts/credential-canary.sh" \
+  "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>50</integer></dict>"
 
 echo ""
 if (( TIMERS_ONLY )); then

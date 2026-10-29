@@ -1,5 +1,9 @@
 # Changelog: hosting
 
+## 2026-10-29 — E10: com.assistant.credential-canary timer (daily 06:50) + scripts/credential-canary.sh
+
+- `scripts/install-launchd.sh`: `install_timer "credential-canary" "scripts/credential-canary.sh"` at 06:50 local and the label in `TIMER_LABELS` (so `uninstall` removes it); the timer env block already carries `VENV_PY` + the two telemetry flags (C1). `scripts/credential-canary.sh` (new): venv per §4, `python -m src.runner.credential_canary --telemetry volumes/telemetry/credential_canary.json --timeout 180`, FAIL → `notify send --kind credential_canary --severity critical` (curl fallback), log `volumes/logs/credential-canary.log`. Reaches prod with `install-launchd.sh timers-only` (runbook §5).
+
 ## 2026-10-29 — E9: scripts/install-dev-hooks.sh — the dev protected-path commit-msg guard
 
 - New `scripts/install-dev-hooks.sh`: `install` arms `.git/hooks/commit-msg` in the DEV checkout (honours `GIT_DIR`; idempotent marker block; appends to an existing hook, never overwrites; the CHANGELOG pre-commit hook is a separate file and untouched); `check <paths-file> <message-file>` is the pure decision — a staged diff touching a MISSION §M path is REFUSED unless the message carries `Approved-Protected-Path: ap-<id>`. The path list is §M's ten path-shaped items (incl. `.context/org/ORG.md` and `src/gateway/web.py`, the two the first cut missed), pinned two-way against MISSION.md by `tests/test_protected_paths_hook.py` (24, incl. a real `git init` + install + refused/allowed commit). Phase-1 limit printed by the hook: the id's SHAPE is checked; resolution against `approvals(kind=protected_path)` begins with the Phase-2 approvals migration (009). God break-glass = `--no-verify`, pushed in the same session. **Armed in the dev checkout 2026-10-29.** Owner-gated: D6's first half adds `.claude/settings.json`, `.claude/settings.local.json` and this script's list to §M — until then those three are not guarded (runbook §8b).
