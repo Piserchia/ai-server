@@ -621,3 +621,109 @@ def test_applied_history_ends_at_current_head():
     history = _applied_history()
     assert history[-1] == script.get_current_head() == "008"
     assert history == ["001", "002", "003", "004", "005", "006", "007", "008"]
+
+
+# ── Layer 1d (E8, 2026-10-29): the runner-startup check against the LIVE row ──
+# `alembic_version` is a row in the live DB, which no test in the deploy gate
+# can see (layer 1 has no DB; layer 2 points at a throwaway one). So the guard
+# is a runner-STARTUP check plus a pure test of the comparison it makes, and
+# `scripts/alembic-current-check.sh` is the owner's by-hand diagnostic after a
+# revert — NOT wired into skills/server-deploy/SKILL.md (a protected path).
+
+def test_migration_gap_pure():
+    from src.runner.main import migration_gap
+    msg = migration_gap("009", {"001", "002", "003", "004", "005", "006", "007", "008"})
+    assert msg and "009" in msg and "downgrade -1" in msg and "possible_bad_rollback" in msg
+    assert migration_gap("008", set(_disk_chain())) is None
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_migration_gap_cannot_tell_is_not_a_failure(value):
+    # A fresh DB (no alembic_version row) or an unreadable table must NOT stop
+    # the runner: "cannot tell" is a warning, "the DB is ahead of disk" is the
+    # refusal. Getting this backwards would make an empty database unbootable.
+    from src.runner.main import migration_gap
+    assert migration_gap(value, {"001"}) is None
+
+
+def test_startup_check_refuses_unknown_revision():
+    import inspect
+    from src.runner import main as main_mod
+    src = inspect.getsource(main_mod._check_alembic_history)
+    assert "possible_bad_rollback" in src                # the kind §9 names (the notice ROW is Phase 2)
+    assert "alembic_version" in src and "ScriptDirectory" in src
+    assert "SystemExit" in src or "sys.exit" in src     # fail-closed, not a log line
+    # "cannot tell" is tolerated: the whole probe sits in a try that logs and returns.
+    assert "except Exception" in src
+    # Ordering in main(): credentials, then the vendor-key assertion (E7, inside
+    # _check_subscription_auth), then migration history — cheapest and most fatal first.
+    main_src = inspect.getsource(main_mod.main)
+    assert main_src.index("_check_subscription_auth()") < main_src.index("_check_alembic_history()")
+
+
+async def test_startup_check_exits_on_a_gap_and_boots_on_cannot_tell(monkeypatch):
+    from src.runner import main as main_mod
+
+    class _S:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self):
+            return self
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, stmt):
+            if isinstance(self.value, Exception):
+                raise self.value
+            v = self.value
+            return type("R", (), {"scalar": lambda self_: v})()
+
+    # The live row names a revision with no script → refuse.
+    monkeypatch.setattr(main_mod, "async_session", _S("999"))
+    with pytest.raises(SystemExit):
+        await main_mod._check_alembic_history()
+    # The live row is the head → boot.
+    monkeypatch.setattr(main_mod, "async_session", _S(_disk_chain()[-1]))
+    await main_mod._check_alembic_history()
+    # No table / unreachable DB → "cannot tell" → boot (never block an empty DB).
+    monkeypatch.setattr(main_mod, "async_session", _S(RuntimeError("relation does not exist")))
+    await main_mod._check_alembic_history()
+    monkeypatch.setattr(main_mod, "async_session", _S(None))
+    await main_mod._check_alembic_history()
+
+
+def test_alembic_current_check_script_invariants():
+    path = REPO / "scripts" / "alembic-current-check.sh"
+    r = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    src = path.read_text()
+    assert "pipenv run" not in src                       # §4: never pipenv in a by-hand/launchd script
+    assert 'VENV_PY="${VENV_PY:-' in src and "pipenv --venv" in src
+    assert "-m alembic current" in src and "alembic/versions" in src
+    assert "downgrade -1" in src                          # the rule, printed at the moment it matters
+    assert "exit 2" in src and "exit 1" in src           # 0 ok · 1 mismatch · 2 cannot tell
+    # cd to the project dir BEFORE the interpreter guard probe (the probe imports src.config)
+    assert src.index('cd "$PROJECT_DIR"') < src.index("import src.config")
+    # Not wired into the protected executor skill.
+    assert "alembic-current-check" not in (REPO / "skills" / "server-deploy" / "SKILL.md").read_text()
+
+
+@pytest.mark.skipif(not _db_tests_enabled(),
+                    reason="opt-in: set AI_SERVER_RUN_DB_TESTS=1 (needs local Postgres)")
+def test_configured_db_current_revision_has_a_script():
+    # The live-DB form of the rule — what scripts/alembic-current-check.sh does by hand.
+    import asyncio
+    from sqlalchemy import text
+    from src.db import async_session
+
+    async def _current():
+        async with async_session() as s:
+            return (await s.execute(text("SELECT version_num FROM alembic_version"))).scalar()
+
+    current = asyncio.run(_current())
+    assert current in set(_disk_chain()), f"alembic_version={current} has no script on disk"

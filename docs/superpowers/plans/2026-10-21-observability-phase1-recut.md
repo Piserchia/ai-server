@@ -365,7 +365,7 @@ Fresh reviewer over `git diff main...observability/phase-1` (four dimensions: ru
 - **Files**: `src/runner/main.py` (pure `migration_gap(db_revision, disk_revisions) -> str | None`; `_check_alembic_history()` after `_check_subscription_auth()` in `main()` :1770 — the live `alembic_version` must name a revision with a script on disk or the runner refuses to start with `possible_bad_rollback` (`logger.error` + `SystemExit(1)`; the notice row is Phase 2); `from collections.abc import Iterable`), `scripts/alembic-current-check.sh` (owner diagnostic, exit 0/1/2, venv resolution per §4, **not** wired into `server-deploy/SKILL.md`), `tests/test_migrations.py` append layer 1d (`test_migration_gap_pure`, `test_startup_check_refuses_unknown_revision`, `test_alembic_current_check_script_invariants`, one opt-in DB test), SYSTEM.md script row after `backup.sh` (:64), runner/db/hosting CHANGELOGs, runner CONTEXT startup-hook list.
 - **Gotcha**: on the dev box `settings.server_root` is prod, so a dev-launched check walks prod's `alembic/versions` — never launch the runner from dev (§4). Under launchd `KeepAlive`, `SystemExit(1)` restart-loops; `healthcheck-all.sh` surfaces it and `notify send` DMs it (A7).
 - **Size**: S–M.
-- [ ] Steps: S1 → S6.
+- [x] Steps: S1 → S6 — **built 2026-10-29** (7 layer-1d tests + the opt-in live-DB check; the startup check is driven with a fake session for the three outcomes). Notes: runner + db + hosting CHANGELOG 2026-10-29.
 
 ### E9 — Dev `commit-msg` protected-path guard
 

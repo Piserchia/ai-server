@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E8: alembic runner-startup check + the owner diagnostic script
+
+**Agent task**: Observability Phase 1 Tier B E8 (recut plan; design of record P0 plan Task 18 steps b–d — the manifest itself landed in A1; spec §9 rollback paragraph).
+**Files changed**: `src/runner/main.py` — pure `migration_gap(db_revision, disk_revisions) -> str | None` (None = fine OR "cannot tell": an empty/absent revision never blocks a boot; a revision with no script on disk is the `possible_bad_rollback` message with the `alembic downgrade -1` rule) and `_check_alembic_history()` — `ScriptDirectory` walk vs `SELECT version_num FROM alembic_version`, any probe error logs and boots, a real gap `logger.error` + `SystemExit(1)`; called in `main()` right after `_check_subscription_auth()` (credentials, the vendor-key assertion, then migration history — cheapest and most fatal first). `scripts/alembic-current-check.sh` (new; owner diagnostic, exit 0/1/2, venv per §4, NOT wired into the protected `server-deploy` skill). `tests/test_migrations.py` layer 1d (the pure function incl. the three "cannot tell" shapes; the startup check driven with a fake session — exits on `999`, boots on the head, boots on "no table"; the `main()` ordering by source; the script invariants; one opt-in live-DB check).
+**Why**: `alembic_version` is a row in the LIVE DB that no test in the deploy gate can see; a revert that deletes a migration file leaves the on-disk chain walkable and the DB ahead of it — the next `alembic upgrade head` fails mid-incident. The refusal IS the alarm: launchd restarts the runner, `healthcheck-all.sh` sees it down and DMs. The `notice(kind=possible_bad_rollback)` row is Phase 2.
+**Side effects**: a runner whose DB names an unknown revision refuses to start (never happened yet; prod is at 008 with 008 on disk). On the dev box `settings.server_root` is prod, so a dev-launched check walks prod's `alembic/versions` — never launch the runner from dev (§4).
+
 ## 2026-10-29 — E7: telemetry off on every Claude subprocess; the runner refuses to start with a planted key; utility `model_usage` audited
 
 **Agent task**: Observability Phase 1 Tier B E7 (recut plan; design of record P0 plan Task 17 + E7 Deltas; spec §2.4/§3, §6, §8 exit rows 7–8).

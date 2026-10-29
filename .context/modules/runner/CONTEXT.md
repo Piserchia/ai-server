@@ -128,7 +128,7 @@ MCP servers are injected based on skill name (`_NEEDS_PROJECTS_MCP`,
 
 ## Auth
 
-Subscription only. The runner calls `_check_subscription_auth()` on startup and
+Subscription only. The runner calls `_check_subscription_auth()` on startup (which since E7 also refuses any vendor/auth key in `os.environ`, and is followed by E8's `_check_alembic_history()` — a live `alembic_version` with no script on disk is `possible_bad_rollback`, exit 1; "cannot tell" boots) and
 refuses to start if `ANTHROPIC_API_KEY` is set or no Claude Code CLI is
 resolvable. The Agent SDK ships a bundled CLI inside its package
 (`claude_agent_sdk/_bundled/claude`) — a system `claude` install is a fallback,

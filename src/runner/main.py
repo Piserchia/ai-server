@@ -30,6 +30,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 import structlog
@@ -138,6 +139,59 @@ def _check_subscription_auth() -> None:
 
     # A logged-in status is harder to probe reliably without invoking a full request,
     # so we defer the real auth check to the first session — which will fail visibly.
+
+
+# ── E8: alembic history vs disk — the rollback rule as a startup check ────────
+
+
+def migration_gap(db_revision: str | None, disk_revisions: Iterable[str]) -> str | None:
+    """Pure. A message when the DB's current revision has no script on disk.
+
+    None means "fine" OR "cannot tell": a fresh database has no alembic_version
+    row, and refusing to boot on that would make an empty DB unbootable. The
+    refusal case is narrow — the DB is AHEAD of the scripts on disk, which is
+    exactly what a `git revert` of a migration file leaves behind and what
+    breaks the next `alembic upgrade head` mid-incident (spec §9 rollback rule;
+    `alembic/applied_history.txt` + tests/test_migrations.py are the gate-side
+    belt, this is the live-row belt no test can see).
+    """
+    rev = (db_revision or "").strip()
+    if not rev:
+        return None
+    if rev in set(disk_revisions):
+        return None
+    return (f"possible_bad_rollback: alembic_version={rev} has no script under "
+            f"alembic/versions/. A revert removed a migration file. Restore it; if the "
+            f"migration itself must go, run `alembic downgrade -1` on this DB BEFORE "
+            f"removing the file (spec §9 rollback rule).")
+
+
+async def _check_alembic_history() -> None:
+    """Refuse to start when the live `alembic_version` is ahead of the scripts
+    on disk. Fail-closed on a real gap; tolerant of "cannot tell" (no table,
+    no row, an alembic env that will not load). The refusal IS the alarm:
+    launchd restarts the runner, `healthcheck-all.sh` sees it down and DMs
+    through `notify send`. The `notice(kind=possible_bad_rollback)` ROW is
+    Phase 2 — this is the belt that exists in Phase 1."""
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import text
+
+        cfg = Config(str(settings.server_root / "alembic.ini"))
+        cfg.set_main_option("script_location", str(settings.server_root / "alembic"))
+        script = ScriptDirectory.from_config(cfg)
+        on_disk = {r.revision for r in script.walk_revisions()}
+        async with async_session() as s:
+            current = (await s.execute(
+                text("SELECT version_num FROM alembic_version"))).scalar()
+    except Exception as exc:  # noqa: BLE001 — "cannot tell" never blocks a boot
+        logger.warning("alembic history check skipped (cannot tell): %s", exc)
+        return
+    gap = migration_gap(current, on_disk)
+    if gap:
+        logger.error("%s", gap)
+        raise SystemExit(1)
 
 
 # ── Job loop ────────────────────────────────────────────────────────────────
@@ -2117,6 +2171,9 @@ async def main() -> int:
     import logging
     logging.basicConfig(level=logging.INFO)
     _check_subscription_auth()
+    # E8: credentials first, then the vendor-key assertion (inside the check
+    # above), then migration history — cheapest and most fatal first.
+    await _check_alembic_history()
     logger.info(
         "runner starting",
         root=str(settings.server_root),

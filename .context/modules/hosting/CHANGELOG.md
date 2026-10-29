@@ -1,5 +1,9 @@
 # Changelog: hosting
 
+## 2026-10-29 — E8: scripts/alembic-current-check.sh (owner-run diagnostic)
+
+- New `scripts/alembic-current-check.sh`: `alembic current` must name a revision with a script under `alembic/versions/` — exit 0 ok · 1 mismatch (prints the `downgrade -1` rule) · 2 cannot tell; venv resolved per §4 (never `pipenv run`); run by hand after a migration revert. NOT wired into `skills/server-deploy/SKILL.md` (protected) — the pytest manifest tests and the runner's own startup check are the belts.
+
 ## 2026-10-29 — E7: service plists carry the telemetry-off flags; run.sh stops exporting .env
 
 - `scripts/install-launchd.sh` — the service plist template's `EnvironmentVariables` gains `DISABLE_ERROR_REPORTING=1` and `DISABLE_TELEMETRY=1` (the timer plists had them since C1); never a credential (pinned by `tests/test_claude_env.py::test_installer_never_exports_credentials`). Reaches prod on the next full install (runbook).
