@@ -25,7 +25,9 @@ from claude_agent_sdk import (
     query,
 )
 
+from src import audit_log
 from src.config import settings
+from src.runner.claude_env import claude_subprocess_env, log_utility_model_usage
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,17 @@ def build_catalog_with_descriptions(entries: list[tuple[str, str]]) -> str:
     )
 
 
+def _audit_utility_model_usage(call: str, requested: str, message: object) -> None:
+    """E7 (spec §9 exit: `model_usage` on utility calls lists only the
+    requested model): log + audit a second family under job id "utility";
+    never changes the call's outcome."""
+    model_usage = getattr(message, "model_usage", None) or {}
+    extra = log_utility_model_usage(call, requested=requested, model_usage=model_usage)
+    if extra:
+        audit_log.append("utility", "utility_model_usage", call=call, requested=requested,
+                         served_models=sorted(model_usage))
+
+
 async def llm_route(description: str) -> tuple[str, float]:
     """Route an ambiguous description via the utility model. Returns (skill, confidence).
 
@@ -151,6 +164,7 @@ async def llm_route(description: str) -> tuple[str, float]:
         allowed_tools=[],
         max_turns=2,
         output_format=ROUTE_OUTPUT_FORMAT,
+        env=claude_subprocess_env(),          # E7: telemetry off on every subprocess
     )
 
     final_text = ""
@@ -163,6 +177,7 @@ async def llm_route(description: str) -> tuple[str, float]:
                         final_text += block.text
             elif isinstance(message, ResultMessage):
                 structured = message.structured_output
+                _audit_utility_model_usage("router", options.model or "", message)
     except Exception as exc:  # noqa: BLE001
         logger.warning("llm router SDK error: %s", exc)
         return "", 0.0

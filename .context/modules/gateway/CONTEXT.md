@@ -9,9 +9,10 @@ the single enqueue/cancel/lookup helper.
 
 - `src/gateway/web.py` — FastAPI app on `localhost:8080`. REST (`/api/jobs`) +
   HTMX dashboard shell at `/`.
-- `src/gateway/telegram_bot.py` — python-telegram-bot process with 9 commands.
+- `src/gateway/telegram_bot.py` — python-telegram-bot process (commands listed under /help).
 - `src/gateway/jobs.py` — shared helpers: `enqueue_job`, `cancel_job`,
-  `find_job_by_prefix`.
+  `find_job_by_prefix`, and (E3, 2026-10-29) the ONE durable cancel:
+  `cancel_action_for_status`, `remove_from_queue`, `cancel_job_durable(job, *, stage)`.
 
 ## Public interface
 
@@ -34,6 +35,9 @@ the single enqueue/cancel/lookup helper.
   `scheduler`, everything else → system/<created_by>; refs clipped to 64, an
   empty ref is `None`). Called by `enqueue_job` since A2.
 - `cancel_job(job_id)` — publishes to `jobs:cancel`
+- `cancel_job_durable(job, *, stage) -> "cancelled_queued" | "cancel_requested" | "already_terminal"` (E3; D-P1-4): queued/deferred → `LREM jobs:queue` + a guarded `UPDATE … WHERE status IN (queued, deferred)` to `cancelled` with `terminal_reason="interrupted"`, `error_message="cancelled by user (<stage>)"`, `completed_at`, one `job_cancelled{stage}` audit row (rowcount 0 → `already_terminal`, nothing written); running → `cancel_job` publish (the runner's listener stamps the same vocabulary with `stage="running"`); anything else → no-op. Sites: the task Cancel button (`button`), `/cancel <prefix>` (`telegram`), `DELETE /api/jobs/{id}` (`api`), `/clear` (`cleared`, E4). `cancel_action_for_status(status)` and `remove_from_queue(job_id) -> int` are its pure/Redis halves.
+- Telegram (E4): `/clear` previews counts and asks — `clear_confirm:<token>` (120 s, single use, `clear_token_valid`) runs `_do_clear()`, which routes every queued/deferred/running job through `cancel_job_durable(stage="cleared")`, fails open tasks and flushes `jobs:queue`; `clear_abort:0` cancels the card.
+- Telegram (E3): `/cancel <prefix>` (`cmd_cancel`, `format_cancel_reply` — four replies), `/proposals` (`cmd_proposals`: `runner.proposals.list_pending_proposals(15)` as plain text), `/status <prefix>` (A6's `format_job_status`); `/rate` is gone from `/help`, `/jobs` and the done DM (the `rate:` callback and `POST /api/jobs/{id}/rate` stay).
 - `find_job_by_prefix(prefix) -> Job | None` — accepts 8-char prefix or full UUID
 - FastAPI: `/health`, `/api/jobs` (GET/POST), `/api/jobs/{id}` (GET/DELETE),
   `/api/jobs/{id}/rate` (POST), `/api/jobs/{id}/stream` (SSE),

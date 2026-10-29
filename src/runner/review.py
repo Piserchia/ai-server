@@ -24,6 +24,7 @@ from claude_agent_sdk import (
 
 from src import audit_log
 from src.config import settings
+from src.runner.claude_env import claude_subprocess_env
 
 logger = logging.getLogger(__name__)
 
@@ -497,6 +498,7 @@ async def run_code_review(
         # line of the diff. The reviewer needs none of them: the prompt
         # carries the diff and the system prompt carries the instructions.
         setting_sources=[],
+        env=claude_subprocess_env(),          # E7: telemetry off on every subprocess
     )
 
     final_text = ""

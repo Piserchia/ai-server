@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E2: `DEFAULT_REQUIRED_TOOLS`; `AskUserQuestion` leaves the default tool list
+
+**Agent task**: Observability Phase 1 Tier B E2 (recut plan; design of record P0 plan Task 10).
+**Files changed**: `src/registry/skills.py` — `DEFAULT_REQUIRED_TOOLS: tuple[str, ...] = ("Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch")` above `SkillConfig`; the dataclass default (`default_factory=lambda: list(DEFAULT_REQUIRED_TOOLS)`) and the loader fallback both read it. `tests/test_default_tools.py` (6).
+**Why**: spec §3/§9 — nothing consumes `AskUserQuestion` headless, so a session that calls it hangs in `running` (TROUBLESHOOTING "Root cause #5"). Three copies of the eight-plus-one list were one definition waiting to drift.
+**Side effects**: a skill with no `required_tools:` line, and the generic no-skill task, no longer get `AskUserQuestion`; the 7 skills that declare it explicitly (incl. the protected `skills/new-skill/SKILL.md`) are untouched — whether they should keep it is an owner question, not this task. Subagents of skills without `required_tools` lose it too (`runner/agents.py` reads `cfg.required_tools`) — intended.
+
 ## 2026-10-21 — D1: `Manifest.env_required` is READ (was ignored since the loader was born)
 
 **Agent task**: Observability Phase 1 re-cut plan D1 (P0 plan Task 21 Step 3).

@@ -10,7 +10,6 @@ from src.runner.events import (
     _error_signature,
     _should_trigger_skill_diagnose,
     _should_trigger_project_diagnose,
-    _should_trigger_idle_review,
     event_loop,
     should_trip_breaker,
 )
@@ -168,28 +167,62 @@ class TestProjectDiagnose:
         assert result == []
 
 
-class TestIdleQueueReview:
-    def test_idle_queue_no_prior_review(self):
-        assert _should_trigger_idle_review(0, None) is True
+class TestTheAutonomousServerPatchDispatcherIsGone:
+    """E5 (spec §4.3, §6): the idle-queue `review-and-improve` trigger — the one
+    place the fleet dispatched a server-patching retrospective on its own —
+    is removed unconditionally. No self-improvement loop until the Phase-4
+    `retro`; the interim is the CostCard plus an owner-run
+    `/task review-and-improve`. The skill file itself stays."""
 
-    def test_idle_queue_old_review(self):
-        assert _should_trigger_idle_review(0, NOW - timedelta(hours=25)) is True
+    def test_the_autonomous_server_patch_dispatcher_is_gone(self):
+        import inspect
+        src = inspect.getsource(events_mod)
+        assert not hasattr(events_mod, "_check_idle_queue_review")
+        assert not hasattr(events_mod, "_should_trigger_idle_review")
+        assert not hasattr(events_mod, "REVIEW_COOLDOWN_HOURS")
+        assert "review-and-improve" not in src
+        assert "_check_idle_queue_review" not in inspect.getsource(event_loop)
 
-    def test_idle_queue_recent_review(self):
-        assert _should_trigger_idle_review(0, NOW - timedelta(hours=12)) is False
+    def test_alpha_drainer_survives_the_review_trigger_removal(self, monkeypatch):
+        # The flywheel drainer sat beside the review trigger under the same
+        # breaker exemption; it must keep its predicate (idle queue, stale
+        # governor, under the daily valve, 4 h cooldown) and its enqueue.
+        from types import SimpleNamespace
+        assert events_mod.ALPHA_IDLE_COOLDOWN_HOURS == 4
+        assert "_check_idle_queue_alpha" in __import__("inspect").getsource(event_loop)
+        enqueued = []
 
-    def test_busy_queue_no_trigger(self):
-        assert _should_trigger_idle_review(3, None) is False
+        async def fake_enqueue(desc, **kw):
+            enqueued.append(kw)
+            return SimpleNamespace(id="x")
 
-    def test_busy_queue_old_review(self):
-        assert _should_trigger_idle_review(1, NOW - timedelta(hours=30)) is False
+        class _S:
+            def __init__(self):
+                self.calls = 0
 
-    def test_exactly_at_cooldown_triggers(self):
-        # Exactly 24h ago: the cooldown has elapsed, so trigger
-        assert _should_trigger_idle_review(0, NOW - timedelta(hours=24)) is True
+            def __call__(self):
+                return self
 
-    def test_just_under_cooldown(self):
-        assert _should_trigger_idle_review(0, NOW - timedelta(hours=23, minutes=59)) is False
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                self.calls += 1
+                # active count 0 → stale governor (no row) → 0 alpha jobs
+                if self.calls == 2:
+                    return SimpleNamespace(first=lambda: None)
+                return SimpleNamespace(scalar=lambda: 0)
+
+        monkeypatch.setattr(events_mod, "async_session", _S())
+        monkeypatch.setattr(events_mod, "enqueue_job", fake_enqueue)
+        asyncio.run(events_mod._check_idle_queue_alpha())
+        assert len(enqueued) == 1
+        assert enqueued[0]["kind"] == "alpha-governor"
+        assert enqueued[0]["payload"] == {"project_slug": "atlas"}
+        assert enqueued[0]["created_by"] == "event-trigger:idle-queue"
 
 
 class TestErrorSignature:
@@ -297,9 +330,10 @@ class TestBreakerConstants:
 
 
 class TestEventLoopBreakerGating:
-    """One-cycle event_loop runs with all four checks monkeypatched (no
+    """One-cycle event_loop runs with all three checks monkeypatched (no
     DB/Redis): the breaker must gate skill-failure + project-health spawning
-    but never the idle-queue review, and a breaker crash must fail open."""
+    but never the idle-queue alpha drainer, and a breaker crash must fail
+    open. (The idle-queue review trigger was removed by E5.)"""
 
     def _run_cycle(self, monkeypatch, breaker):
         calls: list[str] = []
@@ -311,9 +345,6 @@ class TestEventLoopBreakerGating:
         async def fake_project():
             calls.append("project")
 
-        async def fake_idle():
-            calls.append("idle")
-
         async def fake_idle_alpha():
             calls.append("idle_alpha")
             shutdown.set()  # end the loop after one full cycle (last check in the loop)
@@ -321,28 +352,27 @@ class TestEventLoopBreakerGating:
         monkeypatch.setattr(events_mod, "_check_circuit_breaker", breaker)
         monkeypatch.setattr(events_mod, "_check_skill_failures", fake_skill)
         monkeypatch.setattr(events_mod, "_check_project_health", fake_project)
-        monkeypatch.setattr(events_mod, "_check_idle_queue_review", fake_idle)
         monkeypatch.setattr(events_mod, "_check_idle_queue_alpha", fake_idle_alpha)
         asyncio.run(event_loop(shutdown))
         return calls
 
-    def test_breaker_active_skips_spawn_checks_not_idle_review(self, monkeypatch):
+    def test_breaker_active_skips_spawn_checks_not_the_alpha_drainer(self, monkeypatch):
         async def breaker():
             return True
 
-        assert self._run_cycle(monkeypatch, breaker) == ["idle", "idle_alpha"]
+        assert self._run_cycle(monkeypatch, breaker) == ["idle_alpha"]
 
     def test_breaker_inactive_runs_all_checks(self, monkeypatch):
         async def breaker():
             return False
 
-        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle", "idle_alpha"]
+        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle_alpha"]
 
     def test_breaker_crash_fails_open_and_loop_survives(self, monkeypatch):
         async def breaker():
             raise RuntimeError("redis down")
 
-        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle", "idle_alpha"]
+        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle_alpha"]
 
 
 class TestEventLoopStartup:

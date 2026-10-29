@@ -30,6 +30,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 import structlog
@@ -86,9 +87,32 @@ def _check_subscription_auth() -> None:
     """
     if os.environ.get("ANTHROPIC_API_KEY"):
         print(
-            "ERROR: ANTHROPIC_API_KEY is set in the environment. This server is "
-            "configured for subscription auth; unset it and restart.\n"
+            "ERROR: ANTHROPIC_API_KEY is set in the environment — INV-3: this server "
+            "runs on subscription auth only; unset it and restart.\n"
             "  unset ANTHROPIC_API_KEY",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # E7 (spec §6): vendor and auth keys live in .env and are read by Settings
+    # in-process only. Anything in os.environ is inherited by every Claude
+    # subprocess and every Bash child of every job — refuse to start rather
+    # than leak. FAIL-CLOSED on the whole set: CLAUDE_CODE_OAUTH_TOKEN,
+    # ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are exactly what outranks the
+    # Keychain /login. Named Anthropic keys, never a blanket ANTHROPIC_* prefix.
+    from src.runner.claude_env import vendor_keys_in
+    leaked = vendor_keys_in(os.environ)
+    if leaked:
+        print(
+            f"ERROR: forbidden credentials in the runner environment: {', '.join(leaked)} "
+            "(INV-3).\n"
+            "  Every one of these is inherited by each Claude subprocess and by every Bash\n"
+            "  call in every skill; CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_AUTH_TOKEN and\n"
+            "  ANTHROPIC_BASE_URL also outrank the Keychain /login (spec §6).\n"
+            "  Remove them from the launchd plist / shell profile and restart; vendor keys\n"
+            "  belong in .env (Settings reads them in-process; pydantic-settings does not\n"
+            "  export). If you launched through `pipenv run`, set PIPENV_DONT_LOAD_ENV=1 —\n"
+            "  `pipenv run` copies .env into os.environ (scripts/run.sh does this already).",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -115,6 +139,59 @@ def _check_subscription_auth() -> None:
 
     # A logged-in status is harder to probe reliably without invoking a full request,
     # so we defer the real auth check to the first session — which will fail visibly.
+
+
+# ── E8: alembic history vs disk — the rollback rule as a startup check ────────
+
+
+def migration_gap(db_revision: str | None, disk_revisions: Iterable[str]) -> str | None:
+    """Pure. A message when the DB's current revision has no script on disk.
+
+    None means "fine" OR "cannot tell": a fresh database has no alembic_version
+    row, and refusing to boot on that would make an empty DB unbootable. The
+    refusal case is narrow — the DB is AHEAD of the scripts on disk, which is
+    exactly what a `git revert` of a migration file leaves behind and what
+    breaks the next `alembic upgrade head` mid-incident (spec §9 rollback rule;
+    `alembic/applied_history.txt` + tests/test_migrations.py are the gate-side
+    belt, this is the live-row belt no test can see).
+    """
+    rev = (db_revision or "").strip()
+    if not rev:
+        return None
+    if rev in set(disk_revisions):
+        return None
+    return (f"possible_bad_rollback: alembic_version={rev} has no script under "
+            f"alembic/versions/. A revert removed a migration file. Restore it; if the "
+            f"migration itself must go, run `alembic downgrade -1` on this DB BEFORE "
+            f"removing the file (spec §9 rollback rule).")
+
+
+async def _check_alembic_history() -> None:
+    """Refuse to start when the live `alembic_version` is ahead of the scripts
+    on disk. Fail-closed on a real gap; tolerant of "cannot tell" (no table,
+    no row, an alembic env that will not load). The refusal IS the alarm:
+    launchd restarts the runner, `healthcheck-all.sh` sees it down and DMs
+    through `notify send`. The `notice(kind=possible_bad_rollback)` ROW is
+    Phase 2 — this is the belt that exists in Phase 1."""
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import text
+
+        cfg = Config(str(settings.server_root / "alembic.ini"))
+        cfg.set_main_option("script_location", str(settings.server_root / "alembic"))
+        script = ScriptDirectory.from_config(cfg)
+        on_disk = {r.revision for r in script.walk_revisions()}
+        async with async_session() as s:
+            current = (await s.execute(
+                text("SELECT version_num FROM alembic_version"))).scalar()
+    except Exception as exc:  # noqa: BLE001 — "cannot tell" never blocks a boot
+        logger.warning("alembic history check skipped (cannot tell): %s", exc)
+        return
+    gap = migration_gap(current, on_disk)
+    if gap:
+        logger.error("%s", gap)
+        raise SystemExit(1)
 
 
 # ── Job loop ────────────────────────────────────────────────────────────────
@@ -652,11 +729,17 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # ROUTER_PROVIDERS_ENABLED, or one with no executor — terminal, NOT
         # escalated (a bigger model would re-refuse the same policy). Raised
         # by session._resolve_model before any clone or process exists
-        # (T1, 2026-10-21; C12 fail-closed).
+        # (T1, 2026-10-21; C12 fail-closed) — or, as the E1 subclass
+        # `SettingsOverrideRefused`, after the clone and before the SDK (the
+        # session keeps that clone for forensics).
         reason = str(exc)
         audit_log.append(str(job_id), "provider_refused",
                          provider=exc.provider, model=exc.model_id, raw=exc.raw,
-                         reason=exc.reason)
+                         reason=exc.reason,
+                         # E1 (additive): the settings-override subclass names
+                         # the key, the file and whether it was an auth key.
+                         key=getattr(exc, "key", None), file=getattr(exc, "file", None),
+                         auth_key=getattr(exc, "auth_key", None))
         audit_log.append(str(job_id), "job_failed", error=reason,
                          error_category="provider_refused", terminal_reason="provider_refused")
         await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}",
@@ -2051,11 +2134,16 @@ async def _cancel_listener() -> None:
                     continue
                 did = await session_mod.interrupt(job_id)
                 if did:
-                    audit_log.append(str(job_id), "job_cancelled")
+                    # E3 / D-P1-4: the same vocabulary as gateway.jobs.
+                    # cancel_job_durable — one `job_cancelled{stage}` shape,
+                    # terminal_reason "interrupted" (never a 16th value).
+                    audit_log.append(str(job_id), "job_cancelled", stage="running")
                     async with session_scope() as s:
                         await s.execute(
                             update(Job).where(Job.id == job_uuid).values(
                                 status=JobStatus.cancelled.value,
+                                terminal_reason="interrupted",
+                                error_message="cancelled by user (running)",
                                 completed_at=datetime.now(timezone.utc),
                             )
                         )
@@ -2083,6 +2171,9 @@ async def main() -> int:
     import logging
     logging.basicConfig(level=logging.INFO)
     _check_subscription_auth()
+    # E8: credentials first, then the vendor-key assertion (inside the check
+    # above), then migration history — cheapest and most fatal first.
+    await _check_alembic_history()
     logger.info(
         "runner starting",
         root=str(settings.server_root),

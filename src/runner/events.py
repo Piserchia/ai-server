@@ -15,7 +15,7 @@ self-diagnose jobs were event-spawned while self-diagnose itself was broken:
 "'Server' object has no attribute 'list_tools'"). The loop then sets
 KEY_EVENTS_BREAKER (TTL 30 min), enqueues exactly ONE self-diagnose naming
 the signature, and skips all event-trigger spawning (skill-failure,
-project-health, correlated) — but not the idle-queue review check — while
+project-health, correlated) — but not the idle-queue alpha drainer — while
 the key exists.
 """
 
@@ -37,7 +37,6 @@ POLL_INTERVAL_SECONDS = 60
 SKILL_FAILURE_WINDOW_MINUTES = 10
 SKILL_FAILURE_THRESHOLD = 2
 PROJECT_UNHEALTHY_MINUTES = 20
-REVIEW_COOLDOWN_HOURS = 24
 MULTI_SKILL_CORRELATION_WINDOW_MINUTES = 5
 MULTI_SKILL_CORRELATION_THRESHOLD = 3
 BREAKER_WINDOW_MINUTES = 10
@@ -342,23 +341,12 @@ async def _check_project_health() -> None:
         logger.warning("event-triggered self-diagnose for project %s", slug)
 
 
-def _should_trigger_idle_review(
-    queued_or_running: int,
-    last_review_at: datetime | None,
-    cooldown_hours: int = REVIEW_COOLDOWN_HOURS,
-) -> bool:
-    """
-    Pure function: return True if the queue is idle and review-and-improve
-    hasn't run recently enough. Maximizes subscription token usage during
-    idle periods.
-    """
-    if queued_or_running > 0:
-        return False
-    if last_review_at is None:
-        return True  # never run before
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)
-    return last_review_at < cutoff
-
+# E5 (spec §4.3, §6; 2026-10-29): the idle-queue retrospective trigger that
+# lived here — the one place the fleet dispatched a server-patching
+# retrospective skill on its own — is REMOVED unconditionally. No
+# self-improvement loop until the Phase-4 `retro`; the interim is the
+# CostCard plus the owner running that skill by hand with /task. The skill
+# file stays.
 
 ALPHA_IDLE_COOLDOWN_HOURS = 4
 ALPHA_DAILY_JOB_VALVE = 12  # server-side mirror of alpha-lab budget.yaml
@@ -429,37 +417,6 @@ async def _check_idle_queue_alpha() -> None:
         logger.info("idle-queue alpha-governor enqueued")
 
 
-async def _check_idle_queue_review() -> None:
-    """If queue is idle and review-and-improve hasn't run in 24h, enqueue one."""
-    async with async_session() as s:
-        # Count queued + running jobs (excluding review-and-improve itself)
-        result = await s.execute(
-            select(func.count())
-            .select_from(Job)
-            .where(Job.status.in_([JobStatus.queued.value, JobStatus.running.value]))
-        )
-        active_count = result.scalar() or 0
-
-        # Last review-and-improve completion
-        result = await s.execute(
-            select(Job.completed_at)
-            .where(Job.resolved_skill == "review-and-improve")
-            .where(Job.status == JobStatus.completed.value)
-            .order_by(Job.completed_at.desc())
-            .limit(1)
-        )
-        row = result.first()
-        last_review = row[0] if row else None
-
-    if _should_trigger_idle_review(active_count, last_review):
-        await enqueue_job(
-            "Idle-queue retrospective: analyze recent job data and propose improvements",
-            kind="review-and-improve",
-            created_by="event-trigger:idle-queue",
-        )
-        logger.info("idle-queue review-and-improve enqueued")
-
-
 async def event_loop(shutdown: asyncio.Event) -> None:
     """
     Fourth async task in the runner. Polls every 60 seconds for conditions
@@ -491,15 +448,10 @@ async def event_loop(shutdown: asyncio.Event) -> None:
             except Exception:
                 logger.exception("event loop: project health check error (non-fatal)")
 
-        # Idle-queue review is NOT gated by the breaker: it spawns on an idle
-        # queue, not on failures, so it can't amplify a failure storm.
-        try:
-            await _check_idle_queue_review()
-        except Exception:
-            logger.exception("event loop: idle queue review check error (non-fatal)")
-
-        # Idle-queue alpha drainer (flywheel): same breaker exemption and
-        # rationale as the review check above.
+        # Idle-queue alpha drainer (flywheel) is NOT gated by the breaker: it
+        # spawns on an idle queue, not on failures, so it can't amplify a
+        # failure storm. (The idle-queue retrospective trigger that sat here
+        # was removed by E5, 2026-10-29.)
         try:
             await _check_idle_queue_alpha()
         except Exception:

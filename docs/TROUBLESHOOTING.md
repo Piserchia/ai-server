@@ -497,7 +497,7 @@ If the SDK version is current but specific tools (WebSearch, WebFetch) still fai
 
 **Diagnostic**: audit log shows `tool_use` with `tool_name: AskUserQuestion`, job status stuck at `running` (not `awaiting_user`), no Telegram prompt arrives.
 
-**Status**: RESOLVED. `AskUserQuestion` was removed from all skills' `required_tools` lists. The `awaiting_user` job status exists in the runner but no skill currently uses it. If a future skill needs interactive clarification, it would need to re-add `AskUserQuestion` to its tools and wire the prompt through Telegram (not yet implemented).
+**Status**: RESOLVED. `AskUserQuestion` was removed from all skills' `required_tools` lists, and since 2026-10-29 (E2) from the DEFAULT list too — `registry.skills.DEFAULT_REQUIRED_TOOLS` feeds skills without a `required_tools:` line and the generic no-skill task, so a session can only call it if its skill declares it. The `awaiting_user` job status exists in the runner but no skill currently uses it. If a future skill needs interactive clarification, it would need to re-add `AskUserQuestion` to its tools and wire the prompt through Telegram (not yet implemented).
 
 ### Root cause #6: `audit_log.append()` `kind` parameter collision
 

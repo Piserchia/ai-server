@@ -1,5 +1,25 @@
 # Changelog: hosting
 
+## 2026-10-29 — E9 after the whole-branch review: rename/typechange bypass closed; the two auth files guarded by hunk
+
+- `scripts/install-dev-hooks.sh`: the installed hook now lists staged paths with `--no-renames --diff-filter=ACMRDT` — `git mv MISSION.md x` listed only the destination and a file→symlink typechange (`T`) was filtered out, so both passed with no trailer (reproduced by the reviewer; pinned end to end). `src/gateway/telegram_bot.py` joins the list (the chat-ID half of §M item 2), and for the two gateway files the hook counts them only when a staged hunk touches an auth-check line (`AUTH_LINES`: `_check_auth`, `_is_authorized`, `telegram_allowed_chat_ids`, `web_auth_token`, `HTTPBasic`, …) — a `JobOut`/route-body edit needs no trailer, so the trailer stays rare and meaningful instead of becoming a reflex `--no-verify`. The break-glass pointer now names `--no-verify` + runbook §8b (the god skill documents PROD's pre-commit bypass, a different hook). Re-armed in the dev checkout.
+
+## 2026-10-29 — E10: com.assistant.credential-canary timer (daily 06:50) + scripts/credential-canary.sh
+
+- `scripts/install-launchd.sh`: `install_timer "credential-canary" "scripts/credential-canary.sh"` at 06:50 local and the label in `TIMER_LABELS` (so `uninstall` removes it); the timer env block already carries `VENV_PY` + the two telemetry flags (C1). `scripts/credential-canary.sh` (new): venv per §4, `python -m src.runner.credential_canary --telemetry volumes/telemetry/credential_canary.json --timeout 180`, FAIL → `notify send --kind credential_canary --severity critical` (curl fallback), log `volumes/logs/credential-canary.log`. Reaches prod with `install-launchd.sh timers-only` (runbook §5).
+
+## 2026-10-29 — E9: scripts/install-dev-hooks.sh — the dev protected-path commit-msg guard
+
+- New `scripts/install-dev-hooks.sh`: `install` arms `.git/hooks/commit-msg` in the DEV checkout (honours `GIT_DIR`; idempotent marker block; appends to an existing hook, never overwrites; the CHANGELOG pre-commit hook is a separate file and untouched); `check <paths-file> <message-file>` is the pure decision — a staged diff touching a MISSION §M path is REFUSED unless the message carries `Approved-Protected-Path: ap-<id>`. The path list is §M's ten path-shaped items (incl. `.context/org/ORG.md` and `src/gateway/web.py`, the two the first cut missed), pinned two-way against MISSION.md by `tests/test_protected_paths_hook.py` (24, incl. a real `git init` + install + refused/allowed commit). Phase-1 limit printed by the hook: the id's SHAPE is checked; resolution against `approvals(kind=protected_path)` begins with the Phase-2 approvals migration (009). God break-glass = `--no-verify`, pushed in the same session. **Armed in the dev checkout 2026-10-29.** Owner-gated: D6's first half adds `.claude/settings.json`, `.claude/settings.local.json` and this script's list to §M — until then those three are not guarded (runbook §8b).
+
+## 2026-10-29 — E8: scripts/alembic-current-check.sh (owner-run diagnostic)
+
+- New `scripts/alembic-current-check.sh`: `alembic current` must name a revision with a script under `alembic/versions/` — exit 0 ok · 1 mismatch (prints the `downgrade -1` rule) · 2 cannot tell; venv resolved per §4 (never `pipenv run`); run by hand after a migration revert. NOT wired into `skills/server-deploy/SKILL.md` (protected) — the pytest manifest tests and the runner's own startup check are the belts.
+
+## 2026-10-29 — E7: service plists carry the telemetry-off flags; run.sh stops exporting .env
+
+- `scripts/install-launchd.sh` — the service plist template's `EnvironmentVariables` gains `DISABLE_ERROR_REPORTING=1` and `DISABLE_TELEMETRY=1` (the timer plists had them since C1); never a credential (pinned by `tests/test_claude_env.py::test_installer_never_exports_credentials`). Reaches prod on the next full install (runbook).
+- `scripts/run.sh` — `_start_one <svc> env PIPENV_DONT_LOAD_ENV=1 pipenv run …`: `pipenv run` copies `.env` into `os.environ`, and the runner now refuses to start with a vendor key there (`main._check_subscription_auth`, E7); Settings reads `.env` in-process regardless.
 ## 2026-10-22 — backup.sh: the atlas probe names the maintenance database
 
 **Agent task**: Observability Phase 1 post-deploy verification (plan `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §8, C1 accept).

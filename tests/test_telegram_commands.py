@@ -236,7 +236,7 @@ class TestDoneDmText:
                              "codex/gpt-6-luna")
         assert text.startswith("Job `01234567` *completed* · `codex/gpt-6-luna`")
         assert "did the thing" in text
-        assert "/rate 01234567 1-5" in text
+        assert "/rate" not in text                     # E3: /rate never existed as a command
 
     def test_failed_names_lane_and_reason(self):
         text = _done_dm_text("0123456789abcdef", "failed", "",
@@ -245,7 +245,7 @@ class TestDoneDmText:
 
     def test_no_lane_is_the_pre_t7_text(self):
         text = _done_dm_text("0123456789abcdef", "completed", "sum", "")
-        assert text == "Job `01234567` *completed*\n\nsum\n\n💡 `/rate 01234567 1-5`"
+        assert text == "Job `01234567` *completed*\n\nsum"
 
 
 # ── handler-level: refusal replies, no job; /jobs rows; done DM lookup ──────
@@ -413,7 +413,7 @@ class TestDoneDmLookup:
         bot = SimpleNamespace(send_message=AsyncMock())
         jid = str(_uuid.uuid4())
         await tg._deliver_done(SimpleNamespace(bot=bot), 1, jid, {"status": "completed"})
-        assert bot.send_message.await_args.args[1] == f"Job `{jid[:8]}` *completed*\n\n💡 `/rate {jid[:8]} 1-5`"
+        assert bot.send_message.await_args.args[1] == f"Job `{jid[:8]}` *completed*"
 
 
 # ── A2: every launch persists its origin ──────────────────────────────────
@@ -517,3 +517,304 @@ class TestLaunchOrigin:
         kw = self.enqueue.await_args.kwargs
         assert kw["kind"] == "chat"
         assert (kw["origin_channel"], kw["origin_ref"]) == ("telegram", "5")
+
+
+# ── E3: ghost commands become real; one cancel semantics; /rate leaves the copy ──
+
+import uuid  # noqa: E402
+
+class TestCancelReply:
+    def test_replies(self):
+        from src.gateway.telegram_bot import format_cancel_reply
+        assert format_cancel_reply("cancelled_queued", "abcdef12") == "🚫 Job abcdef12 removed from the queue."
+        assert format_cancel_reply("cancel_requested", "abcdef12") == "🚫 Cancel sent to the runner for running job abcdef12."
+        assert format_cancel_reply("already_terminal", "abcdef12") == "Job abcdef12 is already finished — nothing to cancel."
+        assert format_cancel_reply("not_found", "abcdef12") == "No job matches abcdef12 (need a unique 8-char prefix)."
+        assert format_cancel_reply("???", "x") == format_cancel_reply("not_found", "x")
+
+
+class TestCmdCancel:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_usage_without_an_argument(self):
+        upd = _tg_update("/cancel")
+        await tg.cmd_cancel(upd, SimpleNamespace(args=[]))
+        assert "Usage: /cancel <job prefix>" in upd.message.reply_text.call_args.args[0]
+
+    async def test_resolves_the_prefix_and_routes_through_the_durable_path(self, monkeypatch):
+        job = SimpleNamespace(id=uuid.uuid4(), status="queued")
+        calls = []
+
+        async def fake_find(prefix):
+            return job if prefix == str(job.id)[:8] else None
+
+        async def fake_durable(j, *, stage):
+            calls.append((j.id, stage))
+            return "cancelled_queued"
+        monkeypatch.setattr(tg, "find_job_by_prefix", fake_find)
+        monkeypatch.setattr(tg, "cancel_job_durable", fake_durable)
+        upd = _tg_update("/cancel")
+        await tg.cmd_cancel(upd, SimpleNamespace(args=[str(job.id)[:8]]))
+        assert calls == [(job.id, "telegram")]
+        assert upd.message.reply_text.call_args.args[0] == \
+            f"🚫 Job {str(job.id)[:8]} removed from the queue."
+
+    async def test_unknown_prefix(self, monkeypatch):
+        async def fake_find(prefix):
+            return None
+        monkeypatch.setattr(tg, "find_job_by_prefix", fake_find)
+        upd = _tg_update("/cancel")
+        await tg.cmd_cancel(upd, SimpleNamespace(args=["zzzzzzzz"]))
+        assert "No job matches zzzzzzzz" in upd.message.reply_text.call_args.args[0]
+
+
+class TestCmdProposals:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_empty(self, monkeypatch):
+        from src.runner import proposals as proposals_mod
+
+        async def none(limit=50):
+            return []
+        monkeypatch.setattr(proposals_mod, "list_pending_proposals", none)
+        upd = _tg_update("/proposals")
+        await tg.cmd_proposals(upd, SimpleNamespace(args=[]))
+        assert upd.message.reply_text.call_args.args[0] == "No pending proposals."
+
+    async def test_lists_pending_rows_as_plain_text(self, monkeypatch):
+        from datetime import datetime, timezone
+        from src.runner import proposals as proposals_mod
+        rows = [SimpleNamespace(id=uuid.uuid4(), target_file="skills/x/SKILL.md",
+                                change_type="edit", outcome="pending",
+                                proposed_at=datetime(2026, 10, 29, tzinfo=timezone.utc))]
+
+        async def some(limit=50):
+            assert limit == 15
+            return rows
+        monkeypatch.setattr(proposals_mod, "list_pending_proposals", some)
+        upd = _tg_update("/proposals")
+        await tg.cmd_proposals(upd, SimpleNamespace(args=[]))
+        args, kwargs = upd.message.reply_text.call_args
+        assert args[0].startswith("Pending proposals (1):")
+        assert "skills/x/SKILL.md" in args[0]
+        assert "parse_mode" not in kwargs                 # plain text: paths carry `_`
+
+
+class TestHelpCopy:
+    def test_help_and_jobs_no_longer_advertise_rate(self):
+        import inspect
+        src = inspect.getsource(tg.cmd_help) + inspect.getsource(tg.cmd_jobs)
+        assert "/rate" not in src
+        help_src = inspect.getsource(tg.cmd_help)
+        assert "/cancel <prefix>" in help_src and "/proposals" in help_src
+        assert "/status <prefix>" in help_src
+
+    def test_ghost_commands_are_registered(self):
+        import inspect
+        src = inspect.getsource(tg.main)
+        for cmd in ('CommandHandler("cancel", cmd_cancel)', 'CommandHandler("proposals", cmd_proposals)'):
+            assert cmd in src
+
+    def test_done_dm_drops_the_rate_hint(self):
+        text = _done_dm_text("0123456789abcdef", "completed", "did the thing", "codex/gpt-6-luna")
+        assert "/rate" not in text and "did the thing" in text
+
+
+class TestStatusPrefix:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_status_prefix_renders_job(self, monkeypatch):
+        # Routing only: the renderer itself is A6's (tests/test_notify_bot.py).
+        row = _job_row(resolved_provider="anthropic", resolved_model="claude-opus-5",
+                       status="completed")
+        seen = []
+
+        async def fake_find(prefix):
+            seen.append(prefix)
+            return row
+        monkeypatch.setattr(tg, "find_job_by_prefix", fake_find)
+        monkeypatch.setattr(tg, "format_job_status", lambda j: f"RENDERED {j.id}")
+        upd = _tg_update("/status")
+        await tg.cmd_status(upd, SimpleNamespace(args=[str(row.id)[:8]]))
+        assert seen == [str(row.id)[:8]]
+        args, kwargs = upd.message.reply_text.call_args
+        assert args[0] == f"RENDERED {row.id}" and "parse_mode" not in kwargs
+
+
+# ── E4: /clear requires a confirm button ────────────────────────────────────
+
+class TestClearConfirm:
+    def test_token_valid_within_ttl(self):
+        from src.gateway.telegram_bot import clear_token_valid
+        assert clear_token_valid(("abcd1234", 1000.0), "abcd1234", 1050.0)
+
+    def test_token_expires(self):
+        from src.gateway.telegram_bot import clear_token_valid
+        assert not clear_token_valid(("abcd1234", 1000.0), "abcd1234", 1121.0)   # 121 s > 120
+        assert not clear_token_valid(("abcd1234", 1000.0), "zzzz0000", 1001.0)
+        assert not clear_token_valid(None, "abcd1234", 1001.0)
+        assert not clear_token_valid(("abcd1234", 1000.0), "abcd1234", 999.0)    # clock went back
+
+    def test_callbacks_fit_64_bytes(self):
+        cb = "clear_confirm:" + "a" * 8
+        assert len(cb.encode()) <= 64
+        assert tg._parse_callback(cb) == ("clear_confirm", "a" * 8, None)
+        assert tg._parse_callback("clear_abort:0") == ("clear_abort", "0", None)
+
+    def test_cmd_clear_no_longer_clears_directly(self):
+        import inspect
+        src = inspect.getsource(tg.cmd_clear)
+        assert "clear_confirm:" in src and "sql_update(Job)" not in src
+        assert "clear_token" in src
+
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_cmd_clear_previews_counts_and_arms_a_token(self, monkeypatch):
+        class _Counts:
+            def __init__(self):
+                self.n = iter([3, 2])
+
+            def __call__(self):
+                return self
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                v = next(self.n)
+                return SimpleNamespace(scalar=lambda: v)
+        monkeypatch.setattr(tg, "async_session", _Counts())
+        upd = _tg_update("/clear")
+        ctx = SimpleNamespace(args=[], bot_data={})
+        await tg.cmd_clear(upd, ctx)
+        args, kwargs = upd.message.reply_text.call_args
+        assert "3" in args[0] and "2" in args[0] and "Confirm within 120 s" in args[0]
+        token, issued = ctx.bot_data["clear_token"]
+        assert len(token) == 8
+        buttons = [b for row in kwargs["reply_markup"].inline_keyboard for b in row]
+        assert buttons[0].callback_data == f"clear_confirm:{token}"
+        assert buttons[1].callback_data == "clear_abort:0"
+        assert "3 job(s), 2 task(s)" in buttons[0].text
+
+    async def test_abort_leaves_queue(self, monkeypatch):
+        calls = []
+
+        async def fake_do_clear():
+            calls.append(1)
+            return (0, 0)
+        monkeypatch.setattr(tg, "_do_clear", fake_do_clear)
+        from tests.test_notify_bot import _button_update
+        upd = _button_update("clear_abort:0")
+        ctx = SimpleNamespace(bot_data={"clear_token": ("abcd1234", 0.0)})
+        await tg._handle_button(upd, ctx)
+        upd.callback_query.edit_message_text.assert_awaited_once_with("Clear aborted.")
+        assert calls == []
+
+    async def test_expired_confirm_does_not_clear(self, monkeypatch):
+        import time as _time
+        calls = []
+
+        async def fake_do_clear():
+            calls.append(1)
+            return (0, 0)
+        monkeypatch.setattr(tg, "_do_clear", fake_do_clear)
+        from tests.test_notify_bot import _button_update
+        upd = _button_update("clear_confirm:abcd1234")
+        ctx = SimpleNamespace(bot_data={"clear_token": ("abcd1234", _time.time() - 200)})
+        await tg._handle_button(upd, ctx)
+        text = upd.callback_query.edit_message_text.await_args.args[0]
+        assert "expired" in text and "/clear" in text
+        assert calls == []
+        # A wrong token is refused the same way, and a missing one too.
+        upd2 = _button_update("clear_confirm:zzzz0000")
+        ctx2 = SimpleNamespace(bot_data={"clear_token": ("abcd1234", _time.time())})
+        await tg._handle_button(upd2, ctx2)
+        assert "expired" in upd2.callback_query.edit_message_text.await_args.args[0]
+        assert calls == []
+
+    async def test_confirm_clears_through_the_durable_path(self, monkeypatch):
+        import time as _time
+        cancelled = []
+
+        async def fake_do_clear():
+            cancelled.append("ran")
+            return (3, 2)
+        monkeypatch.setattr(tg, "_do_clear", fake_do_clear)
+        from tests.test_notify_bot import _button_update
+        upd = _button_update("clear_confirm:abcd1234")
+        ctx = SimpleNamespace(bot_data={"clear_token": ("abcd1234", _time.time() - 5)})
+        await tg._handle_button(upd, ctx)
+        assert cancelled == ["ran"]
+        upd.callback_query.edit_message_text.assert_awaited_once_with("Cleared 3 job(s) and 2 task(s).")
+        assert "clear_token" not in ctx.bot_data            # single use
+
+    async def test_do_clear_cancels_queued_deferred_and_running_then_fails_tasks(self, monkeypatch, fake_redis):
+        # _do_clear routes EVERY open job through cancel_job_durable(stage="cleared")
+        # — queued and deferred flip, running gets the publish (the old body
+        # flipped running rows in SQL with no publish, leaving live sessions
+        # running into a suppressed finish) — then fails the open tasks and
+        # flushes jobs:queue.
+        q, d, r = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        rows = [SimpleNamespace(id=q, status="queued"), SimpleNamespace(id=d, status="deferred"),
+                SimpleNamespace(id=r, status="running")]
+        seen = []
+
+        async def fake_durable(job, *, stage):
+            seen.append((job.id, job.status, stage))
+            return "cancel_requested" if job.status == "running" else "cancelled_queued"
+        monkeypatch.setattr(tg, "cancel_job_durable", fake_durable)
+        monkeypatch.setattr(tg, "redis", fake_redis)
+        await fake_redis.rpush("jobs:queue", str(q))
+
+        class _DB:
+            def __init__(self):
+                self.statements = []
+
+            def __call__(self):
+                return self
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                self.statements.append(stmt)
+                if len(self.statements) == 1:                       # the open-jobs SELECT
+                    return SimpleNamespace(scalars=lambda: rows, all=lambda: rows)
+                return SimpleNamespace(rowcount=2)                  # the Task UPDATE
+
+            async def commit(self):
+                pass
+        db = _DB()
+        monkeypatch.setattr(tg, "async_session", db)
+        jobs_cleared, tasks_cleared = await tg._do_clear()
+        assert sorted(s for _, _, s in seen) == ["cleared"] * 3
+        assert {st for _, st, _ in seen} == {"queued", "deferred", "running"}
+        assert (jobs_cleared, tasks_cleared) == (3, 2)
+        assert await fake_redis.llen("jobs:queue") == 0
+        where = str(db.statements[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "deferred" in where and "queued" in where and "running" in where
+        # No direct cancel UPDATE on jobs any more — the durable path owns that.
+        assert len(db.statements) == 2 and "tasks" in str(db.statements[1]).lower()
+
+    def test_deferred_job_is_cancelled_by_clear(self):
+        # The semantic widening the P0 plan calls out: plan-DAG children parked
+        # in `deferred` used to survive /clear; "clear everything" means them.
+        import inspect
+        src = inspect.getsource(tg._do_clear)
+        assert "_CLEAR_JOB_STATUSES" in src and "cancel_job_durable(" in src
+        assert 'stage="cleared"' in src
+        assert set(tg._CLEAR_JOB_STATUSES) == {"queued", "deferred", "running"}

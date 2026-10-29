@@ -35,6 +35,18 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+# Default tool set for skills that do not declare `required_tools` and for the
+# generic (no-skill) task — the ONE definition behind the dataclass default,
+# the loader fallback and `session._build_options` (E2, 2026-10-29).
+# AskUserQuestion is deliberately ABSENT (spec §3/§9): nothing consumes the
+# question headless, so the job hangs in `running` (TROUBLESHOOTING.md "Root
+# cause #5"). Skills that truly need it declare it explicitly (7 do today);
+# their subagents (`runner.agents`) inherit whatever the skill declares.
+DEFAULT_REQUIRED_TOOLS: tuple[str, ...] = (
+    "Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch",
+)
+
+
 @dataclass
 class SkillConfig:
     name: str
@@ -43,10 +55,7 @@ class SkillConfig:
     model: str = ""                    # "" means "use settings.default_model"
     effort: str = "medium"             # low | medium | high | xhigh | max (xhigh→max at SDK boundary)
     permission_mode: str = "acceptEdits"
-    required_tools: list[str] = field(default_factory=lambda: [
-        "Read", "Write", "Edit", "Bash", "Glob", "Grep",
-        "WebSearch", "WebFetch", "AskUserQuestion",
-    ])
+    required_tools: list[str] = field(default_factory=lambda: list(DEFAULT_REQUIRED_TOOLS))
     max_turns: int | None = None
     escalation: dict = field(default_factory=dict)
     post_review: dict = field(default_factory=dict)
@@ -141,9 +150,7 @@ def load(name: str, skills_dir: Path | None = None) -> SkillConfig | None:
         model=fm.get("model", ""),
         effort=fm.get("effort", "medium"),
         permission_mode=fm.get("permission_mode", "acceptEdits"),
-        required_tools=fm.get("required_tools",
-                              ["Read", "Write", "Edit", "Bash", "Glob", "Grep",
-                               "WebSearch", "WebFetch", "AskUserQuestion"]),
+        required_tools=fm.get("required_tools", list(DEFAULT_REQUIRED_TOOLS)),
         max_turns=fm.get("max_turns"),
         escalation=fm.get("escalation", {}),
         post_review=fm.get("post_review", {}),

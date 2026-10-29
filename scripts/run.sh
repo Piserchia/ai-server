@@ -113,9 +113,13 @@ do_start() {
     fi
     cd "$PROJECT_DIR"
     echo "Starting services..."
-    _start_one runner pipenv run python3 -m src.runner.main
-    _start_one web pipenv run uvicorn src.gateway.web:app --host 127.0.0.1 --port 8080
-    _start_one bot pipenv run python3 -m src.gateway.telegram_bot
+    # E7: `pipenv run` would copy .env into os.environ, and the runner refuses
+    # to start with a vendor key in its environment (Settings reads .env
+    # in-process). `_start_one` execs its arguments, so the switch goes
+    # through `env`.
+    _start_one runner env PIPENV_DONT_LOAD_ENV=1 pipenv run python3 -m src.runner.main
+    _start_one web env PIPENV_DONT_LOAD_ENV=1 pipenv run uvicorn src.gateway.web:app --host 127.0.0.1 --port 8080
+    _start_one bot env PIPENV_DONT_LOAD_ENV=1 pipenv run python3 -m src.gateway.telegram_bot
     echo "Done. Logs at $LOG_DIR"
 }
 

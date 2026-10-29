@@ -2,6 +2,14 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — audit kinds added by Tier B (recorded here per the whole-branch review)
+
+- `src/audit_log.py` docstring (the audit-kind list this module owns) gained, additively: `provider_refused` + `key`/`file`/`auth_key` and the new kind `settings_override_observed` (E1); `job_cancelled` + `stage` (E3); `result_stamp_failed` (2026-10-28 B3 follow-up); `utility_model_usage` under the synthetic job id `utility` (E7 — `volumes/audit_log/utility.jsonl` is skipped by every JSONL walker because it has no `job_started`, and never ages out of retention; low volume). C14 holds: no existing kind's name or fields changed.
+
+## 2026-10-29 — E8: the rollback rule as a runner-startup check
+
+- `main._check_alembic_history()` compares the live `alembic_version` against `ScriptDirectory`'s walk at startup and refuses to start (`possible_bad_rollback`, exit 1) when the DB is ahead of the scripts on disk — the one thing `alembic/applied_history.txt` + `tests/test_migrations.py` (A1) cannot see from the gate. "Cannot tell" (fresh DB, no table) boots with a warning. Rollback rule unchanged (spec §9): revert application code only; `alembic downgrade -1` on prod BEFORE removing a migration file, then drop its manifest line in the same commit. Owner diagnostic: `scripts/alembic-current-check.sh` (exit 0/1/2).
+
 ## 2026-10-22 — Whole-tier review applied: migration 008 `origin_ref` NULL arm for `web`/`scheduler`; opt-in Postgres test round-trips the downgrade
 
 **Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").

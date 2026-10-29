@@ -83,7 +83,8 @@ Multi-project hosting on a single public domain via:
   with two WARNs.
 - `install-launchd.sh [timers-only|uninstall]` — services + timers; `timers-only`
   (C1) re-renders and reloads only the timer plists (no runner/web/bot
-  restart). `install_timer` writes an `EnvironmentVariables` dict (`PATH`
+  restart). Service plists carry `DISABLE_ERROR_REPORTING=1` / `DISABLE_TELEMETRY=1`
+  too since E7 (2026-10-29; applied on the next full install). `install_timer` writes an `EnvironmentVariables` dict (`PATH`
   with `${VENV_DIR}/bin`, `VENV_PY`, `DISABLE_ERROR_REPORTING=1`,
   `DISABLE_TELEMETRY=1`; never a credential). Every `ProgramArguments`
   string escapes `&&` as `&amp;&amp;` (a raw `&&` is not XML — 10 of 14

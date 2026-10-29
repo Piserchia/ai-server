@@ -20,6 +20,32 @@ summary: >-
 > §7 owner actions, §8 exit criteria, §11 deployment log). Everything below is verified against
 > the tree and prod, not recalled.
 
+## UPDATE — Tier B built 2026-10-29 (owner: "Go with number 1"); read this first
+
+**All ten Tier B tasks (E1–E10) are built on branch `observability/phase-1-tier-b`**, one commit each
+(`c4ed48f` E1 … `dc5c755` E10), tests first, full suite **3092 passed, 2 skipped**, `lint_docs` clean,
+`lib.py check` OK. Per-task independent reviews for E1, E3, E6, E7 (all findings applied — see the
+runner/gateway CHANGELOG entries dated 2026-10-29); E2/E4/E5/E8/E9/E10 rely on the whole-tier review.
+**Merge status is in the ledger** `.superpowers/sdd/2026-10-21-observability-phase1-recut/progress.md`
+(every `Ruling:` the session made on the owner's behalf is there) and in the final line of this section.
+
+| Task | What landed | Notable |
+|---|---|---|
+| E1 | settings-channel override refused before the session (`session.settings_override`, provenance-keyed; `SettingsOverrideRefused`) | observe arm **sized in code** (bingo→`hooks` + `permissions` in any project's `settings.local.json`); Q2 probe: project-scope `ANTHROPIC_BASE_URL` **is honoured** by CLI 2.1.139; lenient JSON is not parsed |
+| E2 | `DEFAULT_REQUIRED_TOOLS`; `AskUserQuestion` off the default list | 7 explicit declarers untouched |
+| E3 | `cancel_job_durable` — one cancel vocabulary at four sites; `/cancel`, `/proposals`; `/rate` off the copy | the runner's queued→running flip is still an unguarded write (recorded, GOTCHAS) |
+| E4 | `/clear` asks (120 s token) and runs through the durable cancel | running rows now get the publish; deferred rows included |
+| E5 | idle `review-and-improve` dispatcher deleted | alpha drainer pinned |
+| E6 | always-on secret redactor, both lanes | review's 20-string bypass corpus pinned; derived `task_*` rows redacted |
+| E7 | telemetry-off overlay on every subprocess; startup refusal on a planted key; utility `model_usage` audited | `CODEX_` is NOT a prefix (Settings knobs); **prod's plist is a login shell — run runbook §0b before the restart** (printed `[]` here) |
+| E8 | alembic startup check + `alembic-current-check.sh` | "cannot tell" boots; a real gap refuses |
+| E9 | dev `commit-msg` protected-path guard | armed in the dev checkout; renames/typechanges covered; `web.py`/`telegram_bot.py` guarded by auth hunk; D6 first half still owner-gated |
+| E10 | daily credential canary 06:50 | hand-run **PASS** (`ok served=claude-sonnet-4-6 api_ms=1315`); any E7-set env variable is a FAIL; user scope = auth ∪ {hooks, env, apiKeyHelper}, `statusLine` allowed; timer reaches prod with `install-launchd.sh timers-only` (owner item 5) |
+
+**Owner items this adds**: run runbook **§0b** (login-shell probe) before the deploy restart; **§5**
+`install-launchd.sh timers-only` (now also installs the canary) then the full install for E7's plist flags;
+**§8b** keep the dev guard armed; D6's first half still open. §8 exit rows 6–8 are now tests.
+
 ## UPDATE — second session, 2026-10-28 (read this first; the sections below it are the morning's state)
 
 Four commits on top of `e43c397`, pushed as `ff61e56` and **deployed by the autopilot 2026-10-28 21:05Z**

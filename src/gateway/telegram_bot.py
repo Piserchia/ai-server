@@ -14,6 +14,7 @@ Run: `python -m src.gateway.telegram_bot`
 from __future__ import annotations
 
 import asyncio
+import time
 import functools
 import json
 import logging
@@ -30,7 +31,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_DONE, CHANNEL_NOTIFY_OUTBOX, async_session, redis
-from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
+from src.gateway.jobs import cancel_job_durable, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project, Schedule, Task, TaskStatus, TaskTurn
 from src.notify.outbox import (
     OPS_NOTICE_KINDS,
@@ -269,10 +270,12 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "*Commands (still work):*\n\n"
         "/task <description> — start a new task explicitly\n"
         "  _Reply in the thread to continue. Buttons for actions._\n\n"
-        "/status — see active tasks\n"
-        "/jobs — see recent job runs\n"
+        "/status — active tasks · /status <prefix> — one job's details\n"
+        "/jobs — recent job runs\n"
+        "/cancel <prefix> — cancel a queued or running job\n"
+        "/proposals — pending self-improvement proposals\n"
         "/help — this message\n\n"
-        "_Admin: /god, /chat, /resume, /clear, /schedule_",
+        "_Admin: /god, /chat, /resume, /clear (asks first), /schedule_",
         parse_mode="Markdown",
     )
 
@@ -663,40 +666,88 @@ async def cmd_resume(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-@_error_safe
-async def cmd_clear(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-    """Cancel all queued/running jobs and fail all active tasks."""
-    if await _guard(update) is None:
-        return
+_CLEAR_TOKEN_TTL_SECONDS = 120
 
+
+def clear_token_valid(stored: tuple[str, float] | None, token: str, now: float,
+                      ttl: int = _CLEAR_TOKEN_TTL_SECONDS) -> bool:
+    """Pure (E4). The confirm button must carry the token /clear just issued
+    and be pressed within the TTL — an old card cannot wipe the fleet later;
+    a clock that went backwards does not count as "within"."""
+    if not stored:
+        return False
+    issued_token, issued_at = stored
+    return token == issued_token and 0 <= now - issued_at <= ttl
+
+
+_CLEAR_JOB_STATUSES = (JobStatus.queued.value, JobStatus.deferred.value, JobStatus.running.value)
+_CLEAR_TASK_STATUSES = (TaskStatus.active.value, TaskStatus.awaiting_user.value,
+                        TaskStatus.pending_approval.value)
+
+
+async def _do_clear() -> tuple[int, int]:
+    """Cancel every open job and fail every open task (E4; the old /clear body
+    rebuilt on E3's durable cancel).
+
+    Every queued / deferred / running job goes through
+    `cancel_job_durable(stage="cleared")` — queued and deferred rows flip with
+    the one cancel vocabulary and leave Redis, running rows get the
+    `jobs:cancel` publish so the live sessions actually stop (the old body
+    flipped running rows in SQL with no publish, leaving them to run into a
+    suppressed finish). `deferred` joins the set deliberately: plan-DAG
+    children parked there used to survive a /clear and be promoted later;
+    "clear everything" means them too. Then the open tasks fail and
+    `jobs:queue` is flushed (the per-row LREMs make it redundant; harmless).
+    """
     async with async_session() as s:
-        # Cancel queued + running jobs
         result = await s.execute(
-            sql_update(Job)
-            .where(Job.status.in_([JobStatus.queued.value, JobStatus.running.value]))
-            .values(status=JobStatus.cancelled.value)
+            select(Job).where(Job.status.in_(list(_CLEAR_JOB_STATUSES)))
         )
-        jobs_cleared = result.rowcount or 0
-
-        # Fail active + awaiting tasks
+        open_jobs = list(result.scalars())
+    jobs_cleared = 0
+    for job in open_jobs:
+        try:
+            outcome = await cancel_job_durable(job, stage="cleared")
+        except Exception:  # noqa: BLE001 — one bad row must not stop the sweep
+            logger.exception("clear: cancel failed for %s", str(job.id)[:8])
+            continue
+        if outcome in ("cancelled_queued", "cancel_requested"):
+            jobs_cleared += 1
+    async with async_session() as s:
         result = await s.execute(
             sql_update(Task)
-            .where(Task.status.in_([
-                TaskStatus.active.value,
-                TaskStatus.awaiting_user.value,
-                TaskStatus.pending_approval.value,
-            ]))
+            .where(Task.status.in_(list(_CLEAR_TASK_STATUSES)))
             .values(status=TaskStatus.failed.value)
         )
         tasks_cleared = result.rowcount or 0
         await s.commit()
-
-    # Flush the Redis queue
     await redis.delete("jobs:queue")
+    return jobs_cleared, tasks_cleared
 
+
+@_error_safe
+async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/clear — show what would be wiped and ask for a confirm tap (E4; spec
+    §4.1). The wipe itself runs from the `clear_confirm:<token>` button."""
+    if await _guard(update) is None:
+        return
+    from sqlalchemy import func as sqlfunc
+    async with async_session() as s:
+        n_jobs = (await s.execute(select(sqlfunc.count()).select_from(Job).where(
+            Job.status.in_(list(_CLEAR_JOB_STATUSES))))).scalar() or 0
+        n_tasks = (await s.execute(select(sqlfunc.count()).select_from(Task).where(
+            Task.status.in_(list(_CLEAR_TASK_STATUSES))))).scalar() or 0
+    token = uuid.uuid4().hex[:8]
+    ctx.bot_data["clear_token"] = (token, time.time())
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(f"Yes — clear {n_jobs} job(s), {n_tasks} task(s)",
+                             callback_data=f"clear_confirm:{token}"),
+        InlineKeyboardButton("Abort", callback_data="clear_abort:0"),
+    ]])
     await update.message.reply_text(
-        f"Cleared {jobs_cleared} job(s) and {tasks_cleared} task(s)."
-    )
+        f"⚠️ /clear cancels {n_jobs} queued/deferred/running job(s) and fails {n_tasks} "
+        f"open task(s). Confirm within {_CLEAR_TOKEN_TTL_SECONDS} s:",
+        reply_markup=keyboard)
 
 
 # ── Schedule management ────────────────────────────────────────────────────
@@ -896,6 +947,53 @@ def provider_paused_text(provider: str, reset_at: datetime | None, reason: str) 
 
 
 
+_CANCEL_REPLIES = {
+    "cancelled_queued": "🚫 Job {p} removed from the queue.",
+    "cancel_requested": "🚫 Cancel sent to the runner for running job {p}.",
+    "already_terminal": "Job {p} is already finished — nothing to cancel.",
+    "not_found": "No job matches {p} (need a unique 8-char prefix).",
+}
+
+
+def format_cancel_reply(result: str, prefix: str) -> str:
+    """Pure. One line per `cancel_job_durable` outcome; unknown → not_found."""
+    return _CANCEL_REPLIES.get(result, _CANCEL_REPLIES["not_found"]).format(p=prefix)
+
+
+@_error_safe
+async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/cancel <job-prefix> — durable (E3): a queued job leaves Redis and
+    flips; a running job is interrupted; a second call is a no-op."""
+    if await _guard(update) is None:
+        return
+    args = getattr(ctx, "args", None) or []
+    if not args:
+        await update.message.reply_text("Usage: /cancel <job prefix>  (see /jobs)")
+        return
+    prefix = str(args[0]).strip()
+    job = await find_job_by_prefix(prefix)
+    result = await cancel_job_durable(job, stage="telegram") if job else "not_found"
+    await update.message.reply_text(format_cancel_reply(result, prefix))
+
+
+@_error_safe
+async def cmd_proposals(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/proposals — pending review-and-improve proposals (the SYSTEM.md gap
+    that said "no /proposals command yet")."""
+    if await _guard(update) is None:
+        return
+    from src.runner import proposals as proposals_mod
+    rows = await proposals_mod.list_pending_proposals(limit=15)
+    if not rows:
+        await update.message.reply_text("No pending proposals.")
+        return
+    lines = [f"Pending proposals ({len(rows)}):"]
+    lines += [proposals_mod.format_proposal_line(p.id, p.target_file, p.change_type,
+                                                 p.outcome, p.proposed_at)
+              for p in rows]
+    await update.message.reply_text("\n".join(lines)[:4000])   # plain text: paths carry `_`
+
+
 @_error_safe
 async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """List recent jobs: /jobs [count]"""
@@ -936,7 +1034,7 @@ async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         lane_ref = f" `{lane}`" if lane else ""
         line = f"`{prefix}` {icon} {skill}{lane_ref} — {desc}{task_ref}"
         if j.status == JobStatus.completed.value:
-            line += f"\n  → `/rate {prefix} 1-5` or `/status {prefix}`"
+            line += f"\n  → `/status {prefix}`"
         elif j.status == JobStatus.failed.value:
             line += f"\n  → `/status {prefix}` for error details"
         elif j.status in (JobStatus.queued.value, JobStatus.running.value):
@@ -1051,7 +1149,7 @@ async def _handle_thread_reply(update: Update, _: ContextTypes.DEFAULT_TYPE) -> 
 
 
 @_error_safe
-async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+async def _handle_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle inline keyboard button presses."""
     query = update.callback_query
     if not query:
@@ -1072,6 +1170,19 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if action == "jd":
         job = await find_job_by_prefix(task_prefix)
         await query.message.reply_text(format_job_status(job) if job else "Job not found.")
+        return
+    # E4: the /clear confirm card — token-gated, single use, 120 s.
+    if action == "clear_abort":
+        await query.edit_message_text("Clear aborted.")
+        return
+    if action == "clear_confirm":
+        bot_data = getattr(ctx, "bot_data", None) or {}
+        if not clear_token_valid(bot_data.get("clear_token"), task_prefix or "", time.time()):
+            await query.edit_message_text("This confirm expired — send /clear again.")
+            return
+        bot_data.pop("clear_token", None)
+        jobs_cleared, tasks_cleared = await _do_clear()
+        await query.edit_message_text(f"Cleared {jobs_cleared} job(s) and {tasks_cleared} task(s).")
         return
 
     task = await _find_task_by_prefix(task_prefix)
@@ -1118,17 +1229,12 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
                 ).order_by(Job.created_at.desc())
             )
             open_jobs = list(result.scalars())
+        # E3 (D-P1-4): every open job through the ONE durable path — running
+        # → publish, queued/deferred → LREM + flip with terminal_reason
+        # "interrupted" and error_message "cancelled by user (button)".
         for job in open_jobs:
-            if job.status == JobStatus.running.value:
-                await cancel_job(job.id)
+            await cancel_job_durable(job, stage="button")
         async with async_session() as s:
-            await s.execute(
-                sql_update(Job).where(
-                    Job.task_id == task.id,
-                    Job.status.in_([JobStatus.queued.value, JobStatus.deferred.value]),
-                ).values(status=JobStatus.cancelled.value,
-                         error_message="task cancelled by user")
-            )
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
                     status=TaskStatus.failed.value,
@@ -1274,8 +1380,8 @@ def _done_dm_text(job_id: str, status: str, summary: str, lane: str) -> str:
         text += f" \u00b7 `{lane}`"
     if summary:
         text += f"\n\n{summary}"
-    if status == JobStatus.completed.value:
-        text += f"\n\n💡 `/rate {job_id[:8]} 1-5`"
+    # E3: no `/rate` hint — the command never existed (the `rate:` callback
+    # and POST /api/jobs/{id}/rate stay; spec §4.1 keeps /rate off the copy).
     return text
 
 
@@ -1708,6 +1814,8 @@ def main() -> None:
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("tasks", cmd_status))  # alias
     app.add_handler(CommandHandler("jobs", cmd_jobs))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("proposals", cmd_proposals))
     # Admin commands
     app.add_handler(CommandHandler("chat", cmd_chat))
     app.add_handler(CommandHandler("god", cmd_god))

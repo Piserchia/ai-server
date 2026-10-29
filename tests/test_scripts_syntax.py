@@ -42,6 +42,7 @@ ALL_SCRIPTS = sorted(p.relative_to(REPO).as_posix() for p in (REPO / "scripts").
 TIMER_SCRIPTS = (
     "scripts/backup.sh",
     "scripts/cost-reconcile-run.sh",
+    "scripts/credential-canary.sh",          # E10
     "scripts/healthcheck-all.sh",
     "scripts/schedule-monitor.sh",
 )
@@ -664,7 +665,8 @@ def test_installer_uninstall_removes_every_timer():
     m = re.search(r"^TIMER_LABELS=\(([^)]*)\)", src, re.M)
     assert m, "TIMER_LABELS array missing"
     assert sorted(m.group(1).split()) == sorted(installed) == sorted(
-        ["backup", "healthcheck-all", "schedule-monitor", "cost-reconcile"])
+        ["backup", "healthcheck-all", "schedule-monitor", "cost-reconcile",
+         "credential-canary"])                                  # E10
     un = _bash_function("scripts/install-launchd.sh", "uninstall")
     assert 'for t in "${TIMER_LABELS[@]}"' in un and '"${timers[@]}"' in un
 

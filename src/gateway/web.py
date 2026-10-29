@@ -39,7 +39,7 @@ from sse_starlette.sse import EventSourceResponse
 from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_STREAM, KEY_RUNNER_HEARTBEAT, QUEUE_JOBS, async_session, redis
-from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
+from src.gateway.jobs import cancel_job_durable, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project, Schedule, Task, TaskStatus, TaskTurn
 from src.registry import models as models_registry
 from src.runner import quota, retrospective
@@ -484,13 +484,13 @@ async def get_job(job_id: str) -> dict:
 
 @app.delete("/api/jobs/{job_id}", dependencies=[Depends(_check_auth)])
 async def delete_job(job_id: str) -> dict:
+    # E3: one cancel semantics for every site — a queued/deferred row is
+    # removed from Redis and flipped here, a running one gets the publish.
     job = await find_job_by_prefix(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if JobStatus(job.status).is_terminal:
-        return {"ok": True, "note": "already terminal"}
-    await cancel_job(job.id)
-    return {"ok": True, "note": "cancel requested"}
+    result = await cancel_job_durable(job, stage="api")
+    return {"ok": True, "note": result.replace("_", " ")}
 
 
 @app.post("/api/jobs/{job_id}/rate", dependencies=[Depends(_check_auth)])

@@ -44,6 +44,24 @@ raw `&&` — that is the finding C1 fixes, not a new problem. The first probe
 must read `401` (a `200` means the dashboard is unauthenticated — stop and
 set `WEB_AUTH_TOKEN` in prod `.env`, an owner-only file).
 
+### 0b. E7 pre-restart probe (read-only, 30 s) — BEFORE the first restart that carries E7
+
+The runner now refuses to start with a vendor/auth key in its environment
+(`src/runner/claude_env.py`: `GEMINI_*`, `CEREBRAS_*`, `GROQ_*`, `OPENROUTER_*`,
+`OPENAI_*`, `XAI_*`, any `*_API_KEY`, and the four named Anthropic credentials).
+The service plists run `bash -lc`, a login shell, so what the profile exports
+reaches the runner. Probe what the login shell would hand it:
+
+    cd "$HOME/Library/Application Support/ai-server" && bash -lc env | cut -d= -f1 \
+      | "$(pipenv --venv)/bin/python" -c 'import sys; from src.runner.claude_env import vendor_keys_in; print(vendor_keys_in({l.strip(): "" for l in sys.stdin}))'
+    # → []   (anything else: remove that export from the shell profile first — a hit means a
+    #         30-second KeepAlive crash loop of the runner after the restart; web/bot are unaffected)
+
+Dev-launch note: `scripts/run.sh` now starts the services with
+`PIPENV_DONT_LOAD_ENV=1`, so on a dev launch the jobs' Bash children no longer
+inherit `.env` names (Settings still reads `.env` in-process). Prod is
+unchanged — launchd runs the venv python directly.
+
 ## 1. Auto-restart after power loss (sudo, 1 min)
 
     sudo pmset -a autorestart 1
@@ -132,7 +150,9 @@ Right after the C1 deploy, re-render the timers only — no service restart:
     # resolve the venv by `.project` match under ~/.local/share/virtualenvs (on a host with
     # both checkouts the old first-match glob selected the DEV venv — schedule-monitor did so
     # from 2026-10-05 until the 2026-10-22 whole-tier review fix).
-    launchctl list | grep com.assistant                       # backup, healthcheck-all, schedule-monitor, cost-reconcile, sync-learnings
+    launchctl list | grep com.assistant                       # backup, healthcheck-all, schedule-monitor, cost-reconcile, credential-canary (E10), sync-learnings
+    plutil -p ~/Library/LaunchAgents/com.assistant.credential-canary.plist | grep -c VENV_PY   # → 1 (E10: daily 06:50)
+    bash scripts/credential-canary.sh && cat volumes/telemetry/credential_canary.json           # one ping by hand: "ok": true, served=<model>
     plutil -p ~/Library/LaunchAgents/com.assistant.backup.plist | grep -c VENV_PY   # → 1
 
 Then, once after C1 and again after E7, the **full** install — it restarts
@@ -146,6 +166,11 @@ queued):
 The service plists keep the `&&` fix from the next full install; until
 then they run as before (launchd tolerated the raw `&&`; only `plutil`
 refused it).
+
+The same full install is what puts E7's `DISABLE_ERROR_REPORTING=1` /
+`DISABLE_TELEMETRY=1` on the three service plists (the timers already carry
+them); until then the runner's own `ClaudeAgentOptions.env` overlay is what
+turns telemetry off for every session — the plist is the belt.
 
 ## 6. Ollama: delete the three stale weights (10 min; spec D5 = yes)
 
@@ -204,6 +229,35 @@ bingo repo's own delivery path.
 
 Until it is gone, expect the observe arm, not a refusal, for bingo.
 
+## 8b. Install the dev protected-path guard (E9; the DEV checkout only, 1 min)
+
+"Protected path" used to be prose. `scripts/install-dev-hooks.sh install` arms
+a `commit-msg` hook in `~/Documents/repos/ai-server` (the only checkout where
+code commits are born) that refuses a commit touching a MISSION §M path unless
+the message carries `Approved-Protected-Path: ap-<id>`:
+
+    cd ~/Documents/repos/ai-server && bash scripts/install-dev-hooks.sh install
+    ls -la .git/hooks/commit-msg .git/hooks/pre-commit     # both exist; the CHANGELOG hook is untouched
+
+It is a **commit-msg** hook on purpose (git hands only that hook the message
+file); it is idempotent (marker-delimited, re-armable) and appends to an
+existing hook rather than overwriting it. Renames and file→symlink typechanges
+of a protected file count (`--no-renames --diff-filter=ACMRDT`). For the two
+gateway files (`web.py`, `telegram_bot.py`) only a staged hunk that touches an
+auth-check line (`_check_auth`, `_is_authorized`, the chat-ID / web-auth
+settings) makes the commit protected — a `JobOut` or `/jobs` copy edit needs
+no trailer. Phase-1 limit, printed by the hook
+itself: the id's shape is checked, resolving it against
+`approvals(kind=protected_path)` begins with the Phase-2 approvals migration
+(009). The break-glass is `git commit --no-verify` (this section is its
+documentation; `skills/god/SKILL.md` documents PROD's pre-commit bypass, a
+different hook) — a bypassed commit must be pushed in the same session. Never install it on
+prod (prod has `scripts/install-prod-hooks.sh`, re-armed on every deploy).
+**D6's first half** (owner PR) adds `.claude/settings.json`,
+`.claude/settings.local.json` and this script's path list to MISSION §M; until
+it lands those three are not guarded and `test_the_list_is_missions_list`
+will say so the day §M grows.
+
 ## 9. What to write back
 
 | Measurement | Where |
@@ -214,3 +268,5 @@ Until it is gone, expect the observe arm, not a refusal, for bingo.
 | `WEB_AUTH_TOKEN` probe → 401; `plutil` credential grep → 0 | plan §8, last row |
 | D4 confirmations (§7) with dates | `.context/modules/runner/skills/GOTCHAS.md` |
 | Ollama override, if any | plan §8 |
+| first credential-canary PASS (`volumes/telemetry/credential_canary.json`, `"ok": true`) | plan §8 (E10) + runner GOTCHAS |
+| the dev guard armed (`ls .git/hooks/commit-msg`) and the date | runner GOTCHAS |

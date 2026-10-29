@@ -26,7 +26,9 @@ import functools
 import json
 import logging
 import re
+import subprocess
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,6 +53,7 @@ from src.db import CHANNEL_JOB_DONE, CHANNEL_JOB_STREAM, async_session, redis
 from src.models import Job, JobKind, Project
 from src.registry import models as models_registry
 from src.registry.skills import (
+    DEFAULT_REQUIRED_TOOLS,
     SkillConfig,
     SkillFrontmatterError,
     load as load_skill,
@@ -67,8 +70,10 @@ class SkillResolutionError(RuntimeError):
     """
 from src.runner import agents as agents_mod
 from src.runner import delivery, guards, quota, review, router, workspaces
-from src.runner import pricing
+from src.runner import pricing, secret_redact
+from src.runner.claude_env import claude_subprocess_env
 from src.runner.executors import codex_cli
+from src.notify.outbox import build_ops_notice, enqueue_notice
 from src.runner.result_capture import (
     API_RETRY_TO_TERMINAL,
     ENFORCEMENT_CATEGORIES,
@@ -1066,6 +1071,288 @@ def _build_system_prompt(
     return system_prompt
 
 
+# ── E1: INV-3 from project scope — the settings-channel override refusal ─────
+# (spec §6 "Settings-channel override refusal, keyed on provenance", §2.4;
+# design of record P0 plan Task 19 + the re-cut E1 Deltas; D-P1-12.)
+#
+# `setting_sources=["project"]` in _build_options loads <cwd>/.claude/
+# settings.json and settings.local.json from the clone the job runs in — and
+# from the SERVER ROOT for the isolation:none skills. Those files are a code
+# channel, not just an auth channel: `hooks` runs arbitrary commands at
+# SessionStart/PreToolUse, `permissions.allow` widens what any later session
+# may do, `mcpServers` adds tools, and `apiKeyHelper`/`env.ANTHROPIC_*`/
+# `ANTHROPIC_BASE_URL` outrank the Keychain /login — the first two re-bill Max
+# work to an API key, the last redirects it. Atlas is GitHub-canonical with
+# other machines committing, so the file can arrive without anyone here doing
+# anything. Refuse the job; never strip or rewrite the file.
+SETTINGS_OVERRIDE_KEYS: tuple[str, ...] = (
+    "hooks",
+    "permissions",
+    "mcpServers",
+    "enableAllProjectMcpServers",
+    "apiKeyHelper",
+    "env",
+    "ANTHROPIC_BASE_URL",
+    # Recorded deviation from spec §6's seven (review 2026-10-29): the
+    # per-server form of `enableAllProjectMcpServers` — approving named
+    # servers from the clone's own `.mcp.json` adds tools exactly as the
+    # "all" form does, so refusing one and not the other would be a hole.
+    "enabledMcpjsonServers",
+)
+
+# The subset that outranks /login. Not a second check — a LABEL, so the audit
+# event and the failed card can distinguish "someone committed a hook" from
+# "someone redirected your billing". Auth keys are refused in every checkout,
+# tracked or not, canonical or clone; the observe arm never covers them.
+SETTINGS_AUTH_KEYS: tuple[str, ...] = (
+    "apiKeyHelper",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+)
+
+# This repo's OWN .claude/ is loaded as project scope by every isolation:none
+# skill (cwd == server root), and its two TRACKED files carry `enabledPlugins`
+# and `permissions` — the second is in the refusal set above. So the server
+# root's own files may carry `permissions` (the one allowed key the refusal
+# set names; `enabledPlugins` is listed for the record and is never refused),
+# and `tests/test_settings_auth_override.py::test_settings_no_hooks` pins that
+# they carry nothing else. The exemption is per KEY, never per path (a hook
+# there is refused like anywhere).
+#
+# It is keyed on PROVENANCE, not on the cwd path: a workspace-tier job's cwd
+# is ws.path — a `git clone` of the canonical — and both tracked files travel
+# with the clone, so a path test would refuse server-patch, new-skill,
+# atlas-build and every skill-less job. The allowance applies when the
+# canonical is the server root and the file's bytes equal the canonical's
+# copy (working tree OR tracked HEAD blob — a clone carries HEAD's bytes, and
+# the dev checkout's settings.local.json is routinely dirty). A clone is a
+# copy; a clone with a key added is not. `test_settings_no_hooks` pins the
+# two files' contents inside the deploy gate; the content-hash pin of spec
+# §2.4 is deferred with `restraints.py` (spec §14 item 10), and the residual
+# (a file edited directly on prod) is what D6's first half — MISSION §M — is
+# for. Nothing here edits either file.
+TRACKED_SETTINGS_ALLOWED_KEYS: frozenset[str] = frozenset({"enabledPlugins", "permissions"})
+TRACKED_SETTINGS_FILES: tuple[str, ...] = (".claude/settings.json",
+                                           ".claude/settings.local.json")
+_SETTINGS_FILE_NAMES: tuple[str, ...] = ("settings.local.json", "settings.json")
+
+# D-P1-12's observe arm, SIZED IN CODE (review 2026-10-29): which code-channel
+# key, in which hosted project's own tracked file, is audited + DM'd instead
+# of refused. Today exactly bingo's PostToolUse hook. Anything a project
+# canonical acquires beyond this — including a `hooks`/`mcpServers`/`env` key
+# that another machine commits to a GitHub-canonical project such as atlas
+# and that arrives here on the next rebase — is REFUSED, because "the
+# canonical's own tracked copy" is not a bound on its own for a canonical
+# other people commit to. `tests/test_settings_auth_override.py::
+# test_project_settings_inventory` keeps this table and the checkout in step;
+# a new row is an owner decision (plan §7 row 11 / D-P1-12), never a drift.
+OBSERVED_PROJECT_SETTINGS: dict[tuple[str, str], frozenset[str]] = {
+    ("baseball-bingo", "settings.json"): frozenset({"hooks"}),
+}
+# Claude Code itself writes `permissions.allow` into any project's
+# <project>/.claude/settings.local.json when a session approves a tool, so
+# that one key in that one (gitignored-by-convention) file is observed for
+# every project; `permissions` committed into a project's settings.json is
+# not (it widens what every later session may do, and nothing writes it there).
+OBSERVED_LOCAL_SETTINGS_KEYS: frozenset[str] = frozenset({"permissions"})
+
+#: One `settings_override` DM per project per UTC day (D-P1-12; same shape as
+#: D1's schedule-gap claim: SET NX only after the notice row exists).
+KEY_SETTINGS_OVERRIDE_NOTIFIED_PREFIX = "settings_override:notified:"
+TTL_SETTINGS_OVERRIDE_NOTIFIED = 129_600   # 36 h: one per day with slack
+
+
+@dataclass(frozen=True)
+class SettingsOverride:
+    """What `settings_override` found: the first offending key, the file it
+    sits in, whether it is an auth key (re-bills/redirects — never observed),
+    whether D-P1-12's observe arm applies, and the project (the canonical's
+    directory name; None when the canonical is the server root)."""
+    key: str
+    file: str
+    auth_key: bool
+    observed_only: bool
+    project: str | None
+
+
+class SettingsOverrideRefused(models_registry.ProviderRefused):
+    """A settings-channel override refused before the session starts. A
+    subclass of the registry's `ProviderRefused` so `main._process_job`'s
+    existing handler stamps `terminal_reason="provider_refused"` and never
+    escalates (a bigger model would run the same poisoned clone); `reason` is
+    `settings_override:<key>` and `key`/`file`/`auth_key` ride the audit row
+    additively (E1 Deltas — no `observed_only` field here: the observe arm
+    has its own audit kind)."""
+
+    def __init__(self, found: SettingsOverride, *, path: Path,
+                 provider: str | None = "anthropic", model_id: str | None = None,
+                 raw: str | None = None) -> None:
+        self.key = found.key
+        self.file = found.file
+        self.auth_key = found.auth_key
+        what = ("outranks the Keychain login and re-bills or redirects this work"
+                if found.auth_key else
+                "executes with owner privileges in every later session and bypasses "
+                "guards.py/lint_docs.py")
+        reason = (f"settings_override:{found.key}")
+        super().__init__(raw or "", reason, provider=provider, model_id=model_id)
+        # ProviderRefused's own message is about model refs; say what this is.
+        self.args = (f"{found.key} in {path / found.file} {what} (spec §6) — remove it "
+                     f"from the clone; never strip it automatically",)
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+
+def settings_override(cwd: Path, *, canonical: Path | None = None) -> SettingsOverride | None:
+    """The first offending key in <cwd>/.claude/settings*.json, else None.
+
+    settings.local.json is checked first: it is gitignored in most repos (so it
+    is the likelier carrier) and the CLI gives it precedence. When the offender
+    is `env`, the specific auth key inside it is reported instead of the
+    container, so the card can say what was actually done. Unreadable or
+    invalid JSON is NOT an override — a malformed settings file is the CLI's
+    problem; inventing a refusal from it would fail honest jobs.
+
+    `canonical` is the real checkout when `cwd` is a workspace clone (the
+    value run_session holds as `canonical_cwd`); for an isolation:none job it
+    is `cwd` itself. The server root's own two tracked files — and
+    byte-identical copies of them in a clone of the server root — may carry
+    TRACKED_SETTINGS_ALLOWED_KEYS and nothing else; every other key is refused
+    there exactly as in any other clone, and with no canonical there is no
+    allowance at all. Pure except for file reads under <cwd>/.claude and
+    <canonical>/.claude (plus `git show HEAD:` of the canonical's copy).
+    """
+    cwd = Path(cwd)
+    canon = Path(canonical) if canonical is not None else None
+    own_root = canon is not None and _same_dir(canon, settings.server_root)
+    project = None if (canon is None or own_root) else canon.name
+    for name in _SETTINGS_FILE_NAMES:
+        path = cwd / ".claude" / name
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        env = data.get("env") if isinstance(data.get("env"), dict) else {}
+        # Name the auth key inside `env` before the generic `env` container.
+        for key in SETTINGS_AUTH_KEYS:
+            if key in env:
+                return SettingsOverride(key=key, file=name, auth_key=True,
+                                        observed_only=False, project=project)
+        allowed = own_root and _matches_canonical(cwd, name, canon)
+        hits: list[SettingsOverride] = []
+        for key in SETTINGS_OVERRIDE_KEYS:
+            if allowed and key in TRACKED_SETTINGS_ALLOWED_KEYS:
+                continue
+            if key in data:
+                hits.append(SettingsOverride(
+                    key=key, file=name, auth_key=key in SETTINGS_AUTH_KEYS,
+                    observed_only=settings_override_observe_only(
+                        key, cwd=cwd, file_name=name, canonical=canon),
+                    project=project))
+        if hits:
+            # A refused key is never masked by an observed one in the same
+            # file (bingo's observed `hooks` beside a committed `mcpServers`
+            # must refuse): report the first REFUSED hit, else the observed one.
+            return next((h for h in hits if not h.observed_only), hits[0])
+    return None
+
+
+def settings_override_observe_only(key: str, *, cwd: Path, file_name: str,
+                                  canonical: Path | None) -> bool:
+    """True when this override is AUDITED but must not fail the job
+    (D-P1-12, "the third belt"): a code-channel key in a hosted PROJECT
+    canonical's OWN tracked settings file. Auth keys are never observe-only,
+    the server root is never observe-only, and a file whose bytes differ from
+    the canonical's (one introduced inside the clone) is never observe-only.
+
+    Why this arm exists rather than a blanket refusal: the only such file
+    today is projects/baseball-bingo/.claude/settings.json (one key, `hooks`),
+    present in dev and prod and cloned into every workspace; refusing it would
+    take every job of a live public service down on the deploy. Claude Code
+    also writes `permissions` into any <project>/.claude/settings.local.json
+    when a session approves a tool. The arm is SIZED IN CODE
+    (`OBSERVED_PROJECT_SETTINGS` + `OBSERVED_LOCAL_SETTINGS_KEYS`) and kept in
+    step with the checkout by `test_project_settings_inventory`; a key a
+    GitHub-canonical project acquires upstream is refused, not observed. The
+    bingo row goes once its hook is retired through the bingo repo (plan §7
+    row 11).
+    """
+    if key in SETTINGS_AUTH_KEYS:
+        return False
+    if canonical is None or _same_dir(canonical, settings.server_root):
+        return False
+    canonical = Path(canonical)
+    sized = OBSERVED_PROJECT_SETTINGS.get((canonical.name, file_name), frozenset())
+    if file_name == "settings.local.json":
+        sized = sized | OBSERVED_LOCAL_SETTINGS_KEYS
+    if key not in sized:
+        return False
+    return _matches_canonical(Path(cwd), file_name, canonical)
+
+
+def _matches_canonical(cwd: Path, name: str, canonical: Path) -> bool:
+    """<cwd>/.claude/<name> is byte-identical to the canonical's copy — its
+    working-tree file, or its tracked HEAD blob (what a `git clone` carries)."""
+    try:
+        here = (cwd / ".claude" / name).read_bytes()
+    except OSError:
+        return False
+    try:
+        if here == (canonical / ".claude" / name).read_bytes():
+            return True
+    except OSError:
+        pass
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(canonical), "show", f"HEAD:.claude/{name}"],
+            capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return res.returncode == 0 and res.stdout == here
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return False
+
+
+async def _observe_settings_override(job_id: str, found: SettingsOverride, *,
+                                     cwd: Path, project: str) -> None:
+    """The observe arm: audit `settings_override_observed{key, file, project}`
+    and DM once per project per UTC day (ops kind → delivered with the outbox
+    switch on or off, D-P1-10). The day claim is SET NX only after
+    `enqueue_notice` returned an id, so a dropped insert does not burn the
+    day (the half A5 dropped; same shape as main._notify_schedule_deferral)."""
+    audit_log.append(job_id, "settings_override_observed",
+                     key=found.key, file=found.file, project=project,
+                     path=str(Path(cwd) / ".claude"))
+    logger.warning("settings_override observed (job runs): key=%s file=%s project=%s cwd=%s",
+                   found.key, found.file, project, cwd)
+    key = f"{KEY_SETTINGS_OVERRIDE_NOTIFIED_PREFIX}{project}:{datetime.now(timezone.utc):%Y-%m-%d}"
+    try:
+        if await redis.exists(key):
+            return
+        nid = await enqueue_notice(build_ops_notice(
+            kind="settings_override", severity="warn",
+            text=(f"⚠ settings override observed in project {project}: `{found.key}` in "
+                  f".claude/{found.file} (its own tracked copy) — the job ran; retire or "
+                  f"relocate it through the project's repo (plan §7 row 11), after which "
+                  f"this arm refuses"),
+            subject=f"job:{job_id}",
+        ))
+        if nid is not None:
+            await redis.set(key, "1", nx=True, ex=TTL_SETTINGS_OVERRIDE_NOTIFIED)
+    except Exception:  # noqa: BLE001 — the audit row is the record; a DM failure never fails the job
+        logger.exception("settings_override notice failed for %s", job_id)
+
+
 def _build_options(
     job: Job,
     cwd: Path,
@@ -1098,10 +1385,7 @@ def _build_options(
     permission_mode = payload.get("permission_mode") or (
         skill_cfg.permission_mode if skill_cfg else "acceptEdits"
     )
-    tools = (skill_cfg.required_tools if skill_cfg else [
-        "Read", "Write", "Edit", "Bash", "Glob", "Grep",
-        "WebSearch", "WebFetch", "AskUserQuestion",
-    ])
+    tools = (skill_cfg.required_tools if skill_cfg else list(DEFAULT_REQUIRED_TOOLS))
 
     kwargs: dict[str, Any] = dict(
         cwd=str(cwd),
@@ -1222,6 +1506,10 @@ def _build_options(
     # without unbounded growth. `setdefault` so a payload or skill override
     # (none today) can still tighten or widen per-session.
     kwargs.setdefault("max_buffer_size", 20 * 1024 * 1024)
+
+    # E7 (spec §2.4/§3): error reports + operational metrics off for every
+    # session. The SDK overlays this dict on os.environ.
+    kwargs["env"] = {**(kwargs.get("env") or {}), **claude_subprocess_env()}
 
     return ClaudeAgentOptions(**kwargs)
 
@@ -1412,6 +1700,35 @@ async def run_session(job: Job) -> dict[str, Any]:
                 f"workspace creation failed for a workspace-tier job: {exc}"
             ) from exc
 
+    # INV-3's third enforcement point (E1; spec §6): the clone — or the
+    # canonical itself for isolation:none — is what setting_sources=["project"]
+    # loads, so its .claude/settings*.json is checked HERE, after the clone
+    # exists and before the SDK sees it. Anthropic lane only: the executor
+    # lane runs with a scrubbed env and its own sandbox and never reads these
+    # files. canonical_cwd goes in unconditionally — the allowance is keyed
+    # on provenance, and the `if ws else None` form would refuse every
+    # isolation:none skill at the server root.
+    if is_anthropic:
+        found = settings_override(Path(cwd), canonical=canonical_cwd)
+        if found is not None:
+            if found.observed_only:
+                await _observe_settings_override(
+                    job_id, found, cwd=Path(cwd),
+                    project=slug or found.project or Path(canonical_cwd).name)
+            else:
+                # The clone is the evidence: keep it (as a failed session's
+                # clone is kept) and say so, so a refused job never leaves an
+                # unaudited directory under volumes/workspaces.
+                if ws is not None:
+                    workspaces.cleanup_workspace(ws, keep=True)
+                    audit_log.append(job_id, "note",
+                                     text=f"workspace kept for forensics after a "
+                                          f"settings_override refusal: {ws.path}")
+                raise SettingsOverrideRefused(
+                    found, path=Path(cwd) / ".claude", provider=provider,
+                    model_id=model_ref.model_id,
+                    raw=str((job.payload or {}).get("model") or model_ref.model_id))
+
     # One system prompt for every executor (T4); the SDK path wraps it in
     # ClaudeAgentOptions exactly as before, the CLI path prepends it to the
     # task text (plan §4h).
@@ -1567,7 +1884,9 @@ async def run_session(job: Job) -> dict[str, Any]:
                 for evt in extract_text_events(final_summary):
                     kind = evt.pop("kind")
                     if kind not in existing_kinds:
-                        audit_log.append(job_id, kind, **evt)
+                        # E6: parsed from the RAW text (so markers still work),
+                        # redacted before it lands in the trace.
+                        audit_log.append(job_id, kind, **secret_redact.redact_tree(evt))
             except Exception:
                 logger.exception("text-event extraction failed (non-fatal)")
 
@@ -1986,22 +2305,25 @@ async def _handle_message(
     if isinstance(message, AssistantMessage):
         for block in message.content:
             if isinstance(block, TextBlock):
-                audit_log.append(job_id, "text", text=block.text)
+                # E6: the durable trace is redacted, ALWAYS; the result text
+                # (final_text_chunks → job result / TASK_COMPLETE parser) is not.
+                safe = secret_redact.redact(block.text)
+                audit_log.append(job_id, "text", text=safe)
                 final_text_chunks.append(block.text)
-                await _publish_stream(job_id, {"kind": "text", "text": block.text})
+                await _publish_stream(job_id, {"kind": "text", "text": safe})
             elif isinstance(block, ToolUseBlock):
                 audit_log.append(
                     job_id, "tool_use",
                     tool_name=block.name,
                     tool_use_id=block.id,
-                    input=_truncate_for_log(block.input),
+                    input=secret_redact.redact_tree(_truncate_for_log(block.input)),
                 )
                 await _publish_stream(
                     job_id,
                     {"kind": "tool_use", "tool_name": block.name, "tool_use_id": block.id},
                 )
             elif isinstance(block, ThinkingBlock):
-                audit_log.append(job_id, "thinking", text=block.thinking)
+                audit_log.append(job_id, "thinking", text=secret_redact.redact(block.thinking))
 
     elif isinstance(message, UserMessage):
         for block in message.content:
@@ -2010,7 +2332,8 @@ async def _handle_message(
                     job_id, "tool_result",
                     tool_use_id=block.tool_use_id,
                     is_error=bool(block.is_error),
-                    result_preview=_preview_text(block.content),
+                    # After truncation, so the pattern set sees whole lines.
+                    result_preview=secret_redact.redact(_preview_text(block.content)),
                 )
 
 
