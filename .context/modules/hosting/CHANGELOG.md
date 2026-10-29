@@ -1,5 +1,9 @@
 # Changelog: hosting
 
+## 2026-10-29 — E7: service plists carry the telemetry-off flags; run.sh stops exporting .env
+
+- `scripts/install-launchd.sh` — the service plist template's `EnvironmentVariables` gains `DISABLE_ERROR_REPORTING=1` and `DISABLE_TELEMETRY=1` (the timer plists had them since C1); never a credential (pinned by `tests/test_claude_env.py::test_installer_never_exports_credentials`). Reaches prod on the next full install (runbook).
+- `scripts/run.sh` — `_start_one <svc> env PIPENV_DONT_LOAD_ENV=1 pipenv run …`: `pipenv run` copies `.env` into `os.environ`, and the runner now refuses to start with a vendor key there (`main._check_subscription_auth`, E7); Settings reads `.env` in-process regardless.
 ## 2026-10-22 — backup.sh: the atlas probe names the maintenance database
 
 **Agent task**: Observability Phase 1 post-deploy verification (plan `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §8, C1 accept).

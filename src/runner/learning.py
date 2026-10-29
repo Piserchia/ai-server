@@ -37,6 +37,7 @@ from claude_agent_sdk import (
 
 from src import audit_log
 from src.config import settings
+from src.runner.claude_env import claude_subprocess_env, log_utility_model_usage
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +262,7 @@ async def extract_learning(
         allowed_tools=[],
         max_turns=2,
         output_format=LEARNING_OUTPUT_FORMAT,
+        env=claude_subprocess_env(),          # E7: telemetry off on every subprocess
     )
 
     final_text = ""
@@ -273,6 +275,13 @@ async def extract_learning(
                         final_text += block.text
             elif isinstance(message, ResultMessage):
                 structured = message.structured_output
+                # E7: a second family is logged + audited, never a failure.
+                model_usage = getattr(message, "model_usage", None) or {}
+                if log_utility_model_usage("learning", requested=options.model or "",
+                                           model_usage=model_usage):
+                    audit_log.append("utility", "utility_model_usage", call="learning",
+                                     requested=options.model or "",
+                                     served_models=sorted(model_usage))
     except Exception as exc:
         logger.warning("learning extractor SDK error: %s", exc)
         return LearningProposal(had_learning=False)

@@ -2,6 +2,24 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E7: telemetry off on every Claude subprocess; the runner refuses to start with a planted key; utility `model_usage` audited
+
+**Agent task**: Observability Phase 1 Tier B E7 (recut plan; design of record P0 plan Task 17 + E7 Deltas; spec §2.4/§3, §6, §8 exit rows 7–8).
+**Files changed**:
+- `src/runner/claude_env.py` (new, import-free) — `CLAUDE_SUBPROCESS_ENV` / `claude_subprocess_env()`; `VENDOR_KEY_PREFIXES`, `VENDOR_KEY_SUFFIXES`, `VENDOR_KEY_EXACT`, `vendor_keys_in(env)`; `utility_model_violation`, `log_utility_model_usage`. The docstring states the two contracts (runner startup set vs the Codex child scrub).
+- `env=claude_subprocess_env()` inline at the five `ClaudeAgentOptions` sites (E7 Delta: no builder extraction): `session._build_options` (`kwargs["env"]`), `llm_router.llm_route`, `learning.extract_learning`, `review.py` (beside `setting_sources=[]`), `evals/run.py::_run_judge` (lazy import).
+- `src/runner/main.py` — `_check_subscription_auth` exits 1 on any `vendor_keys_in(os.environ)` hit, with `INV-3` in both messages (the existing `ANTHROPIC_API_KEY` block kept as the first, named case).
+- `src/runner/llm_router.py` / `src/runner/learning.py` — after the `ResultMessage`: a second family in `model_usage` is logged and audited `utility_model_usage{call, requested, served_models}` under job id `"utility"` (`llm_router` gains an `audit_log` import); never fails the call.
+- `src/audit_log.py` — docstring: `utility_model_usage`.
+- `scripts/run.sh` — `_start_one <svc> env PIPENV_DONT_LOAD_ENV=1 pipenv run …` (the helper execs its arguments, so the switch goes through `env`); `scripts/install-launchd.sh` — the service plists gain `DISABLE_ERROR_REPORTING`/`DISABLE_TELEMETRY` (the timers already had them from C1).
+- `tests/test_claude_env.py` (new, 20: the overlay; the detector (named Anthropic keys, never a prefix; the legitimate `*_TOKEN` Settings names pass); every planted key refuses startup and `INV-3` survives; `PROVISIONING_EXEMPT ⊆ VENDOR_KEY_EXACT`; the five sites by source; `run.sh`'s `env` prefix; the installer's flags and no credential in any plist; the router/learning audit on a second family and silence on one).
+
+**Why**: Pro/Max sign-ins ship error reports and operational metrics on by default — proprietary (atlas/alpha) sessions must not; and the three Anthropic names that outrank the Keychain `/login` (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`) plus any vendor key in `os.environ` are inherited by every Claude subprocess and every Bash child of every job. §8 exit rows 7 ("the runner refuses to start with a planted key") and 8 ("`model_usage` on utility calls lists only the requested model") are now tests.
+
+**Independent review (2026-10-29, applied before commit)**: `CODEX_` dropped from the prefixes — it collided with four legitimate Settings knobs (`CODEX_BIN`, `CODEX_HOME`, `CODEX_SANDBOX_DEFAULT`, `CODEX_RUN_AS_USER`) and `CODEX_HOME` is the Codex CLI's own var; `CODEX_API_KEY` is caught by the `_API_KEY` suffix; a test now pins that no `Settings` field name is in the set. The plan's owner note "prod launchd runs the venv python directly and is unaffected" was wrong — the service plist runs `bash -lc`, a LOGIN shell, so a profile-exported vendor key would crash-loop the runner (KeepAlive, ThrottleInterval 30) at the first restart carrying this check; the runbook gains a §0 pre-restart probe. `kwargs["env"]` merges rather than overwrites; a vacuous count assertion was replaced. Noted: `volumes/audit_log/utility.jsonl` (the synthetic job id) is read harmlessly by every JSONL walker today (no `job_started`, so index/ledger skip it) but never ages out of retention — low volume, a comment for Phase 3.
+
+**Side effects**: a runner started with ANY name in the set refuses to start — none is set on prod today (the 14 `com.assistant.*` plists carry no such name — verified by the review). Run the runbook §0 probe before the deploy's restart. The plist belt reaches prod on the next full `install-launchd.sh` (owner runbook; `timers-only` does not rewrite service plists). `scripts/run.sh` (dev launch) no longer exports `.env`. `utility_model_usage` is log + audit only.
+
 ## 2026-10-29 — E6: always-on audit/stream secret redactor, both lanes
 
 **Agent task**: Observability Phase 1 Tier B E6 (recut plan; design of record P0 plan Task 20 + E6 Deltas; spec §2.4 "Audit/stream redaction", §8.3).

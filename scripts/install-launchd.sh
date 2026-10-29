@@ -122,6 +122,8 @@ if (( ! TIMERS_ONLY )); then
   <dict>
     <key>PATH</key>
     <string>${VENV_DIR}/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>DISABLE_ERROR_REPORTING</key><string>1</string>
+    <key>DISABLE_TELEMETRY</key><string>1</string>
   </dict>
 
   <key>RunAtLoad</key><true/>

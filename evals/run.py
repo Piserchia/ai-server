@@ -78,12 +78,14 @@ async def _run_judge(prompt: str, timeout_s: int = 120) -> str:
     from claude_agent_sdk import (
         AssistantMessage, ClaudeAgentOptions, TextBlock, query,
     )
+    from src.runner.claude_env import claude_subprocess_env
 
     options = ClaudeAgentOptions(
         model=JUDGE_MODEL,
         permission_mode="plan",
         allowed_tools=[],
         max_turns=1,
+        env=claude_subprocess_env(),          # E7: telemetry off on every subprocess
     )
 
     async def _collect() -> str:

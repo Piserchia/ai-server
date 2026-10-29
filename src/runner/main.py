@@ -86,9 +86,32 @@ def _check_subscription_auth() -> None:
     """
     if os.environ.get("ANTHROPIC_API_KEY"):
         print(
-            "ERROR: ANTHROPIC_API_KEY is set in the environment. This server is "
-            "configured for subscription auth; unset it and restart.\n"
+            "ERROR: ANTHROPIC_API_KEY is set in the environment — INV-3: this server "
+            "runs on subscription auth only; unset it and restart.\n"
             "  unset ANTHROPIC_API_KEY",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # E7 (spec §6): vendor and auth keys live in .env and are read by Settings
+    # in-process only. Anything in os.environ is inherited by every Claude
+    # subprocess and every Bash child of every job — refuse to start rather
+    # than leak. FAIL-CLOSED on the whole set: CLAUDE_CODE_OAUTH_TOKEN,
+    # ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are exactly what outranks the
+    # Keychain /login. Named Anthropic keys, never a blanket ANTHROPIC_* prefix.
+    from src.runner.claude_env import vendor_keys_in
+    leaked = vendor_keys_in(os.environ)
+    if leaked:
+        print(
+            f"ERROR: forbidden credentials in the runner environment: {', '.join(leaked)} "
+            "(INV-3).\n"
+            "  Every one of these is inherited by each Claude subprocess and by every Bash\n"
+            "  call in every skill; CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_AUTH_TOKEN and\n"
+            "  ANTHROPIC_BASE_URL also outrank the Keychain /login (spec §6).\n"
+            "  Remove them from the launchd plist / shell profile and restart; vendor keys\n"
+            "  belong in .env (Settings reads them in-process; pydantic-settings does not\n"
+            "  export). If you launched through `pipenv run`, set PIPENV_DONT_LOAD_ENV=1 —\n"
+            "  `pipenv run` copies .env into os.environ (scripts/run.sh does this already).",
             file=sys.stderr,
         )
         sys.exit(1)

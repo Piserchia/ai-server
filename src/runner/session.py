@@ -71,6 +71,7 @@ class SkillResolutionError(RuntimeError):
 from src.runner import agents as agents_mod
 from src.runner import delivery, guards, quota, review, router, workspaces
 from src.runner import pricing, secret_redact
+from src.runner.claude_env import claude_subprocess_env
 from src.runner.executors import codex_cli
 from src.notify.outbox import build_ops_notice, enqueue_notice
 from src.runner.result_capture import (
@@ -1505,6 +1506,10 @@ def _build_options(
     # without unbounded growth. `setdefault` so a payload or skill override
     # (none today) can still tighten or widen per-session.
     kwargs.setdefault("max_buffer_size", 20 * 1024 * 1024)
+
+    # E7 (spec §2.4/§3): error reports + operational metrics off for every
+    # session. The SDK overlays this dict on os.environ.
+    kwargs["env"] = {**(kwargs.get("env") or {}), **claude_subprocess_env()}
 
     return ClaudeAgentOptions(**kwargs)
 
