@@ -17,7 +17,7 @@ Kinds used (keep this list honest — update when adding new kinds):
 - settings_override_observed: {"kind", "ts", "job_id", "key", "file", "project", "path"}  # E1 / D-P1-12: a code-channel key in a hosted PROJECT canonical's OWN tracked settings file (today exactly baseball-bingo → hooks) — audited, DM'd once per project per day (ops notice `settings_override`), and the job RUNS; flips to refuse once the inventory is empty
 - api_retry:        {"kind", "ts", "job_id", "error", "attempt"}  # a system/api_retry message on the Anthropic lane; `error` is the vendor category (rate_limit|overloaded|account_on_hold|oauth_org_not_allowed|billing_error|authentication_failed) — never the message text (B3, 2026-10-21)
 - job_result_rejected: {"kind", "ts", "job_id", "reason", "detail", "requested_model"}  # the session's ResultMessage was a silent empty success / served a different model than requested; reason = "unrecognized_model"; the job then fails with that terminal_reason (B3, 2026-10-21)
-- job_cancelled:    {"kind", "ts", "job_id"}
+- job_cancelled:    {"kind", "ts", "job_id"}  # + "stage" (E3 2026-10-29, D-P1-4): running | button | telegram | api | cleared — the site that cancelled; every site writes status=cancelled, terminal_reason=interrupted, error_message="cancelled by user (<stage>)"
 - tool_use:         {"kind", "ts", "job_id", "tool_name", "tool_use_id", "input"}
 - tool_result:      {"kind", "ts", "job_id", "tool_use_id", "is_error", "result_preview"}  # + "exit_code", "output" from the Codex executor (additive, T3)
 - text:             {"kind", "ts", "job_id", "text"}             # assistant text blocks

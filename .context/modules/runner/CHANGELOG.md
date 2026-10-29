@@ -2,6 +2,17 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E5: the autonomous `server-patch` idle dispatcher is removed unconditionally
+
+**Agent task**: Observability Phase 1 Tier B E5 (recut plan; design of record P0 plan Task 13 Step 6b; spec §4.3, §6).
+**Files changed**: `src/runner/events.py` — deleted `REVIEW_COOLDOWN_HOURS`, `_should_trigger_idle_review`, `_check_idle_queue_review` and the `event_loop` dispatch block that enqueued `review-and-improve` on an idle queue; the alpha drainer keeps its place and its breaker exemption. `tests/test_events.py` — `TestIdleQueueReview` deleted; `TestEventLoopBreakerGating` rewritten for three checks; new `TestTheAutonomousServerPatchDispatcherIsGone` (the names and the literal are gone from the module; the alpha drainer still enqueues under its predicate — idle queue, stale governor, under the daily valve, 4 h cooldown).
+**Why**: the idle trigger was the one place the fleet dispatched a server-patching retrospective on its own, with no owner in the loop. **No self-improvement loop until the Phase-4 `retro`; interim = CostCard + owner-run `/task review-and-improve`** (spec §4.3). The `review-and-improve` skill file stays.
+**Side effects**: quiet hours no longer produce a `review-and-improve` job (≈ $34 over 30 d was its line in the ledger); `/task review-and-improve` still works by hand; the `/proposals` command (E3) is where its pending proposals surface.
+
+## 2026-10-29 — E3: the cancel listener stamps `interrupted` + `cancelled by user (running)`
+
+**Agent task**: Tier B E3 (D-P1-4). **Files changed**: `src/runner/main.py` — `_cancel_listener`, after a successful `session.interrupt`, writes `job_cancelled{stage="running"}` and stamps `terminal_reason="interrupted"`, `error_message="cancelled by user (running)"` beside `status=cancelled`/`completed_at`. **Why**: one cancel vocabulary across the four sites (gateway CHANGELOG, same date). **Side effects**: `jobs.terminal_reason` is no longer NULL on a cancelled running job.
+
 ## 2026-10-29 — E2: the generic task's tool list is `registry.skills.DEFAULT_REQUIRED_TOOLS`
 
 **Agent task**: Tier B E2. **Files changed**: `src/runner/session.py` — `_build_options` reads `list(DEFAULT_REQUIRED_TOOLS)` for a skill-less job instead of its own literal (which carried `AskUserQuestion`). **Why/side effects**: see the registry CHANGELOG entry of the same date — one definition, and the generic task can no longer hang on an unanswered question.

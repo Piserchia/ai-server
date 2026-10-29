@@ -2,6 +2,21 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E3: ghost commands become real; one cancel semantics; `/rate` leaves the copy
+
+**Agent task**: Observability Phase 1 Tier B E3 (recut plan; design of record P0 plan Task 8 + D-P1-4).
+**Files changed**:
+- `src/gateway/jobs.py` — `cancel_action_for_status` (pure), `remove_from_queue` (`LREM jobs:queue 0 <id>`), `cancel_job_durable(job, *, stage)`: queued/deferred rows leave Redis and flip to `cancelled` with **`terminal_reason="interrupted"`** (D-P1-4: spec §2.4's value, never a 16th `cancelled`), `error_message="cancelled by user (<stage>)"`, `completed_at`, one `job_cancelled{stage}` audit row, under `WHERE status IN (queued, deferred)` so a race with the runner's running-flip is reported (`already_terminal`), never double-written; running → the existing `jobs:cancel` publish. New import `src.audit_log` (SYSTEM.md Depends-on).
+- `src/gateway/web.py` — `DELETE /api/jobs/{id}` routes through `cancel_job_durable(stage="api")`; the note is the outcome (`cancelled queued | cancel requested | already terminal`). `_check_auth` and the route decorator untouched.
+- `src/gateway/telegram_bot.py` — `/cancel <prefix>` (`cmd_cancel`, `_CANCEL_REPLIES`, `format_cancel_reply`), `/proposals` (`cmd_proposals`, function-level import of `runner.proposals` → SYSTEM.md Depends-on), both registered in `main()`; the task Cancel button cancels every open job through `cancel_job_durable(stage="button")` (the second vocabulary `"task cancelled by user"` is gone); `/help` lists `/status <prefix>`, `/cancel <prefix>`, `/proposals`, `/clear (asks first)` and no `/rate`; `/jobs` completed lines point at `/status <prefix>` only; `_done_dm_text` drops the `/rate` hint (spec §4.1).
+- `tests/test_cancel_durable.py` (new, 11: the mapping, idempotent LREM, the flip with the full vocabulary + guard + single audit row, the race, publish for running, deferred, terminal no-op, source pins that the listener/button/API share the vocabulary, the docstring); `tests/test_telegram_commands.py` + `TestCancelReply`, `TestCmdCancel` (3), `TestCmdProposals` (2), `TestHelpCopy` (3), `TestStatusPrefix`; the three `/rate` pins updated.
+
+**Why**: `/cancel`, `/status <prefix>` and `/proposals` were advertised or implied but did not exist (ghost commands); a queued job could not be cancelled at all (the publish reached running jobs only); and four sites wrote three different cancel vocabularies.
+
+**Side effects**: `jobs.error_message` for a user cancel changes from `"task cancelled by user"` / nothing to `"cancelled by user (<stage>)"`; `terminal_reason` is now stamped on every cancel. `cancel_job` (the bare publish) stays for the runner-side callers.
+
+**Independent review (2026-10-29, applied before commit)**: the guarded UPDATE now runs BEFORE the LREM (LREM-first would strand a queued row in Postgres on a DB failure; UPDATE-first leaves at worst a dead id the runner skips); on rowcount 0 the row's status is re-read and a RUNNING row still gets the publish (`cancel_requested`) — before E3, `DELETE /api/jobs` published for any non-terminal row, so dropping the cancel on the queued→running race would have been a regression; only a terminal fresh status is `already_terminal`. Copy: "Cancel sent to the runner" (the publish is best-effort; an orphaned running row has nothing to interrupt). **Recorded, not fixed here (pre-existing)**: `main._process_job`'s queued→running flip is an unguarded ORM write — a cancel that commits inside its read→commit window is overwritten (INV-9 flip-back with a `job_cancelled` row that lies); the fix is a guarded core UPDATE `WHERE status='queued'` in `_process_job` and is a follow-up (runner GOTCHAS 2026-10-29).
+
 ## 2026-10-22 — Whole-tier review applied: stuck `sending` rows released before every drain; `/status <prefix>`; the quota-notice fan-out narrowing recorded
 
 **Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").

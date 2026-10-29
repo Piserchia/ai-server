@@ -7,8 +7,10 @@ One function: `enqueue_job(...)`. Creates the Job row, pushes to Redis, returns 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
+from src import audit_log
 from src.db import QUEUE_JOBS, async_session, redis
 from src.models import Job, JobKind, JobStatus
 
@@ -130,3 +132,75 @@ async def find_job_by_prefix(prefix: str) -> Job | None:
         if len(ids) == 1:
             return await s.get(Job, ids[0])
         return None  # 0 or ambiguous
+
+
+# ── E3: durable cancel — ONE semantics for every cancel site (D-P1-4) ────────
+
+def cancel_action_for_status(status: str) -> str:
+    """Pure. queued/deferred → remove from Redis + flip the row here;
+    running → publish jobs:cancel (the runner interrupts, INV-8);
+    anything else → no-op (a second /cancel is harmless)."""
+    if status in (JobStatus.queued.value, JobStatus.deferred.value):
+        return "lrem_and_flip"
+    if status == JobStatus.running.value:
+        return "publish"
+    return "noop"
+
+
+async def remove_from_queue(job_id: uuid.UUID | str) -> int:
+    """LREM every copy of the id from jobs:queue. Idempotent."""
+    return int(await redis.lrem(QUEUE_JOBS, 0, str(job_id)))
+
+
+async def cancel_job_durable(job: Job, *, stage: str) -> str:
+    """Cancel a job whatever its state. The four cancel sites — the task
+    Cancel button (`stage="button"`), `/cancel <prefix>` (`"telegram"`),
+    `DELETE /api/jobs/{id}` (`"api"`) and `/clear` (`"cleared"`) — all route
+    here, so there is one vocabulary: `status=cancelled`,
+    `terminal_reason="interrupted"` (spec §2.4's value — never a 16th
+    `cancelled`), `error_message="cancelled by user (<stage>)"`, one
+    `job_cancelled{stage}` audit row on a real flip. The runner's listener
+    stamps the same for a running job it interrupts (`stage="running"`).
+
+    Returns `cancelled_queued` | `cancel_requested` | `already_terminal`.
+    A queued/deferred row is LREM'd and flipped under
+    `WHERE status IN (queued, deferred)` (INV-9 safe); rowcount 0 means the
+    runner's running-flip or another cancel won the race — reported, never
+    double-written.
+    """
+    from sqlalchemy import select, update as sql_update
+
+    action = cancel_action_for_status(job.status)
+    if action == "publish":
+        await cancel_job(job.id)
+        return "cancel_requested"
+    if action == "noop":
+        return "already_terminal"
+    # Flip FIRST, then LREM (review 2026-10-29): with LREM first, a DB failure
+    # would strand a `queued` row that is no longer in Redis (invisible until
+    # the next restart's requeue); with the flip first, a Redis failure leaves
+    # a dead id the runner skips gracefully (`_process_job` returns on
+    # status != queued), and the runner popping it in between is skipped too.
+    async with async_session() as s:
+        res = await s.execute(
+            sql_update(Job)
+            .where(Job.id == job.id,
+                   Job.status.in_([JobStatus.queued.value, JobStatus.deferred.value]))
+            .values(status=JobStatus.cancelled.value,
+                    terminal_reason="interrupted",
+                    error_message=f"cancelled by user ({stage})",
+                    completed_at=datetime.now(timezone.utc))
+        )
+        await s.commit()
+        if getattr(res, "rowcount", 0) == 0:
+            # Lost the race: the runner's queued→running flip or another
+            # cancel got there first. Re-read — a RUNNING row still gets the
+            # user's cancel (the publish); only a terminal one is a no-op.
+            fresh = (await s.execute(select(Job.status).where(Job.id == job.id))).scalar()
+            if fresh == JobStatus.running.value:
+                await cancel_job(job.id)
+                return "cancel_requested"
+            return "already_terminal"
+    await remove_from_queue(job.id)
+    audit_log.append(str(job.id), "job_cancelled", stage=stage)
+    return "cancelled_queued"

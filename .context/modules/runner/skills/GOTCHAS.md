@@ -843,3 +843,7 @@ E1's provenance allowance compares a clone's `.claude/settings*.json` with the c
 ## 2026-10-29 — An observed settings key can mask a refused one in the same file
 
 E1's `settings_override` walks `SETTINGS_OVERRIDE_KEYS` in order and `hooks` comes first. With D-P1-12's observe arm, bingo's own `hooks` is observed — so a `mcpServers` committed into the SAME file would have been reported as "hooks, observed" and the job would have run. Caught by the sized-arm test; the function now collects every hit in a file and reports the first REFUSED one before any observed one. Lesson for any allow-list beside a deny-list: never return on the first allowed match.
+
+## 2026-10-29 — `_process_job`'s queued→running flip is an unguarded ORM write (INV-9 window)
+
+`main._process_job` reads the row, awaits the provider-hold check (a Redis round trip), then sets `job.status = running` and commits — SQLAlchemy emits `UPDATE jobs SET status='running' WHERE id=:id` with no status predicate. A durable cancel (`gateway.jobs.cancel_job_durable`, E3) that commits inside that window is overwritten: the job runs with a `job_cancelled` audit row that lies. Pre-existing (the old button path had the same race); found by E3's review. Fix when touching `_process_job`: a guarded core `update(Job).where(Job.id == id, Job.status == 'queued').values(status='running', …)` and return on rowcount 0.

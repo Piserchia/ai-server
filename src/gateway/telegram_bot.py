@@ -30,7 +30,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from src import audit_log
 from src.config import settings
 from src.db import CHANNEL_JOB_DONE, CHANNEL_NOTIFY_OUTBOX, async_session, redis
-from src.gateway.jobs import cancel_job, enqueue_job, find_job_by_prefix
+from src.gateway.jobs import cancel_job_durable, enqueue_job, find_job_by_prefix
 from src.models import Job, JobKind, JobStatus, Project, Schedule, Task, TaskStatus, TaskTurn
 from src.notify.outbox import (
     OPS_NOTICE_KINDS,
@@ -269,10 +269,12 @@ async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "*Commands (still work):*\n\n"
         "/task <description> — start a new task explicitly\n"
         "  _Reply in the thread to continue. Buttons for actions._\n\n"
-        "/status — see active tasks\n"
-        "/jobs — see recent job runs\n"
+        "/status — active tasks · /status <prefix> — one job's details\n"
+        "/jobs — recent job runs\n"
+        "/cancel <prefix> — cancel a queued or running job\n"
+        "/proposals — pending self-improvement proposals\n"
         "/help — this message\n\n"
-        "_Admin: /god, /chat, /resume, /clear, /schedule_",
+        "_Admin: /god, /chat, /resume, /clear (asks first), /schedule_",
         parse_mode="Markdown",
     )
 
@@ -896,6 +898,53 @@ def provider_paused_text(provider: str, reset_at: datetime | None, reason: str) 
 
 
 
+_CANCEL_REPLIES = {
+    "cancelled_queued": "🚫 Job {p} removed from the queue.",
+    "cancel_requested": "🚫 Cancel sent to the runner for running job {p}.",
+    "already_terminal": "Job {p} is already finished — nothing to cancel.",
+    "not_found": "No job matches {p} (need a unique 8-char prefix).",
+}
+
+
+def format_cancel_reply(result: str, prefix: str) -> str:
+    """Pure. One line per `cancel_job_durable` outcome; unknown → not_found."""
+    return _CANCEL_REPLIES.get(result, _CANCEL_REPLIES["not_found"]).format(p=prefix)
+
+
+@_error_safe
+async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/cancel <job-prefix> — durable (E3): a queued job leaves Redis and
+    flips; a running job is interrupted; a second call is a no-op."""
+    if await _guard(update) is None:
+        return
+    args = getattr(ctx, "args", None) or []
+    if not args:
+        await update.message.reply_text("Usage: /cancel <job prefix>  (see /jobs)")
+        return
+    prefix = str(args[0]).strip()
+    job = await find_job_by_prefix(prefix)
+    result = await cancel_job_durable(job, stage="telegram") if job else "not_found"
+    await update.message.reply_text(format_cancel_reply(result, prefix))
+
+
+@_error_safe
+async def cmd_proposals(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/proposals — pending review-and-improve proposals (the SYSTEM.md gap
+    that said "no /proposals command yet")."""
+    if await _guard(update) is None:
+        return
+    from src.runner import proposals as proposals_mod
+    rows = await proposals_mod.list_pending_proposals(limit=15)
+    if not rows:
+        await update.message.reply_text("No pending proposals.")
+        return
+    lines = [f"Pending proposals ({len(rows)}):"]
+    lines += [proposals_mod.format_proposal_line(p.id, p.target_file, p.change_type,
+                                                 p.outcome, p.proposed_at)
+              for p in rows]
+    await update.message.reply_text("\n".join(lines)[:4000])   # plain text: paths carry `_`
+
+
 @_error_safe
 async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """List recent jobs: /jobs [count]"""
@@ -936,7 +985,7 @@ async def cmd_jobs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         lane_ref = f" `{lane}`" if lane else ""
         line = f"`{prefix}` {icon} {skill}{lane_ref} — {desc}{task_ref}"
         if j.status == JobStatus.completed.value:
-            line += f"\n  → `/rate {prefix} 1-5` or `/status {prefix}`"
+            line += f"\n  → `/status {prefix}`"
         elif j.status == JobStatus.failed.value:
             line += f"\n  → `/status {prefix}` for error details"
         elif j.status in (JobStatus.queued.value, JobStatus.running.value):
@@ -1118,17 +1167,12 @@ async def _handle_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
                 ).order_by(Job.created_at.desc())
             )
             open_jobs = list(result.scalars())
+        # E3 (D-P1-4): every open job through the ONE durable path — running
+        # → publish, queued/deferred → LREM + flip with terminal_reason
+        # "interrupted" and error_message "cancelled by user (button)".
         for job in open_jobs:
-            if job.status == JobStatus.running.value:
-                await cancel_job(job.id)
+            await cancel_job_durable(job, stage="button")
         async with async_session() as s:
-            await s.execute(
-                sql_update(Job).where(
-                    Job.task_id == task.id,
-                    Job.status.in_([JobStatus.queued.value, JobStatus.deferred.value]),
-                ).values(status=JobStatus.cancelled.value,
-                         error_message="task cancelled by user")
-            )
             await s.execute(
                 sql_update(Task).where(Task.id == task.id).values(
                     status=TaskStatus.failed.value,
@@ -1274,8 +1318,8 @@ def _done_dm_text(job_id: str, status: str, summary: str, lane: str) -> str:
         text += f" \u00b7 `{lane}`"
     if summary:
         text += f"\n\n{summary}"
-    if status == JobStatus.completed.value:
-        text += f"\n\n💡 `/rate {job_id[:8]} 1-5`"
+    # E3: no `/rate` hint — the command never existed (the `rate:` callback
+    # and POST /api/jobs/{id}/rate stay; spec §4.1 keeps /rate off the copy).
     return text
 
 
@@ -1708,6 +1752,8 @@ def main() -> None:
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("tasks", cmd_status))  # alias
     app.add_handler(CommandHandler("jobs", cmd_jobs))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("proposals", cmd_proposals))
     # Admin commands
     app.add_handler(CommandHandler("chat", cmd_chat))
     app.add_handler(CommandHandler("god", cmd_god))

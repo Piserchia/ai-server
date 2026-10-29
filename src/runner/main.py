@@ -2057,11 +2057,16 @@ async def _cancel_listener() -> None:
                     continue
                 did = await session_mod.interrupt(job_id)
                 if did:
-                    audit_log.append(str(job_id), "job_cancelled")
+                    # E3 / D-P1-4: the same vocabulary as gateway.jobs.
+                    # cancel_job_durable — one `job_cancelled{stage}` shape,
+                    # terminal_reason "interrupted" (never a 16th value).
+                    audit_log.append(str(job_id), "job_cancelled", stage="running")
                     async with session_scope() as s:
                         await s.execute(
                             update(Job).where(Job.id == job_uuid).values(
                                 status=JobStatus.cancelled.value,
+                                terminal_reason="interrupted",
+                                error_message="cancelled by user (running)",
                                 completed_at=datetime.now(timezone.utc),
                             )
                         )

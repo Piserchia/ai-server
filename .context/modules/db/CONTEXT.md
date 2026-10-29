@@ -112,7 +112,7 @@ fields `key`/`file`/`auth_key` on `provider_refused` (reason `settings_override:
 (`audit_log.append_schedule_event` / `read_schedule_events`; a subdirectory
 so `runner/audit_index.rebuild_index` never indexes it as a job). Kinds are
 a parsing contract (C14): add, never rename or reshape. The full list with
-field shapes is the `src/audit_log.py` docstring.
+field shapes is the `src/audit_log.py` docstring. E3 (2026-10-29) added `stage` on `job_cancelled` (running | button | telegram | api | cleared).
 
 Plus `volumes/audit_log/<job_id>.summary.md` — human-readable one-paragraph
 summary, written at job completion (the final text message from Claude).

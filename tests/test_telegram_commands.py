@@ -236,7 +236,7 @@ class TestDoneDmText:
                              "codex/gpt-6-luna")
         assert text.startswith("Job `01234567` *completed* · `codex/gpt-6-luna`")
         assert "did the thing" in text
-        assert "/rate 01234567 1-5" in text
+        assert "/rate" not in text                     # E3: /rate never existed as a command
 
     def test_failed_names_lane_and_reason(self):
         text = _done_dm_text("0123456789abcdef", "failed", "",
@@ -245,7 +245,7 @@ class TestDoneDmText:
 
     def test_no_lane_is_the_pre_t7_text(self):
         text = _done_dm_text("0123456789abcdef", "completed", "sum", "")
-        assert text == "Job `01234567` *completed*\n\nsum\n\n💡 `/rate 01234567 1-5`"
+        assert text == "Job `01234567` *completed*\n\nsum"
 
 
 # ── handler-level: refusal replies, no job; /jobs rows; done DM lookup ──────
@@ -413,7 +413,7 @@ class TestDoneDmLookup:
         bot = SimpleNamespace(send_message=AsyncMock())
         jid = str(_uuid.uuid4())
         await tg._deliver_done(SimpleNamespace(bot=bot), 1, jid, {"status": "completed"})
-        assert bot.send_message.await_args.args[1] == f"Job `{jid[:8]}` *completed*\n\n💡 `/rate {jid[:8]} 1-5`"
+        assert bot.send_message.await_args.args[1] == f"Job `{jid[:8]}` *completed*"
 
 
 # ── A2: every launch persists its origin ──────────────────────────────────
@@ -517,3 +517,131 @@ class TestLaunchOrigin:
         kw = self.enqueue.await_args.kwargs
         assert kw["kind"] == "chat"
         assert (kw["origin_channel"], kw["origin_ref"]) == ("telegram", "5")
+
+
+# ── E3: ghost commands become real; one cancel semantics; /rate leaves the copy ──
+
+import uuid  # noqa: E402
+
+class TestCancelReply:
+    def test_replies(self):
+        from src.gateway.telegram_bot import format_cancel_reply
+        assert format_cancel_reply("cancelled_queued", "abcdef12") == "🚫 Job abcdef12 removed from the queue."
+        assert format_cancel_reply("cancel_requested", "abcdef12") == "🚫 Cancel sent to the runner for running job abcdef12."
+        assert format_cancel_reply("already_terminal", "abcdef12") == "Job abcdef12 is already finished — nothing to cancel."
+        assert format_cancel_reply("not_found", "abcdef12") == "No job matches abcdef12 (need a unique 8-char prefix)."
+        assert format_cancel_reply("???", "x") == format_cancel_reply("not_found", "x")
+
+
+class TestCmdCancel:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_usage_without_an_argument(self):
+        upd = _tg_update("/cancel")
+        await tg.cmd_cancel(upd, SimpleNamespace(args=[]))
+        assert "Usage: /cancel <job prefix>" in upd.message.reply_text.call_args.args[0]
+
+    async def test_resolves_the_prefix_and_routes_through_the_durable_path(self, monkeypatch):
+        job = SimpleNamespace(id=uuid.uuid4(), status="queued")
+        calls = []
+
+        async def fake_find(prefix):
+            return job if prefix == str(job.id)[:8] else None
+
+        async def fake_durable(j, *, stage):
+            calls.append((j.id, stage))
+            return "cancelled_queued"
+        monkeypatch.setattr(tg, "find_job_by_prefix", fake_find)
+        monkeypatch.setattr(tg, "cancel_job_durable", fake_durable)
+        upd = _tg_update("/cancel")
+        await tg.cmd_cancel(upd, SimpleNamespace(args=[str(job.id)[:8]]))
+        assert calls == [(job.id, "telegram")]
+        assert upd.message.reply_text.call_args.args[0] == \
+            f"🚫 Job {str(job.id)[:8]} removed from the queue."
+
+    async def test_unknown_prefix(self, monkeypatch):
+        async def fake_find(prefix):
+            return None
+        monkeypatch.setattr(tg, "find_job_by_prefix", fake_find)
+        upd = _tg_update("/cancel")
+        await tg.cmd_cancel(upd, SimpleNamespace(args=["zzzzzzzz"]))
+        assert "No job matches zzzzzzzz" in upd.message.reply_text.call_args.args[0]
+
+
+class TestCmdProposals:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_empty(self, monkeypatch):
+        from src.runner import proposals as proposals_mod
+
+        async def none(limit=50):
+            return []
+        monkeypatch.setattr(proposals_mod, "list_pending_proposals", none)
+        upd = _tg_update("/proposals")
+        await tg.cmd_proposals(upd, SimpleNamespace(args=[]))
+        assert upd.message.reply_text.call_args.args[0] == "No pending proposals."
+
+    async def test_lists_pending_rows_as_plain_text(self, monkeypatch):
+        from datetime import datetime, timezone
+        from src.runner import proposals as proposals_mod
+        rows = [SimpleNamespace(id=uuid.uuid4(), target_file="skills/x/SKILL.md",
+                                change_type="edit", outcome="pending",
+                                proposed_at=datetime(2026, 10, 29, tzinfo=timezone.utc))]
+
+        async def some(limit=50):
+            assert limit == 15
+            return rows
+        monkeypatch.setattr(proposals_mod, "list_pending_proposals", some)
+        upd = _tg_update("/proposals")
+        await tg.cmd_proposals(upd, SimpleNamespace(args=[]))
+        args, kwargs = upd.message.reply_text.call_args
+        assert args[0].startswith("Pending proposals (1):")
+        assert "skills/x/SKILL.md" in args[0]
+        assert "parse_mode" not in kwargs                 # plain text: paths carry `_`
+
+
+class TestHelpCopy:
+    def test_help_and_jobs_no_longer_advertise_rate(self):
+        import inspect
+        src = inspect.getsource(tg.cmd_help) + inspect.getsource(tg.cmd_jobs)
+        assert "/rate" not in src
+        help_src = inspect.getsource(tg.cmd_help)
+        assert "/cancel <prefix>" in help_src and "/proposals" in help_src
+        assert "/status <prefix>" in help_src
+
+    def test_ghost_commands_are_registered(self):
+        import inspect
+        src = inspect.getsource(tg.main)
+        for cmd in ('CommandHandler("cancel", cmd_cancel)', 'CommandHandler("proposals", cmd_proposals)'):
+            assert cmd in src
+
+    def test_done_dm_drops_the_rate_hint(self):
+        text = _done_dm_text("0123456789abcdef", "completed", "did the thing", "codex/gpt-6-luna")
+        assert "/rate" not in text and "did the thing" in text
+
+
+class TestStatusPrefix:
+    @pytest.fixture(autouse=True)
+    def _auth(self, monkeypatch):
+        monkeypatch.setattr(tg, "_is_authorized", lambda chat_id: True)
+
+    async def test_status_prefix_renders_job(self, monkeypatch):
+        # Routing only: the renderer itself is A6's (tests/test_notify_bot.py).
+        row = _job_row(resolved_provider="anthropic", resolved_model="claude-opus-5",
+                       status="completed")
+        seen = []
+
+        async def fake_find(prefix):
+            seen.append(prefix)
+            return row
+        monkeypatch.setattr(tg, "find_job_by_prefix", fake_find)
+        monkeypatch.setattr(tg, "format_job_status", lambda j: f"RENDERED {j.id}")
+        upd = _tg_update("/status")
+        await tg.cmd_status(upd, SimpleNamespace(args=[str(row.id)[:8]]))
+        assert seen == [str(row.id)[:8]]
+        args, kwargs = upd.message.reply_text.call_args
+        assert args[0] == f"RENDERED {row.id}" and "parse_mode" not in kwargs
