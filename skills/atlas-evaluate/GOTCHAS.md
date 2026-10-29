@@ -454,3 +454,96 @@ today's number for an old date differs, the metric backfills and the prior readi
 and aggregate by week. The underlying fetch errors were real and still growing (169 × `unable to open
 database file`, 199 failed downloads, 4,159 "possibly delisted") — report *those* as the defect, but do
 not convert a lagging edge into a collapsing universe.
+
+## 2026-10-29 — `x != x` cannot detect NaN in Postgres, so any always-false scan "proves" cleanliness
+
+A build's done-evidence claimed *"live non-finite scans of candles and indicator_values are 0"* and the
+run before it had used the same predicate. Both were measuring nothing:
+
+```
+SELECT 'NaN'::numeric = 'NaN'::numeric, 'NaN'::numeric != 'NaN'::numeric;  -- t | f
+SELECT count(*) FROM candles WHERE open != open OR close != close;        -- 0   (always 0)
+SELECT count(*) FROM candles WHERE open = 'NaN'::numeric OR close = 'NaN'::numeric;  -- 12
+```
+
+Postgres defines `NaN` as **equal to itself** and **greater than every number** so that `numeric` has a
+total sort order. The IEEE-754 `x != x` idiom — correct in C, Python and float8-via-`isnan` — is
+**always false** here, which means the scan would report 0 against a table of pure NaN.
+
+Rules for this class of evidence:
+
+- Scan with `= 'NaN'::numeric` (or `isnan(x)` for float8), never `x != x`.
+- **Demand that any "the scan returns 0" claim come with proof the scan can return non-zero.** A
+  detector that has never been shown to fail is not evidence. Ask the done-evidence line to include a
+  deliberately-seeded fixture.
+- The generalisation beyond NaN: when grading, the question is never only *what did the number say* but
+  *could this instrument have produced a different number*. Two runs in a row accepted a vacuous zero.
+
+## 2026-10-29 — a bare `[pipeline]` tag makes internal plumbing permanently unbuildable
+
+An item tagged `[pipeline]` is caught by LOOP.md §4.3.2's solid-ground clause: pipeline items need a
+`specced` `data_gaps` row **and** a spec block in the sector's `pipelines.md`. Internal work — a
+freshness detector, a sync guard, a cache fix — ingests no new source, so it will **never** have either,
+and the builder is obliged to skip it. From the transcript: *"Fails the solid-ground eligibility clause
+(pipeline items need a specced gap + spec block). Skip, leave for the evaluator to spec/re-tag."*
+
+Tag internal plumbing `[build:pipeline]`, `[tests]` or `[build:tooling]`. Reserve bare `[pipeline]` for
+work that genuinely ingests a new external source. Three items in the 10-19 backlog carried the wrong
+tag and one of them had been ranked at slot 2 for two windows while being structurally unpickable.
+
+## 2026-10-29 — a "renders in the UI" done-evidence clause silently converts an M into an L
+
+I wrote *"the flag renders in the UI, not only in a log"* onto a Python detector item sized **M**. On the
+Atlas web surface that clause means a typed API route + a new component + a web build + `node_modules`
++ `verify-frontend` — a greenfield UI deliverable bolted onto the backend one. The builder priced it
+correctly and skipped it: *"item 2 is the grander item and not safely landable in a single 30-min
+window."*
+
+**Done-evidence clauses are sizing decisions, not wishes.** Before writing one, ask which surfaces it
+drags in. If a backend item wants a UI, file the UI as a separate item and let the backend land first —
+otherwise the whole thing sits at the top of the queue being skipped.
+
+## 2026-10-29 — the builder has a ~30-minute window ceiling, so ranking an M above an S buys nothing
+
+Measured from two builder transcripts in one window: both enforced a ~30-minute ceiling, both lost
+**~⅓ of it** to venv repair (workspace venv built with Python 3.9 instead of 3.12; pip 21 cannot do PEP
+660 editable installs), and both then cited the remaining time as the explicit reason for skipping every
+**M** item — *"eligible but M (full new pipelines) … the skill's explicit rule is to prefer the smaller
+eligible item."*
+
+So **effort is a hard gate at the builder, not a weight in the evaluator's priority formula.** Ranking
+an M above an S does not get the M built; it gets the window spent on the S anyway, one slot lower. Four
+spec-READY M pipelines sat at `specced` for 24–36 days this way, with live probes and spec blocks, while
+the ranking was repeatedly adjusted as if ordering were the problem.
+
+The only two levers that move M work: **slice it into S slices**, and **fix the bootstrap** so a window
+is 30 minutes of work instead of 20. Put all S items above all M items and stop re-ranking.
+
+## 2026-10-29 — `grep -c <module_name>` in a scheduler log is not proof the module ran
+
+Three consecutive runs refused a `built → live` promotion citing *"`grep -c relative_strength` = 0
+across every scheduler log"* as proof the module had never been imported. The diagnosis was right (the
+scheduler PID predated the file), but the instrument was not: after a restart the module demonstrably
+produced +1,176 rows and that grep **still returns 0** — it emits no log line carrying its own name.
+
+A module's absence from the logs is evidence of its logging, not of its execution. Grade pipeline
+liveness on **row counts and `max(ts)` against a same-table control cohort**, which is what actually
+settled it. If you want a process-level instrument, read the scheduler's PID and start time
+(`ps -o pid,lstart,etime`) against the module file's mtime — that comparison is sound and is what made
+the three refusals correct despite the bad grep.
+
+## 2026-10-29 — a per-agent GOTCHAS file cannot stop a cross-agent defect
+
+The "a new `coverage-matrix.md` row mints a glossary slug and reds the deploy gate" lesson has been in
+*this* file since 2026-08-24, after the evaluator did it twice. On 10-28 the **gap-scout** did it —
+commit `40bfb89` added one row minting `sector-etf-relative-strength` — and the gate went red eight days
+after the previous occurrence was cleared. The scout's charter does not carry this file.
+
+Two takeaways for the governor:
+
+- When the charter's "same class twice ⇒ `[system]` item" rule fires, check **which agent** tripped it.
+  If the lesson lives in one agent's lesson base and another agent tripped it, the `[system]` item is not
+  "re-encode the lesson" — it is **move the rule into the shared contract** (LOOP.md) or into a test
+  (a pre-commit check that every new matrix row has a matching glossary slug).
+- Corollary for grading: a recurrence after a documented fix is not necessarily a discipline failure. Ask
+  whether the fix was ever *reachable* by the agent that failed.
