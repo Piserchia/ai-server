@@ -2,6 +2,12 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — `settings_override` header reads "observed", not "refused" (E1)
+
+**Agent task**: Observability Phase 1 Tier B E1 (independent review finding 2).
+**Files changed**: `src/notify/telegram.py` — the `settings_override` ops-notice header is `🛡 settings override observed`. Its only producer is E1's observe arm (D-P1-12), where the job RAN; a refused override never produces a notice — it fails the job with `terminal_reason=provider_refused` and the failed-job card says why.
+**Why**: the header must not contradict the event. **Side effects**: none beyond the string.
+
 ## 2026-10-22 — Whole-tier review applied: CLI `drain` releases stuck rows; task cards name the task
 
 **Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").

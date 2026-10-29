@@ -652,11 +652,17 @@ async def _process_job(job_id: uuid.UUID) -> None:
         # ROUTER_PROVIDERS_ENABLED, or one with no executor — terminal, NOT
         # escalated (a bigger model would re-refuse the same policy). Raised
         # by session._resolve_model before any clone or process exists
-        # (T1, 2026-10-21; C12 fail-closed).
+        # (T1, 2026-10-21; C12 fail-closed) — or, as the E1 subclass
+        # `SettingsOverrideRefused`, after the clone and before the SDK (the
+        # session keeps that clone for forensics).
         reason = str(exc)
         audit_log.append(str(job_id), "provider_refused",
                          provider=exc.provider, model=exc.model_id, raw=exc.raw,
-                         reason=exc.reason)
+                         reason=exc.reason,
+                         # E1 (additive): the settings-override subclass names
+                         # the key, the file and whether it was an auth key.
+                         key=getattr(exc, "key", None), file=getattr(exc, "file", None),
+                         auth_key=getattr(exc, "auth_key", None))
         audit_log.append(str(job_id), "job_failed", error=reason,
                          error_category="provider_refused", terminal_reason="provider_refused")
         await _finish_job(job_id, JobStatus.failed, error=f"Provider refused: {reason}",

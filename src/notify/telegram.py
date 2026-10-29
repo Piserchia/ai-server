@@ -46,7 +46,7 @@ _HEADERS: dict[str, str] = {
     "quota_paused": "⏸ queue paused",
     "quota_resumed": "▶️ queue resumed",
     "schedule_deferred": "⏭ schedule deferred",
-    "settings_override": "\U0001f6e1 settings override refused",
+    "settings_override": "\U0001f6e1 settings override observed",
     "provider_enforcement": "\U0001f6ab provider refused",
 }
 
