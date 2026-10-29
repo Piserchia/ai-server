@@ -53,6 +53,7 @@ from src.db import CHANNEL_JOB_DONE, CHANNEL_JOB_STREAM, async_session, redis
 from src.models import Job, JobKind, Project
 from src.registry import models as models_registry
 from src.registry.skills import (
+    DEFAULT_REQUIRED_TOOLS,
     SkillConfig,
     SkillFrontmatterError,
     load as load_skill,
@@ -1383,10 +1384,7 @@ def _build_options(
     permission_mode = payload.get("permission_mode") or (
         skill_cfg.permission_mode if skill_cfg else "acceptEdits"
     )
-    tools = (skill_cfg.required_tools if skill_cfg else [
-        "Read", "Write", "Edit", "Bash", "Glob", "Grep",
-        "WebSearch", "WebFetch", "AskUserQuestion",
-    ])
+    tools = (skill_cfg.required_tools if skill_cfg else list(DEFAULT_REQUIRED_TOOLS))
 
     kwargs: dict[str, Any] = dict(
         cwd=str(cwd),

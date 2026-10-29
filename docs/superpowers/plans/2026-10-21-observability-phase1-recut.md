@@ -317,7 +317,7 @@ Fresh reviewer over `git diff main...observability/phase-1` (four dimensions: ru
 - **Design of record**: P0 plan Task 10 (lines 6324–6454).
 - **Files**: `src/registry/skills.py` (`DEFAULT_REQUIRED_TOOLS` tuple of 8 above `class SkillConfig`; `default_factory` :46-49 and loader fallback :144-146 point at it), `src/runner/session.py` (import at :51-55; the literal at :1090-1093 → `list(DEFAULT_REQUIRED_TOOLS)`; keep the explanatory comment **out** of `_build_options` — the test greps its source), `tests/test_default_tools.py` (5 tests; use `load("t", skills_dir=tmp_path)`), registry + runner CHANGELOG (one line: `agents.py:64` subagents of skills without `required_tools` lose it too — intended). The 7 skills declaring it explicitly (incl. protected `skills/new-skill/SKILL.md`) are **not** touched. Spec citation is §3/§9, not "§4.5".
 - **Size**: S.
-- [ ] Steps: S1 → S6.
+- [x] Steps: S1 → S6 — **built 2026-10-29** (6 tests; three copies of the list collapsed into `DEFAULT_REQUIRED_TOOLS`; the 7 explicit declarers untouched). Notes: registry + runner CHANGELOG 2026-10-29.
 
 ### E3 — Ghost commands become real; one cancel semantics; `/rate` leaves the copy
 

@@ -23,6 +23,7 @@ Parsers for the three pieces of external declarative configuration:
 ### skills
 
 - `load(name, skills_dir=None) -> SkillConfig | None` — load one skill by directory name
+- **`DEFAULT_REQUIRED_TOOLS`** (E2, 2026-10-29): `("Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch")` — the one default behind `SkillConfig.required_tools`, the loader fallback and the runner's generic (no-skill) task; `AskUserQuestion` is deliberately absent (nothing consumes it headless) and must be declared per skill.
   (`skills_dir` defaults to `settings.skills_dir`; tests pass the repo's own `skills/`, 2026-10-21).
   Since 2026-08-31 raises `SkillFrontmatterError` when the skill exists but
   its frontmatter is corrupt (fail closed — never run a skill on defaults);

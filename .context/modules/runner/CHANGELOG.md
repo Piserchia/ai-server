@@ -2,6 +2,10 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — E2: the generic task's tool list is `registry.skills.DEFAULT_REQUIRED_TOOLS`
+
+**Agent task**: Tier B E2. **Files changed**: `src/runner/session.py` — `_build_options` reads `list(DEFAULT_REQUIRED_TOOLS)` for a skill-less job instead of its own literal (which carried `AskUserQuestion`). **Why/side effects**: see the registry CHANGELOG entry of the same date — one definition, and the generic task can no longer hang on an unanswered question.
+
 ## 2026-10-29 — E1: project-scope settings override refused before the session (Tier B, 1 of 10)
 
 **Agent task**: Observability Phase 1 Tier B, owner approved 2026-10-29 ("Go with number 1"); E1 = recut plan §6 (design of record P0 plan Task 19 minus its `result_capture` edits and its own exception class).
