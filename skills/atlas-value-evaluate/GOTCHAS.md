@@ -116,4 +116,51 @@
   code that cannot emit the product. That is a real gap in the deterministic
   ladder; say so in the verdict and file it as a DR. Do NOT harden the bars by
   judgment to compensate — that is the mirror image of softening them, and
-  equally forbidden.
+  equally forbidden. (G-0011 added a fourth state the ladder cannot name:
+  **buildable and untrustworthy**.)
+- **"Vacuous at N=0" is often an understatement — compute whether the gate can
+  EVER fail.** The N=0 rule above says to read the gate code for false `pass`
+  strings and silent skips. Go one step further: `grep -n 'ok = False'` the gate
+  and trace EVERY site's guard back to the production composition. G-0011 found
+  all five sites in `theses.py:gate()` unreachable (`:95` needs a
+  `regime_breaker_on` that `weekly.py:285` hardcodes `False`; `:102/:107/:113`
+  sit inside `if pv:` and `:128` inside `if kind == "long" and pv:` with `pv`
+  permanently `None`). So `gate()` returns `ok=True` unconditionally and
+  compliance check #1 is **unfalsifiable at any N**, not merely untested at
+  N=0 — a far stronger finding than eight prior grades' "vacuous", and the
+  difference matters because it survives the credential landing.
+- **Blindness can be an ordering invariant, not a missing credential — grep the
+  lazy builder's CALL SITES, not just its existence.** `_psql()` exists and
+  works; it has exactly ONE call site (`weekly.py:95`, inside `_ledger()`),
+  reached only from `emit()` — strictly AFTER `propose()`'s `:192`
+  `portfolio_context(self.settings, self.psql, quotes)`, which therefore always
+  receives `None` and returns `mode="blind"`. A builder that exists but is never
+  called before its consumer is the same defect class as a builder that does not
+  exist (`_ivstore`/`_guards`), and it is invisible if you only check that the
+  builder is defined. Corollary: `emit()` recomputes the same gate context after
+  the handle exists, so the two evaluations of one card can disagree — and the
+  blind one decides emission.
+- **Compare the ledger's `## [G-` headers against `value.grades` rows as the
+  FIRST query of the run — they diverge silently and nothing reconciles them.**
+  G-0011 started with 9 grade entries in the ledger against 6 DB rows. G-0010
+  appended 496 lines, ran `\d value.grades` to build its payload, and died
+  before the INSERT with `status = completed`; week 2026-10-25 has no grade on
+  either surface. An owner reading the table sees a three-week-old vertical; an
+  owner reading the ledger sees unbroken cadence; neither view contradicts the
+  other. Correct by APPEND (a table of which surface holds which week), never by
+  editing the predecessor.
+- **`status = completed` WITH `terminal_reason = error` is a real row, and it is
+  how a dead governor reports success.** Job `358435e5` emitted
+  `Not logged in · Please run /login`, made ZERO tool calls, burned 0 input and
+  0 output tokens, recorded `model_served = NULL`, exited in 2.79 s — and is
+  `completed`. `result_capture.served_model_violation` did not fire. The honest
+  liveness query is `started_at - created_at` (G-0010's lesson) **plus**
+  `terminal_reason` **plus** `model_served IS NULL`/zero-usage. Five audit
+  events and a 1.8 KB JSONL is itself the tell.
+- **A sibling lane's dirty files are not your dirty tree.** The skill says
+  "dirty tree → STOP". Scope the test: `git status --short -- value/`. If the
+  tracked modifications live in other lanes' paths (G-0011 met
+  `trader/evaluation/LEDGER.md` + the trader GOTCHAS), staging by explicit path
+  is sufficient and the HEAD-index recipe above is unnecessary — that recipe is
+  only for a shared file both lanes write. Verify with
+  `git diff --cached --name-only` and leave the sibling's work dirty.
