@@ -28,3 +28,25 @@
 - `schedule-monitor`'s launchd plist has `RunAtLoad false`, so after any
   reboot the watchdog stays dark until the next 07:15 local slot. Always
   state that residual dark window when grading a post-recovery week.
+- 2026-11-01 (G-0006 blocked): the dirty-tree gate is not hypothetical —
+  **a sibling governor's cap-stop head-of-line blocks this one**, because
+  all atlas governors share one dev clone. Signature: `atlas-trader-evaluate`
+  ran 10:00–10:12 EST, wrote its finished 511-line `T-0040` grade +64 GOTCHAS
+  lines to disk, then died at `terminal_reason='max_turns'` (61 turns)
+  BEFORE its commit/rebase/push step. Swing's 11:00 slot then found two
+  tracked modifications and had to stop. Diagnose authorship before judging:
+  `jobs.terminal_reason` + `completed_at` on the sibling's job id (quoted in
+  its own ledger entry header) vs the files' mtimes — matching minutes means
+  cap-stop orphan, not a human mid-edit.
+- Corollary: `status='completed'` + `terminal_reason='max_turns'` is the
+  *orphaned-write* class — the work is complete on disk but unpublished, so
+  per atlas CLAUDE.md rule 7 it does not exist. Never "help" by committing
+  it: a `git add -A`/`commit -a` sweeps a sibling's unattributed grade into
+  your `Swing-Grade:` footer, and `git rebase` refuses a dirty tree anyway,
+  so the only paths are stash (= cleaning another loop's state, forbidden)
+  or STOP. Stop, and hand the owner the one-line unblock.
+- Do not write your own learnings into the atlas clone while reporting it
+  dirty — that adds dirt you also cannot commit. Append them to this
+  server-side GOTCHAS instead; `sync-learnings.sh` publishes it hourly to
+  `origin/runtime-learnings`. Prod main commits are guarded, so do not
+  commit here either — just leave the edit for the sync.
