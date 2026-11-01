@@ -354,3 +354,67 @@ rewrite old entries.
   watchdog fired correctly and the loop still died, lead the grade with THAT —
   it is a different and worse finding than governor-dark, because the
   observability spend is already paid and bought nothing.
+- 2026-11-01: a **whole-host outage** is invisible to every in-box watchdog AND
+  self-heals the metric they watch. Signature (T-0040, 4d 4h 9m): a multi-day
+  `started_at` gap in `jobs`; a MATCHING gap in `volumes/logs/healthcheck.log`
+  (the 5-minute launchd timer did not run either — this is what distinguishes a
+  host outage from a runner crash or a quota pause); no `runner starting` line
+  in `runner.out.log` across the gap; and `last reboot` showing a boot with NO
+  preceding `shutdown time`. Afterwards `schedules.last_run_at` and
+  `schedule-monitor.sh` both read HEALTHY, because the recovery drain re-stamps
+  every schedule before the watchdog next runs. `schedule-monitor.sh` has no
+  retrospective gap detection at all. So: diff the week's sessions against an
+  independent bar list AND check `healthcheck.log` for a gap — never conclude
+  availability from anything the host says about itself after the fact.
+- 2026-11-01: **`status='completed'` is not evidence a job did anything.** When
+  the bundled Claude CLI is logged out, the session returns one text line —
+  `Not logged in · Please run /login` — in 2–13s and the runner writes
+  `status='completed'` with `terminal_reason='error'`, `model_served=NULL` and
+  zero tokens. T-0040: 24 jobs inside 70 seconds of the recovery drain,
+  including that week's governor grade (`dad97337`, 8.1s, no ledger entry, no
+  DB read). This SUPERSEDES T-0032's "build liveness on terminal job status".
+  The honest predicate, add it to the weekly sweep:
+  `select kind,count(*) from jobs where status='completed' and
+  terminal_reason='error' and model_served is null and created_at > now() -
+  interval '14 days' group by 1;`
+- 2026-11-01: grepping `volumes/audit_log/*.jsonl` for an error STRING yields
+  false positives, because meta-jobs (`self-diagnose`, `*-manager`,
+  `alpha-governor`, and the governor's own session) read logs and the string
+  lands in their own `tool_result`. T-0040: 38 files matched "Not logged in",
+  only **24** were genuine failures — and one of the false positives was the
+  grading job itself. Always confirm a grep census against
+  `jobs.terminal_reason` + `model_served` + `input_tokens` before quoting a
+  count.
+- 2026-11-01: never credit a control from its presence in the repo. The
+  credential canary (`src/runner/credential_canary.py` +
+  `scripts/credential-canary.sh`, the control designed for the bullet above) is
+  **not installed**: no `com.assistant.credential-canary.plist` in
+  `~/Library/LaunchAgents/`, no such label in `launchctl list`, no
+  `volumes/logs/credential-canary.log`, and `volumes/telemetry/` holds only
+  `schedule_adherence.json`. `com.assistant.cost-reconcile` is also absent.
+  Check `launchctl list` + the log file's existence, not the module graph.
+- 2026-11-01: PROTOCOL §4 rule 3's convention is **settled in the ledger as 60
+  NYSE SESSIONS** (T-0005 → T-0032; T-0027/T-0031 reported the naive sign as
+  auxiliary only, never as the rule firing). Count sessions from an independent
+  daily-bar list, not from rows that exist. Cheap, unimpeachable sign test: the
+  sign of a Sharpe ratio is the sign of the mean return, so if the trailing
+  window's CUMULATIVE return is negative the Sharpe is negative under every
+  annualisation, gap-handling and risk-free convention — report it that way and
+  no methodology has to be defended. T-0040: 47/60 sessions, sign **−0.769**,
+  rule matures ≈2026-11-18, and firing it demotes `paper → validated` which
+  STOPS the executor (`active_strategies` requires `stage: paper`). Give the
+  owner the date in advance.
+- 2026-11-01: run the `adjustment=all` vs `split` ex screen for **every window
+  you quote**, not just the grading week. T-0040's grading window (10-19 →
+  10-30) was byte-identical on all three symbols, but the 60-day Sharpe window
+  (08-31 → 10-30) spans two first-business-days: BIL reads **+5.46 bp** on
+  price and **+64.20 bp** on total return — a 12× difference on the risk-free
+  leg. Any window crossing a month boundary needs its own screen.
+- 2026-11-01: the **stored-vs-rebuild delta is itself the instant-hygiene
+  metric.** T-0032's stored answer was ~150 bp off because one run was drained
+  from a backlog onto a 15:02Z instant; T-0040's was off by **2.58 bp (vs SPY)
+  / 1.27 bp (vs BIL)** because all 8 runs fired 13:30–13:31 EDT = 17:30–17:31Z.
+  `equity_curve` still has no instant column, so compute the delta every week
+  and read it as the answer to "were the rows sampled where the convention
+  says?" — a small delta earns the right to quote stored numbers, a large one
+  means the rebuild IS the grade.
