@@ -157,13 +157,66 @@ trigger it — 3rd instance was `atlas-momo-research` (isolation=workspace).
    `skills/atlas-momo-research/SKILL.md`), then burned turns exploring
    `projects/atlas` and reading the parent's summary before hitting the ceiling.
 
-### Status (2026-08-13)
+### Status (2026-08-13; updated 2026-11-01)
 
-**Not yet fixed** — three failures across three days (`56c478cc`, `fc483ddb`,
-`dc5fad7d`). The immediate remediation (delete `projects/atlas/.superpowers`
-in the dev repo + `.gitignore` it) doesn't cover the 3rd-instance path
-(workspace-isolated parents). The server-code fixes below are the durable
-answer and should be prioritized in the dev repo.
+**Still not fixed** — the only mitigation applied is a `max_turns` bump
+(6 → 20 → 30 across versions of `skills/_writeback/SKILL.md`). The two
+underlying defects — `.superpowers/` scratch triggers writeback, and the
+child session ignores `payload.cwd` when the parent has no `project_id` —
+remain untouched. Confirmed recurrences since the 2026-08 diagnosis:
+
+| Date | Job | Parent | max_turns consumed |
+|---|---|---|---|
+| 2026-09-01 | `f6c9e375` | (various) | 6 |
+| 2026-09-29 | `054408fd` | alpha-governor | 20 |
+| 2026-10-01 | `3c39e6cc`, `0c04056d` | alpha-governor | 20 |
+| 2026-10-02 | `0204fc1f` | alpha-governor | 20 |
+| 2026-11-01 | `a3d40a1c` | alpha-governor (7012fded) | 30 |
+
+The 2026-11-01 instance (`a3d40a1c`) matches defect #3 exactly: parent
+`7012fded` had `project_id=NULL` + `payload.project_slug=atlas`,
+`_verify_writeback` enqueued the child with `payload.cwd` pointing at
+`~/Documents/repos/atlas` but DID NOT propagate `project_slug`. The child
+had both `project_id=NULL` and no `project_slug` in payload, so
+`_project_slug` returned `None`, `_resolve_cwd` returned
+`settings.server_root`, and the session spent 30/30 turns in the server
+repo trying to reconcile a diff about `.agents/skills/*/SKILL.md` and
+`trader/evaluation/LEDGER.md` that only existed in the atlas dev repo.
+Last recorded tool_use was `tail -40 projects/atlas/CHANGELOG.md` — the
+session had just gathered enough context to start writing when the
+turn budget expired. Bumping `max_turns` further is throwing dollars at a
+cwd bug.
+
+### Durable fix (still pending — DEV repo work)
+
+Two options; either resolves the recurrence without a max_turns bump:
+
+**(A)** `src/runner/main.py::_verify_writeback` — copy
+`project_slug` from the parent's payload into the child's payload:
+```python
+parent_payload = job.payload or {}
+payload = {
+    "parent_job_summary": parent_summary,
+    "modified_files": modified,
+    "cwd": str(cwd),
+}
+if parent_payload.get("project_slug"):
+    payload["project_slug"] = parent_payload["project_slug"]
+```
+`_project_slug` already honors `payload.project_slug`, so this alone
+makes `_resolve_cwd` land in the right project.
+
+**(B)** `src/runner/session.py::_resolve_cwd` — if
+`job.payload.get("cwd")` resolves inside the server tree AND the job kind
+is a post-step child (`_writeback`, `_learning_apply`, `_evaluate`), honor
+it directly. This is the fix originally recommended in 2026-08 and would
+also cover any future post-step children with a known cwd. Add a pytest
+case: `_writeback` child whose parent had no `project_id` but
+`payload.cwd=~/Documents/repos/atlas` must resolve to the atlas path.
+
+Option A is smaller and surgical; option B is more general. Either must
+land in `~/Documents/repos/ai-server` and ship through `server-deploy` —
+production is pull-only per CLAUDE.md single-writer topology.
 
 ### Diagnostic
 
@@ -497,7 +550,7 @@ If the SDK version is current but specific tools (WebSearch, WebFetch) still fai
 
 **Diagnostic**: audit log shows `tool_use` with `tool_name: AskUserQuestion`, job status stuck at `running` (not `awaiting_user`), no Telegram prompt arrives.
 
-**Status**: RESOLVED. `AskUserQuestion` was removed from all skills' `required_tools` lists. The `awaiting_user` job status exists in the runner but no skill currently uses it. If a future skill needs interactive clarification, it would need to re-add `AskUserQuestion` to its tools and wire the prompt through Telegram (not yet implemented).
+**Status**: RESOLVED. `AskUserQuestion` was removed from all skills' `required_tools` lists, and since 2026-10-29 (E2) from the DEFAULT list too — `registry.skills.DEFAULT_REQUIRED_TOOLS` feeds skills without a `required_tools:` line and the generic no-skill task, so a session can only call it if its skill declares it. The `awaiting_user` job status exists in the runner but no skill currently uses it. If a future skill needs interactive clarification, it would need to re-add `AskUserQuestion` to its tools and wire the prompt through Telegram (not yet implemented).
 
 ### Root cause #6: `audit_log.append()` `kind` parameter collision
 
@@ -3477,3 +3530,13 @@ checkout are the owner's — `scripts/backup.sh` seals that file nightly.
 Fail-open rules (`tests/test_provisioning_gap.py`): no project, no/invalid
 manifest, an unreadable `.env` or an empty list never defer a row — the ONLY
 trigger is a positively declared name that the file positively lacks.
+
+## Symptom: a job that visibly did its work ends `failed` with `terminal_reason=error` and a SQL error in `error_message` (e.g. `value too long for type character varying(N)`) — 2026-10-28
+
+**Seen**: Codex-lane job `0e09233d` (2026-10-28): the executor ran, `turn_completed` carried 38,799 input tokens, the pre-push gate skipped on an empty diff, then `job_failed` with `StringDataRightTruncationError … character varying(24)` on the `UPDATE jobs SET cli_version=…` stamp. The row had no tokens and a failure DM went out.
+
+**Cause**: the post-session column stamp (`session.run_session`, the one-site UPDATE of the 008 columns) raised, and until 2026-10-28 that exception failed the job. The value was `codex --version`'s first line, `codex-cli 0.162.0-alpha.17.2`, 28 chars into a 24-char column.
+
+**Fix (in tree since 2026-10-28)**: `result_capture.cli_version_column` normalises the value for both lanes; the stamp is guarded — a failure is audited as `result_stamp_failed{error}` and the job completes, with `main._finish_job` re-stamping tokens/cost from the result dict.
+
+**If you see it again**: `grep result_stamp_failed volumes/audit_log/<job>.jsonl` — the `error` names the column; compare the value the lane produced (`executor_started.cli_version` for Codex, `session.cli_version()` for Anthropic) with the ORM width in `src/models.py`. A job with a `result_stamp_failed` row but a `completed` status is the guard working; the tokens on the row come from the terminal transition. After a guarded failure three columns stay NULL on the row — `cli_version`, `duration_api_ms`, `sdk_cost_usd` — because `main._terminal_values` does not carry them; tokens, `num_turns`, `cost_usd_list`, `terminal_reason` and `model_served` are re-stamped.
