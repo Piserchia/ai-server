@@ -2,6 +2,16 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-10-29 — runtime learning: alpha-governor max_turns exhaustion pattern documented
+
+**Agent task**: deploy-director dispatched a server-deploy for a docs-only range; runtime learnings recorded during or around that session.
+**Files changed**:
+- `.context/modules/runner/skills/GOTCHAS.md` — added entry documenting that the alpha-governor skill hits `max_turns=51` in ~11% of runs (3 of 27), always at the git-commit step, causing silent loss of complete audit ledger entries ($10.39 combined). Root cause: commit-last ordering means the primary output sits after the most token-expensive minutes; mitigation is commit-first (before GOTCHAS/CHANGELOG prose).
+
+**Why**: Three runs over 14 days terminated with `terminal_reason: max_turns` after staging all files but before executing `git commit`, permanently losing the session's work. The pattern falsifies any "unbroken audit record" assumption and needed to be documented so future operators know to reorder commit before documentation steps.
+**Side effects**: None (docs-only append).
+**Gotchas discovered**: `max_turns` ceiling is a hard gate that fires silently — `status=completed` with `terminal_reason: max_turns` is indistinguishable from success in most dashboards.
+
 ## 2026-10-29 — E10 after the whole-branch review: any E7-set variable in the canary's env is a FAIL; user scope narrowed to the spec's set
 
 **Files changed**: `src/runner/credential_canary.py` — `main()` fails (exit 1, naming the keys) on `claude_env.vendor_keys_in(os.environ)` instead of `CLAUDE_CODE_OAUTH_TOKEN` alone: `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` / a vendor key re-bill or redirect the ping while `model_usage` still names the model, so the old check could print `ok` under a redirected call. `USER_SETTINGS_REFUSED_KEYS` is now exactly `session.SETTINGS_AUTH_KEYS ∪ {hooks, env, apiKeyHelper, statusLine}` (pinned) with `statusLine` the one allowed key (D-P1-9) — the first cut refused every `SETTINGS_OVERRIDE_KEYS` entry in `~/.claude/settings*.json`, which the fleet never reads (`setting_sources=["project"]`) and which would have turned the owner's own "always allow" or a global MCP setting into a red canary — inside the prod deploy gate, via `test_the_real_user_scope_is_clean_today` (now on the narrowed set). `tests/test_credential_canary.py` (33).

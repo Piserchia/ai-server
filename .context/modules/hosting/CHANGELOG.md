@@ -1,5 +1,20 @@
 # Changelog: hosting
 
+## 2026-10-29 — moneymachine Caddy vhost config added; AGENTS.md bootstrapped; skill GOTCHAS files created
+
+**Agent task**: deploy-director runtime session; these files were created/modified as part of operational learnings around that deploy.
+**Files changed**:
+- `Caddyfile.d/moneymachine.conf` — new vhost config routing `moneymachine.chrispiserchia.com` to `localhost:8794`; matches the launchd service `com.assistant.project.moneymachine` already running on that port.
+- `AGENTS.md` — new file; mirrors CLAUDE.md for Codex/OpenAI agent harnesses that read `AGENTS.md` instead of `CLAUDE.md`. Content is identical to CLAUDE.md (same directives, same documentation update map, same hard rules).
+- `skills/atlas-build/GOTCHAS.md` — new file; documents bootstrap (Python 3.12 venv), env-persistence, commit-first, and the expensive "two full builds lost to commit-last" pattern.
+- `skills/pickem-chart/GOTCHAS.md` — new file; documents chart-API Python version requirement, cross-check patterns for dog/fav/sport/MNF/home-away, multi-category partial-build rule.
+- `skills/server-deploy/GOTCHAS.md` — new file; documents two recurring deploy traps: wrong `docs/Troubleshooting.md` pathspec in step-1 stash (should be `TROUBLESHOOTING.md`), and prod-doc writes after step 4 being SIGTERM'd by the runner restart window.
+- `skills/atlas-evaluate/GOTCHAS.md` — appended five new entries: NaN detection via `= 'NaN'::numeric` not `x != x`; bare `[pipeline]` tag making internal items unpickable; done-evidence UI clauses silently upsizing M→L; effort as a hard builder gate not a ranking weight; module-name grep not being proof of execution.
+
+**Why**: The moneymachine service was already running but had no Caddy vhost. AGENTS.md was needed for Codex-harness jobs. The GOTCHAS files capture expensive runtime lessons: two atlas-build sessions each lost a complete build (~37 min, code-review approved) because they committed last; the server-deploy pathspec and restart-window traps have now fired three times each.
+**Side effects**: Caddy will pick up moneymachine.conf on next reload. AGENTS.md is gitignored from main (runtime-learnings path applies).
+**Gotchas discovered**: See `skills/server-deploy/GOTCHAS.md` — the step-1 pathspec fix and the post-step-4 write prohibition are still outstanding in `$DEV`.
+
 ## 2026-10-29 — E9 after the whole-branch review: rename/typechange bypass closed; the two auth files guarded by hunk
 
 - `scripts/install-dev-hooks.sh`: the installed hook now lists staged paths with `--no-renames --diff-filter=ACMRDT` — `git mv MISSION.md x` listed only the destination and a file→symlink typechange (`T`) was filtered out, so both passed with no trailer (reproduced by the reviewer; pinned end to end). `src/gateway/telegram_bot.py` joins the list (the chat-ID half of §M item 2), and for the two gateway files the hook counts them only when a staged hunk touches an auth-check line (`AUTH_LINES`: `_check_auth`, `_is_authorized`, `telegram_allowed_chat_ids`, `web_auth_token`, `HTTPBasic`, …) — a `JobOut`/route-body edit needs no trailer, so the trailer stays rare and meaningful instead of becoming a reflex `--no-verify`. The break-glass pointer now names `--no-verify` + runbook §8b (the god skill documents PROD's pre-commit bypass, a different hook). Re-armed in the dev checkout.

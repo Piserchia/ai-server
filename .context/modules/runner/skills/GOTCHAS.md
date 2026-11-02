@@ -11,6 +11,30 @@
 > This file is seeded empty. Claude sessions working in this module should
 > append here when they learn something reusable (see `.context/PROTOCOL.md`).
 
+## 2026-11-01 — sed on a ledger file silently damages prior entries (stray address range)
+
+When using `sed` to append or insert lines in a structured ledger file (e.g. a JSONL audit log or a Markdown skills file), a stray address range (e.g. `/pattern/,/end/`) can silently match and mutate earlier entries that share tokens with the pattern. The symptom is corrupted prior entries with no error output — `sed` exits 0. Always prefer the `Edit` tool for structured files, or use `>>` append-only for unstructured logs. Never use `sed` with address ranges on files that contain repeated structural tokens.
+
+_Evidence: job `7012fded`_
+
+## 2026-11-01 — Idle cooldown anchors on completed_at with no created_by predicate — scheduled rows do not reset it
+
+The idle-cooldown query that decides whether the runner should pause between jobs anchors on `jobs.completed_at` but applies no `created_by` predicate. Rows inserted by the scheduler (`created_by = 'scheduler'`) therefore count against the cooldown window even though they represent automated background work, not interactive load. The practical consequence is that a burst of scheduled jobs (e.g. hourly atlas-report + market-check firing together) can hold the cooldown open indefinitely, starving interactively-submitted jobs. Any fix to the cooldown logic must either exclude `scheduler`-origin rows from the anchor query or use a separate idle-signal channel (e.g. a Redis key set only by interactive completions).
+
+_Evidence: job `906c469a`_
+
+## 2026-11-01 — gate() returns ok=True unconditionally when portfolio data arrives after gate evaluation
+
+`gate()` evaluates conditions at call time using whatever data is present in the context at that moment. When portfolio data (positions, balances, prices) is fetched or computed after `gate()` is called, the gate never sees that data and returns `ok=True` by default — it cannot block on facts it has not observed. This means a gate that is intended to prevent execution when portfolio state fails a condition will silently pass if the state check is deferred. Always fetch and validate all prerequisite data before calling `gate()`, not after.
+
+_Evidence: job `cf36ac73`_
+
+## 2026-10-31 — `jobs.num_turns` does not measure actual reasoning depth
+
+`jobs.num_turns` counts conversation turns (message pairs), not the amount of reasoning, tool calls, or work done per turn. A job with 3 turns may have performed dozens of tool calls and deep analysis, while a job with 20 turns may have done trivial work. Do not use `num_turns` as a proxy for job complexity, cost, or effort when auditing or comparing jobs. Use token counts or tool-call counts from the audit log instead.
+
+_Evidence: job `2e67bdc5`_
+
 ## 2026-10-26 — Heredoc containing a protected path literal triggers the write guard
 
 When writing a shell heredoc (or any multi-line string) that contains the server root path as a literal substring, the runner's write guard pattern-matches against the raw text and blocks the operation, even though the heredoc itself is not being written to that path. The guard sees the protected path token inside the content and raises regardless of destination. Workaround: write the content with the Edit tool (which targets the destination path directly and only checks the destination, not the payload) or split the literal string so it is never present verbatim in the shell command text.
@@ -74,8 +98,32 @@ Lifting a lane by hand is `/resume <provider>`; bare `/resume` is still the
 global pause only. Tests: `tests/test_quota.py` (TestHeldJob,
 TestCodexRateLimited).
 
+## 2026-10-30 — Bash cwd leaks across tool calls in a session — use absolute paths always
+
+The shell working directory set by one Bash tool call persists into all subsequent calls within the same session. A `cd` in an early step will silently alter the resolution of any relative path used later, causing file reads, git commands, and script invocations to target unintended locations. Always construct paths using absolute references (e.g. `$SERVER_ROOT/...`, `$(pwd)` captured once at session start, or hardcoded `/Users/...` roots) rather than relative paths. Relative paths after a `cd` are especially treacherous inside subagent-driven jobs where the `cd` and the relative path use appear in different tool calls with no visible coupling.
+
+_Evidence: job `d70e8605`_
+
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_ABOVE -->
+
+## 2026-11-01 — Skill GOTCHAS.md lives in the workspace integration path, not the production ai-server path
+
+When a `_learning_apply` job targets `module=runner, category=GOTCHA`, the correct file is `.context/modules/runner/skills/GOTCHAS.md` relative to the server root. On the production machine this resolves to `/Users/alfredbot.ai.butler/Library/Application Support/ai-server/.context/modules/runner/skills/GOTCHAS.md`. A session that mistakes the workspace integration path (e.g. a Codex clone under `volumes/workspaces/`) for the production ai-server path will write the entry to the wrong location and the commit will not appear in the learning history. Always verify `SERVER_ROOT` resolves to the production checkout before appending.
+
+_Evidence: job `61a7a498`_
+
+## 2026-11-01 — Kalshi API canonical base URL changed to external-api.kalshi.com
+
+The Kalshi REST API's canonical base URL is `https://external-api.kalshi.com/trade-api/v2`, not the older `https://trading-api.kalshi.com/trade-api/v2` or demo variants. Any skill, script, or project config that hard-codes the old hostname will receive 4xx/connection errors without a clear message pointing at the URL change. Update all `KALSHI_BASE_URL` references and any hardcoded URLs in project skills to use `external-api.kalshi.com`; verify with a `/v2/exchange/status` probe before relying on further endpoints.
+
+_Evidence: job `c872d7dc`_
+
+## 2026-10-31 — `mmcore check --active-cycles` cap is per-bucket, not global
+
+The `--active-cycles` flag on `mmcore check` enforces a concurrency limit per strategy bucket (e.g. per ticker or per timeframe), not across the entire portfolio run. A check that returns "at cap" for one bucket does not block dispatch for other buckets; each bucket's cap is evaluated independently. Callers that treat a single "at cap" response as a global stop signal will skip valid dispatches in unrelated buckets. Always iterate all buckets and check each independently before concluding that no new cycles can start.
+
+_Evidence: job `a8b1a488`_
 
 ## 2026-10-22 — Heredoc content triggers safety pattern block on keywords like "kill"
 
@@ -828,6 +876,12 @@ A session's `model_usage` carries the CLI's own small-model calls alongside the 
 
 _Persisted since the same day_: `job_completed.model_usage` carries the normalised per-model breakdown (+ the CLI's per-model `costUSD` as `sdk_cost_usd`) and `pricing.price_model_usage` prices it per model when it COVERS the aggregate (runner CHANGELOG 2026-10-28). Mind the accounting: the bundled CLI's `usage` is the main loop only, `modelUsage` is every call in the process (subagents included) — so a per-model figure covers tokens the row's five token columns do not, and an equality rule would never fire. Rows before that keep the one-model figure — there is nothing to re-attribute them from. The CLI's own price table has no TTL notion (every cache write at 1.25× input, the 5-m rate), which on a cache-write-heavy session alone would read as ≈ −19…−23 % while subagent tokens (in the SDK figure, not in `usage`) push it back up — likely the bulk of the computed-vs-SDK gap. **Measured 2026-10-28 on the first per-model row** (`bdef2a99`, single model, no subagents): `cost_usd_list` $0.8813 vs `sdk_cost_usd` $0.6963, and the same tokens priced with cache writes at the 5-m rate equal the SDK figure to 8 decimals — on a single-model session the gap is entirely the CLI's cache-write rate.
 
+## 2026-10-28 — alpha-governor hits max_turns=51 and dies exactly one turn before git commit
+
+The alpha-governor skill has a hard `max_turns` ceiling that has been hit in exactly 3 of 27 runs (11.1%) over 14 days, always at turn 51, and always after staging all files but before executing `git commit`. All three runs touched `LEDGER.md`, all three were lost silently (`terminal_reason: max_turns`, workspace GC'd) — a combined $10.39 and three complete audit entries permanently gone. The pattern also falsifies any downstream "unbroken audit record" assumption, since a 4.7-day, 4-run hole exists in the ledger. Mitigation: reorder the skill so `git commit` (and push) of the ledger entry happens **before** the GOTCHAS/CHANGELOG update steps — commit-first guarantees the primary output survives even if the session expires on the documentation tail. Longer term: raise the `max_turns` budget or split the skill into a commit phase and a documentation phase.
+
+_Evidence: job `3697d380`_
+
 ## 2026-10-28 — `codex --version` is `codex-cli <version>`, and `jobs.cli_version` is 24 chars wide
 
 The Codex executor's version probe returns the whole first stdout line — `codex-cli 0.162.0-alpha.17.2`, 28 chars — while the column was sized for the SDK's bare `2.1.139`. The first real Codex job after the Phase-1 deploy (`0e09233d`) finished its work and then failed on the row stamp with `value too long for type character varying(24)`. Stamp through `result_capture.cli_version_column` (last token, clipped to `CLI_VERSION_MAX`), and never let a test fake a collaborator's output in a shape prod does not produce (B3's test used `"0.162.0"`). The post-session stamp is guarded now (`result_stamp_failed` audit kind) — a `result_stamp_failed` row in a job's JSONL means the row's tokens came from `main._finish_job`'s re-stamp, not the session. After a guarded failure three columns stay NULL on the row — `cli_version`, `duration_api_ms`, `sdk_cost_usd` — because `main._terminal_values` does not carry them; tokens, `num_turns`, `cost_usd_list`, `terminal_reason` and `model_served` are re-stamped.
@@ -843,6 +897,18 @@ E1's provenance allowance compares a clone's `.claude/settings*.json` with the c
 ## 2026-10-29 — An observed settings key can mask a refused one in the same file
 
 E1's `settings_override` walks `SETTINGS_OVERRIDE_KEYS` in order and `hooks` comes first. With D-P1-12's observe arm, bingo's own `hooks` is observed — so a `mcpServers` committed into the SAME file would have been reported as "hooks, observed" and the job would have run. Caught by the sized-arm test; the function now collects every hit in a file and reports the first REFUSED one before any observed one. Lesson for any allow-list beside a deny-list: never return on the first allowed match.
+
+## 2026-10-31 — Jobs that exit with auth errors are still written as status=completed
+
+When the Claude CLI exits due to an authentication error (e.g. expired token, revoked key, or subscription-auth mismatch), it may still emit a `ResultMessage` with `is_error=False` and non-empty text — typically an error banner — causing the runner to record the job as `completed` rather than `failed`. The `on_failure` escalation path is never triggered, schedules show a healthy `last_run_at`, and Telegram summaries look normal. Any future "did this job succeed?" check must inspect the summary text shape and `usage` counters together (see the `is_api_terminal_summary` pattern), not just `is_error` or exit code. Auth errors produce the same zero-usage + banner-text signature as 5xx errors, so the existing two-signal classifier in `session.py` should catch them — verify the regex covers auth-error banner variants if new failure modes appear.
+
+_Evidence: job `c8e8360d`_
+
+## 2026-11-01 — Sibling job can leave dev repo dirty, blocking next scheduled job at gate-0
+
+A job that commits but does not push (e.g. it fails after the commit step, or the push gate is skipped) leaves the dev repo one commit ahead of `origin/main`. The next scheduled job that runs a pre-flight `git status` or the deploy gate's `git diff origin/main..HEAD` sees an unclean state and refuses to proceed, silently blocking all downstream work until a human resolves the divergence. Always push within the same session that commits; if a job exits before pushing, check `git log --oneline origin/main..HEAD` at the start of the next session and either push or reset. The `sync-learnings` timer can also deposit a commit between two job windows — treat any ahead-of-origin state as a potential sibling artifact, not only as your own work.
+
+_Evidence: job `edaf7fec`_
 
 ## 2026-10-29 — `_process_job`'s queued→running flip is an unguarded ORM write (INV-9 window)
 

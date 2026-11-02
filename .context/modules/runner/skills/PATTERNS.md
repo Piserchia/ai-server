@@ -6,6 +6,12 @@ Extending the runner with new post-session hooks (write-back, review, escalation
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-11-01 — Stale technical dossier warrants upweighting the business lens in aggregation
+
+When a subagent's technical dossier is stale or incomplete, the aggregation step should compensate by giving additional weight to business-context signals (customer impact, urgency cues, strategic framing) rather than waiting for a fresh technical pass. A dossier that is days or weeks old may still accurately reflect business priority even when its technical details are outdated. Treat staleness as a signal to lean on the business lens, not as a blocker to aggregation.
+
+_Evidence: job `ac1ffa30`_
+
 ## 2026-08-01 — Use context_files in skill frontmatter to inject documentation
 
 Skills can declare `context_files: [".context/SYSTEM.md"]` (or other context paths) in their SKILL.md frontmatter. The runner automatically injects these files at prompt-open time, making documentation available to the skill without duplicating it in the prompt. Use this pattern for architecture guides, system reference documentation, or other materials that multiple skills need access to — it avoids prompt bloat and keeps context centralized and maintainable.
