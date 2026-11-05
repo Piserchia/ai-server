@@ -547,3 +547,95 @@ Two takeaways for the governor:
   (a pre-commit check that every new matrix row has a matching glossary slug).
 - Corollary for grading: a recurrence after a documented fix is not necessarily a discipline failure. Ask
   whether the fix was ever *reachable* by the agent that failed.
+
+## A backlog item whose work lives in ANOTHER repo is not builder-eligible at any size (2026-11-05)
+
+On 10-29 I put `[build:tooling] fix the workspace venv bootstrap` at **slot 2** and sized it S. The
+11-03 builder skipped it and said exactly why: *"a cross-repo synced-skill change with no in-session
+pytest gate."* It was right, and the defect is structural, not a judgment call — the atlas builder
+works in a **workspace clone of the atlas repo** and its gates are **atlas's pytest**. The bootstrap
+lives in ai-server. There is no size at which that item becomes buildable by that builder; it can
+only ever burn a slot.
+
+Add this to the pre-write eligibility check, next to "does it need a `specced` gap?":
+
+- **Does the file I am asking to be changed exist in the atlas repo?** If the fix lands in ai-server
+  (skills, runner, bootstrap, deploy chain, writeback, job semantics), the item belongs in **Owner
+  actions**, tagged with a note that Atlas cannot make the change. `[ops]`/`[system]` tags are the
+  honest home; a `[build:*]` tag on cross-repo work is a mis-route that costs a whole window.
+
+Note the asymmetry that makes this easy to get wrong: the *cost* is paid in atlas (every build window
+pays it), so it feels like an atlas item. Where the cost lands is not where the fix lands.
+
+## Done-evidence that requires mutating PRODUCTION data puts the item out of lane (2026-11-05)
+
+Same window, same builder, second skip: my `[tests]` NaN item's done-evidence read *"the live counts
+for `candles` and `indicator_values` both return 0 after remediation."* The builder: *"requires a
+destructive production-data deletion, out of lane."* Correct — LOOP.md §6 reserves destructive
+operations on populated tables to the owner, so **I wrote an item that the contract forbids its
+intended executor from completing.**
+
+The rule: **done-evidence must be producible by the builder, inside its lane, from the repo.** When a
+finding has a detection half and a remediation half, they are **two items**:
+
+- detection (scan, test, flag, instrument) → builder-eligible, S, in-repo, provable by a test;
+- remediation of live rows (delete, backfill, rewrite) → **owner/ops action**, sequenced *after* the
+  guard or fix is deployed so the cleanup is not immediately re-polluted.
+
+Splitting them is also better engineering: the detector lands and starts measuring in week 1 instead
+of waiting on an owner window.
+
+## Read the builder's own skip reasons BEFORE re-ranking an item (2026-11-05)
+
+Both of the above came from the builder's report, not from my analysis. LOOP.md §4.3.2 already says a
+"no buildable items" report is *"the evaluator's input, not a failure"* — but the same applies to the
+per-item skip lines in a run that **did** build something. Those lines are the single highest-value
+input the governor gets, because they are the only place the loop tells you **why your own routing
+failed**, in the builder's words, against the real gates.
+
+Procedure: for every item that was offered and not taken, find the builder's sentence about it in the
+job summary/audit log and quote it in the backlog re-route. Two windows running, that one habit has
+turned "this item keeps getting skipped, rank it higher" (which has never worked) into a precise,
+fixable defect in my own writing: bare `[pipeline]` tags, a UI clause that converted M→L, cross-repo
+scope, out-of-lane done-evidence. Five instances of the class now, all found this way.
+
+## `ON CONFLICT DO NOTHING` + a row seeded outside migrations = a permanently inert migration (2026-11-05)
+
+Slot 1 shipped `0060` seeding `sector-etf-relative-strength` on 10-30 and the gate went green. Then
+on 11-01 the monthly curator (`atlas-refresh-knowledge`, job `c872d7dc`) wrote the *same term*
+directly into the live `glossary` table — 567 chars, **empty** formula, different `related` array.
+Because `0060` ends `ON CONFLICT (term) DO NOTHING`, the reviewed **1,774-char** definition can now
+**never** reach production, and `0060`'s `migrate:down` (`DELETE FROM glossary WHERE term = …`) would
+delete the curator's row instead. The build was graded PASS and was correct; the *outcome* was zero.
+
+Two things to check whenever you grade a seed/backfill migration:
+
+- **Is the seed idempotent in the strong sense?** `DO NOTHING` protects the *migration*; `DO UPDATE
+  SET …` protects the *content*. For reviewed, versioned prose (glossary definitions especially), the
+  repo must be authoritative, so the seed must be an upsert. Require it in the done-evidence: *a test
+  asserts that re-applying the seed over a pre-existing shorter row replaces it.*
+- **Does any agent write that table outside migrations?** This is the `0058` orphan-migration class
+  (10-19) with the roles reversed — there a builder wrote live with no file, here a curator wrote live
+  ahead of a file and neutralised it. Same root: **unversioned production writes**. If the answer is
+  yes, the `[system]` item is to bind that writer to the migration path, not to patch the symptom.
+
+Grading corollary: "the migration file exists and the gate is green" is **not** evidence the content
+landed. Compare `length(definition_md)` in live against the file before crediting a seed.
+
+## The venv tax is ~2 minutes, not a third of the window — retract figures you cannot re-measure (2026-11-05)
+
+I wrote on 10-19 and 10-29 that builders "lose ~⅓ of every 30-minute window to venv repair," built an
+ordering rule on it, and put a `[build:tooling]` item at slot 2 because of it. Re-measured across two
+builds: `31974097` pinned 3.12 correctly in **22 seconds**; `a92048e5` got **Python 3.9.6**, could not
+import `atlas_dash`, and rebuilt — about **2 minutes**. So the class is real (three hand-repairs in
+three windows) and the magnitude was inflated by an order of magnitude.
+
+Two lessons, and the second is the important one:
+
+- A figure quoted from a builder's *self-description of time pressure* ("a third of the window") is a
+  rhetorical estimate, not a measurement. Treat it as a hypothesis and time the actual steps.
+- **Retract loudly in the scorecard when you retire a number**, naming the entries that used it.
+  Otherwise the inflated figure keeps propagating forward through your own prose — mine had already
+  justified an ordering rule and a slot-2 assignment before anyone checked it. A governor's own
+  unverified numbers are the hardest errors in this loop to detect, because every later run reads
+  them as established evidence.
