@@ -14,6 +14,12 @@
 <!-- Append entries below this marker. Do not delete the marker. -->
 <!-- APPEND_ENTRIES_BELOW -->
 
+## 2026-11-06 — SQL comment text containing `-- migrate:down` truncates dbmate up-block
+
+If a SQL comment inside the `-- migrate:up` block contains the literal text `-- migrate:down`, dbmate treats it as the start of the down-migration section and silently truncates the up-block at that point. This causes partial migrations that apply without error but leave the schema incomplete. Always avoid writing `-- migrate:down` anywhere in comment text within the up block; use alternative phrasing like `# migrate down` or `-- rollback:` instead.
+
+_Evidence: job `96e80f27`_
+
 ## 2026-10-09 — Can't derive team W/L from pool-selected games
 
 When building charts that group by team performance attributes (e.g., "games vs losing teams"), the schema may lack those attributes directly. The `games` table contains only pool-selected games, so deriving W/L records from game scores would be dishonest — you'd be computing statistics from a biased subset.

@@ -11,6 +11,42 @@
 > This file is seeded empty. Claude sessions working in this module should
 > append here when they learn something reusable (see `.context/PROTOCOL.md`).
 
+## 2026-11-02 — `git pull --rebase --no-fork-point` exits 129 — flag not accepted by git pull
+
+`git pull --rebase --no-fork-point` returns exit code 129 ("unknown option") because `--no-fork-point` is a flag for `git rebase` directly, not for `git pull --rebase`. Passing it via `git pull` causes an immediate failure with no rebase attempted. The fix is to run `git fetch origin` followed by `git rebase --no-fork-point origin/<branch>` as two separate commands, or simply omit `--no-fork-point` (the default fork-point behaviour is safe for most server-repo rebases).
+
+_Evidence: job `7087b527`_
+
+## 2026-11-02 — git rebase silently drops inherited unpushed commits in workspace clones
+
+In a workspace clone that inherits unpushed commits from its parent (e.g. via `git clone` of a canonical that is ahead of `origin/main`), running `git rebase origin/main` will silently drop those inherited commits — they are not in `origin/main` and are not part of the current branch's own work, so rebase treats them as already-applied and omits them. The result is a clone whose HEAD matches `origin/main` exactly, with no trace of the dropped commits in `git log`. Always check `git log --oneline origin/main..HEAD` before and after any rebase in a workspace clone; if the count drops unexpectedly, the missing commits were inherited from the canonical's dirty state. The safe recovery is to `git cherry-pick` the dropped SHAs back, or push the canonical's ahead commits to `origin/main` before cloning.
+
+_Evidence: job `fc94ca2d`_
+
+## 2026-11-01 — sed on a ledger file silently damages prior entries (stray address range)
+
+When using `sed` to append or insert lines in a structured ledger file (e.g. a JSONL audit log or a Markdown skills file), a stray address range (e.g. `/pattern/,/end/`) can silently match and mutate earlier entries that share tokens with the pattern. The symptom is corrupted prior entries with no error output — `sed` exits 0. Always prefer the `Edit` tool for structured files, or use `>>` append-only for unstructured logs. Never use `sed` with address ranges on files that contain repeated structural tokens.
+
+_Evidence: job `7012fded`_
+
+## 2026-11-01 — Idle cooldown anchors on completed_at with no created_by predicate — scheduled rows do not reset it
+
+The idle-cooldown query that decides whether the runner should pause between jobs anchors on `jobs.completed_at` but applies no `created_by` predicate. Rows inserted by the scheduler (`created_by = 'scheduler'`) therefore count against the cooldown window even though they represent automated background work, not interactive load. The practical consequence is that a burst of scheduled jobs (e.g. hourly atlas-report + market-check firing together) can hold the cooldown open indefinitely, starving interactively-submitted jobs. Any fix to the cooldown logic must either exclude `scheduler`-origin rows from the anchor query or use a separate idle-signal channel (e.g. a Redis key set only by interactive completions).
+
+_Evidence: job `906c469a`_
+
+## 2026-11-01 — gate() returns ok=True unconditionally when portfolio data arrives after gate evaluation
+
+`gate()` evaluates conditions at call time using whatever data is present in the context at that moment. When portfolio data (positions, balances, prices) is fetched or computed after `gate()` is called, the gate never sees that data and returns `ok=True` by default — it cannot block on facts it has not observed. This means a gate that is intended to prevent execution when portfolio state fails a condition will silently pass if the state check is deferred. Always fetch and validate all prerequisite data before calling `gate()`, not after.
+
+_Evidence: job `cf36ac73`_
+
+## 2026-10-31 — `jobs.num_turns` does not measure actual reasoning depth
+
+`jobs.num_turns` counts conversation turns (message pairs), not the amount of reasoning, tool calls, or work done per turn. A job with 3 turns may have performed dozens of tool calls and deep analysis, while a job with 20 turns may have done trivial work. Do not use `num_turns` as a proxy for job complexity, cost, or effort when auditing or comparing jobs. Use token counts or tool-call counts from the audit log instead.
+
+_Evidence: job `2e67bdc5`_
+
 ## 2026-10-26 — Heredoc containing a protected path literal triggers the write guard
 
 When writing a shell heredoc (or any multi-line string) that contains the server root path as a literal substring, the runner's write guard pattern-matches against the raw text and blocks the operation, even though the heredoc itself is not being written to that path. The guard sees the protected path token inside the content and raises regardless of destination. Workaround: write the content with the Edit tool (which targets the destination path directly and only checks the destination, not the payload) or split the literal string so it is never present verbatim in the shell command text.
@@ -74,8 +110,69 @@ Lifting a lane by hand is `/resume <provider>`; bare `/resume` is still the
 global pause only. Tests: `tests/test_quota.py` (TestHeldJob,
 TestCodexRateLimited).
 
+## 2026-10-30 — Bash cwd leaks across tool calls in a session — use absolute paths always
+
+The shell working directory set by one Bash tool call persists into all subsequent calls within the same session. A `cd` in an early step will silently alter the resolution of any relative path used later, causing file reads, git commands, and script invocations to target unintended locations. Always construct paths using absolute references (e.g. `$SERVER_ROOT/...`, `$(pwd)` captured once at session start, or hardcoded `/Users/...` roots) rather than relative paths. Relative paths after a `cd` are especially treacherous inside subagent-driven jobs where the `cd` and the relative path use appear in different tool calls with no visible coupling.
+
+_Evidence: job `d70e8605`_
+
 <!-- Append entries below this marker. Do not delete the marker. -->
+
+## 2026-11-06 — Importing a prior cycle's script can dirty a G4-protected file if the script hard-codes a git-tracked output path
+
+When a session re-uses (imports or `exec`s) a script from a previous job cycle, that script may contain a hard-coded output path that points to a git-tracked file (e.g. a ledger, CHANGELOG, or skills file). Executing it writes to that path unconditionally, dirtying the working tree even if the current session's intent was read-only. The G4 write guard fires on the destination path, but only after the write has already occurred — the guard cannot prevent the dirty state, only flag it. Always audit any reused script for hard-coded output paths before executing it; prefer passing the output path as an argument or environment variable so the caller controls where writes land. If a script must hard-code a path, ensure it targets a scratch or ephemeral location, never a git-tracked file.
+
+_Evidence: job `c37f9957`_
+
+## 2026-11-05 — psql `created_at >= 'YYYY-MM-DD'` filters by session timezone, silently dropping UTC-midnight rows
+
+A bare date comparison like `WHERE created_at >= '2026-11-05'` in psql is interpreted in the session's local timezone (e.g. `America/New_York`), not UTC. Rows with `created_at` timestamps between UTC midnight and the local timezone offset are silently excluded — a job that completed at 00:30 UTC on 2026-11-05 (i.e. 19:30 EST on 2026-11-04) will not appear in a query filtered to `>= '2026-11-05'` from a US Eastern session. Always cast to UTC explicitly: `WHERE created_at >= '2026-11-05 00:00:00+00'` or `WHERE created_at >= '2026-11-05'::date AT TIME ZONE 'UTC'`. This affects any date-range audit sweep, job-count query, or rate-limit window that uses bare date literals.
+
+_Evidence: job `b575d7a9`_
+
+## 2026-11-05 — Running the push-gate test suite overwrites sealed evidence artifacts
+
+The push-gate test suite (`tests/test_pre_push_gate.py`) exercises real workspace clones and may invoke `git commit` and `git push` helpers against fixture paths. When `SERVER_ROOT` or `WORKSPACES_DIR` is not redirected to a scratch directory, these helpers resolve relative paths against the production checkout and can overwrite or truncate files that are meant to be sealed evidence (e.g., audit JSONL fixtures, sealed ledger snapshots). The symptom is a fixture or ledger file that silently loses trailing entries after a test run, with no test failure reported. Always run this suite with `SERVER_ROOT` and `WORKSPACES_DIR` pointed at a throwaway scratch tree (`PIPENV_DONT_LOAD_ENV=1 SERVER_ROOT=<scratch> WORKSPACES_DIR=<scratch>/workspaces pipenv run pytest tests/test_pre_push_gate.py`), and never run it in the production checkout.
+
+_Evidence: job `128108e8`_
+
+## 2026-11-04 — Turn-cap exhaustion records status=completed, silencing all alerts
+
+When a job hits the max_turns limit, the runner records `terminal_reason: "max_turns"` but sets `status = completed`. No gate, alert, or audit check fires — the job appears successful even if it produced zero deliverables.
+
+This is especially dangerous for jobs whose only deliverable is a final write/commit/push: if the job spends turns on drafting and dies one turn short of the append, nothing flags the failure.
+
+**Mitigation pattern**: In any job where the deliverable is a durable write (ledger entry, CHANGELOG, commit), perform that write **first** — before optional prose, before analysis polish, before anything that consumes turns but doesn't produce the deliverable. Treat entry length as the consumable the turn cap meters, not a style choice.
+
+**Detection gap**: The `status = completed` on a turn-capped job means the governor-dark incident class (auditor runs that land nothing) is invisible to downstream gates. A separate check on `terminal_reason == "max_turns" AND diff == empty` is needed to surface these.
+
+_Evidence: job `55bc0dd4`_
+
+## 2026-11-03 — code-review subagent returning without a VERDICT: line must be fully discarded
+
+A `code-review` subagent can return `completed` with a purely narrative final message ("I'll start by examining the repository state and the protocol.") and zero findings — even when an explicit output contract with a tool budget, narration ban, and VERDICT mandate was in the prompt. When this happens, discard the entire run: no observation, finding, or absence-of-finding from it may be used, and the relaunch must be disclosed out loud in the ledger. The two additions that turned the third-cycle relaunch from failure into a 9-call LGTM were: (a) stating the previous failure verbatim inside the new prompt, and (b) inverting the quality bar — "a thin report with an honest gap list is a PASS of your job; a thorough-looking report with no verdict is a FAIL." Budget the relaunch as the expected path (two invocations per review cycle), not as an anomaly.
+
+_Evidence: job `d65b401d`_
+
 <!-- APPEND_ENTRIES_ABOVE -->
+
+## 2026-11-01 — Skill GOTCHAS.md lives in the workspace integration path, not the production ai-server path
+
+When a `_learning_apply` job targets `module=runner, category=GOTCHA`, the correct file is `.context/modules/runner/skills/GOTCHAS.md` relative to the server root. On the production machine this resolves to `/Users/alfredbot.ai.butler/Library/Application Support/ai-server/.context/modules/runner/skills/GOTCHAS.md`. A session that mistakes the workspace integration path (e.g. a Codex clone under `volumes/workspaces/`) for the production ai-server path will write the entry to the wrong location and the commit will not appear in the learning history. Always verify `SERVER_ROOT` resolves to the production checkout before appending.
+
+_Evidence: job `61a7a498`_
+
+## 2026-11-01 — Kalshi API canonical base URL changed to external-api.kalshi.com
+
+The Kalshi REST API's canonical base URL is `https://external-api.kalshi.com/trade-api/v2`, not the older `https://trading-api.kalshi.com/trade-api/v2` or demo variants. Any skill, script, or project config that hard-codes the old hostname will receive 4xx/connection errors without a clear message pointing at the URL change. Update all `KALSHI_BASE_URL` references and any hardcoded URLs in project skills to use `external-api.kalshi.com`; verify with a `/v2/exchange/status` probe before relying on further endpoints.
+
+_Evidence: job `c872d7dc`_
+
+## 2026-10-31 — `mmcore check --active-cycles` cap is per-bucket, not global
+
+The `--active-cycles` flag on `mmcore check` enforces a concurrency limit per strategy bucket (e.g. per ticker or per timeframe), not across the entire portfolio run. A check that returns "at cap" for one bucket does not block dispatch for other buckets; each bucket's cap is evaluated independently. Callers that treat a single "at cap" response as a global stop signal will skip valid dispatches in unrelated buckets. Always iterate all buckets and check each independently before concluding that no new cycles can start.
+
+_Evidence: job `a8b1a488`_
 
 ## 2026-10-22 — Heredoc content triggers safety pattern block on keywords like "kill"
 
@@ -850,6 +947,22 @@ E1's provenance allowance compares a clone's `.claude/settings*.json` with the c
 
 E1's `settings_override` walks `SETTINGS_OVERRIDE_KEYS` in order and `hooks` comes first. With D-P1-12's observe arm, bingo's own `hooks` is observed — so a `mcpServers` committed into the SAME file would have been reported as "hooks, observed" and the job would have run. Caught by the sized-arm test; the function now collects every hit in a file and reports the first REFUSED one before any observed one. Lesson for any allow-list beside a deny-list: never return on the first allowed match.
 
+## 2026-10-31 — Jobs that exit with auth errors are still written as status=completed
+
+When the Claude CLI exits due to an authentication error (e.g. expired token, revoked key, or subscription-auth mismatch), it may still emit a `ResultMessage` with `is_error=False` and non-empty text — typically an error banner — causing the runner to record the job as `completed` rather than `failed`. The `on_failure` escalation path is never triggered, schedules show a healthy `last_run_at`, and Telegram summaries look normal. Any future "did this job succeed?" check must inspect the summary text shape and `usage` counters together (see the `is_api_terminal_summary` pattern), not just `is_error` or exit code. Auth errors produce the same zero-usage + banner-text signature as 5xx errors, so the existing two-signal classifier in `session.py` should catch them — verify the regex covers auth-error banner variants if new failure modes appear.
+
+_Evidence: job `c8e8360d`_
+
+## 2026-11-01 — Sibling job can leave dev repo dirty, blocking next scheduled job at gate-0
+
+A job that commits but does not push (e.g. it fails after the commit step, or the push gate is skipped) leaves the dev repo one commit ahead of `origin/main`. The next scheduled job that runs a pre-flight `git status` or the deploy gate's `git diff origin/main..HEAD` sees an unclean state and refuses to proceed, silently blocking all downstream work until a human resolves the divergence. Always push within the same session that commits; if a job exits before pushing, check `git log --oneline origin/main..HEAD` at the start of the next session and either push or reset. The `sync-learnings` timer can also deposit a commit between two job windows — treat any ahead-of-origin state as a potential sibling artifact, not only as your own work.
+
+_Evidence: job `edaf7fec`_
+
 ## 2026-10-29 — `_process_job`'s queued→running flip is an unguarded ORM write (INV-9 window)
 
 `main._process_job` reads the row, awaits the provider-hold check (a Redis round trip), then sets `job.status = running` and commits — SQLAlchemy emits `UPDATE jobs SET status='running' WHERE id=:id` with no status predicate. A durable cancel (`gateway.jobs.cancel_job_durable`, E3) that commits inside that window is overwritten: the job runs with a `job_cancelled` audit row that lies. Pre-existing (the old button path had the same race); found by E3's review. Fix when touching `_process_job`: a guarded core `update(Job).where(Job.id == id, Job.status == 'queued').values(status='running', …)` and return on rowcount 0.
+
+## 2026-11-06 — Tier B live on prod: first canary PASS, first week of signals
+
+Owner ran runbook §5 (`timers-only`, then the full `install-launchd.sh`) and one hand `credential-canary.sh` on prod: **PASS** `ok served=claude-sonnet-4-6 api_ms=1430 tokens=19639` (telemetry `volumes/telemetry/credential_canary.json`). The runner restarted through E7's credential refusal and E8's alembic check (`LastExitStatus 0`). First week with Tier B: 182 `ok` / 21 `max_turns` / 1 `error`; zero `settings_override_observed` (bingo's hook never ran a job in the window), zero `result_stamp_failed`, no `utility_model_usage` row (the router/learning calls were single-model). The dev `commit-msg` guard has been armed in `~/Documents/repos/ai-server` since 2026-10-29.
