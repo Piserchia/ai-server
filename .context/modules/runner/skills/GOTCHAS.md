@@ -913,3 +913,7 @@ _Evidence: job `edaf7fec`_
 ## 2026-10-29 — `_process_job`'s queued→running flip is an unguarded ORM write (INV-9 window)
 
 `main._process_job` reads the row, awaits the provider-hold check (a Redis round trip), then sets `job.status = running` and commits — SQLAlchemy emits `UPDATE jobs SET status='running' WHERE id=:id` with no status predicate. A durable cancel (`gateway.jobs.cancel_job_durable`, E3) that commits inside that window is overwritten: the job runs with a `job_cancelled` audit row that lies. Pre-existing (the old button path had the same race); found by E3's review. Fix when touching `_process_job`: a guarded core `update(Job).where(Job.id == id, Job.status == 'queued').values(status='running', …)` and return on rowcount 0.
+
+## 2026-11-06 — Tier B live on prod: first canary PASS, first week of signals
+
+Owner ran runbook §5 (`timers-only`, then the full `install-launchd.sh`) and one hand `credential-canary.sh` on prod: **PASS** `ok served=claude-sonnet-4-6 api_ms=1430 tokens=19639` (telemetry `volumes/telemetry/credential_canary.json`). The runner restarted through E7's credential refusal and E8's alembic check (`LastExitStatus 0`). First week with Tier B: 182 `ok` / 21 `max_turns` / 1 `error`; zero `settings_override_observed` (bingo's hook never ran a job in the window), zero `result_stamp_failed`, no `utility_model_usage` row (the router/learning calls were single-model). The dev `commit-msg` guard has been armed in `~/Documents/repos/ai-server` since 2026-10-29.

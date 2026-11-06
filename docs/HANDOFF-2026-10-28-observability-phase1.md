@@ -44,9 +44,11 @@ startup checks; `/health` ok). Every `Ruling:` the session made on the owner's b
 | E9 | dev `commit-msg` protected-path guard | armed in the dev checkout; renames/typechanges covered; `web.py`/`telegram_bot.py` guarded by auth hunk; D6 first half still owner-gated |
 | E10 | daily credential canary 06:50 | hand-run **PASS** (`ok served=claude-sonnet-4-6 api_ms=1315`); any E7-set env variable is a FAIL; user scope = auth ∪ {hooks, env, apiKeyHelper}, `statusLine` allowed; timer reaches prod with `install-launchd.sh timers-only` (owner item 5) |
 
-**Owner items this adds**: run runbook **§0b** (login-shell probe) before the deploy restart; **§5**
-`install-launchd.sh timers-only` (now also installs the canary) then the full install for E7's plist flags;
-**§8b** keep the dev guard armed; D6's first half still open. §8 exit rows 6–8 are now tests.
+**Owner items — done 2026-11-06**: §0b probe (`[]`), §5 `timers-only` (cost-reconcile + credential-canary timers loaded),
+a hand-run canary **PASS** on prod, and the full install (service plists carry the telemetry flags; runner stable). Still
+open: **D6's first half** (owner PR: MISSION §M += the two tracked settings files + the dev guard's path list) and the
+rest of the original list below (R2, seal key, trading tokens, pmset, D2/D3, D4, Ollama, bingo hook, the `0e09233d` row).
+§8b: the dev guard is armed in the dev checkout.
 
 ## UPDATE — second session, 2026-10-28 (read this first; the sections below it are the morning's state)
 
