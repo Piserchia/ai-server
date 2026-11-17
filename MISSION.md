@@ -177,6 +177,14 @@ Things the system is **explicitly prohibited from doing** autonomously:
   7. the safety-principle section of `.context/org/ORG.md`
   8. the lane's executor skills: `skills/server-patch/SKILL.md`,
      `skills/server-deploy/SKILL.md`, `skills/new-skill/SKILL.md`
+  9. the two tracked settings files `.claude/settings.json` and
+     `.claude/settings.local.json` — project scope for every session at the
+     server root; a `hooks`/`mcpServers`/`env`/`apiKeyHelper` key there is
+     owner-privilege code on every later session (spec §6; E1 allows only
+     `enabledPlugins`/`permissions`, `test_settings_no_hooks` pins that in
+     the deploy gate) — D6 first half, 2026-11-17
+  10. `scripts/install-dev-hooks.sh` — the dev `commit-msg` guard that
+     enforces this list, and its own path list — D6 first half, 2026-11-17
 
   Rationale: the system must not be able to relax its own restraints
   autonomously — every protected path defines or enforces a restraint.

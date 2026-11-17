@@ -51,6 +51,9 @@ PROTECTED_PATTERNS=(
   'skills/server-patch/SKILL.md'
   'skills/server-deploy/SKILL.md'
   'skills/new-skill/SKILL.md'
+  '.claude/settings.json'
+  '.claude/settings.local.json'
+  'scripts/install-dev-hooks.sh'
 )
 TRAILER_RE='^Approved-Protected-Path:[[:space:]]*ap-[A-Za-z0-9_-]{4,}[[:space:]]*$'
 # The auth-check lines of the two gateway files: a staged hunk adding or
