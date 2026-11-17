@@ -238,3 +238,10 @@ When you add a new documentation file, add it to this index.
 | Work on the skills | `skills/mm-*/SKILL.md` (frontmatter = contract; each reads the repo's `company/officers/<role>.md` handbook first), `tests/test_mm_skills.py`, `.context/org/divisions/moneymachine/CHARTER.md` |
 | Operate it (read the memo, pause/resume, manual CEO trigger, stop in-flight chains, apply an approved `[system]` item, refresh the prod clone) | repo `docs/OWNER.md`; the three schedule rows in `scripts/seed-schedules.sh` — `mm-ceo-weekly` (Sat 17:00 UTC), `mm-report-weekly` (Sat 19:30 UTC), `mm-resume-daily` (daily 10:30 UTC); kill switch `/schedule pause mm-ceo-weekly` (plus `company/config/settings.yaml` `enabled: false`, fail-closed) |
 | Build it task-by-task | `docs/superpowers/plans/2026-10-21-moneymachine-company.md` (Tasks 1–15: repo + constitution + `mmcore` + adapters + buckets, then skills, tests, charter, registries, schedules, gates, provisioning) |
+
+## Additions 2026-11-17 (sportsbetting / Props — NBA player-prop EV card, piece 1 LIVE)
+
+| I need to... | Read these |
+|---|---|
+| Understand the Props site (public card + track record at props.chrispiserchia.com, `/me` owner tools behind a fail-closed CF Access JWT check, in-project scheduler, FanDuel + DraftKings line sources, published read-only DB) | project `~/Documents/repos/sportsbetting`: `.context/CONTEXT.md`, `CLAUDE.md`, `docs/superpowers/specs/2026-11-17-hosting-port-design.md`; `.context/PROJECTS_REGISTRY.md` |
+| See why the upstream model is not trusted yet (290 verified findings; piece-2 rebuild scope) | project `docs/audit/2026-11-06-baseline-audit.md` |

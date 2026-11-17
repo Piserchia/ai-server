@@ -12,3 +12,4 @@
 8792: content-forge           # FastAPI workshop dashboard (CF Access gated)
 8793: pickem                  # FastAPI + React SPA — Arlington Degenerates pick'em dashboard
 8794: moneymachine           # FastAPI read-only page (web/mmweb; CF Access gated)
+8795: sportsbetting          # FastAPI + React SPA — Props: NBA player-prop EV card (public; /me owner tools CF Access JWT-gated)
