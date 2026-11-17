@@ -639,3 +639,45 @@ Two lessons, and the second is the important one:
   justified an ordering rule and a slot-2 assignment before anyone checked it. A governor's own
   unverified numbers are the hardest errors in this loop to detect, because every later run reads
   them as established evidence.
+
+## `gaps-set` resets `updated_at`, which is the ONLY STUCK-BUILT clock (2026-11-17)
+
+`gaps.set_status()` runs `set status = %s, status_reason = coalesce(%s, status_reason), updated_at =
+now()`. There is no separate `built_at`, so **`updated_at` is the only measurement of how long a gap
+has been STUCK-BUILT** — the number LOOP.md §3 asks you to compare against 7 days and the number
+owner escalations are built on.
+
+Consequence: **never re-stamp a `built` gap.** The tempting move — "I'll set it to `built` again with
+a fresh `status_reason` recording this week's refusal evidence" — silently zeroes the clock and the
+refusal history disappears with it. A gap that has been stuck 32 days reads as 0 days to your
+successor, and the escalation that was finally about to bite resets to nothing.
+
+Where the refusal evidence belongs instead: the SCORECARD entry (the `built → live` refusal table),
+the coverage-matrix row note, and the owner item. All three are append-only prose; the ledger row is
+the clock, and clocks are for reading.
+
+Corollary for any other status write: a transition that *moves* the row (`specced → rejected`) is
+fine, because the clock you destroy measured a state the row has left. A transition **to the same
+status** is almost always a mistake.
+
+## A red scanner over a green gate is a DEPLOY artifact — the inverse of the 10-19 trap (2026-11-17)
+
+2026-10-19 taught: scanner green + gate red ⇒ trust the gate, because the scanner was reading a live
+DB that had rows no migration file created. This run produced the mirror image and it needs its own
+entry, because the same instruments disagreeing the other way means something completely different:
+
+- `pytest -q` in `dashboard/` = **583 passed, 0 failed** (including `test_zero_undefined_terms`).
+- The live scanner = `source: db` / **UNDEFINED TERMS: 2 / RESULT: FAIL**, on exactly the two terms
+  the newest migration seeds.
+- `select max(version) from schema_migrations` = **0058** against **61** migration files.
+
+So the repo's knowledge is complete and *production's* is not. The one-line diagnostic: **take the
+undefined terms and grep the unapplied migrations for them.** If every red term is seeded by a
+migration production has not applied, the scanner is reporting a deploy defect and Educational depth
+should be graded on the gate (the standing rule still holds — it is merely the generous reading this
+week rather than the harsh one). If a red term is seeded by **no** migration at all, it is the
+slug-minting class and a real knowledge hole.
+
+Record **both** numbers in the scorecard either way. A bare "scanner FAIL" in a past entry is
+indistinguishable between these two cases a week later, and they route to opposite places: one to a
+builder slot, one to the owner's deploy item.

@@ -418,3 +418,64 @@ rewrite old entries.
   and read it as the answer to "were the rows sampled where the convention
   says?" — a small delta earns the right to quote stored numbers, a large one
   means the rebuild IS the grade.
+- 2026-11-17: the FIRST breaker trip in the vertical's life (T-0046 F33) was
+  wrong twice, and the forensic recipe generalises: when `trader.halts` gains a
+  `daily_loss` row, ALWAYS compare the halt's quoted % against the true
+  single-session move recomputed from `runs.equity`. The 11-06 halt quoted
+  −3.32%, which is exactly 11-04 → 11-06 (two sessions) because
+  `prior_close_equity` returns the last `equity_curve` row that EXISTS and 11-05
+  was `stale_data`; the true 11-06 move was **−1.50 bp**. Meanwhile the REAL
+  breach, −330.06 bp on 11-05 against a −300 bp limit, was never evaluated at
+  all because `stale_data` returns at executor step 5 and `check_breakers` runs
+  at step 7. A halt firing is NOT evidence the breach it names happened that
+  day, and no halt firing is NOT evidence no breach occurred.
+- 2026-11-17: `breaker_tripped` is a status that reached step 7 AND step 9 (it
+  has `kernel_rejected`, `new_halts` and an `equity_curve` row), so count it as
+  PRODUCTIVE coverage — but it is **not** in T-0002 observable (a)'s allowlist
+  `{ok, market_closed, stale_data}`, so it scores as a MISS there. A sealed
+  clause can be made stricter by a status it never anticipated; score it as
+  written in that direction too and file the gap as a successor-card finding.
+- 2026-11-17: **the paper account now credits SGOV distributions** — this
+  supersedes the 2026-09-20 "credits no distributions at all" entry in part.
+  `/v2/account/activities` returned a `DIV` row for the first time
+  (`2026-11-05 DIV SGOV 32.53 @ 0.328581, Rec Date 2026-11-02`); the 09-01 and
+  10-01 ex-dates were still never credited. The cheap DB tell is `cash` moving
+  off its lifetime constant **450.10 → 482.63**. So the book's equity series has
+  a CONVENTION BREAK at 2026-11-05: price-return before, price-return-plus-
+  credits after. Check the activity feed every week; never assume either answer.
+- 2026-11-17: the unclean-down test ("a boot with no preceding `shutdown time`",
+  2026-09-07 / 2026-11-01) is **NON-DISCRIMINATING on this host** — `last
+  shutdown` returns ZERO records lifetime (`wtmp begins Thu Jan 22`), so every
+  boot looks unclean. The decisive host-outage test is the `volumes/logs/
+  healthcheck.log` GAP (the 5-minute launchd timer cannot run while the box is
+  down). Use `sysctl -n kern.boottime` for the exact boot instant, and note that
+  `last reboot` showed TWO boots 32 min apart on 2026-11-17 (13:09, 13:41) — a
+  boot that did not stick is itself a diagnostic worth reporting to the owner.
+- 2026-11-17: F32's "did nothing, recorded as success" class has a SECOND cause.
+  Right after a boot the network stack may not be up: four drained jobs logged
+  **10 `api_retry` events** then `text: "API Error: Unable to connect to API
+  (ConnectionRefused)"` and still wrote `status='completed'`,
+  `terminal_reason='error'`, `model_served=NULL`, 0 tokens — 190 s of nothing.
+  The T-0040 no-op predicate catches it, but note the ORDERING: jobs enqueued in
+  the same second as `runner starting` can die on a cold network while jobs that
+  start 15 min later succeed. Always check `api_retry` counts in the audit
+  stream before attributing a no-op to dead auth.
+- 2026-11-17: the credential-canary timer IS now installed (T-0040 P0 was acted
+  on — plist in `~/Library/LaunchAgents/`, label in `launchctl list`, one
+  `rc=0 ok` line). Credit the install, but do not credit it with coverage it
+  cannot provide: it is another host-local 06:50 timer, so it cannot run during
+  a host outage, and it did not run on the recovery day either because the box
+  booted at 13:41, after its window. One `rc=0` line is its entire history.
+- 2026-11-17: `stale_data` can push the MONTHLY REBALANCE late, and the DB hides
+  it. November's first session was 11-02 but `rebalance_due=True` appears on
+  11-04, because 11-02/11-03 returned at step 5 before the rebalance logic.
+  `strategy_state.last_rebalance_month` stores the MONTH, not the session, so
+  the lateness is invisible unless you read `details->>'mode'` on every row.
+- 2026-11-17: once the vertical passes ~55 sessions, COUNT SESSIONS OF LIFE from
+  an independent daily-bar list every single week. PROTOCOL §4 rule 3 matures at
+  60 NYSE sessions = 2026-11-18, while grades run Sundays — so a mandated
+  demotion can mature BETWEEN grades and sit unfired for days, or not fire at
+  all if the governor is dark (it was dark 3 of its last 5 Sundays). Do not fire
+  it early either: 59 is not 60 (PROTOCOL §1 binds in both directions). State
+  the maturity date, the sign, and the gap, and file the conjunction as an owner
+  decision.
