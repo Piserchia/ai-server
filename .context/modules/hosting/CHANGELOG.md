@@ -1,5 +1,9 @@
 # Changelog: hosting
 
+## 2026-11-17 — D6 first half landed: MISSION §M items 9–10; the dev guard's list matches
+
+- `MISSION.md` §M (protected; owner-run commit `090e1e8` with the `Approved-Protected-Path: ap-d6-20261117` trailer — the first use of E9's mechanism) gains item 9 (the two tracked `.claude/settings*.json` files, the settings channel E1 refuses from) and item 10 (`scripts/install-dev-hooks.sh`, the guard and its path list). `PROTECTED_PATTERNS` gained the same three paths in that commit, so `test_the_list_is_missions_list` stays two-way green. From here on, editing either settings file or the guard in the dev repo needs the trailer. Re-arm with `bash scripts/install-dev-hooks.sh install` after pulling.
+
 ## 2026-10-29 — moneymachine Caddy vhost config added; AGENTS.md bootstrapped; skill GOTCHAS files created
 
 **Agent task**: deploy-director runtime session; these files were created/modified as part of operational learnings around that deploy.

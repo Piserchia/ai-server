@@ -253,10 +253,11 @@ itself: the id's shape is checked, resolving it against
 documentation; `skills/god/SKILL.md` documents PROD's pre-commit bypass, a
 different hook) — a bypassed commit must be pushed in the same session. Never install it on
 prod (prod has `scripts/install-prod-hooks.sh`, re-armed on every deploy).
-**D6's first half** (owner PR) adds `.claude/settings.json`,
-`.claude/settings.local.json` and this script's path list to MISSION §M; until
-it lands those three are not guarded and `test_the_list_is_missions_list`
-will say so the day §M grows.
+**D6's first half landed 2026-11-17** (`090e1e8`, owner-approved trailer
+`ap-d6-20261117`): MISSION §M items 9–10 name `.claude/settings.json`,
+`.claude/settings.local.json` and this script, and the guard's list matches — a
+commit touching any of the three now needs the trailer too. Re-arm after
+pulling: `bash scripts/install-dev-hooks.sh install`.
 
 ## 9. What to write back
 

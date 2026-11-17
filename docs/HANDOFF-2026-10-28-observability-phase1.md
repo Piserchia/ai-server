@@ -45,9 +45,8 @@ startup checks; `/health` ok). Every `Ruling:` the session made on the owner's b
 | E10 | daily credential canary 06:50 | hand-run **PASS** (`ok served=claude-sonnet-4-6 api_ms=1315`); any E7-set env variable is a FAIL; user scope = auth ∪ {hooks, env, apiKeyHelper}, `statusLine` allowed; timer reaches prod with `install-launchd.sh timers-only` (owner item 5) |
 
 **Owner items — done 2026-11-06**: §0b probe (`[]`), §5 `timers-only` (cost-reconcile + credential-canary timers loaded),
-a hand-run canary **PASS** on prod, and the full install (service plists carry the telemetry flags; runner stable). Still
-open: **D6's first half** (owner PR: MISSION §M += the two tracked settings files + the dev guard's path list) and the
-rest of the original list below (R2, seal key, trading tokens, pmset, D2/D3, D4, Ollama, bingo hook, the `0e09233d` row).
+a hand-run canary **PASS** on prod, and the full install (service plists carry the telemetry flags; runner stable). **D6's first
+half landed 2026-11-17** (`090e1e8`, owner trailer commit — §M items 9–10). Still open: the rest of the original list below (R2, seal key, trading tokens, pmset, D2/D3, D4, Ollama, bingo hook, the `0e09233d` row).
 §8b: the dev guard is armed in the dev checkout.
 
 ## UPDATE — second session, 2026-10-28 (read this first; the sections below it are the morning's state)
