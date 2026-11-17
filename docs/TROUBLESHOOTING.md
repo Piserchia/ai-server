@@ -2815,6 +2815,62 @@ tail across three consecutive fires — sufficient evidence
 that the self-suppress guard IS the right next fix
 whenever the workspace-push meta-bug unblocks it.)
 
+2026-11-17 ~20:15Z (job `cf8b0ec6`, pickem — the first NON-atlas /
+NON-baseball-bingo fire of this pattern). pickem answered `/healthz`
+200 with `{"ok":true,"db":true,"schema":3}` and `/api/charts` 200 both
+locally AND via `https://pickem.chrispiserchia.com` (`/healthz` 200 in
+3.9s, `/api/charts` 200 in 36.2s through the tunnel — slow but 200);
+`last_healthy_at` at diagnosis = 20:13:48Z, age 82s — refreshed to
+current by the time the probe ran. The real slip was ELEVEN DAYS long:
+`healthcheck.log` and `healthcheck.out.log` gap 2026-11-06 22:45:30Z →
+2026-11-17 19:38:18Z (11-day dormancy, almost certainly Mac
+sleep/power — swing-watchdog's log line resumed in lockstep with the
+same tick). The diagnose job was dispatched at 19:33:39Z, 5 minutes
+BEFORE healthcheck-all's natural resume at 19:38:18Z, and
+healthcheck-all self-resumed before this job's turn in the queue — no
+inline kickstart needed. launchctl runs=1, pid 7606 since 19:33 local,
+`last exit code = (never exited)`, no respawns. The uvicorn
+Started/Shutting-down pairs in `project.pickem.err.log` are all
+historical (from pre-11-17 deploys); the three trailing Started
+entries without matching shutdowns correspond to kickstart -k kills
+plus the current pid 7964 child under bash 7606. No action — service
+self-recovered before this ran. Eighty-fourth recurrence; first on a
+new slug, which reinforces the documented prevention stance: this
+isn't per-project flaps, it's healthcheck-all cadence slip that fires
+diagnose against whichever projects happen to be registered. The 11-day
+slip is ~44x the previous longest (70 min); a server-side launchd
+cadence guarantee (e.g. caffeinate wrapper or runner-side probe) now
+has clearer cost-justification than the live-probe gate alone.
+
+2026-11-17 ~20:27Z (job `5f86d3a2`, atlas diagnose — twin of the
+pickem 84th recurrence from the SAME 2026-11-06 22:45:30Z →
+2026-11-17 19:38:18Z 11-day healthcheck-all dormancy gap). Atlas
+answered `/` HTTP 200 in 77ms on port 8791; `last_healthy_at` at
+diagnosis was 2026-11-17T20:23:54Z (3m old, already refreshed by
+natural ticks). All three atlas launchd processes stable — primary
+PID 7597, pm-edge 10327, dash-scheduler 7589, all 54 min uptime
+since the 19:33 boot. pm-edge's `last exit code = 1` is from the
+boot-time crash (psycopg `FATAL: the database system is starting
+up` in `project.atlas-pm-edge.err.log` — Postgres wasn't ready yet
+when launchd started pm-edge; launchd KeepAlive restarted it, now
+stable 53 min). No inline kickstart needed — healthcheck-all
+self-resumed at 19:38:18Z and has run 10 ticks since
+(`checked=5 healthy=5 failed=0` through 20:23:55Z). Eighty-fifth
+recurrence — canonical sleep-throttled-cadence-slip; first time
+we've seen the SAME 11-day slip produce twin diagnoses on
+different slugs (pickem #84 + atlas #85), confirming the
+"whichever projects happen to be registered" framing from the 84th
+entry. Pre-existing app-level bugs still surfacing in
+`project.atlas.err.log` (UUID cast `"AAPL"` → `assets.id` and
+`stop_config_asset_fk` FK on DELETE — unrelated to healthcheck,
+candidates for a future atlas-patch cycle). Live-probe gate still
+un-landed; not re-dispatching a server-patch — workspace-push
+meta-bug blocker per the 51st entry still stands. Reinforces the
+84th entry's recommendation: a cadence-guarantee at the launchd
+layer (caffeinate wrapper or runner-owned healthcheck tick) would
+zero out this class of false positive even when the live-probe
+gate is still blocked.
+
 ## Symptom: `atlas-daily-brief` fails with `error_max_turns: Reached maximum number of turns (14)` after `atlas-dash packet` errors
 
 ### Diagnostic
