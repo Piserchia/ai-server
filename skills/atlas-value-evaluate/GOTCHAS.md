@@ -164,3 +164,67 @@
   is sufficient and the HEAD-index recipe above is unnecessary — that recipe is
   only for a shared file both lanes write. Verify with
   `git diff --cached --name-only` and leave the sibling's work dirty.
+- **A fix the ledger calls "the cheapest single line" can be a no-op — trace the
+  proposed fix forward through the SAME unreachability analysis you used to find
+  the defect.** G-0011 proved `theses.gate()` unfalsifiable and then recommended
+  `weekly.py:192 self.psql → self._psql()` as the first fix. G-0012 traced it
+  forward: sites `95/102/107/113` are all inside `if kind == "msp"` and no `msp`
+  card is constructible (`ivr` is `None` at `weekly.py:179` and reassigned only
+  under `self.ivstore`, which has no builder), and site `128` reduces to
+  `slug_pct > sector_cap_pct` = `5.0 > 25.0` because `sector_exposure` is a
+  permanently-empty dict. So `gate()` still returns `ok=True` after the fix.
+  **Grading your predecessor's finding is not enough; grade its remedy.**
+- **Check the config threshold's CONSUMERS before endorsing a fix that makes a
+  stale input load-bearing.** `holdings_stale_days: 14` is read by nothing — the
+  only matches read or print the *computed* `stale_days`. Flipping the psql
+  handle on would have made an 86-day-old snapshot authoritative with no code
+  path able to refuse. `grep` the threshold *name*, then check whether each hit
+  compares against it or merely formats it.
+- **`portfolio_context`'s `stated` branch returns `holdings: {}` too.** So
+  "state your portfolio value" does not un-dead the `exit` card
+  (`weekly.py:247-256`, the only artefact in the vertical that writes a literal
+  `FAIL` into a gates blob) nor the `held` skip at `:200`. When you report that
+  an owner action unblocks something, read EVERY return of the function that
+  action feeds — not only the branch the action changes.
+- **`terminal_reason = max_turns` with `status = completed` can destroy a whole
+  cycle, and `workspace_synced` is how you prove it.** Job `2f5af23e` ran
+  1143 s / 81 turns / $7.30, sealed a card, appended a trial line, fixed a
+  validator `[HIGH]` and left 156 tests green — and committed nothing. The tell
+  is `workspace_synced: {"detail": "canonical fast-forwarded from origin"}`:
+  the canonical took a commit FROM origin, so nothing came OUT of the clone.
+  Corroborate with `git log origin/<branch>..<branch>` + reverse (both empty),
+  `git branch -r | grep <job-id-prefix>` (no wip branch) and the absence of a
+  `volumes/workspaces/<job>-<project>` dir. Narration that ends "writing the
+  close-out" is the signature.
+- **`code_review_done` can carry an LGTM for a DIFFERENT lane's commit — read
+  the review BODY, not the outcome.** For `2f5af23e` the belt-2 reviewer fired
+  48 s after the ff-sync and reviewed `dashboard/atlas_dash/nonfinite.py`
+  (Postgres `NaN` equality) — an `atlas-build` commit the value-research job
+  never touched. A flag-only belt that diffs a stranger's commit manufactures a
+  clean review record for a job that produced nothing. Always diff the review
+  text's file names against the job's own narration.
+- **`resolved_skill IS NULL` on a scheduled job does NOT mean "never
+  dispatched".** It is null until the session resolves the skill, so a freshly
+  queued catch-up row looks undispatched. Settle it with
+  `select s.name, count(j.id) from schedules s left join jobs j on
+  j.schedule_id = s.id and date(j.created_at) = '<day>' group by 1`. G-0012
+  nearly filed "theses and monitor were not re-dispatched" as a worker finding;
+  both were queued. The wrong version of that finding is a lie about a worker.
+- **A catch-up sweep stamps `last_run_at` for every schedule but enqueues ONE
+  job per schedule, not one per missed slot.** After the 11-day 11-07→11-16
+  outage the four value schedules shared an identical `last_run_at`
+  (`2026-11-17 14:33:39.834578-05`) and got 4 jobs for 11 lost slots. Count
+  lost slots from the cron expression against the outage window; do not infer
+  them from `last_run_at`.
+- **The governor's own queue wait is evidence.** `started_at - created_at` was
+  2 h 21 m behind 55 catch-up jobs. Report it: a grade written hours after its
+  slot is measuring a different tape than its cron implies, and the regime
+  table's "settled vs today's bar" choice turns on it.
+- **Publish a predecessor's DECLARED-but-unlanded correction yourself, by
+  append.** `d65b401d`'s final message said N-0009's §7 timer line and header
+  stamp were forward-written and that a published correction was the remedy —
+  then it hit `max_turns`. Nothing in the DB contradicts a false timestamp.
+  Verify it against git (`git log -1 --format=%cI <commit>`): a header stamp
+  LATER than the commit that published the entry is proof. Then correct by
+  append, never by editing the predecessor (G-0007a class, now twice in eight
+  weeks).
