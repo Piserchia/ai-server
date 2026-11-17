@@ -3487,3 +3487,9 @@ trigger is a positively declared name that the file positively lacks.
 **Fix (in tree since 2026-10-28)**: `result_capture.cli_version_column` normalises the value for both lanes; the stamp is guarded — a failure is audited as `result_stamp_failed{error}` and the job completes, with `main._finish_job` re-stamping tokens/cost from the result dict.
 
 **If you see it again**: `grep result_stamp_failed volumes/audit_log/<job>.jsonl` — the `error` names the column; compare the value the lane produced (`executor_started.cli_version` for Codex, `session.cli_version()` for Anthropic) with the ORM width in `src/models.py`. A job with a `result_stamp_failed` row but a `completed` status is the guard working; the tokens on the row come from the terminal transition. After a guarded failure three columns stay NULL on the row — `cli_version`, `duration_api_ms`, `sdk_cost_usd` — because `main._terminal_values` does not carry them; tokens, `num_turns`, `cost_usd_list`, `terminal_reason` and `model_served` are re-stamped.
+
+## Symptom: runner log says `job no longer queued at claim time — not run (cancelled or claimed elsewhere)` — 2026-11-17
+
+**Cause**: INV-9 claim guard. The runner popped a job id from Redis, read the row as `queued`, but by the time it claimed the row with its guarded `UPDATE … WHERE status='queued'` someone else had changed it — almost always a user cancel (`/cancel`, the task button, `/clear`, `DELETE /api/jobs`) that raced the pop, occasionally a second worker. The job did not run, nothing was written for it, the slot was released.
+
+**Action**: none. The row shows the state the other writer gave it (`cancelled` with `terminal_reason=interrupted`, or `running` under another worker). A burst of these lines with no cancels behind them would mean duplicate ids in `jobs:queue` — check `redis-cli lrange jobs:queue 0 -1` for repeats and `reconcile.requeue_stranded_queued` in the runner log.

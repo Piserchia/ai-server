@@ -618,6 +618,9 @@ class _MainHarness:
     async def get(self, model, job_id):
         return self.job
 
+    async def execute(self, stmt):
+        return SimpleNamespace(rowcount=1)      # INV-9 claim guard: this harness wins the claim
+
     async def commit(self):
         pass
 

@@ -729,6 +729,11 @@ class _MainHarness:
     async def get(self, model, job_id):
         return self.job
 
+    async def execute(self, stmt):
+        # INV-9 claim guard (2026-11-17): the runner claims the row with a
+        # guarded UPDATE; this harness always wins the claim.
+        return SimpleNamespace(rowcount=1)
+
     async def commit(self):
         pass
 

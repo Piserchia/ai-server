@@ -373,6 +373,7 @@ class _FakeDB:
 
     async def execute(self, stmt):
         self.executed.append(stmt)
+        return SimpleNamespace(rowcount=1)      # INV-9 claim guard: this harness wins the claim
 
     async def commit(self):
         self.commits += 1

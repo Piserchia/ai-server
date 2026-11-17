@@ -322,18 +322,25 @@ def test_queue_wait_ms():
 
 def test_running_flip_stamps_queue_wait_ms():
     # Source pin: the one place a job flips to `running` in _process_job
-    # assigns queue_wait_ms right there, from created_at and started_at.
+    # stamps queue_wait_ms right there, from created_at and started_at. Since
+    # the INV-9 claim guard (2026-11-17) the flip is one guarded UPDATE whose
+    # values carry `queue_wait_ms=wait_ms`, with `wait_ms` computed just above.
     tree = ast.parse(MAIN_SRC.read_text())
     process_job = next(n for n in ast.walk(tree)
                        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_process_job")
-    stamps = [
+    computed = [
         n for n in ast.walk(process_job)
         if isinstance(n, ast.Assign) and len(n.targets) == 1
-        and ast.unparse(n.targets[0]) == "job.queue_wait_ms"
+        and ast.unparse(n.targets[0]) == "wait_ms"
     ]
-    assert len(stamps) == 1
-    assert "queue_wait_ms(" in ast.unparse(stamps[0].value)
-    assert "started_at" in ast.unparse(stamps[0].value)
+    assert len(computed) == 1
+    assert "queue_wait_ms(" in ast.unparse(computed[0].value)
+    assert "started_at" in ast.unparse(computed[0].value)
+    claims = [n for n in ast.walk(process_job) if isinstance(n, ast.Call)
+              and ast.unparse(n.func).endswith(".values")
+              and "queue_wait_ms=wait_ms" in ast.unparse(n)]
+    assert len(claims) == 1, "exactly one guarded claim UPDATE stamps queue_wait_ms"
+    assert "status=JobStatus.running.value" in ast.unparse(claims[0])
 
 
 def test_scheduler_rows_carry_origin():

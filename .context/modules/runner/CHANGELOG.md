@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-11-17 — INV-9: the queued→running claim is one guarded UPDATE (Tier B whole-branch review #4)
+
+**Agent task**: the dated follow-up recorded at Tier B's merge (gateway CHANGELOG 2026-10-29 caveat; runner GOTCHAS 2026-10-29).
+**Files changed**: `src/runner/main.py` — `_process_job` claims the row with `UPDATE jobs SET status='running', started_at, queue_wait_ms WHERE id = :id AND status = 'queued'`; rowcount 0 (a `cancel_job_durable` or another worker got there first) logs and returns without running the job; the local ORM object mirrors the row only after the claim won. The ORM flip it replaces (`job.status = running` + commit, no predicate) could overwrite a `cancelled` row committed inside the read→commit window. `tests/test_claim_guard.py` (new, 3: the claim is one guarded UPDATE with the predicate, the id and both stamps; a lost claim runs nothing and finishes nothing; no unguarded flip precedes it); `tests/test_origin.py::test_running_flip_stamps_queue_wait_ms` re-pinned to the guarded shape; the `_process_job` harnesses in `tests/test_provider_dispatch.py` and `tests/test_pre_push_gate.py` gained an `execute` that wins the claim.
+**Why**: E3's "one cancel semantics" was true everywhere except this window — a cancel that landed there produced a `job_cancelled` row and a "removed from the queue" reply while the job ran.
+**Side effects**: none visible on a healthy fleet; the one new log line fires only when a claim is lost.
+
 ## 2026-10-29 — runtime learning: alpha-governor max_turns exhaustion pattern documented
 
 **Agent task**: deploy-director dispatched a server-deploy for a docs-only range; runtime learnings recorded during or around that session.

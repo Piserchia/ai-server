@@ -553,6 +553,7 @@ async def _process_job(job_id: uuid.UUID) -> None:
             if job is not None:
                 _requeued_missing_ids.discard(str(job_id))
                 if job.status != JobStatus.queued.value:
+                    _held_audited.pop(str(job_id), None)
                     return
                 # T6: a paused provider lane holds the job here — before it
                 # is ever marked running (no DB write, no slot held, no
@@ -561,13 +562,39 @@ async def _process_job(job_id: uuid.UUID) -> None:
                 # the loop before BLPOP).
                 if await _hold_if_provider_paused(job, logger.bind(job_id=str(job_id))):
                     return
-                job.status = JobStatus.running.value
-                job.started_at = datetime.now(timezone.utc)
+                # INV-9 claim (2026-11-17; Tier B whole-branch review #4): ONE
+                # guarded UPDATE `… WHERE id = :id AND status = 'queued'`. The
+                # ORM flip this replaces committed with no status predicate,
+                # so a `cancel_job_durable` that landed between the read above
+                # and the commit was overwritten and the job ran — with a
+                # job_cancelled row and a "removed from the queue" reply that
+                # were both false. rowcount 0 = someone else owns the row now
+                # (a cancel, another worker): never run it.
+                started_at = datetime.now(timezone.utc)
                 # getattr: the ORM row always has created_at; the row
                 # stand-ins the _process_job test harnesses build do not.
-                job.queue_wait_ms = queue_wait_ms(getattr(job, "created_at", None),
-                                                  job.started_at)
+                wait_ms = queue_wait_ms(getattr(job, "created_at", None), started_at)
+                res = await s.execute(
+                    update(Job)
+                    .where(Job.id == job.id, Job.status == JobStatus.queued.value)
+                    .values(status=JobStatus.running.value, started_at=started_at,
+                            queue_wait_ms=wait_ms)
+                )
                 await s.commit()
+                # asyncpg reports `UPDATE n`; `_finish_job` relies on the same
+                # rowcount for its own guarded UPDATE. -1 ("unknown", server-side
+                # cursors only) would read as "won" — fail-open on purpose: a
+                # driver change must not halt the fleet.
+                if res.rowcount == 0:
+                    logger.info("job no longer queued at claim time — not run (cancelled or "
+                                "claimed elsewhere)", job_id=str(job_id))
+                    _held_audited.pop(str(job_id), None)
+                    return
+                # The local object mirrors the row the UPDATE wrote; the
+                # post-steps read it and `_refetch_job` refreshes it later.
+                job.status = JobStatus.running.value
+                job.started_at = started_at
+                job.queue_wait_ms = wait_ms
         if job is not None:
             break
 
