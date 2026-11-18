@@ -2,6 +2,934 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-11-17 — self-diagnose: `_writeback` SIGTERM'd by server-deploy's self-restart (new vector of the 20s-window race)
+
+**Agent task**: `7026f688` (self-diagnose of `_writeback` job `463e06f8`, exit 143).
+**Files changed**: `skills/server-deploy/GOTCHAS.md` (append 4th recurrence; the prior three were parent-session SIGTERMs from post-step-4 writes, this one is a child `_writeback` dispatched by `_verify_writeback` landing inside the same 20s window); `docs/TROUBLESHOOTING.md` (new "Symptom: `_writeback` fails with `exit code 143` (SIGTERM) after server-deploy" section with diagnostics + proposed fix).
+**Why**: parent `547cb86b` (server-deploy 539cff5→94671ef) completed cleanly, but `src/runner/main.py::_verify_writeback` enqueued a `_writeback` follow-up at T+8s after queueing the detached runner restart at T+0; the follow-up was 12s into execution when SIGTERM fired. Deploy itself was unaffected (HEAD=94671ef, /health=200, services restarted, 3110 tests passed). Historical check shows this is the first time server-deploy spawned a dying `_writeback` — the earlier 9 failed `_writeback` rows came from atlas-governor/research with different root causes.
+**Side effects**: docs-only. The proposed server fix (skip `_writeback` dispatch when parent kind is `server-deploy`, or honor a `skip_writeback` payload flag) is MEDIUM-risk server-code work, deferred to a future server-patch job. Not applied in this session per self-diagnose skill rules.
+
+## 2026-11-17 — INV-9: the queued→running claim is one guarded UPDATE (Tier B whole-branch review #4)
+
+**Agent task**: the dated follow-up recorded at Tier B's merge (gateway CHANGELOG 2026-10-29 caveat; runner GOTCHAS 2026-10-29).
+**Files changed**: `src/runner/main.py` — `_process_job` claims the row with `UPDATE jobs SET status='running', started_at, queue_wait_ms WHERE id = :id AND status = 'queued'`; rowcount 0 (a `cancel_job_durable` or another worker got there first) logs and returns without running the job; the local ORM object mirrors the row only after the claim won. The ORM flip it replaces (`job.status = running` + commit, no predicate) could overwrite a `cancelled` row committed inside the read→commit window. `tests/test_claim_guard.py` (new, 3: the claim is one guarded UPDATE with the predicate, the id and both stamps; a lost claim runs nothing and finishes nothing; no unguarded flip precedes it); `tests/test_origin.py::test_running_flip_stamps_queue_wait_ms` re-pinned to the guarded shape; the `_process_job` harnesses in `tests/test_provider_dispatch.py` and `tests/test_pre_push_gate.py` gained an `execute` that wins the claim.
+**Why**: E3's "one cancel semantics" was true everywhere except this window — a cancel that landed there produced a `job_cancelled` row and a "removed from the queue" reply while the job ran.
+**Side effects**: none visible on a healthy fleet; the one new log line fires only when a claim is lost.
+
+## 2026-10-29 — runtime learning: alpha-governor max_turns exhaustion pattern documented
+
+**Agent task**: deploy-director dispatched a server-deploy for a docs-only range; runtime learnings recorded during or around that session.
+**Files changed**:
+- `.context/modules/runner/skills/GOTCHAS.md` — added entry documenting that the alpha-governor skill hits `max_turns=51` in ~11% of runs (3 of 27), always at the git-commit step, causing silent loss of complete audit ledger entries ($10.39 combined). Root cause: commit-last ordering means the primary output sits after the most token-expensive minutes; mitigation is commit-first (before GOTCHAS/CHANGELOG prose).
+
+**Why**: Three runs over 14 days terminated with `terminal_reason: max_turns` after staging all files but before executing `git commit`, permanently losing the session's work. The pattern falsifies any "unbroken audit record" assumption and needed to be documented so future operators know to reorder commit before documentation steps.
+**Side effects**: None (docs-only append).
+**Gotchas discovered**: `max_turns` ceiling is a hard gate that fires silently — `status=completed` with `terminal_reason: max_turns` is indistinguishable from success in most dashboards.
+
+## 2026-10-29 — E10 after the whole-branch review: any E7-set variable in the canary's env is a FAIL; user scope narrowed to the spec's set
+
+**Files changed**: `src/runner/credential_canary.py` — `main()` fails (exit 1, naming the keys) on `claude_env.vendor_keys_in(os.environ)` instead of `CLAUDE_CODE_OAUTH_TOKEN` alone: `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` / a vendor key re-bill or redirect the ping while `model_usage` still names the model, so the old check could print `ok` under a redirected call. `USER_SETTINGS_REFUSED_KEYS` is now exactly `session.SETTINGS_AUTH_KEYS ∪ {hooks, env, apiKeyHelper, statusLine}` (pinned) with `statusLine` the one allowed key (D-P1-9) — the first cut refused every `SETTINGS_OVERRIDE_KEYS` entry in `~/.claude/settings*.json`, which the fleet never reads (`setting_sources=["project"]`) and which would have turned the owner's own "always allow" or a global MCP setting into a red canary — inside the prod deploy gate, via `test_the_real_user_scope_is_clean_today` (now on the narrowed set). `tests/test_credential_canary.py` (33).
+**Why**: the whole-branch review's two E10 findings (falsely green under a redirecting variable; falsely red on an editor setting).
+
+## 2026-10-29 — E10: the daily credential canary through the runner's own SDK path
+
+**Agent task**: Observability Phase 1 Tier B E10 (recut plan; design of record P0 plan Task 12, renamed `credential_canary` and made self-contained; spec §0a, §6; D-P1-9).
+**Files changed**: `src/runner/credential_canary.py` (new) — `canary_options`, `settings_scopes`, `settings_precheck` (E1's rule over the server root + a stricter user-scope pass, `statusLine` the one allowed extra key), `run_ping`, `evaluate_ping` (the runner's `served_model_violation` + the probe tightening), `telemetry_record`, `main` (exit 0/1/2; a `CLAUDE_CODE_OAUTH_TOKEN` in the process env is a FAIL — a pass proves the Keychain login); `scripts/credential-canary.sh` (new timer wrapper; venv per §4; `notify send` first, curl fallback; `unset ANTHROPIC_API_KEY`); `scripts/install-launchd.sh` — `install_timer "credential-canary"` daily 06:50 + the `TIMER_LABELS` entry for `uninstall`; `tests/test_scripts_syntax.py` — `TIMER_SCRIPTS` gains the script; `tests/test_credential_canary.py` (new, 25: options = the runner's; evaluate incl. no result / is_error / missing `model_usage` / wrong served model / no API time or empty usage; run_ping captures through a fake query; both scopes incl. `statusLine` allowed and every other key refused in user scope and E1's per-key allowance in project scope; the real user scope clean today (Mini only); main's exit codes, the telemetry file, the scope short-circuit before any ping, the setup-token refusal; the timer script's contract).
+**Why**: if the Max login lapses, the first job of the day fails only after burning a slot and an escalation; this probe fails BEFORE that, through the same path the fleet runs on, and says which credential served.
+**Side effects**: a new daily timer (installed on prod by `install-launchd.sh timers-only` — owner runbook §5); `volumes/telemetry/credential_canary.json`; the `credential_canary` ops-notice kind (already in `OPS_NOTICE_KINDS`) gets its first producer. User-scope `statusLine` is allowed (D-P1-9) so the canary does not go red the day the owner does D8.
+
+## 2026-10-29 — E8: alembic runner-startup check + the owner diagnostic script
+
+**Agent task**: Observability Phase 1 Tier B E8 (recut plan; design of record P0 plan Task 18 steps b–d — the manifest itself landed in A1; spec §9 rollback paragraph).
+**Files changed**: `src/runner/main.py` — pure `migration_gap(db_revision, disk_revisions) -> str | None` (None = fine OR "cannot tell": an empty/absent revision never blocks a boot; a revision with no script on disk is the `possible_bad_rollback` message with the `alembic downgrade -1` rule) and `_check_alembic_history()` — `ScriptDirectory` walk vs `SELECT version_num FROM alembic_version`, any probe error logs and boots, a real gap `logger.error` + `SystemExit(1)`; called in `main()` right after `_check_subscription_auth()` (credentials, the vendor-key assertion, then migration history — cheapest and most fatal first). `scripts/alembic-current-check.sh` (new; owner diagnostic, exit 0/1/2, venv per §4, NOT wired into the protected `server-deploy` skill). `tests/test_migrations.py` layer 1d (the pure function incl. the three "cannot tell" shapes; the startup check driven with a fake session — exits on `999`, boots on the head, boots on "no table"; the `main()` ordering by source; the script invariants; one opt-in live-DB check).
+**Why**: `alembic_version` is a row in the LIVE DB that no test in the deploy gate can see; a revert that deletes a migration file leaves the on-disk chain walkable and the DB ahead of it — the next `alembic upgrade head` fails mid-incident. The refusal IS the alarm: launchd restarts the runner, `healthcheck-all.sh` sees it down and DMs. The `notice(kind=possible_bad_rollback)` row is Phase 2.
+**Side effects**: a runner whose DB names an unknown revision refuses to start (never happened yet; prod is at 008 with 008 on disk). On the dev box `settings.server_root` is prod, so a dev-launched check walks prod's `alembic/versions` — never launch the runner from dev (§4).
+
+## 2026-10-29 — E7: telemetry off on every Claude subprocess; the runner refuses to start with a planted key; utility `model_usage` audited
+
+**Agent task**: Observability Phase 1 Tier B E7 (recut plan; design of record P0 plan Task 17 + E7 Deltas; spec §2.4/§3, §6, §8 exit rows 7–8).
+**Files changed**:
+- `src/runner/claude_env.py` (new, import-free) — `CLAUDE_SUBPROCESS_ENV` / `claude_subprocess_env()`; `VENDOR_KEY_PREFIXES`, `VENDOR_KEY_SUFFIXES`, `VENDOR_KEY_EXACT`, `vendor_keys_in(env)`; `utility_model_violation`, `log_utility_model_usage`. The docstring states the two contracts (runner startup set vs the Codex child scrub).
+- `env=claude_subprocess_env()` inline at the five `ClaudeAgentOptions` sites (E7 Delta: no builder extraction): `session._build_options` (`kwargs["env"]`), `llm_router.llm_route`, `learning.extract_learning`, `review.py` (beside `setting_sources=[]`), `evals/run.py::_run_judge` (lazy import).
+- `src/runner/main.py` — `_check_subscription_auth` exits 1 on any `vendor_keys_in(os.environ)` hit, with `INV-3` in both messages (the existing `ANTHROPIC_API_KEY` block kept as the first, named case).
+- `src/runner/llm_router.py` / `src/runner/learning.py` — after the `ResultMessage`: a second family in `model_usage` is logged and audited `utility_model_usage{call, requested, served_models}` under job id `"utility"` (`llm_router` gains an `audit_log` import); never fails the call.
+- `src/audit_log.py` — docstring: `utility_model_usage`.
+- `scripts/run.sh` — `_start_one <svc> env PIPENV_DONT_LOAD_ENV=1 pipenv run …` (the helper execs its arguments, so the switch goes through `env`); `scripts/install-launchd.sh` — the service plists gain `DISABLE_ERROR_REPORTING`/`DISABLE_TELEMETRY` (the timers already had them from C1).
+- `tests/test_claude_env.py` (new, 20: the overlay; the detector (named Anthropic keys, never a prefix; the legitimate `*_TOKEN` Settings names pass); every planted key refuses startup and `INV-3` survives; `PROVISIONING_EXEMPT ⊆ VENDOR_KEY_EXACT`; the five sites by source; `run.sh`'s `env` prefix; the installer's flags and no credential in any plist; the router/learning audit on a second family and silence on one).
+
+**Why**: Pro/Max sign-ins ship error reports and operational metrics on by default — proprietary (atlas/alpha) sessions must not; and the three Anthropic names that outrank the Keychain `/login` (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`) plus any vendor key in `os.environ` are inherited by every Claude subprocess and every Bash child of every job. §8 exit rows 7 ("the runner refuses to start with a planted key") and 8 ("`model_usage` on utility calls lists only the requested model") are now tests.
+
+**Independent review (2026-10-29, applied before commit)**: `CODEX_` dropped from the prefixes — it collided with four legitimate Settings knobs (`CODEX_BIN`, `CODEX_HOME`, `CODEX_SANDBOX_DEFAULT`, `CODEX_RUN_AS_USER`) and `CODEX_HOME` is the Codex CLI's own var; `CODEX_API_KEY` is caught by the `_API_KEY` suffix; a test now pins that no `Settings` field name is in the set. The plan's owner note "prod launchd runs the venv python directly and is unaffected" was wrong — the service plist runs `bash -lc`, a LOGIN shell, so a profile-exported vendor key would crash-loop the runner (KeepAlive, ThrottleInterval 30) at the first restart carrying this check; the runbook gains a §0 pre-restart probe. `kwargs["env"]` merges rather than overwrites; a vacuous count assertion was replaced. Noted: `volumes/audit_log/utility.jsonl` (the synthetic job id) is read harmlessly by every JSONL walker today (no `job_started`, so index/ledger skip it) but never ages out of retention — low volume, a comment for Phase 3.
+
+**Side effects**: a runner started with ANY name in the set refuses to start — none is set on prod today (the 14 `com.assistant.*` plists carry no such name — verified by the review). Run the runbook §0 probe before the deploy's restart. The plist belt reaches prod on the next full `install-launchd.sh` (owner runbook; `timers-only` does not rewrite service plists). `scripts/run.sh` (dev launch) no longer exports `.env`. `utility_model_usage` is log + audit only.
+
+## 2026-10-29 — E6: always-on audit/stream secret redactor, both lanes
+
+**Agent task**: Observability Phase 1 Tier B E6 (recut plan; design of record P0 plan Task 20 + E6 Deltas; spec §2.4 "Audit/stream redaction", §8.3).
+**Files changed**:
+- `src/runner/secret_redact.py` (new, pure, import-free) — `redact(text)`, `redact_tree(value)`, `REDACTED`; name set `NAME_PREFIXES` + `NAME_SUFFIXES` (the P0 set widened per the Deltas with `TELEGRAM_`, `POSTGRES_`, `ALPACA_`, `TRADIER_`, `FINNHUB_`, `WEB_AUTH_` and the `*_URL`/`*_DSN` suffixes — a DSN carries its password in the URL), bare `sk-ant-…`, `Authorization: Bearer`, `NAME=value`/`NAME: value` at line start and mid-line, JSON/YAML credential values, every PEM/OpenSSH/PGP private-key armour — truncated bodies included — and the bare OpenSSH blob. The NAME survives; only the VALUE is replaced.
+- `src/runner/session.py` — `_handle_message`: `text` (audit + stream), `thinking`, `tool_use.input` (after truncation), `tool_result` preview (after `_preview_text`) pass through the redactor; `final_text_chunks` stays raw (it is the job result and the `TASK_COMPLETE` parser input).
+- `src/runner/executors/codex_cli.py` — `default_sink.on_event` runs `redact_tree(fields)` before the audit append and the stream view (the fifth wire point, E6 Delta); the canary sink in `run_canary` is excluded on purpose.
+- `tests/test_audit_redactor.py` (new, 40: the printenv dump with eleven names, DSN/URL names, every PEM armour, the bare blob, bearer headers, bare keys, byte-identical innocent text, every prefix and suffix, mid-line, JSON/YAML shapes, trees, **the name set ⊇ `DENIED_ENV_PREFIXES ∪ DENIED_ENV_NAMES ∪ CANARY_SENTINEL_NAMES`**, `_handle_message` on real SDK blocks for all four block kinds incl. truncation-then-redaction and the un-redacted summary, the Codex sink before both sinks, the canary exclusion).
+
+**Why**: without it the always-on JSONL and `jobs:stream` kept a `printenv` or a `curl -H 'Authorization: …'` verbatim, and `learning.py` reads Bash command text back; a leaked `CLAUDE_CODE_OAUTH_TOKEN` is a one-year credential.
+
+**Independent review (2026-10-29, applied before commit)** — seven probes got a value past the first cut, each now a pinned corpus case (`TestBypassCorpus`, 20 strings): a PEM cut short by the 500-char preview (no END armour — the body is now base64-only and END is optional; PGP `… BLOCK` covered; also kills a quadratic scan on many BEGINs), a quoted mid-line value and a json.dumps'd `\n` before the name (list-shaped tool results), lower-case names (`print(settings)` → `telegram_bot_token='…'`; the name patterns are case-insensitive now — a `base_url = "…"` in a Write is redacted in the trace, accepted), the Telegram bot token inside its API URL, `Authorization: Basic`, `curl -u user:password`, a bare `scheme://user:password@host` DSN, `?token=`/`&api_key=` query strings, `secret_access_key = …` (rclone.conf), `x-api-key:`, plutil's `"NAME" => "value"`, tabs and ANSI codes between name and value. The marker parser's derived rows (`task_complete.summary`, `eval_fail.feedback`, …) were appended RAW from `final_text_chunks` — now `redact_tree(evt)` after parsing, before the append. One vacuous test (the truncation-ordering case cut the secret out before redaction could) rewritten to pin the order via the cut marker's count.
+
+**Side effects**: trace text can now contain `[REDACTED]` where a value was — including inside a code snippet a session wrote (`password = get_pw()` in a Write's trace; the file itself is untouched); innocent text is byte-identical. A URL-shaped value under any `*_URL` name is redacted even when harmless (`GITHUB_URL=…`) — the name is the finding, the value was never needed in a trace. No audit kind or field changes (C14).
+
+## 2026-10-29 — E5: the autonomous `server-patch` idle dispatcher is removed unconditionally
+
+**Agent task**: Observability Phase 1 Tier B E5 (recut plan; design of record P0 plan Task 13 Step 6b; spec §4.3, §6).
+**Files changed**: `src/runner/events.py` — deleted `REVIEW_COOLDOWN_HOURS`, `_should_trigger_idle_review`, `_check_idle_queue_review` and the `event_loop` dispatch block that enqueued `review-and-improve` on an idle queue; the alpha drainer keeps its place and its breaker exemption. `tests/test_events.py` — `TestIdleQueueReview` deleted; `TestEventLoopBreakerGating` rewritten for three checks; new `TestTheAutonomousServerPatchDispatcherIsGone` (the names and the literal are gone from the module; the alpha drainer still enqueues under its predicate — idle queue, stale governor, under the daily valve, 4 h cooldown).
+**Why**: the idle trigger was the one place the fleet dispatched a server-patching retrospective on its own, with no owner in the loop. **No self-improvement loop until the Phase-4 `retro`; interim = CostCard + owner-run `/task review-and-improve`** (spec §4.3). The `review-and-improve` skill file stays.
+**Side effects**: quiet hours no longer produce a `review-and-improve` job (≈ $34 over 30 d was its line in the ledger); `/task review-and-improve` still works by hand; the `/proposals` command (E3) is where its pending proposals surface.
+**Commit note**: this entry landed with E3's docs commit (`fd5e60b`); the code deletion is the commit that follows it.
+
+## 2026-10-29 — E3: the cancel listener stamps `interrupted` + `cancelled by user (running)`
+
+**Agent task**: Tier B E3 (D-P1-4). **Files changed**: `src/runner/main.py` — `_cancel_listener`, after a successful `session.interrupt`, writes `job_cancelled{stage="running"}` and stamps `terminal_reason="interrupted"`, `error_message="cancelled by user (running)"` beside `status=cancelled`/`completed_at`. **Why**: one cancel vocabulary across the four sites (gateway CHANGELOG, same date). **Side effects**: `jobs.terminal_reason` is no longer NULL on a cancelled running job.
+
+## 2026-10-29 — E2: the generic task's tool list is `registry.skills.DEFAULT_REQUIRED_TOOLS`
+
+**Agent task**: Tier B E2. **Files changed**: `src/runner/session.py` — `_build_options` reads `list(DEFAULT_REQUIRED_TOOLS)` for a skill-less job instead of its own literal (which carried `AskUserQuestion`). **Why/side effects**: see the registry CHANGELOG entry of the same date — one definition, and the generic task can no longer hang on an unanswered question.
+
+## 2026-10-29 — E1: project-scope settings override refused before the session (Tier B, 1 of 10)
+
+**Agent task**: Observability Phase 1 Tier B, owner approved 2026-10-29 ("Go with number 1"); E1 = recut plan §6 (design of record P0 plan Task 19 minus its `result_capture` edits and its own exception class).
+**Files changed**:
+- `src/runner/session.py` — `SETTINGS_OVERRIDE_KEYS`, `SETTINGS_AUTH_KEYS`, `TRACKED_SETTINGS_ALLOWED_KEYS`, `TRACKED_SETTINGS_FILES`; frozen `SettingsOverride(key, file, auth_key, observed_only, project)`; pure `settings_override(cwd, *, canonical)` keyed on provenance (the canonical's working copy OR tracked HEAD blob); `settings_override_observe_only(...)`; `SettingsOverrideRefused(models_registry.ProviderRefused)` with `reason="settings_override:<key>"` + `key/file/auth_key`; `_observe_settings_override` (audit `settings_override_observed` + one `settings_override` ops notice per project per UTC day, SET NX after the insert); the call in `run_session` after the workspace block, before `_build_system_prompt`, Anthropic lane only, `canonical=canonical_cwd` unconditionally. New import `src.notify.outbox` (`build_ops_notice`, `enqueue_notice`; SYSTEM.md Depends-on updated — never the module alias, which `test_switch_is_not_read_by_the_runner` would read as the bot's switch name).
+- `src/runner/main.py` — the `provider_refused` audit row gains `key`, `file`, `auth_key` via `getattr` (additive; None on registry/lane refusals; no `observed_only` field — the observe arm has its own kind).
+- `src/audit_log.py` — docstring: `settings_override_observed`; `provider_refused` + the three fields.
+- `scripts/q2-settings-sandbox-probe.sh` — hand-run spec §14 Q2 probe on the pinned CLI (throwaway dir; `ANTHROPIC_BASE_URL` → 127.0.0.1:1); answers in runner GOTCHAS.
+- `tests/test_settings_auth_override.py` (new, 43: every refused key; server-root allowance per key; clone-of-canonical by working copy AND by HEAD blob; no canonical → no allowance; the project observe arm incl. a clone of the project; auth never observed; `test_project_settings_inventory`; **`test_settings_no_hooks`** (Phase-1 exit row 6); the exception subclass; source pins on the call site; `run_session` wiring — auth key refuses before the SDK, a hook added inside the clone refuses, the Codex lane is not checked, the observe arm DMs once a day and the day claim waits for the insert; `main._process_job` stamps `provider_refused` with the three fields and never escalates; the Q2 script invariants).
+
+**Why**: spec §6 — a settings file is a code channel (hooks/permissions/mcpServers run with owner privileges on every later session) and its auth keys outrank the Keychain login; atlas is GitHub-canonical, so such a file can arrive without anyone here acting. §8 exit row 6 ("both tracked settings files carry no `hooks`") is now a test in the deploy gate.
+
+**Side effects / recorded deviation (D-P1-12)**: a code-channel key in a hosted PROJECT canonical's OWN tracked settings file is **observed, not refused** — today exactly `projects/baseball-bingo/.claude/settings.json` → `hooks` (present in dev and prod, verified by the Step-0 sweep on both checkouts 2026-10-29); refusing it would dark every bingo schedule row on the deploy. Bounded by the inventory test; flips to refuse once the owner retires the hook through the bingo repo (plan §7 row 11). Auth keys and the server root get no such pass. **Deviation from the P0 text**: the provenance match accepts the canonical's tracked HEAD blob as well as its working copy — a `git clone` carries HEAD's bytes, and the dev checkout's `settings.local.json` is routinely dirty (Claude Code appends `permissions.allow` entries), so a working-copy-only rule would have refused every workspace job on a dirty checkout. **Containment still owner-gated**: D6's first half (MISSION §M += the two tracked files + `install-dev-hooks.sh`'s path list) is not merged, so the residual — a poisoning commit to either tracked file — is caught only by `test_settings_no_hooks` in the deploy gate until it is.
+
+**Independent review (2026-10-29, applied before commit)**: (1) a refused job left its clone unaudited under `volumes/workspaces` — now `cleanup_workspace(ws, keep=True)` + a `note` audit row ("workspace kept for forensics"), pinned by the wiring test's `h.cleaned` assertion; (2) the Telegram header for the `settings_override` notice said "refused" for an event whose job ran — now "settings override observed" (`src/notify/telegram.py`); (3) the plan annotation had landed on A1's checkbox line — moved to E1's; (4) **the observe arm is now sized in code**: `OBSERVED_PROJECT_SETTINGS = {("baseball-bingo", "settings.json"): {"hooks"}}` plus `OBSERVED_LOCAL_SETTINGS_KEYS = {"permissions"}` for any project's `settings.local.json` (what Claude Code itself writes) — "the canonical's own tracked copy" was no bound for a GitHub-canonical project other machines commit to (atlas: a `hooks` committed upstream becomes the canonical's tracked copy on the next rebase); such a key is now refused; the inventory test reads the table; (5) `enabledMcpjsonServers` joins `SETTINGS_OVERRIDE_KEYS` (the per-server form of the refused "all" key; recorded spec deviation); (6) the "malformed JSON is not an override" rule was probed rather than assumed — the pinned CLI ignores a settings file with a trailing comma or a line comment (the base URL was not applied), so the rule holds; the probe script gained that case (Q2c). Found while sizing the arm: an observed key could MASK a refused one in the same file (bingo's `hooks` beside a committed `mcpServers`) — `settings_override` now reports the first refused hit before any observed one. Minor: `main.py` handler comment, test rename, comment wording (`enabledPlugins` is never refused; the server-root allowance effectively gates `permissions`). Noted for the plan, not done here: `extraKnownMarketplaces` + `enabledPlugins` in a project file could install a plugin that carries hooks — a code channel E1 does not cover (§9 deferred list).
+
+**Gotchas discovered**: see GOTCHAS (Q2 answers incl. Q2c lenient JSON; the HEAD-blob provenance rule).
+
+## 2026-10-28 — `model_usage` persisted per job; a multi-model session is priced per model
+
+**Agent task**: handoff "smaller, unblocked" item — persist `model_usage` per job so the ledger can attribute a multi-model session per model (the residual computed-vs-SDK divergence, and the only honest way to settle which cache-write TTL the vendor bills).
+**Files changed**:
+- `src/runner/result_capture.py` — `usage_by_model(model_usage) -> {<model id>: {input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens[, sdk_cost_usd]}}` (the CLI's camelCase counters → the SDK's key names, plus the CLI's own per-model `costUSD` as `sdk_cost_usd` when numeric — the one figure a per-model reconcile can compare against; junk ignored, already-normalised input passes through) and `ResultCapture.usage_by_model`.
+- `src/runner/pricing.py` — `price_model_usage(by_model, *, aggregate) -> Decimal | None`: each model's counters at that model's own rate, the basis when the breakdown **covers** the aggregate (each of the four counters summed over the models ≥ the aggregate's); **None** (→ the caller prices the aggregate as before) when the breakdown is empty, names a model with no price family (never a partial sum), has a counter below the aggregate's, or the aggregate carries 5-m cache writes (the per-model counters have no TTL split). Keys other than the four counters are ignored. `JobCost.usd_per_model` / `per_model_priced`; `job_cost_from_events` reads `job_completed.model_usage` and, when it prices, uses it as `usd`; `served_mismatch` stays as computed — it is a report flag, and on a post-fix row it is the signal that `dominant_model` named another family than the request. `LedgerReport.per_model_priced` (+ `to_dict`), counted in `summarize`, a note in `render_sdk_reconcile`.
+- `src/runner/session.py` — Anthropic branch: `cost_usd_list = price_model_usage(capture.usage_by_model, aggregate=usage)` with the old `price_usage(model_served or model_used, usage)` as the fallback; `job_completed` gains `model_usage` (additive; None on the executor lane) and the result dict carries `model_usage` (→ `jobs.result` JSON — persisted per job with no migration).
+- `src/audit_log.py` — docstring: `job_completed.model_usage`.
+- `tests/test_result_capture.py::TestUsageByModel` (5), `::TestPerModelPricingWiring` (5, incl. the prod shape: a breakdown strictly larger than `usage`); `tests/test_pricing.py::TestPerModelPricing` (11).
+
+**Why**: `ResultMessage.usage` is one aggregate across every model a session touched while the ledger priced it as one model — the 39-row `model_served` bug was the extreme case, and after its fix the computed-vs-SDK divergence stayed family-dependent (−2.4 % … −23.4 %, §8). Persisting the breakdown is the only way to attribute new rows per model; the historical rows cannot be re-attributed (the breakdown was never persisted).
+
+**What the independent review found in the bundled CLI (2.1.139 wheel, minified source; stated, to be verified on the first rows)**: (1) `usage` is `totalUsage`, accumulated at ONE site — the main loop's own `message_stop` events — while `modelUsage` is process-global and accumulates EVERY API call: the main loop, Agent-tool subagents (whose messages never reach `totalUsage`), advisor calls and the CLI's utility calls. So in prod the breakdown is a superset of `usage` — equal only for a single-model session with no subagent and no utility call, strictly larger otherwise — and the first cut of this change gated the branch on equality and would never have fired; the rule is now "covers". (2) The CLI's own price table prices EVERY cache write at 1.25× input (`3.75 / 6.25 / 18.75` beside `3 / 5 / 15`), i.e. the 5-minute rate with no TTL notion — so `sdk_cost_usd` is systematically below a 1-h-rate computation by the cache-write share. (3) `usage` omits subagent tokens while `sdk_cost_usd` (Σ per-model `costUSD`) includes them, which pushes the SDK figure back UP by a family-dependent amount — a coherent explanation of the §8 "NOT a single rate" row (the loop primaries that dispatch subagents sit near −2…−3 %, the families that rarely do near the pure 5-m substitution ≈ −19…−23 %). The plan's withdrawn "5-minute rate" reading may have been right after all. `implied_cache_write_rate` solves on aggregate tokens against an SDK figure that includes subagent tokens — read its output with that in mind until per-model rows exist.
+
+**Side effects**: when the branch fires, `cost_usd_list` covers subagent/utility tokens the row's five token columns do not (the columns stay the aggregate, spec §2.3), so cost is no longer derivable from the row's tokens alone — the `per_model_priced` note in the reconcile keeps the mixed basis visible, and the figure now compares like with like against `sdk_cost_usd`. Whether it moves the computed-vs-SDK delta, and in which direction, is to be measured, not assumed: the utility-model share is a handful of tokens; the subagent share can be large. The §8 baseline is a mix of both bases until the window rolls. The audit JSONL grows by one small dict per Anthropic job. No column added; a `jobs.model_usage` column (Phase 3) can be backfilled from `jobs.result` / the JSONL. **Verify on the first 2026-10-28+ rows**: per counter, `Σ model_usage` vs `usage` (expect ≥, strictly > on sessions with subagents); `per_model_priced > 0` in the Monday reconcile; and per model, `Σ sdk_cost_usd` in the breakdown vs the row's `sdk_cost_usd`.
+
+**Gotchas discovered**: the per-model counters carry no `cache_creation.ephemeral_{1h,5m}` split — only the aggregate does — so a 5-m write can only be priced from the aggregate; `price_model_usage` refuses that case on purpose. And a consistency rule written from the SDK's field names rather than the CLI's accounting (equality) was inert in production and green in tests — the fixture had the one shape prod does not produce.
+
+## 2026-10-28 — B3 follow-up: the Codex CLI's version overflowed `jobs.cli_version` and failed a finished job
+
+**Agent task**: handoff item "give the Codex lane one real job so B3's executor path is exercised" — the first real `codex/*` job since the Phase-1 deploy (`0e09233d`, read-only smoke task on pickem, web-created).
+**What it found**: the executor did its work (38,799 / 206 / 16,000 tokens, empty diff, gate skipped) and the job then **failed** at the post-session column stamp: `StringDataRightTruncationError: value too long for type character varying(24)` — `codex --version` reports `codex-cli 0.162.0-alpha.17.2` (28 chars) and B3 stamped it verbatim; the row ended `failed` / `error` with no tokens, a `job_failed` DM went out (message 954). The B3 wiring test had faked `cli_version="0.162.0"`, a shape prod never produces.
+**Files changed**:
+- `src/runner/result_capture.py` — `CLI_VERSION_MAX = 24` (pinned to the ORM column by a test) and `cli_version_column(raw) -> str | None`: the first version-shaped token (the version without the tool name or a trailing annotation — the Anthropic lane already stamps a bare `2.1.139`; `unknown` stays `unknown`), clipped to the column, None when empty. `result_columns` routes `cli_version` through it.
+- `src/runner/session.py` — the executor lane stamps `cli_version_column(lane_cli_version)`; the one-site post-session column UPDATE is now guarded: an exception is logged, audited as `result_stamp_failed{error}` and the session goes on to write `job_completed` and return its result. A finished job is never failed by its own bookkeeping; `main._finish_job` re-stamps the token/cost subset from the result dict on the terminal transition, so a real DB outage still fails the job loudly one write later.
+- `src/audit_log.py` — docstring: `result_stamp_failed`.
+- `tests/test_result_capture.py::TestCliVersionColumn` (7, incl. a trailing `(abc123)` annotation not winning) and `::TestStampAfterTheWork` (3: the prod version string fits the column through the executor lane; a raising stamp still yields the result dict, `job_completed` and the audit row and never `job_failed`; the docstring lists the kind).
+
+**Why**: §8 exit row 1 claims every completed job carries tokens on both lanes; on the Codex lane it was false in production on the first try.
+
+**Side effects**: `jobs.cli_version` on the Codex lane is now `0.162.0-alpha.17.2`-shaped (no `codex-cli ` prefix); the `executor_started.cli_version` audit field keeps the raw probe line. The failed row `0e09233d` is left as the evidence (its tokens live only in its JSONL `turn_completed` event). A new audit kind `result_stamp_failed` (C14: new kinds only).
+
+**Gotchas discovered**: a wiring test that fakes a collaborator's output must use the shape prod actually produces — `codex --version` prints `<tool> <version>`, and the column was sized for the SDK's bare `2.1.139`.
+
+## 2026-10-28 — pricing: the request is the cost basis when `model_served` names another family (+ the 39-row recompute)
+
+**Agent task**: owner instruction "fix the 39 rows and re-run the baseline", following the `model_served` defect in the entry below.
+**Files changed**:
+- `src/runner/pricing.py` — `job_cost_from_events` prices `job_started.model` when `model_served` resolves to a DIFFERENT family, records it on `JobCost.served_mismatch`, counts it in `LedgerReport.served_mismatches` (also in `to_dict`) and prints a note in `render_sdk_reconcile`. A request with no resolvable family (a bare alias like `sonnet`, or an unknown id) still prices from the served id — that case is the reason the field is read at all, and the first version of this change regressed it.
+- `tests/test_pricing.py::TestServedModelMismatch` (5 cases: different family priced at the request, same-family dated snapshot still preferred, served-with-no-request, the bare-alias refinement, and the count rendered rather than silent).
+
+**Why**: the audit JSONL is append-only and still carries the wrong `model_served` on 39 jobs, so correcting the DB rows alone would have left every JSONL-derived report mispriced. Evidence for the request as the basis: those rows price to $122.66 at the request against the SDK's $121.89 (+0.6 %), versus $24.84 at the recorded served id.
+
+**Side effects**: a genuine substitution is now reported rather than silently priced at the served rate — intended, and the note persists for ~30 days while the affected JSONL stays in the window. **Prod data corrected in the same pass** (one-off, dry-run first): 39 rows got `model_served = NULL` and a recomputed `cost_usd_list`; `rows still matching the bug: 0`. Re-run baseline: 30 d ≈ $1,802.07 (789 jobs), 7 d ≈ $231.68 (137). The earlier "the CLI prices cache writes at the 5-minute rate" conclusion is **withdrawn** — post-fix the divergence is family-dependent (opus-5 −2.4 %, opus-4-8 −3.2 %, opus-4-7 −17.9 %, sonnet-4-6 −23.4 %) and the implied rates straddle both rates.
+
+**Gotchas discovered**: `ResultMessage.usage` is a per-session aggregate across every model the session touched, while the ledger prices it as one model — so any multi-model session is mispriced by construction. That is the standing limitation behind the residual divergence, and the `model_served` bug was its extreme case.
+
+## 2026-10-28 — `model_served` names the model that did the work (Opus sessions were stamped and priced as Haiku)
+
+**Agent task**: Observability Phase 1 §8 verification, first full week of stamped jobs.
+**Files changed**:
+- `src/runner/result_capture.py` — new `dominant_model(model_usage)`; `ResultCapture.model_served` uses it instead of `next(iter(model_usage))`. The bundled CLI makes its own small-model calls inside a session, so `model_usage` carries a second, tiny entry — `claude-haiku-4-5-20251001` on prod — and it is often FIRST in the dict. Degenerate shapes (no countable tokens) still yield the first key, so `{"<model>": {}}` captures are unchanged.
+- `tests/test_result_capture.py::TestDominantModel` (5 cases, incl. a genuinely haiku-dominated session still reporting haiku).
+
+**Why**: measured on prod 2026-10-22..28 — `model_served` was `claude-haiku-4-5-20251001` on **39 of 111** completed jobs whose `resolved_model` was opus-5 (28), sonnet-4-6 (9) or opus-4-8 (2). Because `pricing.price_usage` keys on `model_served`, those jobs' `cost_usd_list` was computed at Haiku rates: $24.84 against the SDK's $121.89 for the same 39 jobs (+390.7 %, implied cache-write rate $25.60 — the giveaway that the pairing was wrong, not the rate). `served_model_violation` did not fire and could not: it checks that the requested model is PRESENT among the keys, which it was.
+
+**Side effects**: new jobs stamp the right id and price correctly. **Rows already written stay wrong** — `jobs.model_served` and `jobs.cost_usd_list` on those 39 rows, and the §8 30-day baseline (≈ $2,101.63) that was computed from the same `job_completed.model_served` values in the append-only JSONL. Recompute is a one-off over `jobs` (see the handoff doc); it is a prod data write and is left for the owner.
+
+**Gotchas discovered**: `model_usage` is `dict[str, Any]` in the pinned SDK with no declared value shape; counters appear camelCase (`inputTokens`) from the CLI, and `costUSD`/`contextWindow` sit in the same dict.
+
+## 2026-10-22 — cost-reconcile: the computed-vs-SDK comparison is paired
+
+**Agent task**: Observability Phase 1 §8 measurement (first prod `scripts/cost-reconcile.py --db` run after B3 stamped the first job).
+**Files changed**:
+- `src/runner/pricing.py` — `ModelRow` tracks the paired subset (tokens + computed $ of the jobs that carry `sdk_cost_usd`); `implied_cache_write_rate` and `render_sdk_reconcile` compare over that subset and print `(n)`. The window total `usd` is unchanged. First prod run compared one stamped opus-4-7 job's SDK figure with the computed sum of all twelve in the window (−96.9 %, implied rate −6.63).
+- `tests/test_pricing.py::test_reconcile_pairs_only_jobs_with_an_sdk_figure`.
+
+**Why**: the exit criterion ("within 1 %, or record the rate the CLI uses") is only meaningful like for like. Measured on the first stamped job (bfc449b5, opus-4-7): computed $0.6470 at the 1-h cache-write rate, SDK $0.4847 — exactly the same arithmetic with cache writes at the 5-minute rate ($6.25/M); the CLI prices cache writes at the 5-m rate.
+
+**Side effects**: none at runtime (report only).
+
+## 2026-10-22 — Post-deploy follow-ups: tests can no longer reach the live DB/Redis; weekly-allowance window filter
+
+**Agent task**: Observability Phase 1 Tier A post-deploy verification (plan `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §8).
+**Files changed**:
+- `tests/conftest.py` — before any `src` import, `POSTGRES_DSN`/`REDIS_URL` are pointed at a closed port (`127.0.0.1:1`) unless `AI_SERVER_RUN_DB_TESTS=1`: `pydantic-settings` reads `.env` from the CWD even under `PIPENV_DONT_LOAD_ENV=1`, the dev `.env` points at PRODUCTION, and the prod deploy gate runs with prod's `.env` exported. On 2026-10-22 03:40 local the deploy gate's pytest run drove the dual-write `_notify_task` from `tests/test_origin.py::test_level_3_escalation_fails_the_task_through_set_task_status` with only `src.db.redis` patched (main.py binds its own `redis` at import), inserted a real `notifications` row ("Last error: boom") on prod, and the new bot delivered it (Telegram message 940). The row was deleted by hand; `tests/test_no_live_services.py` pins the guard.
+- `tests/test_origin.py` — that test now patches `runner_main.redis`, `enqueue_notice` and `_task_target`.
+- `src/runner/pricing.py` — `weekly_allowance` keeps only the readings of the CURRENT fixed window (those sharing the newest `resets_at`); the first prod `cost-reconcile` run scored 09-25 readings against the 10-16 window opening and printed "allowance ≈ $0/week". `tests/test_pricing.py::test_readings_from_an_earlier_window_are_excluded`.
+
+**Why**: a test with a side effect on production is a blocker-class defect regardless of how it passed; the guard makes the class impossible rather than fixing one instance.
+
+**Side effects**: any test that silently relied on the live Postgres/Redis now fails with a connection error on `127.0.0.1:1` — exactly one did. The opt-in migration test is exempt (it needs the real DSN prefix for its throwaway database).
+
+## 2026-10-22 — Whole-tier review applied: a recovered `api_retry` on a success is `ok`; anchored exception heuristics; no empty `choices` card
+
+**Agent task**: whole-tier review of `observability/phase-1` (plan "Whole-tier review applied 2026-10-22").
+**Files changed**:
+- `src/runner/result_capture.py` — `derive_terminal_reason` consults `API_RETRY_TO_TERMINAL` only when the capture FAILED (`is_error`, an `api_error_status`, or `banner_terminal`) or the mapped reason is an enforcement category: the CLI emits `system/api_retry` before the retry's outcome is known, and on a subscription account under 529 load the retry usually succeeds — a success-shaped capture was being stamped `api_error` / `rate_limited` / `auth_expired` beside `status=completed`, which `outbox.lane_label` (` · api_error` on the DoneCard), the web badge and the `job_completed` audit row all surface. The `api_retry` audit row still records the recovered retry. `terminal_reason_for_exception`: the category match is anchored to the session's own raise shape (`\bapi_retry ([a-z_]+)`) and the generic auth heuristic is word-bounded (`\b401\b|\b403\b|\bexpired\b|unauthori[sz]ed`) and applies only to `session error …` text — a git `rate_limit` / `Authentication failed … 403` from workspace creation is `error`, not `rate_limited` / `auth_expired`.
+- `src/runner/main.py` — `_notify_task`: a `choices` card with no options writes no outbox row (the legacy `_task_notifier` skips it: `elif notify_type == "choices" and choices`); the legacy publish is unchanged.
+- `src/runner/pricing.py` — `price_usage` docstring: `usage` is the session total, a multi-model session is priced at one family.
+- `tests/test_result_capture.py` (+6: `test_recovered_api_retry_on_a_success_is_ok` ×3, `test_enforcement_category_maps_even_on_a_success_shape` ×3, three anchored-heuristic exception cases), `tests/test_notify_runner_hooks.py::test_choices_without_options_writes_no_row`.
+- `.context/modules/runner/CONTEXT.md` — D1 bullet: `_resolve_schedule_slug` (payload first) vs `session._project_slug` (`project_id` first) precedence note; B1 bullet: multi-model pricing note. This file: B2 gotcha (3) and the B3 `CancelledError` sentence corrected.
+**Why**: review findings (one major — completed jobs flagged `api_error` on day one; three minors).
+**Side effects**: `jobs.terminal_reason` for a completed Anthropic session that saw a recovered transient retry is now `ok` (was the mapped category); nothing else changes — `session._run_in_process` still raises on an enforcement category before `derive_terminal_reason` runs.
+**Gotchas discovered**: the `ENFORCEMENT_CATEGORIES` exemption is what keeps `test_api_retry_category_outranks_the_http_status`-style guarantees independent of `is_error`; gate on `failed` alone and a success-shaped capture with `account_on_hold` would read `ok`.
+
+## 2026-10-21 — D1: scheduler `provisioning_gap` pre-check — a due row whose project `.env` lacks a declared key is deferred (+ one DM per project per day), never run
+
+**Agent task**: Observability Phase 1 re-cut plan D1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 21, adapted by symbol with the D1 Deltas and D-P1-7/D-P1-10).
+**Files changed**:
+- `src/runner/main.py` — `PROVISIONING_EXEMPT` (the three INV-3 names) + `PROVISIONING_EXEMPT_PREFIXES = ("ANTHROPIC_",)` (a LOCAL set, deliberately not `codex_cli.DENIED_ENV_*`); pure `env_keys_present`, `provisioning_gap`, `schedule_env_required` (manifest ∪ `job_payload.env_required`); `_resolve_schedule_slug` (payload `project_slug` first, then `project_id → Project.slug` in the open session), `_project_env_files` (the canonical `resolve_delivery_cwd(..., is_deploy=False)` + `delivery.env_files or [".env"]` — the same file `provision_env_files` copies from), `_schedule_provisioning_gap` (per-slug cache within a tick; any exception → the row runs), `_notify_schedule_deferral` (ops notice `schedule_deferred`/warn, day claim `schedule:gap_notified:<slug>:<date>` SET NX 36 h taken only after the insert returned an id); the pre-check in `_tick_schedules` before `Job(...)` — once `missing` is non-empty the deferral is unconditional (clock advanced, no Job, no RPUSH), audit + DM each best-effort.
+- `src/runner/schedule_adherence.py` — pure `latest_deferral(events)`, `deferral_covers_slot(deferred_at, last_slot)`, `is_deferred(cron, deferred_at, now)`; `adherence_report` gives a row whose newest deferral covers its latest slot status `deferred` (sorted with `paused`, row carries `missing`) + a `DEFERRED` finding instead of DARK; `_collect` reads each schedule's stream; the `OK …` line counts deferred rows.
+- `tests/test_provisioning_gap.py` (new: `TestEnvKeys`, `TestGap`, `TestSchedulerIntegration`, `TestStatusLine`), `tests/test_schedule_adherence.py` (`TestDeferred`).
+- `.context/modules/runner/CONTEXT.md` (D1 bullet, scheduler loop line, adherence bullet), `.context/SYSTEM.md` (`main.py` Depends-on += `registry.manifest`; `schedule-monitor.sh` row), `docs/TROUBLESHOOTING.md` (symptom "schedule deferred (provisioning_gap)"), `.context/INDEX.md` (row).
+**Why**: spec §8.3 / §9 — a schedule missing its provisioning ran a full session and reported `completed` having produced nothing (spec §8.2: 37/37 such runs "successful"). Deferring costs one audit line and one DM a day instead of a session; the swing rows (D-P1-7) are the first governed rows it protects.
+**Side effects**: after deploy + `bash scripts/seed-schedules.sh`, the four swing supervise/trade rows defer at their next slot (the atlas canonical `.env` lacks `TRADIER_SANDBOX_TOKEN`) with one DM naming `~/Documents/repos/atlas/.env`; `/status` lists them; Sunday shows `DEFERRED`. Every other row is unaffected: today's manifests declare nothing their `.env` lacks except atlas's `ANTHROPIC_API_KEY`, which is exempt. New Redis key prefix `schedule:gap_notified:` (36 h TTL). New audit kind `schedule_deferred` in a NEW stream location `volumes/audit_log/schedules/<schedule_id>.jsonl`.
+**Gotchas discovered**: (1) the exemption is load-bearing, not decoration — `projects/atlas/manifest.yml` declares `env_required: [DATABASE_URL, ANTHROPIC_API_KEY]` and the atlas `.env` lacks the second BY DESIGN; without `PROVISIONING_EXEMPT` every atlas row would defer on the first tick. (2) The `.env` to check is NOT `projects/<slug>/.env` for dev-repo projects: `provision_env_files` copies from the canonical dev clone, and a complete runtime-clone `.env` would mask a gap in the one the session actually gets (`test_checks_the_canonical_dev_repo_not_the_runtime_clone`). (3) `Job.id` is a column default applied at flush — the fake session in the tests assigns it in `add` so `redis.rpush(str(job.id))` is meaningful. (4) `Schedule.job_payload` is JSON that older rows may hold as a non-dict; the helpers treat anything but a dict as empty.
+
+## 2026-10-21 — B4 (docs + consumer): `scripts/cost-reconcile.py` is `pricing`'s ledger consumer
+
+**Agent task**: Observability Phase 1 re-cut plan B4 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6). No `src/runner/` code change — the script and its timer are recorded in the hosting CHANGELOG.
+**Files changed**: `.context/modules/runner/CONTEXT.md` — the B1 pricing bullet's "ledger side for B4" now names its consumer (`scripts/cost-reconcile.py`: both windows, the per-kind step, `render_sdk_reconcile`, `render_weekly_allowance`, the `--db` leg through `render_db_delta`, the seed through `write_lane_seed`/`lane_seed`) and the DB leg's grouping key (`COALESCE(model_served, resolved_model)` — the same precedence `job_cost_from_events` uses).
+**Why**: the Phase-1 exit criterion (computed vs SDK within 1 %, or the divergence recorded with the implied cache-write rate) is measured by that script's first prod run; the module's docs should say who calls what.
+**Side effects**: none at runtime.
+**Gotchas discovered**: none.
+
+## 2026-10-21 — B3: capture + pricing wired into `session.py` / `main.py` (both lanes); typed `terminal_reason`; silent-empty-success rejection
+
+**Agent task**: Observability Phase 1 re-cut plan B3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 3 "3a", adapted by symbol with the seven B3 Deltas).
+**Files changed**:
+- `src/runner/session.py` — `SystemMessage` joins the SDK import; `from src.runner import pricing` + the `result_capture` names. New `cli_version()` (`lru_cache`; reads `claude_agent_sdk._cli_version.__cli_version__` = `2.1.139` on the pinned wheel, `unknown` if absent, ≤ 24 chars; no subprocess — pinned). `_run_in_process` returns `(text, usage, ResultCapture)`: the last `system/api_retry` `error` category is collected at the HEAD of the message loop (before the `RateLimitEvent` branch, which can `continue`/raise) and audited as `api_retry{error, attempt}` (category + attempt only, never the message text); the `ResultMessage` branch is `capture_result_message(message, api_retry_error=)`; the errored-empty-session `RuntimeError` carries the category (`session error (<subtype>; api_retry <cat>): …`); after the `is_api_terminal_session` banner belt (kept) it raises on an enforcement category (`vendor enforcement — no retry`) and, when `served_model_violation(...)` returns a reason, audits `job_result_rejected{reason="unrecognized_model", detail, requested_model}` and raises `unrecognized_model: silent empty success — …`. The three `QuotaExhausted` raises keep A3's `source=`. `_run_executor` returns `(text, usage, model_served, cli_version)` — `ExecResult.cli_version` is no longer dropped. `run_session`: the Anthropic branch sets `model_served = capture.model_served`, `terminal_reason = derive_terminal_reason(capture)` (replacing the literal `"ok"`), `cost_usd_list = pricing.price_usage(capture.model_served or model_used, usage)` and `columns = result_columns(..., cli_version=cli_version())`; the executor branch keeps `"ok"`/`ExecutorFailed`, `columns = usage_columns(usage) + cli_version (the Codex CLI's) + cost_usd_list` (`price_usage` → None for a non-Anthropic id; `num_turns`/`duration_api_ms`/`sdk_cost_usd` stay NULL — no source on that lane). Both lanes stamp the row at ONE `sql_update` site after the lane branch, before `job_completed`. `job_completed` gains `num_turns, duration_api_ms, cost_usd_list, sdk_cost_usd, stop_reason` (keeping `provider`; the C14 fields byte-identical); the result dict gains `num_turns`, `cost_usd_list` (float/None — it is `jobs.result`).
+- `src/runner/main.py` — imports `terminal_reason_for_exception`, `usage_columns`; `_terminal_values` / `_finish_job` accept `usage=` (→ the five token columns through `usage_columns`), `num_turns=`, `cost_usd_list=` (→ `Decimal(str(x))` for `numeric(10,4)`), written only when known; the completed path passes `result.get("usage"/"num_turns"/"cost_usd_list")`. The generic `except Exception` handler stamps `reason = terminal_reason_for_exception(exc)` on the `job_failed` audit line and on BOTH lanes' `_finish_job` (A2's interim `"api_error"` is gone).
+- `src/gateway/web.py` — see the gateway CHANGELOG (`JobOut`/`_serialize` + the Cost · Turns column).
+- `src/audit_log.py` — docstring: `job_completed`'s five new fields; new kinds `api_retry`, `job_result_rejected`.
+- `tests/test_result_capture.py` (append: `TestSessionWiring` 14, `TestMainWiring` 3), `tests/test_web.py` (`test_jobout_carries_token_and_cost_columns`), `tests/test_job_visibility.py` (`test_job_completed_carries_cost_and_turns`); `tests/test_provider_dispatch.py` (the `_run_in_process` fake → 3-tuple with a capture whose `model_usage` names `claude-sonnet-4-6`; the Anthropic `job_completed`/result asserts read the captured `model_served`; `_FakeDB.params` is the resolved_* stamp (`statements[0]`), `column_params` the post-session stamp; the T4 lane pin `RuntimeError("clone exploded") → "api_error"` → `"error"`), `tests/test_pre_push_gate.py` (fake → 3-tuple), `tests/test_origin.py` (A2's cancelled-guard pin `RuntimeError("boom") → "api_error"` → `"error"`).
+- `.context/modules/runner/CONTEXT.md` (B3 bullet; `run_session` result dict; `_finish_job` kwargs; B1/B2 "no caller until B3" closed), `.context/SYSTEM.md` (Depends-on: `session.py` += `runner.pricing`, `main.py` += `runner.result_capture`; the `(B3)` forward markers dropped).
+
+**Why**: spec §9's Phase-1 exit criterion — every completed job has tokens / cost / turns / API time / CLI version in Postgres, on both lanes, with `cost_usd_list` computed by the ONE definition (`pricing.price_usage`) and the SDK's figure kept beside it so B4's reconcile can compare them; the typed `terminal_reason` (B2) replaces the literal `"ok"` and A2's interim `"api_error"`; the silent-empty-success shape (an unknown model id answered with a text-less, usage-less "success") fails as `unrecognized_model` so escalation engages instead of a completed no-op.
+
+**Decisions recorded here (plan §3)**: **D-P1-2** — an SDK `error_max_turns` (or `stop_reason=max_turns`) with partial text completes: `status=completed`, `terminal_reason=max_turns`, no escalation (done-ness is a column; the text produced is real work; the owner may choose fail + escalate instead). **D-P1-5** — `DeployRefused`, `DeployNeedsApproval`, `SkillResolutionError` and preflight failures stamp `terminal_reason="error"`: a **deviation from spec §2.4**, which calls `DeployRefused` a `provider_refused{reason}` — the tree reserves `provider_refused` for `models_registry.ProviderRefused` (pinned by `tests/test_models_registry.py` and `tests/test_provider_dispatch.py`). Enforcement categories (`account_on_hold`, `oauth_revoked`, `billing_error`) only map to `terminal_reason` in Phase 1; the lane hold, the `provider_enforcement` notice and the ApprovalCard are Phase 3 — A5's failed-job DM is the Phase-1 signal (the kind name is already reserved in `NOTICE_KINDS`). `audit_index.categorize_error` keeps its own vocabulary; consumers read `terminal_reason` first, `error_category` as the fallback.
+
+**Side effects**: an Anthropic session whose `ResultMessage` is fully empty (no text, zero usage, zero API time) or whose `model_usage` does not contain the requested family now FAILS with `unrecognized_model` and engages escalation — previously recorded `completed`; all-zero usage WITH text remains a success. A session that saw a `system/api_retry` with an enforcement category fails with that category even if a later retry produced text (P0 design: never escalate onto a suspended account). A bare infrastructure `RuntimeError` in the generic handler is now `terminal_reason="error"` on both lanes (was the blanket `api_error`); `QuotaExhausted` `rate_limited`; the `CancelledError → interrupted` arm of `terminal_reason_for_exception` has NO caller today (`_process_job`'s generic branch catches `Exception`; cancellation is the `/cancel` path's `cancelled` stamp) — mapped, not stamped. `run_session` issues one extra `UPDATE jobs` per job (the column stamp); `_finish_job(completed)` re-writes the token/cost subset with the same values. Every existing monkeypatch of `_run_in_process`/`_finish_job` keeps working (the fakes were widened, the kwargs are optional).
+
+**Gotchas discovered**: (1) `run_session`'s second UPDATE means a test's "last captured statement" is the column stamp, not the `resolved_*` stamp — `_FakeDB.params` in `tests/test_provider_dispatch.py` now reads `statements[0]`. (2) Driving the real `_run_in_process` with a fake SDK client reaches `_handle_message → _publish_stream` on `session`'s own `redis` binding; without `monkeypatch.setattr(session, "redis", fake_redis)` the real client's pool binds to that test's event loop and a LATER redis-using test fails with "attached to a different loop" — order-dependent and invisible in a single-file run. (3) `ast.unparse` renders string constants with single quotes; source pins must accept either quote. (4) The review-blocked Codex path raises inside the lane branch (the gate runs before the one-site stamp), so a `review_blocked` job keeps `cli_version`/tokens NULL — a follow-up if the ledger wants them. (5) `jobs.result` is JSON: the result dict carries `cost_usd_list` as a float; the Decimal lives only in the column stamp and `_terminal_values`.
+
+## 2026-10-21 — B2: `result_capture.py` — typed `ResultMessage` capture + the one terminal-reason vocabulary (pure)
+
+**Agent task**: Observability Phase 1 re-cut plan B2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 2 with the five B2 Deltas applied).
+**Files changed**:
+- `src/runner/result_capture.py` (new, pure; no SDK import; imports only `pricing.cache_write_buckets`; nothing in `src/` calls it until B3 except the `usage_is_empty` re-export) — `TERMINAL_REASONS` (15: spec §2.4's 13 + `review_blocked`, `publish_failed`, D-P1-1), `API_RETRY_TO_TERMINAL` (the single `system/api_retry` category → reason table, six vendor categories; `oauth_org_not_allowed` → `oauth_revoked`), `ENFORCEMENT_CATEGORIES`, `ResultCapture` (frozen dataclass: `subtype, is_error, num_turns, duration_ms, duration_api_ms, total_cost_usd, stop_reason, api_error_status, usage, model_usage, permission_denials, result_text, errors, api_retry_error`; properties `input_tokens, output_tokens, cache_read_tokens, cache_write_1h_tokens, cache_write_5m_tokens, usage_empty, model_served`), `capture_result_message(message, *, api_retry_error=None)`, `derive_terminal_reason(capture, *, banner_terminal=False)` (Anthropic lane only), `same_model`, `requested_matches_served`, `served_model_violation(capture, requested_model, *, final_text)`, **`usage_columns(usage)`** (capture-free, both lanes), `result_columns(capture, *, terminal_reason, cost_usd_list, cli_version)` (token keys built through `usage_columns`; `cost_usd_list` has no default), `terminal_reason_for_exception(exc)`, `usage_is_empty` (relocated from `session.py`).
+- `src/runner/session.py` — `usage_is_empty` + `_USAGE_TOKEN_KEYS` removed; `from src.runner.result_capture import usage_is_empty` re-exports it (`is_api_terminal_session` and `tests/test_api_terminal.py` are unchanged consumers). No other `session.py` change — the capture is wired in B3.
+- `src/models.py` — `terminal_reason` comment: `completed` → `ok` (the value the tree stamps), pointing at `result_capture.TERMINAL_REASONS`.
+- `tests/test_result_capture.py` (new, 70: `TestCapture` 8, `TestTerminalReason` 23, `test_codex_terminal_reasons_are_a_subset` 1, `TestServedModel` 9, `TestColumnsAndHelpers` 20, `TestUsageColumns` 5, `TestUsageIsEmpty` 4).
+- `.context/modules/runner/CONTEXT.md` (Paths line + public-interface bullet), `.context/SYSTEM.md` (module-graph row after `session.py`; `session.py` Depends-on += `runner.result_capture`; the pricing row's `(B2)` marker dropped).
+
+**Why**: `session._run_in_process` reads only `usage/is_error/subtype/result/errors` off the `ResultMessage`; `num_turns`, `duration_api_ms`, `total_cost_usd`, `model_usage`, `stop_reason`, `api_error_status` are dropped and terminal-failure detection is a banner regex. This module is the typed replacement (the regex stays as a belt through `banner_terminal`). The B2 Deltas honoured: (1) the 15-value tuple; (2) no `parse_cli_version` — B3's `session.cli_version()` reads `claude_agent_sdk._cli_version.__cli_version__`, no subprocess; (3) `result_columns` is documented as the 008 column payload; (4) `derive_terminal_reason` is the Anthropic-lane source only — the Codex lane keeps `ExecResult.terminal_reason`, and the subset relation `codex_cli.TERMINAL_REASONS <= TERMINAL_REASONS` is a test, not a module-level assert (`codex_cli.py` untouched); (5) `usage_columns` is capture-free so B3 stamps the token columns on both lanes through one function.
+
+**Side effects**: none at runtime — no caller yet, no I/O, no audit kinds or fields, no settings. `session.usage_is_empty` is the same function object as before (identity pinned).
+
+**Gotchas discovered**: (1) All-zero usage with real text is a NORMAL short-chat-job shape; the served-model check only rejects the fully-empty signature when `model_usage` is absent. (2) The web/dispatch launch paths pass bare aliases (`sonnet`) through unvalidated, so the served-model check accepts a hyphen-bounded alias inside the served id — but a `claude-` prefixed request only ever goes through `same_model`'s prefix rule. (3) An account hold and an expired login are both HTTP 403: the three enforcement reasons come from the `system/api_retry` `error` category, which outranks the status unconditionally; a transient category (`overloaded`, `rate_limit`, `authentication_failed`) outranks the status only on a FAILED capture — a recovered retry on a success is `ok` (whole-tier review 2026-10-22). (4) `result_columns(cost_usd_list=…)` deliberately has no default — a default would let a call site silently re-introduce the SDK figure the B4 reconcile is supposed to check against. (5) The `_USAGE_TOKEN_KEYS` name moved with `usage_is_empty`; nothing else referenced it.
+
+## 2026-10-21 — B1: `pricing.py` — the single definition of `cost_usd_list` (pure core; two-window ledger, computed-vs-SDK reconcile, weekly-allowance calibration, lane seed)
+
+**Agent task**: Observability Phase 1 re-cut plan B1 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 16 — the pure module only; the CLI, the `-run.sh` wrapper and the `com.assistant.cost-reconcile` timer are B4).
+**Files changed**:
+- `src/runner/pricing.py` (new, pure; nothing in `src/` imports it yet) — `Price`, `LIST_PRICES` (`claude-anthropic.md §4`, `PRICES_AS_OF = "2026-09-24"`, 12 families), `family_for` (longest prefix with a `-`/end boundary, case-insensitive; `None` for `sonnet`, unknown ids and provider-qualified ids), `cache_write_buckets` (nested `cache_creation.ephemeral_{1h,5m}` authoritative; the flat `cache_creation_input_tokens` → the 1-h arm — B2's `usage_columns` reuses it), **`price_usage(model, usage) -> Decimal | None`** — each cache-write bucket at its own rate, `Decimal(0)` for a known family with no tokens, `None` for anything unpriceable —, `usd_2dp` (half-UP cents), `JobCost` (+ `requested_model`, `provider`, `unpriced_label`), `read_events`, `_ts` (epoch int/float/numeric-string **and** ISO, `Z` accepted, naive read as UTC), `job_cost_from_events` (model = `job_completed.model_served` else `job_started.model`; provider from `job_completed.provider` else `job_started.provider`; a non-Anthropic provider is never priced as a Claude family), `ModelRow`, `KindRow`, `LedgerReport` (+ `to_dict`), `summarize`, `summarize_windows(jobs, *, until, windows=(30, 7))`, `lane_for` (the Phase-1 approximation, P0's 4-channel owner set), `lane_seed`, `write_lane_seed`, `implied_cache_write_rate`, `render_sdk_reconcile`, `QuotaReading`, `quota_readings` (`seven_day` only), `WeeklyCalibration` (+ `to_dict`), `weekly_allowance(jobs, readings, *, working=200)`, `render_weekly_allowance`, `render_table`, `render_db_delta`.
+- `tests/test_pricing.py` (new, 27: `TestPrices` 9, `TestLanes` 1, `TestTs` 1, `TestLedger` 8, `TestSdkReconcile` 4, `TestWeeklyAllowance` 4).
+- `.context/modules/runner/CONTEXT.md` (Paths line + public-interface bullet), `.context/SYSTEM.md` (module-graph row after `learning.py`; Depended-on-by names B2/B3/B4 as the consumers to come).
+
+**Why**: `cost_usd_list` has exactly one definition and it is this module (spec §2.8, P0 round-3 #10 — populating the column from the SDK's `total_cost_usd` made the exit criterion compare that figure to itself). B3 stamps `jobs.cost_usd_list` by calling `price_usage` on the Anthropic lane and stores the SDK's figure separately as `sdk_cost_usd`; B4's script is what compares them. Re-cut deltas honoured: no `result_capture` prerequisite (the module is pure and B2 imports **from** it); `_ts` reads prod's epoch `resets_at`; a Codex job lands under `unpriced` as `codex/<id>` with its tokens counted (Review Focus 7) — there is no Codex price table in Phase 1 (`models.yml` has no price field); `lane_for` is labelled "approximated" (`jobs.lane` is NULL until Phase 3).
+
+**Side effects**: none at runtime — no caller yet, no I/O beyond `read_events`/`write_lane_seed`, no audit kinds or fields, no settings. The three P0 test assertions of the form `round(Decimal("3.485"), 2) == Decimal("3.49")` were arithmetically wrong (Decimal rounds half-EVEN → `3.48`); the tests now assert the exact `Decimal("3.485")` and the spec's `$3.49` through `usd_2dp`, and every `$` cell the renderers print goes through `usd_2dp` so the tables show the spec's figures.
+
+**Gotchas discovered**: (1) `round()` / `:.2f` on a `Decimal` is banker's rounding — a `$x.xx5` list price prints one cent under the spec's figure unless quantized `ROUND_HALF_UP`. (2) Prod's `rate_limit_status.resets_at` is an epoch integer while every other stamp is ISO; a `_ts` that only knew ISO would silently drop every weekly reading and report "no readings" as if the series did not exist. (3) A non-Anthropic provider must gate `family_for`, not just the unpriced label: a Codex job whose served id happened to start with `claude-` would otherwise be priced as a Claude family. (4) `WeeklyCalibration` keeps the P0 dataclass signature (`weekly_allowance(jobs, readings)`) rather than the B1 Interfaces line's `(readings) -> dict` paraphrase, because the named P0 tests call it with two positionals; `to_dict()` gives the dict form.
+
+## 2026-10-21 — A5: the runner writes the notifications outbox (job terminals + every task lifecycle card), dual-write
+
+**Agent task**: Observability Phase 1 re-cut plan A5 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 6 minus its `session.py` half (→ E1) and minus its switch gating (D-P1-10)).
+**Files changed**:
+- `src/runner/main.py` — imports `build_job_notice`, `build_task_notice`, `enqueue_notice` from `src.notify.outbox` (+ `typing.Any`). New pure `effective_origin_channel(own, parent) -> str | None` (spec §4.2: a child whose own channel is `None`/`system` inherits the parent's; an own human channel always wins) and `job_notice_kwargs(job) -> dict` (the `build_job_notice` kwargs off a Job row: `status=None` for the caller, `summary` from a dict `result`, `duration_seconds` from `started_at`/`completed_at`, the 007 lane columns `resolved_provider`/`resolved_model`/`model_served` and `num_turns` — 008, NULL until B3). New `_enqueue_job_notice(job_id, status)` loads the ROW (never the `jobs:done` payload), loads the parent once when `parent_job_id` is set and, when the channel is inherited, takes the parent's `origin_ref`/`origin_thread` with it (so the card lands in the parent's chat, not at a `target` of `dispatch-mcp`); `build_job_notice` → `enqueue_notice` when eligible. New `_task_target(task_id) -> (target, thread)` (`Task.origin_ref`/`origin_thread` first, `str(chat_id)`/`str(thread_message_id)` second, `(None, None)` = owner chat). `_notify_task` is the dual-write chokepoint: the legacy `tasks:notify` publish is unconditional and byte-identical, THEN the outbox row is written unconditionally inside a non-fatal try/except (the DB read included). The five direct `redis.publish("tasks:notify", …)` sites — escalation L3 (its local `from src.db import redis as _redis` deleted), choices, question, sentinel approval, auto-continue progress — route through it; `grep -c '"tasks:notify"' src/runner/main.py` → 1. `_finish_job` enqueues the `job_completed`/`job_failed` notice AFTER `publish_done` and only for those two statuses, non-fatal; an INV-9-suppressed finish returns before either.
+- `tests/test_notify_runner_hooks.py` (new, 40: `TestEligibilityInheritance` 2, `TestJobNoticeKwargs` 6 incl. `test_passes_provider_and_model` + `test_kwargs_fit_build_job_notice`, `TestEnqueueJobNotice` 8 incl. `test_completed_web_job_enqueues_notice` + the parent-inheritance trio, `TestTaskTarget` 4, `TestNotifyTask` 8 incl. `test_outbox_row_written_in_both_modes`, `test_outbox_insert_failure_never_raises`, `test_legacy_channel_published_byte_identically`, `TestFinishJobNotice` 6 incl. `test_finish_job_failed_enqueues_notice_without_task`, `test_finish_job_cancelled_writes_no_notice`, `test_suppressed_finish_writes_no_row`, plus 6 source pins incl. `test_only_one_tasks_notify_literal_remains` and `test_switch_is_not_read_by_the_runner`).
+- `.context/SYSTEM.md` — `src/runner/main.py` Depends-on += `notify.outbox`; the outbox row's Depended-on-by drops the `(A5)` marker. `.context/modules/runner/CONTEXT.md` (public interface bullet), `skills/GOTCHAS.md` (one entry).
+
+**Why**: spec §9 P0 exit "a scheduled failure DMs within 60 s" — every failure DM path required `task_id`, and a web launch never entered `_job_to_chat` (Review Focus 2 and 3). D-P1-10: the runner dual-writes so the kill switch is renderer-side (bot-only restart); `settings.notify_outbox` is read nowhere under `src/runner/` (source-scanned).
+
+**Side effects**: nothing changes on the wire — the runner publishes exactly what it did before in both switch positions. Every eligible terminal and every task card now ALSO inserts a `notifications` row + `notify:outbox` nudge (and a `notice_queued` audit line for job-subject rows, A4's kind). Until A6 flips the switch the bot's listener delivers only ops kinds, so job/task rows accumulate as `pending` (A6 marks them `skipped` in legacy mode). One extra `jobs` read per terminal, two for a child. `_finish_job`'s signature is unchanged; every existing monkeypatch of `_notify_task`/`_finish_job` stays green.
+
+**Gotchas discovered**: (1) inheriting only the parent's CHANNEL is not enough — a `telegram` channel makes `build_job_notice` use `origin_ref` as the chat id, and a child's own ref is its `created_by` (`dispatch-mcp`); the ref/thread must travel with the channel. (2) `test_switch_is_not_read_by_the_runner` is a token scan, so even a docstring under `src/runner/` must not spell the setting's name.
+
+## 2026-10-21 — A3: the quota reset time is labelled by its source (`vendor` vs `estimated`)
+
+**Agent task**: Observability Phase 1 re-cut plan A3 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 7 Step 3b).
+**Files changed**:
+- `src/runner/quota.py` — `QuotaExhausted(reset_at, reason="", source="estimated")` stores `.source`; `pause_queue(reset_at, reason, *, source="estimated")` writes `quota:last_source` (`KEY_QUOTA_LAST_SOURCE`) beside the global pair (a value outside `SOURCES = ("vendor", "estimated")` is stored as `estimated` — the label may never over-claim); new `last_source() -> str` (`"estimated"` when unset or unknown); `clear()` deletes the three keys; `_read_pause` gains keyword-only `extra_keys=()` which the global `is_paused()` passes as `(quota:last_source,)` so BOTH the auto-resume and the corrupt-value branch forget the label with the pair. The per-provider lanes (`pause_provider` for a non-Anthropic name) never write the label; `pause_provider("anthropic", …)` delegates to `pause_queue` and so records `estimated`.
+- `src/runner/session.py` — the three `raise quota.QuotaExhausted(...)` nodes in `_run_in_process` carry `source=`: the `RateLimitEvent` branch `"vendor" if reset_at is not None else "estimated"` (a rejected status without `resets_at` is the default window, not a vendor figure); the two text-heuristic raises (`message.error`, `ResultMessage.is_error`) `"estimated"`. Pinned by the AST test `test_three_raise_sites_are_labelled` (exactly three raises, exactly one may say vendor) — **B3 rewrites this loop and must keep the three nodes and their kwargs**.
+- `src/runner/main.py` — the `QuotaExhausted` handler in `_process_job` passes `source=getattr(exc, "source", "estimated")` to `pause_queue` (the `getattr` keeps a test double without `.source` on the estimated path).
+- `tests/test_quota.py` (+18: `TestPauseSource` 10, `TestSessionPassesVendorOnlyForRateLimitEvent` 2, `TestMainPassesTheSourceToThePause` 2 through the existing `main_harness`, `TestQuotaNoticeLabelsTheSource` 4).
+- `.context/modules/runner/CONTEXT.md` (public interface line for `quota`).
+
+**Why**: spec §2.8 Claude row / review #4 — the SDK emits `resets_at` only on status transitions and nothing else in Phase 1 is a vendor gauge, so a window figure may be called vendor-sourced only when a vendor event carried it. The runner is the only writer of the label; the bot reads it (gateway CHANGELOG, same date).
+
+**Side effects**: `pause_queue`'s positional signature is unchanged (the new kwarg is keyword-only with the legacy default), so every caller/monkeypatch that passes two positionals keeps working. One more Redis key under `quota:` (string, no TTL — it is deleted with the pair). The runner log line `quota queue pause set` gains `source=`. No audit kind or field changes.
+
+**Gotchas discovered**: `_read_pause` is shared by the global and per-provider scopes, so "the auto-resume branch deletes it" had to be expressed as an opt-in key list rather than an unconditional delete — otherwise a Codex lane expiring would delete the Anthropic label out from under a live global pause.
+
+## 2026-10-21 — A2: `queue_wait_ms` at the running flip; `tasks.awaiting_since` has one writer; typed `terminal_reason` on every Anthropic-lane failure; a cancelled job is never escalated; scheduler rows carry origin
+
+**Agent task**: Observability Phase 1 re-cut plan A2 (`docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` §6; design of record P0 plan Task 4 + the 3b half of Task 3).
+**Files changed**:
+- `src/runner/main.py` — (1) pure `queue_wait_ms(created_at, started_at) -> int | None` (never negative; `None` when a stamp is missing), stamped on `jobs.queue_wait_ms` at the one `queued → running` flip in `_process_job` (reads `created_at` via `getattr(..., None)` because the `_process_job` test harnesses' row stand-ins have no `created_at`; the ORM row always does). (2) `_AWAITING_STATUSES = ("awaiting_user", "pending_approval")` + pure `awaiting_since_for(status, now)`; `_set_task_status` stamps/clears `tasks.awaiting_since` with the same clock read as `updated_at` and is now the ONLY runner writer of `tasks.status` outside the sentinel block: the two inline `awaiting_user` UPDATEs in `_update_task_after_job` (choices / question) and — review round 1 — the level-3 terminal `failed` write in `_maybe_escalate` (previously inline, without `updated_at` / `awaiting_since`; it already ran in its own `session_scope`) are routed through it; the auto-continue sentinel block keeps its shared session (it also inserts a TaskTurn) and stamps `awaiting_since` itself. Pinned by `test_no_inline_awaiting_user_update_remains_in_main`, `test_no_inline_task_failed_update_remains_in_main` and the behavioural `test_level_3_escalation_fails_the_task_through_set_task_status`. (3) `terminal_reason=` on the six Anthropic-lane `_finish_job(JobStatus.failed, …)` sites — preflight / `SkillResolutionError` / `DeployRefused` / `DeployNeedsApproval` → `"error"`, Anthropic timeout → `"timeout"`, Anthropic generic → `"api_error"` (B3 replaces the last with `terminal_reason_for_exception`) — and the additive `terminal_reason` key on EVERY `job_failed` audit line in `_process_job` (the five typed non-Anthropic sites included: `provider_refused`, `review_blocked`, `<executor terminal_reason>`). (4) **Cancelled guard**: both the `asyncio.TimeoutError` and the generic `Exception` handlers return right after `_refetch_job` when the fresh row is `cancelled` — before the lane decision, the terminal stamp and `_maybe_escalate` (which has no guard of its own and would enqueue a retry the owner just killed). The real `_finish_job`'s INV-9 WHERE would have suppressed the stamp anyway; the audit `job_failed` line (typed) is still written. (5) `_tick_schedules` stamps `origin_channel="scheduler", origin_ref=sched.name[:64]` on the Job it builds.
+- `src/audit_log.py` — docstring: `job_failed` gains `terminal_reason` (additive, C14).
+- `tests/test_origin.py` (A2 part), `tests/test_provider_dispatch.py::test_main_anthropic_timeout_still_escalates` — its `"terminal_reason" not in h.finished[0]` was the pre-A2 contract; now `h.finished[0]["terminal_reason"] == "timeout"` while `provider` stays unstamped (plan delta 3).
+- `.context/modules/runner/CONTEXT.md` (public interface), `.context/modules/runner/skills/GOTCHAS.md` (plan-DAG children carry no `origin_thread`).
+
+**Why**: spec §2.3 — queue wait and the age of a stuck ask are the two numbers the owner cannot get today; a NULL `terminal_reason` on a failed Anthropic job made B4's cost reconcile and A4's failed card guess; escalating a cancelled job re-ran work the owner had killed.
+
+**Side effects**: `terminal_reason` is now non-NULL on every job the Anthropic lane fails (it already was on the non-Anthropic lanes and on completed jobs). A cancelled job that dies in the session no longer produces an escalation child. The `job_failed` audit shape keeps every existing field.
+
+**Gotchas discovered**: the guard sits BEFORE `_finish_job` in both handlers because T4 already moved the refetch ahead of the stamp (the lane decision reads `resolved_provider`); the P0 plan drew it after the stamp. Same outcome, one round-trip fewer — the behavioural test pins `finished == []` for a cancelled row.
+
+## 2026-10-21 — Final review of the cross-vendor writer slice: two gate findings applied (textconv, case-insensitive deny list)
+
+**Agent task**: apply the final code-review findings on `multi-model/cross-vendor-writer` (code-review (final), 2 majors → lgtm). No protected path touched; nothing pushed.
+**Files changed**:
+- `src/runner/review.py` — (1) **`--no-ext-diff` did not close the diff-driver hole**: `diff.<drv>.textconv` in the clone's `.git/config` plus `*.py diff=<drv>` in a `.gitattributes` still RAN the converter under `GATE_GIT_OPTS` + `--text --no-ext-diff` (verified on git 2.53.0: marker file written, and with an empty converter the reviewer-visible diff carried NO content lines for the file — on both `diff <base>` and `diff --no-index`), so `diff_for_gate`'s "nothing in `.git/config` may shape what the reviewer sees" was false. `GATE_DIFF_FLAGS` gains `--no-textconv` (git honours it on both diff forms); docstring and flag comment name the converter. Precondition is a writable `.git/` (the canary's `git_dir_protected` probe says Seatbelt denies it) — defense in depth, same as the hooksPath pin. (2) **Deny list was case-sensitive on a case-insensitive host** (pre-existing, sibling of the quoted-path bypass): `gate_path_denied(".CLAUDE/settings.json")`, `("agents.md")`, `("sub/.GitAttributes")` were all False, yet on APFS (this Mac, the canonical, every agent that opens it) those ARE `.claude/settings.json` / `AGENTS.md` / `.gitattributes` — a Codex job could plant hooks or instructions past the belt. `gate_path_denied` now compares `top`, the single-segment file name and `parts[-1]` with `.casefold()` against casefolded frozensets (`_GATE_DENIED_DIRS_CF/_FILES_CF/_BASENAMES_CF`); fail closed — on a case-sensitive host a false positive only costs a refusal. **Behaviour change**: `research/claude.md`, `agents.md`, `.Github/…`, `.GITMODULES` etc. are now refused (they were listed as allowed in `TestGatePathDenials.test_allowed`; those two cases are replaced by `research/claude-notes.md` / `agents.txt`).
+**Tests**: `tests/test_pre_push_gate.py` 92 → 114 collected — `TestGateDiffCannotBeBlinded.test_textconv_driver_is_never_invoked` (real repo: textconv planted in `.git/config`, tracked + untracked file under the attribute; asserts the marker is absent and both `+` lines are present — fails without the flag), `test_deny_list_is_case_insensitive` (15 variants incl. `.CLAUDE/x`, `.Github/workflows/x.yml`, `agents.md`, `claude.md`, `sub/.GitAttributes`, `.GITMODULES`, `.MCP.json`) and `test_casefold_does_not_overreach` (`claude.py`, `agents/x.py`, `github/x.yml`, `src/.claude_cache/x`, `sub/gitattributes` stay allowed). Suite 2139 passed, 1 skipped; `scripts/lint_docs.py` clean; ruff on the two files unchanged (13 pre-existing findings, none new).
+**Not done / residual**: unchanged from the whole-branch entry below (per-target publish allowlist = T8/owner work).
+
+## 2026-10-21 — Whole-branch review of the cross-vendor writer slice: five gate/containment findings applied
+
+**Agent task**: apply the whole-branch code-review findings on `multi-model/cross-vendor-writer` (plan `docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md`, notes under T5/T10, §6, §8). No protected path touched.
+**Files changed**:
+- `src/runner/review.py` — (1) `diff_for_gate` treats the clone as UNTRUSTED: `GATE_DIFF_FLAGS = --no-color --text --no-ext-diff` on both `git diff` calls (a nested `sub/.gitattributes` with `* -diff` rendered every file under it as `Binary files … differ` while `publish_workspace` shipped the real bytes — confirmed by the reviewer; `--text` shows the content, `--no-ext-diff` ignores `diff=<driver>`/`diff.external`), `GATE_GIT_OPTS = -c core.quotePath=false -c core.fsmonitor=false -c core.hooksPath=/dev/null` on every gate git call. `.gitattributes` added to `GATE_DENIED_BASENAMES` (denied at ANY depth). (2) The deny list could be bypassed by a git-QUOTED path (`diff --git "a/.github/workflows/\303\244.yml" …` matched neither header regex, so the path was never collected — a workflow with repo secrets could pass): `core.quotePath=false` prints non-ASCII raw, and new pure `gate_unparseable_headers(diff)` + `gate_refusal(diff) -> ("denied_path"|"unparseable_path", items) | None` make the parser FAIL CLOSED on any header it cannot read (quoted `diff --git`/`---`/`+++`/`rename`/`copy` lines; hunk content starting with `--- "` is not a header and is ignored).
+- `src/runner/session.py` — (2) `_pre_push_gate` uses `review.gate_refusal`; `unparseable_path` audits `merge_gate_refused{reason=unparseable_path, lines}` + `ReviewBlocked(verdict=blocker, refused_reason=)`. (3) **Oversized diff**: `run_code_review` truncates at `MAX_DIFF_CHARS` (50 000) and any LGTM on the partial read used to publish the WHOLE clone; the gate now refuses first — `merge_gate_refused{reason=diff_too_large, diff_chars, max_chars}` + `ReviewBlocked(verdict=changes_requested, refused_reason="diff_too_large", diff_chars=)`; a diff of exactly `MAX_DIFF_CHARS` is still reviewed. `ReviewBlocked` gains `refused_reason` (`denied_path|unparseable_path|diff_too_large|None`) and `diff_chars`; the message names each. (4) **Plan §4f enforced**: `EXECUTOR_CONCURRENCY = {codex_cli: 1}`, lazily created `_EXECUTOR_SLOTS` (`executor_slot(name)`, `executor_name_for(provider)` = the registry's `executor:` key); `_run_executor` runs `executor.run` under `async with slot` — a contended wait audits `executor_slot_wait{executor, waited_s, concurrency}` and is subtracted from the executor's budget (main's ceiling does not move), an uncontended slot changes nothing (the budget tests stay exact).
+- `src/runner/workspaces.py` — (5) `UNTRUSTED_GIT_OPTS = -c core.hooksPath=/dev/null -c core.fsmonitor=false`; `_run_git(..., untrusted=True)` for `head_sha`, `current_branch` and every call in `publish_workspace` (add, diff --cached, the commit, the push), and the push is `git push --no-verify`. A `.git/hooks/*`, `core.hooksPath` or `core.fsmonitor` planted in the clone never runs as the owner under the runner's unscrubbed env — whether or not Codex's Seatbelt keeps `.git/` read-only.
+- `src/runner/main.py` — the `ReviewBlocked` done card branches on `refused_reason` (denied paths / unparseable quoted paths / diff too large, with the char count and `MAX_DIFF_CHARS`).
+- `src/runner/executors/codex_cli.py` — canary (5): prompt step 4 `touch '.git/codex-canary'` (`CANARY_GIT_PROBE`), new check `git_dir_protected` (file must not exist after the run; `touch_in_stream` recorded; removed after), `CANARY_CHECKS` now ten; `gate_dry_run` applies the same three pre-reviewer refusals as the session (`gate_refusal` + `diff_too_large`) and reports `refused_reason`.
+- `src/audit_log.py` — docstring: `merge_gate_refused` reasons `unparseable_path` (+`lines`) and `diff_too_large` (+`max_chars`), additive; new kind `executor_slot_wait`. No kind renamed or reshaped (C14).
+**Tests**: `tests/test_pre_push_gate.py` 74 → 92 (nested/any-depth `.gitattributes` + external diff driver + fsmonitor on real temp repos; quoted/tab paths pure and real; unparseable + oversized through `run_session` and main's card; two Codex jobs serialise on the slot, the slot is released on an executor exception, slot keyed by registry name; planted hooks never run during publish). `tests/test_codex_canary.py` 48 → 50 (git-dir probe detected and not double-reported; dry-run refuses quoted and oversized diffs). Existing Anthropic-path tests untouched.
+**Not done / residual**: the per-target publish allowlist (old spec §2.5) stays T8/owner work; the live canary result for `git_dir_protected` is in plan §8.
+
+## 2026-10-21 — T10: live canary entry points + first real `codex exec` run
+
+**Agent task**: cross-vendor writer slice T10 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5 T10, §8).
+**Files changed**:
+- `src/runner/executors/codex_cli.py` — new section: `main()` CLI
+  (`--canary <clone>` / `--gate-dry-run <clone>`), `run_canary()`,
+  `check_canary()` (the nine T10 assertions as `{name: {ok, detail}}`),
+  `check_kind_sequence()`, `build_canary_prompt()`, `canary_environ()` (a
+  sentinel value under every denied name), `is_denied_env_name()`,
+  `gate_dry_run()` (`review.diff_for_gate` → `gate_path_denials` →
+  `run_code_review`, verdict only, no publish/sync; lazy `review` import),
+  `_refuse_clone()` (exit 3 under this repo / the production checkout /
+  any `volumes/`, or while `settings.server_root` is the production path).
+  Nothing in `run()`/`EventMapper` changed; `tests/test_codex_executor.py`
+  untouched and green.
+- `scripts/codex-canary.sh` (new) — seed repo + clone under `CANARY_ROOT`
+  (refused under the repo / prod / volumes), `PIPENV_DONT_LOAD_ENV=1
+  SERVER_ROOT=<root>/fake-server-root`, runs the canary then the gate
+  dry-run; exit 2 = did not run (rate-limited / login lapsed), never retried.
+- `tests/fixtures/codex/sandbox_denied.jsonl` (recorded) +
+  `tests/test_codex_canary.py` (new, 48): fixture-driven canary (the factory
+  replays `command_and_file.jsonl` and performs that run's side effects),
+  each check's failure mode, gate dry-run with a stubbed reviewer, `main()`
+  exit codes and location refusals.
+**Live result (plan §8)**: PASS — 9.42 s, 65,359 in / 405 out tokens, not
+rate-limited, 0 denied env names of 33 visible, escape `touch ~/…` blocked by
+Seatbelt, `-o` written outside the clone under `workspace-write` (T3 (g)
+verified), `model_served` not reported by this build; gate dry-run
+`changes_requested` (6 findings, 28.1 s, opus-4-7) — correct for a diff that
+adds two canary files.
+**Finding (residual, plan §6)**: a Seatbelt-denied command emits NO
+`command_execution` item on codex-cli 0.162.0-alpha.17.2 — the audit log
+under-reports attempts; and `/bin/zsh -lc` sources the owner's rc files, so
+the child's env is the scrubbed allowlist PLUS whatever those files export.
+**Docs**: runner CONTEXT (entry points + test), SYSTEM.md (row + script),
+runner GOTCHAS (3 entries), TROUBLESHOOTING (1 symptom).
+
+## 2026-10-21 — T8: protected-path bundle (branch `multi-model/protected-bundle`, owner-merged)
+
+**Agent task**: cross-vendor writer slice T8 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5, D-D). Protected paths — the owner reviews and merges this branch by hand (INV-4); it is never merged by the slice itself.
+**Files changed**:
+- `src/runner/guards.py` — `VENDOR_CREDENTIAL_NAMES` (`OPENAI_API_KEY`,
+  `CODEX_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`) denied at assignment and export beside
+  `ANTHROPIC_API_KEY`, in BOTH hard-deny lists (workspace + read-only
+  profiles); the two existing `ANTHROPIC_API_KEY` rows are untouched. INV-22
+  server-side deny (the "open follow-up" on the SYSTEM.md row): `api.tradier.com`
+  wholesale, `sandbox.tradier.com/v1/accounts/*/orders` and
+  `*.alpaca.markets/v2/orders` in both lists — market-data/account reads on the
+  sandbox, paper and data hosts stay free. Reads of a credential name
+  (`printenv`, `echo $X`, grep) are still allowed: the deny is on assignment,
+  the scrubbed executor env is why no key is inheritable. Text-level belt;
+  the atlas kernel tripwires remain the INV-22 enforcement of record.
+  KNOWN FALSE POSITIVE (review, 2026-10-21): because `api.tradier.com` is
+  denied wholesale, a read-only mention of the production host on a command
+  line (`grep -rn api.tradier.com swing/`, a `git commit -m` naming it) is
+  denied too, inside atlas workspace build jobs as well. It fails closed with
+  a `Bash denied: production brokerage host api.tradier.com` reason — use
+  `grep -f <pattern-file>` or split the host across variables; it is not a
+  bug (`tests/test_guards.py::test_production_tradier_host_mention_is_a_known_false_positive`).
+- `scripts/lint_docs.py` — checks 14 (`check_model_pins`: every skill
+  `model:`/escalation target resolves in `models.yml`; non-Anthropic ⇒
+  `isolation: workspace`; a `code-server` skill may pin a non-Anthropic
+  provider only when `ROUTER_CODE_SERVER_PROVIDERS` — the same setting the
+  session reads — lists it; and, after review, an `escalation.on_failure.model`
+  must resolve to Anthropic — `main.py:_maybe_escalate` enqueues the retry
+  with `payload.model=<target>`/`created_by="escalation:…"`, which
+  `lane_refusal`'s owner-origin rule refuses on an Anthropic-pinned skill, so
+  a non-Anthropic target was a retry that could never run) and 15 (`check_code_server_set`: the protected
+  `CODE_SERVER_SKILLS` here is the set of record; `runner/session.py`'s copy
+  is AST-read and must be byte-equal, so neither yml nor an INV-4-lane edit
+  can widen the lane). Wired into `run_all()`.
+- `.context/SYSTEM.md` — INV-21 row rewritten to the implemented profile
+  (workspace-only + Seatbelt + scrubbed env + no MCP/subagents; code-server
+  and in-repo canonicals pinned by setting; pre-push Anthropic gate, runner
+  commits/pushes; provider keys never session-assignable; per-provider lane
+  pause; ships dark) with the enforcement column naming every mechanism and
+  test; the "Model router" workstream sentence that said the row still
+  carried the 08-17 wording updated to match.
+- `tests/test_guards.py` — vendor-credential deny (parametrised over the
+  set), assignment-vs-read distinction, broker order hosts denied / non-order
+  broker reads allowed, both profiles, reason names INV-22.
+- `tests/test_doc_lint.py` — repo-level + fixture tests for checks 14/15
+  (each rule fires and stays silent; the setting flip relaxes rule 3; set
+  drift and a missing literal are reported; `run_all` wiring).
+
+**Why**: D-D — the slice's own tests enforce these rules without the
+protected files (T1/T4 lint-equivalents, T3 env scrub); the bundle makes
+them structural in the files an injected diff would target. `MISSION.md`
+untouched (its non-goal wording stays true while D-A is off).
+
+**Side effects**: none on the Anthropic path — existing guard cases are
+unchanged and `test_guards` 207/207; `python scripts/lint_docs.py` prints
+"All clean!" on the live tree. Audit event kinds unchanged (C14).
+`.context/modules/runner/CONTEXT.md` still says the SYSTEM.md INV-21 row
+"carries the 08-17 wording until the owner merges plan T8" — true until this
+branch merges; the sentence is outside T8's allowed edit set and should be
+dropped on merge.
+
+## 2026-10-21 — T9: docs, registries, runbook (no code change)
+
+**Agent task**: cross-vendor writer slice T9 (`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed** (docs only):
+- `.context/modules/runner/CONTEXT.md` — the two pre-dispatch notes left by
+  T1/T3 ("declared in T1, not yet consumed", "not called by `run_session`
+  until T4") replaced with the shipped state; Configuration now documents
+  `ROUTER_CODE_SERVER_PROVIDERS` as D-A's one setting (skill-name rule +
+  canonical-path rule), `CODEX_BIN` discovery order + fail-closed misconfig,
+  `CODEX_HOME`, `CODEX_SANDBOX_DEFAULT`, `CODEX_RUN_AS_USER` (unusable until
+  materialisation, §6 D-C) and `QUOTA_PAUSE_MINUTES` on the lane pause;
+  Testing lists `test_codex_executor` / `test_provider_dispatch` /
+  `test_quota` / `test_cross_vendor_docs`; Key invariants gains INV-21's
+  implemented profile (the SYSTEM.md row itself is T8/owner).
+- `.context/SYSTEM.md` — "Model router" workstream line: BUILT 2026-10-21,
+  ships dark, INV-21 row deferred to T8. Module-graph rows were already added
+  by T1/T3/T4.
+- `.context/INDEX.md` — "Additions 2026-10-21" block (what ships, the owner
+  runbook, debugging a Codex job, where to change what, what was not built,
+  the protected bundle) + the 2026-09-25 spec row's "deferred, not planned"
+  caveated with the reopening.
+- `docs/README.md` — row for the slice plan; the 2026-09-25 spec row caveated.
+- `docs/TROUBLESHOOTING.md` — five symptoms: `provider_refused` (reason
+  table, one row per rule), "codex not found" (`CODEX_BIN` discovery), the
+  `codex exec` hang (stdin / silent 429), `auth_expired` (`codex login
+  --device-auth` into the runner's `CODEX_HOME`), `job_held` (lane pause,
+  `/resume codex`). The T5 `review_blocked` entry already existed.
+- `docs/superpowers/specs/2026-10-05-observability-and-trading-unblock-design.md`
+  §14 items 1, 9, 10 — annotated "reopened 2026-10-21 by this slice" with
+  exactly which half shipped. (The plan header names the 2026-09-25 spec's
+  §14; that section is "Open questions" — the fifteen deferred items live in
+  the cut spec's §14. Noted in the plan's T9 section.)
+- `.context/modules/runner/skills/GOTCHAS.md` — entry: nothing caps Codex-lane
+  concurrency at 1 (plan §4f is an assumption; only the global
+  `MAX_CONCURRENT_JOBS` semaphore exists) — found while writing the
+  `auth_expired` symptom; recorded in plan §6 as residual, follow-up is a
+  per-provider `asyncio.Semaphore(1)` with its own test.
+- `tests/test_cross_vendor_docs.py` (new, 33 collected) — the T9 docs
+  contract as pure file-content checks: every `src/runner/executors/*.py`
+  named in this CONTEXT (the protected `lint_docs.py` only globs the top
+  level), SYSTEM.md rows, INDEX/README rows + caveats, the five TROUBLESHOOTING
+  headings, cut-spec annotations, no stale notes here, db CONTEXT lists the
+  slice's audit kinds, each module CHANGELOG records T9, the plan's T9 note.
+**Tests**: suite green, lint clean (numbers in the plan's T9 note).
+
+## 2026-10-21 — T7: `provider` in INDEX.jsonl entries
+
+**Agent task**: cross-vendor writer slice T7
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/runner/audit_index.py` — `IndexEntry.provider: str | None` (placed
+  after `model`), filled from `job_started.provider` (additive since T4);
+  `None` for audit logs written before that — a pre-007 entry is never
+  guessed to be Anthropic. `search_index(..., provider=)` optional filter;
+  entries without the key never match a provider filter. `rebuild_index` /
+  `append_to_index` emit the field via `asdict` unchanged.
+- Tests: `tests/test_audit_index.py` (+4).
+
+## 2026-10-21 — T6: per-provider quota keys (lane pause + hold-to-tail)
+
+**Agent task**: cross-vendor writer slice T6
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/runner/quota.py` — the global pair (`quota:paused_until` /
+  `quota:last_reason`, now the `src.db.KEY_QUOTA_*` constants) keeps its
+  Anthropic meaning and INV-12 semantics; `pause_queue` / `is_paused` /
+  `clear` are behaviourally unchanged (shared `_write_pause` / `_read_pause`
+  internals). NEW per-provider lane pause over `quota:provider:<p>:paused_until`
+  / `:last_reason`: `provider_keys(p)` (pure; refuses `anthropic`, empty, or
+  `:`/`/` in the name), `pause_provider(p, reset_at, reason)`,
+  `is_provider_paused(p)` (auto-resume on expiry, corrupt value deleted),
+  `clear_provider(p)`, `paused_providers(names)`. The Anthropic name
+  delegates to the global functions so one call answers for any provider.
+  `GLOBAL_PROVIDER = "anthropic"` (asserted equal to the registry default in
+  tests; the registry is NOT imported — module row stays config+db).
+- `src/runner/main.py` — (1) **Hold**: inside `_process_job`'s fetch
+  transaction, BEFORE the row is flipped to `running`,
+  `_hold_if_provider_paused(job)` checks the job's lane: provider =
+  the session's `resolved_provider` stamp from an earlier attempt, else
+  `preresolve_provider(kind, description, payload)` (pure given
+  `load`/`route`: `payload.model > skill pin > settings.default_model` with
+  `_resolve_skill`'s kind→skill mapping and the RULE router only — no LLM
+  fallback; never raises, `None` = cannot tell → run and let the session
+  refuse properly). Paused ⇒ audit `job_held{provider, reason, until}` (once
+  per (job, pause window) via `_held_audited`, not every cycle), schedule
+  `_requeue_held(job_id, hold_delay(until, now))` — an RPUSH to the TAIL
+  (plan §4g) after `min(remaining, HOLD_RECHECK_SECONDS=30)` seconds as its
+  own task (no concurrency slot, no DB write; `_job_loop` cancels the
+  pending ones on shutdown so they push immediately; a crash is healed by
+  `requeue_stranded_queued`) — and return without touching the row. A
+  Redis blip on the check fails OPEN to the session. Anthropic jobs never
+  reach the Redis read (the global pause gates the loop before BLPOP).
+  (2) **Codex 429**: the `ExecutorFailed` handler's `rate_limited` branch
+  now mirrors `QuotaExhausted` on the lane: `quota.pause_provider(provider,
+  None, reason)` (never the global key; the stream has no reset time →
+  `settings.quota_pause_minutes`), `LPUSH` FRONT, row back to `queued` with
+  `error_message="queued for <provider> quota reset (…)"`, audit
+  `job_requeued_for_quota{reason, +provider, +until}` (additive fields),
+  no `job_failed`, no `_finish_job`, no DM, no escalation. Every other
+  terminal reason is unchanged (terminal, never escalated). `router` is
+  now a top-level import (already in the SYSTEM.md row).
+- `src/audit_log.py` — docstring: `job_held` (new kind) and the additive
+  `provider`/`until` fields on `job_requeued_for_quota`.
+- Tests: `tests/test_quota.py` +50 (keys; provider pause/resume round
+  trips; independence from the global key both ways; expiry; Anthropic
+  delegation; `preresolve_provider` precedence/mapping/None cases;
+  `hold_delay`; `_process_job` held → tail with audit, dedupe, stamp wins,
+  Anthropic never held, fail-open, cancel-pushes-now; Codex `rate_limited`
+  → lane pause + FRONT + queued, global key untouched, other reasons
+  terminal, Anthropic `QuotaExhausted` shape untouched; web `/api/quota`
+  map; Telegram `/status` lane line and `/resume [provider]`). Suite 1977
+  passed, 1 skipped; lint clean.
+- **Review round (code-review T6, lgtm; minors applied)**:
+  `preresolve_provider` now resolves `load` / `route` at CALL time
+  (`None` defaults → module-level `load_skill` / `router.route`), so a
+  module-level monkeypatch is honoured — the test harness's
+  `load_skill` patch was previously dead (default captured at
+  definition time). The `main_harness` fixture also stubs
+  `plans.promote_deferred_for`: it ran for every completing job and
+  opened a REAL asyncpg connection through plans.py's own
+  `async_session`, the source of the `coroutine 'Connection._cancel'
+  was never awaited` warning. SYSTEM.md INV-12 row notes the
+  hold-to-tail exception.
+
+## 2026-10-21 — T5 review round 1 applied (code-review T5, blocker → lgtm)
+
+**Agent task**: cross-vendor writer slice T5, reviewer findings (2 blockers,
+1 major, 3 minors). **Files changed**:
+- `src/runner/review.py` — `run_code_review` passes `setting_sources=[]`
+  (SDK isolation mode): with the default `None` the reviewer `claude`
+  process loaded the REVIEWED checkout's `.claude/settings.json` /
+  `settings.local.json` (hooks run as the owner, unscrubbed env) and
+  `CLAUDE.md` — a Codex clone under `workspace-write` can plant exactly
+  those. Applies to belt 2 as well. New pure helpers `gate_diff_paths(diff)`,
+  `gate_path_denied(path)`, `gate_path_denials(diff)` over a hardcoded deny
+  list (`GATE_DENIED_DIRS` = `.claude .codex .git .githooks .github`,
+  `GATE_DENIED_FILES` = `.gitmodules .gitattributes .gitconfig .mcp.json`,
+  `GATE_DENIED_BASENAMES` = `AGENTS.md CLAUDE.md`; deny wins, a rename
+  counts both sides) — the minimal stand-in for the old spec's per-target
+  `publish_allowlist` (T8/owner).
+- `src/runner/session.py` — (1) `_pre_push_gate` refuses a diff touching a
+  denied path BEFORE spending a reviewer: audit `merge_gate_refused{belt,
+  reason=denied_path, paths}` + `ReviewBlocked(..., verdict="blocker",
+  denied_paths=)` (new attr); clone kept. (2) NEW pure
+  `canonical_refusal(canonical_cwd, *, slug, provider, code_server_providers,
+  server_root, projects_dir)` called in `run_session` beside the git-canonical
+  check, before `create_workspace`: unless the provider is in
+  `ROUTER_CODE_SERVER_PROVIDERS`, a non-Anthropic job with no project slug,
+  a canonical equal to `settings.server_root`, or one inside the server
+  root but outside `projects_dir` is `ProviderRefused` naming D-A —
+  `lane_refusal` keyed `code-server` on skill NAMES only, so a generic
+  (router-unmatched) `/task --model=codex/…` resolved to THIS repo and T5's
+  publish path would have pushed it to `origin/main` from a clone of the
+  production checkout. (3) Budget: `executor_timeout_s(ceiling, reserve_s=)`
+  + `gate_reserve_s()` (= `review.GATE_TIMEOUT_SECONDS` + new
+  `GATE_PUBLISH_MARGIN_S` 60 s); `_run_executor` reserves it, so the gate
+  completes inside main's `wait_for` instead of being cancelled mid-review
+  and mislabelled `timeout` (1800 s ceiling → executor 1110 s). (4) Commit
+  subject falls back to `job.kind` on an empty/whitespace description
+  (was IndexError after LGTM). (5) A rejected push after LGTM raises
+  `ExecutorFailed(..., "publish_failed")` (was a bare RuntimeError →
+  `api_error`), so the ledger separates "approved, push rejected" from a
+  vendor error.
+- `src/runner/main.py` — the review-blocked card names the denied paths.
+- `src/audit_log.py` — docstring: `merge_gate_refused` kind; `job_failed`
+  category `publish_failed`.
+**Tests**: `tests/test_pre_push_gate.py` 33 → 74 collected (deny-list parse/rules,
+refusal before the reviewer, `setting_sources=[]` captured off a faked
+`query` + source assertion, D-A canonical rule pure + through `run_session`
+both ways, budget arithmetic + a shrunk-clock run under main's ceiling,
+empty description, typed publish failure, main card); both harnesses'
+`_resolve_project` now return a slug (the rule refuses slug-less jobs) and
+`test_run_session_executor_gets_a_timeout_under_mains_ceiling` asserts the
+reserved budget. Suite green; lint clean. Not done (hard rule): no
+`guards.py`/`lint_docs.py` change — the per-target allowlist stays T8.
+
+## 2026-10-21 — T5: pre-push Anthropic review gate for non-Anthropic lanes (INV-21(c))
+
+**Agent task**: cross-vendor writer slice T5
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; plan
+§4b, old spec §5.3 belt 3b). Closes the ff-sync-before-review hole for
+vendor writers: Anthropic reviews every non-Anthropic diff BEFORE anything
+reaches a canonical repo, and the runner is the only committer/pusher.
+**Files changed**:
+- `src/runner/session.py` — `_pre_push_gate(job, ref, ws, *, base_sha,
+  skill_name) -> (review_outcome, published)` runs in `run_session` right
+  after `_run_executor` returns and before `job_completed`, keyed on the
+  provider alone (a RULE, no setting — the test asserts the function reads
+  nothing from `settings`). `review.diff_for_gate(clone, base_sha)` →
+  empty → audit `merge_gate_skipped{belt=pre_push, reason=empty_diff}`,
+  job completes with no commit; otherwise `review.run_code_review` (the
+  fixed Anthropic reviewer) under `asyncio.wait_for(review.GATE_TIMEOUT_SECONDS
+  = 600)` — a timeout IS `changes_requested` — audited as
+  `merge_gate_verdict{belt, reviewer_provider, reviewer_model, verdict,
+  findings_n, timed_out, diff_chars, base_sha}`. LGTM →
+  `workspaces.publish_workspace` (runner commits with `Executor:`/`Job:`/
+  `Reviewed-By:` trailers, pushes; audit `workspace_published`) and only
+  then the existing `sync_canonical` in `finally` (gated on `published`);
+  a failed publish raises `RuntimeError` (terminal on the lane, clone kept).
+  Anything else raises the new `session.ReviewBlocked(provider, model_id,
+  *, verdict, findings_n, timed_out)` — clone kept, no commit, no sync.
+  `base_sha` (`workspaces.head_sha(clone)`) is captured right after
+  `create_workspace` for non-Anthropic jobs and rides `workspace_created`
+  additively; a non-Anthropic job on a NON-git canonical is `ProviderRefused`
+  before the clone (no diff, no publish path). The T4 "clone kept for T5"
+  `note` is gone: successful non-Anthropic jobs now clean up like Anthropic
+  ones; `cleanup_workspace(keep=session_failed)` for every lane. Result dict
+  gains `review_outcome` (None on Anthropic / empty diff).
+- `src/runner/review.py` — `REVIEWER_PROVIDER`/`REVIEWER_MODEL`/
+  `REVIEWER_EFFORT` constants (`run_code_review` now reads them — same
+  opus-4-7/high, so the trailer and the reviewer cannot drift),
+  `GATE_TIMEOUT_SECONDS`, `diff_for_gate(cwd, base_sha)` (committed +
+  staged + unstaged via `git diff <base>` on the working tree, plus
+  untracked via `git diff --no-index /dev/null <f>`; gitignored excluded;
+  RAISES on any git failure — fail closed, never an "empty" diff),
+  `count_findings(text)` (list-item heuristic for `findings_n`).
+- `src/runner/workspaces.py` — `head_sha(path)`, `current_branch(path)`,
+  `provenance_trailers(provider=, model_id=, job_id=, reviewer=)`,
+  `publish_workspace(ws, *, base_sha, message, trailers) -> (ok, detail,
+  sha)`: `git add -A`, commit (`--no-verify`, message + trailers; an empty
+  provenance commit when the job committed on its own — never amend),
+  `git push origin <branch>:<branch>` when the canonical has a remote. ONE
+  push attempt: a rejection is reported (`ok=False`, sha kept), never
+  rebased, never forced. Never raises.
+- `src/runner/main.py` — `except session_mod.ReviewBlocked` (before
+  `ExecutorFailed`): audit `job_failed error_category=review_blocked`,
+  `_finish_job(failed, provider=, terminal_reason="review_blocked",
+  review_outcome=<verdict>, done_payload={summary: <card>})`, task
+  `failed` card naming the verdict/findings, never escalated.
+  `_terminal_values`/`_finish_job` gain `review_outcome=` (+ `_finish_job`
+  `done_payload=` to override the `jobs:done` DM text); the completed path
+  stamps `result["review_outcome"]`. `_maybe_review` skips non-Anthropic
+  lanes with `post_review_skipped{reason=pre_push_gate, provider, verdict}`
+  — the gate is the review of record (T4-review note resolved: no more
+  `stale_head` WARNING on every Codex job).
+- `src/audit_log.py` — docstring: `merge_gate_verdict`,
+  `merge_gate_skipped`, `workspace_published`, `post_review_skipped`
+  reasons, `workspace_created.base_sha`, `job_failed` category
+  `review_blocked`.
+**Tests**: `tests/test_pre_push_gate.py` (33: diff/publish on real temp
+repos, every gate outcome through `run_session` with spies, main's
+terminal handling, belt-2 skip, rule-not-switch AST check);
+`tests/test_provider_dispatch.py` harness gained a git-looking canonical
+and an empty-diff gate stub, and the T4 end-to-end test's tail now asserts
+the empty-diff skip instead of the kept clone. Suite 1886 passed, 1
+skipped; lint clean.
+
+
+## 2026-10-21 — T4: dispatch at the single executor call site (`session.run_session`)
+
+**Agent task**: cross-vendor writer slice T4
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; plan
+§4a/§4h, old spec §2.4/§2.6/§5.3 belt 3b).
+**Files changed**:
+- `src/runner/session.py` — `run_session` now dispatches on the resolved
+  provider: Anthropic runs in-process through the SDK exactly as before;
+  any other provider runs through the executor module the registry names
+  (`models.yml` `executor:` → `_EXECUTORS = {"codex_cli": codex_cli}`,
+  `executor_for(provider)`), sharing skill/cwd/isolation/clone/system-prompt
+  assembly before and marker-parse/summary/`job_completed` after.
+  `resolve_model_choice(payload, skill_cfg) -> (ModelRef, reason)` replaces
+  the body of `_resolve_model` (which is now the value-only wrapper) and
+  refuses `no executor` from the registry's executor name instead of T1's
+  interim `_EXECUTABLE_PROVIDERS`. **Fail-closed lane rules** (pure
+  `lane_refusal(...)`, raised as `ProviderRefused` BEFORE `create_workspace`
+  so a refusal never leaves a clone): isolation tier must be `workspace`;
+  no `subagents:`; no `needs-*-mcp` tag; `CODE_SERVER_SKILLS`
+  (`server-patch`, `server-deploy`, `new-skill`, `deploy-director`,
+  `atlas-redeploy`, `project-redeploy`) need the provider in
+  `settings.router_code_server_providers` (`code_server_providers()`); a
+  `payload.model` override that moves an Anthropic-pinned skill to another
+  provider is honoured only from an owner origin (`is_owner_origin`:
+  `telegram:*`, `web`, `cli`/`cli:*` — an allowlist). New audit
+  `provider_selected{provider, model, reason ∈ payload|pin|default}`;
+  `job_started` gains `provider`; `job_completed` gains `provider`,
+  `model_served`, `terminal_reason`; the result dict gains `provider`,
+  `model`, `model_served`, `terminal_reason`; the `resolved_*` DB stamp
+  gains `resolved_provider` (`resolved_model` stays the bare id).
+  `_build_system_prompt(...)` split out of `_build_options` unchanged
+  (`_build_options(..., system_prompt=)` accepts the pre-built prompt;
+  identical bytes either way); `build_executor_prompt(system_prompt,
+  description)` prepends it to the task for CLI executors (§4h — never
+  `AGENTS.md`). `_run_executor(...)` calls `executor.run(job, cwd=<clone>,
+  prompt=…, model_id=<bare id>, sandbox=settings.codex_sandbox_default —
+  tightened to `read-only` for `privilege_class: read-only` skills,
+  timeout_s=resolve_session_timeout(...))`; any `terminal_reason != "ok"`
+  raises `ExecutorFailed(provider, model_id, terminal_reason, message,
+  model_served=)`. Non-Anthropic lanes NEVER get `delivery.env_files`
+  provisioned, never `sync_canonical`, and their clone is KEPT (audit
+  `note`) for the T5 pre-push Anthropic gate. `interrupt(job_id)` falls
+  through to the executors' `interrupt` when no SDK session holds the job
+  (INV-8). The Anthropic path is behaviourally identical apart from the
+  additive fields. `resolve_session_timeout` + `SESSION_TIMEOUT_CAP_SECONDS`
+  moved here from `main.py` (same code; `main` re-exports both) so the
+  executor branch shares the ceiling without a `session → main` import.
+- `src/runner/main.py` — `_terminal_values(...)` (pure) + `_finish_job(...,
+  provider=, terminal_reason=, model_served=)` stamp the migration-007
+  columns only when known; the completed path stamps from the result dict,
+  `ProviderRefused` stamps `provider` + `terminal_reason=provider_refused`;
+  new `except session_mod.ExecutorFailed` handler ahead of the generic
+  `except` — `job_failed error_category=<terminal_reason>`, stamps
+  provider/terminal_reason/model_served, task DM, **no escalation** (a
+  vendor switch is a routing decision this slice does not make; T6 adds
+  the `rate_limited` hold + front-requeue).
+- `src/audit_log.py` — docstring: `provider_selected` kind; additive
+  fields on `job_started`/`job_completed`; executor terminal reasons as
+  `job_failed.error_category` values. Existing kinds untouched (C14).
+**Tests**: `tests/test_provider_dispatch.py` (53: each refusal as a pure
+predicate and through `run_session` with a fake executor behind
+`_EXECUTORS` and a captured DB stamp; precedence + reason; Codex branch
+call shape, audit sequence, marker parse, no env_files / no sync / clone
+kept; `ExecutorFailed`; `interrupt` fall-through; Anthropic path unchanged;
+`main` AST + `_terminal_values`). `tests/test_models_registry.py::
+test_session_refuses_enabled_provider_without_executor` now empties
+`_EXECUTORS` to keep its rule under test (codex has an executor since T4).
+**Review (code-review T4, 2026-10-21) applied before commit** — one major,
+two minors: (a) **No Anthropic escalation off a non-Anthropic lane, on any
+failure path.** Main's `wait_for` timer starts before skill resolution and
+the clone, so with equal deadlines it always won over the executor's own
+`timeout_s`; the resulting `asyncio.TimeoutError`, and a pre-process
+`CodexNotFound`/`ValueError` from `executor.run`, fell into the generic
+branches of `_process_job` and `_maybe_escalate` re-ran the job on the
+skill's Anthropic `on_failure` model. Now: `main._non_anthropic_lane(job)`
+(pure read of the `resolved_provider` stamp the session writes before the
+process starts) guards both the `asyncio.TimeoutError` and generic
+`Exception` branches — refetch first, then `_finish_job(..., provider=,
+terminal_reason="timeout"|"api_error")`, audit `note`, no escalation; an
+unstamped job (died before the stamp) keeps the old escalation path.
+`session._run_executor` converts `FileNotFoundError` (incl. `CodexNotFound`)
+and `ValueError` from `executor.run` into `ExecutorFailed(provider,
+model_id, "api_error", …)` (plus an `executor_error` audit) so pre-process
+infrastructure failures take the typed terminal path; and the executor's
+`timeout_s` is `session.executor_timeout_s(ceiling)` = ceiling −
+`EXECUTOR_TIMEOUT_MARGIN_S` (30 s), floored at `EXECUTOR_TIMEOUT_FLOOR_S`
+(30 s), so its own `timeout` terminal reason is reachable (main's deadline
+stays the backstop). (b) The unrelated `.claude/settings.local.json` hunk
+is not staged. (c) GOTCHAS + plan T5 note: `_maybe_review` is a
+`stale_head` no-op for Codex jobs until T5 commits/syncs. Tests 53 → 63
+(`executor_timeout_s`; pre-process errors → `ExecutorFailed`;
+`_non_anthropic_lane`; `_process_job` driven with faked collaborators:
+codex timeout and codex generic exception never escalate and stamp the
+typed reason, Anthropic timeout and unstamped failure still escalate).
+**Not in this task**: the pre-push review gate + runner commit (T5),
+per-provider quota keys (T6), surfaces (T7).
+
+## 2026-10-21 — T3: the Codex executor (`src/runner/executors/codex_cli.py`)
+
+**Agent task**: cross-vendor writer slice T3
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5; old
+spec §2.4 JSONL mapping, §2.6 EnvScrubber contract).
+**Files changed**:
+- `src/runner/executors/__init__.py` (new) — package for non-Anthropic
+  executor adapters; re-exports `ExecResult`.
+- `src/runner/executors/codex_cli.py` (new) — `run(job, *, cwd, prompt,
+  model_id, sandbox, timeout_s, on_event, process_factory=…) -> ExecResult`
+  and `interrupt(job_id)` (SIGTERM → SIGKILL after `KILL_GRACE_S=1.5`,
+  INV-8). One `codex exec --json --ephemeral --ignore-user-config
+  --skip-git-repo-check --sandbox <read-only|workspace-write> -C <clone>
+  -m <id> -c features.goals=false -c analytics.enabled=false
+  -c otel.metrics_exporter="none" -c sandbox_workspace_write.network_access=false
+  -o <audit_log_dir>/<job_id>.codex-last.md <prompt>` per job, `stdin=DEVNULL`
+  (plan §4d), env = `scrubbed_env()` = exactly `{PATH, HOME, LANG, TMPDIR,
+  CODEX_HOME}`. `settings.codex_run_as_user` set → argv prefixed `sudo -n
+  -u <user> --preserve-env=<allowlist> --`. Binary: `settings.codex_bin`
+  (must exist) → `shutil.which("codex")` → the ChatGPT.app bundle path →
+  `CodexNotFound`. `EventMapper` maps the JSONL stream onto the EXISTING
+  audit kinds (`tool_use` Bash/Edit/WebSearch, `tool_result`, `text`,
+  `thinking` — C14 shapes unchanged, `tool_result` gains `exit_code` +
+  `output`) plus three new kinds `executor_started`, `turn_completed`,
+  `executor_error`; `default_sink` audits every event and publishes a
+  compact view on `jobs:stream:<id>` like `session._handle_message`.
+  Terminal reasons: `ok | rate_limited | auth_expired | api_error | timeout
+  | interrupted`; no `turn.completed` ⇒ `api_error` whatever the exit code
+  (the silent-empty-success trap). Final text of record = the `-o` file,
+  fallback the last `agent_message` (plan §4i). Never commits, pushes,
+  writes `AGENTS.md`, or accepts `danger-full-access`. NOT wired into
+  `run_session` yet — T4 adds the dispatch branch; nothing runs Codex today.
+- `src/config.py` — `codex_run_as_user: str = ""` (env `CODEX_RUN_AS_USER`,
+  D-C; unset by default).
+- `src/audit_log.py` — docstring lists the three new kinds and the two
+  additive `tool_result` fields; existing kinds untouched (C14).
+- `tests/test_codex_executor.py` (54, new) + fixture
+  `tests/fixtures/codex/file_change_and_failure.jsonl` (hand-authored,
+  labelled so in its header; `ok`/`command_and_file` are recorded truth).
+  Pure/fixture style: a process factory is injected — no live `codex`, no
+  network, no SDK.
+
+**Review (code-review T3, 2026-10-21) applied before commit**:
+- `run()` wraps the consume/wait block in `except BaseException` that
+  terminates the child (SIGTERM → SIGKILL) before re-raising — a sink that
+  raises (`audit_log.append` on a full disk) or a stream line over
+  `_STREAM_LINE_LIMIT` no longer orphans `codex exec`.
+- Stale `-o` guard: `out_path.unlink(missing_ok=True)` before the spawn, and
+  the `-o` file is only the text of record once `turn.completed` was seen
+  (job ids are reused on requeue; a `TASK_COMPLETE:` from a previous attempt
+  must not pair with this attempt's `terminal_reason`).
+- D-C run-as-user: `codex_run_as_user` now REQUIRES `codex_home` (else
+  `ValueError` before any process) and forwards the stream home as `HOME`,
+  `TMPDIR=<codex_home>/tmp` and `CODEX_HOME` — never the owner's HOME or
+  0700 TMPDIR. `scrubbed_env` gained a `tmpdir=` override. Still NOT
+  delivered: clone readability for the unprivileged user (the
+  `volumes/workspaces/` clone is `drwx------`; materialisation unbuilt) —
+  D-C stays an owner-gated residual, plan §6/§7.4 amended.
+- `classify_error` uses word-bounded regexes (`\b429\b`, `\b401\b`,
+  `\blog(ged)? in\b`): "140123 input tokens" / "plugin" no longer classify
+  as rate_limited / auth_expired (T6 parks the lane on those classes).
+- `ExecResult.model_served` is None when the stream never reported a model
+  (was: defaulted to the requested id) — T4 stamps `jobs.model_served` from
+  observation only; T10 canary to assert.
+- `probe_cli_version` terminates a hung `--version` process in a `finally`.
+- `build_argv` refuses a prompt beginning with `-` (clap would read it as a
+  flag; no unverified `--` separator added — T10 may verify one).
+- Tests: `tests/test_codex_executor.py` 54 → 67 (sink-raises, stale `-o`,
+  `-o` without `turn.completed`, run-as-user stream home + required
+  `codex_home`, hung probe, classify negatives, `model_served` observed-only,
+  `-`-prompt refusal).
+
+## 2026-10-21 — T1: job model resolved through the models registry (fail-closed)
+
+**Agent task**: cross-vendor writer slice T1
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5).
+**Files changed**:
+- `src/config.py` — `router_providers_enabled: str = "anthropic"`,
+  `router_code_server_providers: str = "anthropic"`, `codex_bin: str = ""`,
+  `codex_home: str = ""`, `codex_sandbox_default: str = "workspace-write"`.
+  Fail-closed defaults; flipping them is the owner's call (plan §7).
+- `src/runner/session.py` — `_resolve_model(payload, skill_cfg) ->
+  ModelRef` (pure): `payload.model > skill.model > settings.default_model`,
+  resolved via `registry.models.resolve_enabled`; raises `ProviderRefused`
+  on an unknown id (C12), a provider outside `router_providers_enabled`, or
+  a provider with no executor in this runner (`_EXECUTABLE_PROVIDERS =
+  {anthropic}` — interim until T4 adds the dispatch branch). `run_session`
+  calls it right after `_resolve_skill`, BEFORE the deploy gate and the
+  workspace clone, so a refusal never leaves a clone behind or reaches the
+  SDK; `_build_options` uses `ref.model_id` — the same bare Anthropic id as
+  before, so the Anthropic path is behaviourally identical.
+  `_MODEL_BUDGETS` is now `registry.models.context_windows()`.
+- `src/runner/main.py` — `_process_job` handles `ProviderRefused`
+  terminally: audit `provider_refused{provider, model, raw, reason}` +
+  `job_failed error_category=provider_refused`, task notified, NO
+  escalation (a policy refusal would re-refuse on a bigger model).
+- `src/audit_log.py` — docstring lists the `provider_refused` kind and
+  `job_failed.error_category`; existing kinds untouched (C14).
+**Why**: T0's review found `job.payload["model"]` reached the SDK
+unvalidated (a stale client or old schedule payload could still name the
+retired Haiku id), and the slice needs one place that says which provider
+a job belongs to before T4 can dispatch on it.
+**Tests**: `tests/test_models_registry.py` §9–10 (precedence, retired id,
+unknown pin, disabled provider, enabled-without-executor, unknown default,
+AST check that the main handler fails the job and never escalates).
+`tests/test_context_budget.py`, `tests/test_haiku_retirement.py` unchanged
+and green.
+
+## 2026-10-21 — T0: Haiku 4.5 retirement; utility classifiers read `settings.utility_model`
+
+**Agent task**: cross-vendor writer slice T0
+(`docs/superpowers/plans/2026-10-21-cross-vendor-writer-slice.md` §5) — retire
+the hard-coded `claude-haiku-4-5-20251001` pin whose retirement window opened
+2026-10-15 while it was still being served by the two fail-open classifiers.
+**Files changed**:
+- `src/config.py` — new `utility_model: str = "claude-sonnet-4-6"` and
+  `utility_effort: str = "low"` (env-overridable like `default_model`).
+- `src/runner/llm_router.py` — `llm_route` builds `ClaudeAgentOptions` with
+  `model=settings.utility_model, effort=settings.utility_effort`; docstrings
+  no longer name Haiku.
+- `src/runner/learning.py` — `extract_learning` likewise; docstrings updated.
+- `src/runner/router.py` — docstring wording only.
+- `src/runner/session.py` — `_MODEL_BUDGETS` drops the Haiku row (sonnet row
+  already present; `_DEFAULT_BUDGET` covers unknown ids unchanged).
+**Why**: both classifiers fail open (router → generic task, learning →
+`had_learning=False`), so a retired model would have silently degraded routing
+and learning capture with no job failure to notice. One setting replaces three
+literals so the next swap is a `.env` change, not a code change.
+**Tests**: new `tests/test_haiku_retirement.py` (no retired literal under
+`src/` or skill docs; settings defaults; both classifiers' options carry the
+setting and follow an override — SDK `query` monkeypatched, no network; alias
+table; dashboard; budget row). Full suite 1500 passed, 1 skipped.
+**Side effects**: none on the job path — `default_model` and every skill pin
+are untouched. `skills/project-update-poll/SKILL.md` moves to
+`claude-sonnet-4-6`. Review fix (same commit): `test_skill_contracts` now
+reads the repo's own `skills/` via `registry.skills.list_all(skills_dir)`
+(see registry CHANGELOG 2026-10-21) instead of `settings.skills_dir`, so the
+plain `pipenv run pytest -q -p no:cacheprovider` is green from the dev
+checkout; the `PIPENV_DONT_LOAD_ENV=1` workaround in
+`.context/modules/runner/skills/GOTCHAS.md` still applies to anything else
+that reads through `settings.server_root`. The two `llm_route` tests also
+patch `src.registry.skills.list_all` so the catalog build is
+filesystem-independent.
 ## 2026-10-16 — self-diagnose 13223a20: SDK session_id collision — 12th instance recorded (alpha-research dc9d9f61)
 
 **Files created**: none

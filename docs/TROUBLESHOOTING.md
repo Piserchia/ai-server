@@ -122,6 +122,58 @@ dir. Options:
 
 ---
 
+## Symptom: `_writeback` fails with `exit code 143` (SIGTERM) after server-deploy
+
+### Root cause (diagnosed 2026-11-17, job `463e06f8`, parent `547cb86b`, self-diagnose `7026f688`)
+
+Server-deploy step 4 schedules a detached `launchctl kickstart -k …runner`
+for T+20s via `nohup sleep 20`. If the parent session hits `TASK_COMPLETE`
+after modifying docs, `_verify_writeback` (`src/runner/main.py`) enqueues a
+`_writeback` follow-up job. That child job starts running INSIDE the same
+runner process the parent just queued for restart. ~12s later SIGTERM fires;
+exit code 143; `error_category=unknown`. The runner comes back cleanly; the
+self-diagnose auto-escalation spawns.
+
+**The deploy itself is unaffected** — health 200, HEAD at the target
+commit, services restarted. Only the CHANGELOG-hygiene follow-up is lost,
+and server-deploy step 3.5 already does that work inline if the skill is
+followed properly.
+
+See `skills/server-deploy/GOTCHAS.md` §"Recurrence 2026-11-17" for the full
+story. This is a new vector of the same "20s runner-restart window" gotcha
+documented three times previously.
+
+### Diagnostics
+
+```bash
+# Confirm it's this failure mode (parent is server-deploy):
+psql assistant -tAF'|' -c "SELECT j1.id, j1.created_at, j2.kind
+  FROM jobs j1 JOIN jobs j2 ON j2.id = j1.parent_job_id
+  WHERE j1.kind='_writeback' AND j1.status='failed'
+  ORDER BY j1.created_at DESC LIMIT 5;"
+
+# Verify deploy actually succeeded despite the failed writeback row:
+curl -sf http://localhost:8080/health
+git -C "/Users/alfredbot.ai.butler/Library/Application Support/ai-server" rev-parse HEAD
+```
+
+### Fix (server code, deferred to a server-patch job)
+
+In `src/runner/main.py::_verify_writeback`, skip dispatch when the parent's
+kind is `server-deploy`. Alternative: have `server-deploy`'s SKILL set
+`payload.skip_writeback=true` in its task_complete emission, and have
+`_verify_writeback` honor that flag. Either way, the writeback-hygiene
+burden stays on server-deploy's step 3.5 (where it already belongs — the
+skill ought to do all CHANGELOG writes BEFORE step 4 anyway, per the
+"20s window" gotcha chain).
+
+Blast radius: cosmetic. One failed `_writeback` job row + one spurious
+self-diagnose escalation per server-deploy that happens to modify docs.
+Will not corrupt the deploy; will not lose data (the modified files are
+already committed by the prior session's own flow). Low urgency.
+
+---
+
 ## Symptom: `_writeback` fails with `error_max_turns (6)` after atlas jobs
 
 ### Root cause (diagnosed 2026-08-11, job `fc483ddb`, prior instance `56c478cc`; 3rd occurrence 2026-08-13, job `dc5fad7d` — parent was `atlas-momo-research`, not `atlas-redeploy`)
@@ -3596,3 +3648,9 @@ trigger is a positively declared name that the file positively lacks.
 **Fix (in tree since 2026-10-28)**: `result_capture.cli_version_column` normalises the value for both lanes; the stamp is guarded — a failure is audited as `result_stamp_failed{error}` and the job completes, with `main._finish_job` re-stamping tokens/cost from the result dict.
 
 **If you see it again**: `grep result_stamp_failed volumes/audit_log/<job>.jsonl` — the `error` names the column; compare the value the lane produced (`executor_started.cli_version` for Codex, `session.cli_version()` for Anthropic) with the ORM width in `src/models.py`. A job with a `result_stamp_failed` row but a `completed` status is the guard working; the tokens on the row come from the terminal transition. After a guarded failure three columns stay NULL on the row — `cli_version`, `duration_api_ms`, `sdk_cost_usd` — because `main._terminal_values` does not carry them; tokens, `num_turns`, `cost_usd_list`, `terminal_reason` and `model_served` are re-stamped.
+
+## Symptom: runner log says `job no longer queued at claim time — not run (cancelled or claimed elsewhere)` — 2026-11-17
+
+**Cause**: INV-9 claim guard. The runner popped a job id from Redis, read the row as `queued`, but by the time it claimed the row with its guarded `UPDATE … WHERE status='queued'` someone else had changed it — almost always a user cancel (`/cancel`, the task button, `/clear`, `DELETE /api/jobs`) that raced the pop, occasionally a second worker. The job did not run, nothing was written for it, the slot was released.
+
+**Action**: none. The row shows the state the other writer gave it (`cancelled` with `terminal_reason=interrupted`, or `running` under another worker). A burst of these lines with no cancels behind them would mean duplicate ids in `jobs:queue` — check `redis-cli lrange jobs:queue 0 -1` for repeats and `reconcile.requeue_stranded_queued` in the runner log.
