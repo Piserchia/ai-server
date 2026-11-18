@@ -59,9 +59,13 @@ are gated by a signature-verifying Cloudflare Access JWT check that fails
 closed until the owner creates the Access app and sets `SB_CF_ACCESS_TEAM` /
 `SB_CF_ACCESS_AUD` / `SB_OWNER_EMAILS`. DraftKings' own feed blocks
 automation and must not be scraped or evaded. Piece 1 (hosting + safety) is
-live; the model rebuild (leakage, de-vig, injuries, pre-game archive,
-walk-forward backtest, parlays, tuning agents) is piece 2 — the card carries a
-"model under rebuild" banner until then. Baseline audit + specs live in the
+live; the model rebuild is piece 2 (spec approved 2026-11-18), delivered as
+plans P2.1-P2.9. P2.1 is LIVE since 2026-11-18: an append-only prediction
+archive (`volumes/sportsbetting/archive.duckdb`, never published, daily
+Parquet export to `archive-export/`), schedule + FanDuel tip times, a dynamic
+pre-tip closing-line job, nightly grading with void rules, a fresh public
+record (`/api/record/*`) and the frozen pre-rebuild record. The card carries a
+"model under rebuild" banner until the rebuild's acceptance bar is met. Baseline audit + specs live in the
 project repo's `docs/`. Data dir `volumes/sportsbetting/` (outside the repo).
 
 `research` is a content-storage project: it holds dated markdown research
