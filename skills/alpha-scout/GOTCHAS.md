@@ -234,6 +234,46 @@
   Budget for this: put the full entry text in the Telegram summary so the
   owner can land it in one patch, and do not burn a retry on the denied
   Edit.
+- 2026-11-19 the 2026-10-22 "fence substantively saturated" entry is STILL
+  CURRENT, confirmed by the three scout runs that ran before this patch:
+  2026-10-20 08:10 UTC (job 9696ab18) at 3 non-terminal + 3 queued = 6 vs
+  max_active_ideas=4, 2026-10-20 20:10 UTC (f7c1e8f5) at 4/4 after the
+  owner drained queued lines, 2026-10-21 08:10 UTC (4579a8f5) at 4/4 with
+  the last queued F-04 INBOX line dispatched as a drain. All three invented
+  zero candidates and re-reported the same per-family lesson-termination
+  map. A-0011 has now been parked **49 days** (since 2026-10-01, [E-0087])
+  and A-0014 **44 days** (since 2026-10-06, [E-0118]), so effective working
+  width is still 2 — the same reading the 2026-10-22 entry recorded. Do not
+  re-walk the per-family pruning map on a routine schedule-fired run: cite
+  the 2026-10-22 entry and move the summary straight to the parked-DECISION
+  escalation line. Re-do the full sweep only when FAMILIES.md gains a
+  `status: open` family, a DECISION lands a new offered-but-unfiled item,
+  or one of the parked slots frees.
+- 2026-11-19 SKILL.md step 6 ("Summarize (Telegram)") is factually a NO-OP
+  for every schedule-fired scout run — the summary never reaches Telegram.
+  The gate is `src/notify/outbox.py:113` in `should_notify_job()`:
+  `return task_id is None and (origin_channel or "") in COMPLETION_DM_CHANNELS`
+  where `COMPLETION_DM_CHANNELS = ("telegram", "web", "cli")` at line 67.
+  Scheduled jobs are enqueued with `origin_channel="scheduler"`, so on a
+  completed scout job the function returns False, `build_job_notice()`
+  returns None (line 156), and no notice is ever enqueued. This is
+  INTENTIONAL spec — the comment at outbox.py lines 61–66 states 'every
+  schedule row behaves as `notify=failures` in Phase 1' to suppress the
+  10–20 machine-launcher DMs per day — but SKILL.md step 6 was written as
+  though delivery happened. It does not. The summary survives only as
+  `jobs.result['summary']` and the audit-log `final_message` event; a
+  routine `/task alpha-scout` dispatched from Telegram DOES deliver
+  (origin_channel="telegram" passes the gate), so on-demand runs look
+  fine while twice-daily ones look dark — the asymmetry hides the
+  failure. Consequence: every parked-DECISION escalation the scout
+  has written into the scheduled summary has only ever landed on disk —
+  which is a plausible contributor to [E-0087]/[E-0118] sitting 49/44
+  days unanswered. Until a code change lands (candidates: add `"scheduler"`
+  to COMPLETION_DM_CHANNELS, special-case `alpha-scout` in
+  `build_job_notice`, or route the escalation through a non-suppressed
+  channel such as a review-flagged task notice), treat the summary as a
+  disk-only artifact and surface a parked-DECISION escalation via a
+  route that does not go through the scheduled-completion gate.
 - 2026-10-04 F-08 NAV-source scope: family F-08
   (etf-primary-market-frictions) requires that every candidate names the
   *exact free NAV source* in the idea_text, or triage blocks the card as

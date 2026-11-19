@@ -1,3 +1,38 @@
+## 2026-11-19 — GOTCHAS: fence still saturated + scheduled-run Telegram-summary delivery gap
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — two entries inserted
+  before the F-08 NAV-source scope entry: (1) the 2026-10-22 "fence
+  substantively saturated" picture is STILL CURRENT per the three scout
+  runs that followed (2026-10-20 AM 9696ab18, 2026-10-20 PM f7c1e8f5,
+  2026-10-21 AM 4579a8f5); A-0011 parked 49 days, A-0014 parked 44 days;
+  future routine schedule-fired runs should cite the 2026-10-22 entry and
+  skip straight to the parked-DECISION escalation line. (2) SKILL.md step 6
+  ("Summarize (Telegram)") is factually a NO-OP for every schedule-fired
+  scout run because `src/notify/outbox.py:113` gates completion DMs on
+  `origin_channel in ("telegram","web","cli")` and scheduled jobs carry
+  `origin_channel="scheduler"`, so `build_job_notice()` returns None and
+  no notice is ever enqueued. This is intentional Phase-1 spec (outbox.py
+  lines 61–66), but SKILL.md step 6 was written as though delivery
+  happened — it does not, which is a plausible contributor to [E-0087]/
+  [E-0118] sitting 49/44 days unanswered. On-demand `/task alpha-scout`
+  from Telegram DOES deliver, hiding the asymmetry.
+**Why**: The scout session cannot write its own GOTCHAS under INV-20 and
+  cannot in any case diagnose the delivery gap from read-only + dispatch —
+  the gap is in `src/notify/outbox.py`, outside the scout's read surface.
+  Record the asymmetry so no future scout burns a slot assuming the
+  summary reached the owner, and so the eventual code fix (adding
+  `"scheduler"` to COMPLETION_DM_CHANNELS or special-casing alpha-scout
+  in `build_job_notice`) has a documented pointer.
+**Side effects**: None — documentation-only change. The spec gate at
+  outbox.py:113 is unchanged; a separate server-patch is required to
+  actually deliver scheduled-scout summaries.
+**Gotchas discovered**: the Telegram-summary gap is itself a new class
+  of "skill step X is a spec-level no-op" — any skill with a scheduled
+  trigger and a step that assumes a completion-DM delivery is similarly
+  silent today. Candidates to audit: anything with a schedule row and
+  a Telegram-summary step.
+
 ## 2026-10-22 — GOTCHA: fence-saturation map + mining sources exhausted (from scout job 4b7c76c9)
 
 **Files created**: none
