@@ -681,3 +681,90 @@ slug-minting class and a real knowledge hole.
 Record **both** numbers in the scorecard either way. A bare "scanner FAIL" in a past entry is
 indistinguishable between these two cases a week later, and they route to opposite places: one to a
 builder slot, one to the owner's deploy item.
+
+## A governance alarm about missing artifacts: check WHICH CLONE the alarm read, first (2026-11-19)
+
+This run was dispatched on a hard claim — "SCORECARD.md last commit 2026-09-28 (52 days stale);
+three atlas-evaluate sessions resolved `completed` with zero commits" — with instructions to diagnose
+the silent-failure root cause before scoring. The claim was **false, and falsified in one command**:
+
+```
+git -C "$HOME/Library/Application Support/ai-server/projects/atlas" log -1 --format=%h   # ccf52db, 2026-10-16
+git -C "$HOME/Documents/repos/atlas" log --oneline -- evaluation/SCORECARD.md | head -3  # 0cfe0bb 11-17, 0d49593 11-05, 5ef46dd 09-28
+```
+
+The runtime clone is **2 ahead / 307 behind `origin/master`** (owner item A's refused deploy), so its
+newest SCORECARD commit really is `5ef46dd` 2026-09-28 — the quoted date, to the day. Two of the three
+"silent" sessions had committed normally; only one died to `max_turns`.
+
+Rules this produces:
+
+1. **Any upstream claim about missing or stale artifacts gets its clone verified before you accept the
+   premise.** The runtime clone is read-only *and* arbitrarily far behind; reading it for governance
+   is a false-positive generator, and the staler the deploy item gets the louder the false alarm.
+2. A dispatch that pre-commits you to an escalation ("if you cannot commit, EXIT with escalation") is
+   still conditional on its premise. Check the condition — here the dev clone was clean and writable,
+   so the escalation did not fire and saying so *is* the finding.
+3. When you falsify the alarm, don't just drop it: the stale deploy is now corrupting the loop's own
+   observability, which is a new, concrete cost to add to the owner's deploy item. A falsified alarm
+   usually relocates rather than vanishes.
+
+## Gaps filed during an outage window are artifacts — date them against the restart (2026-11-19)
+
+Four gaps claimed whole portfolio sleeves were "entirely unpriced". The live DB said crypto 101/101
+and stock 32/32 holdings priced, newest bars within a day, zero holdings >4 days stale. The
+reconciliation is their filing times: **20:03–21:20 on 11-17, hours after the 14:33 restart** — they
+were filed by sessions reading a cold DB mid-outage and describe a state that no longer exists.
+
+So: before scouting a dramatic "everything is missing" gap, get `created_at` and compare it to the
+nearest restart/outage window; then try to reproduce the claim against the live DB. Reject as
+`outage artifact` with both halves in the reason (filing time AND the contradicting live count) —
+a reason citing only the live count reads as "evaluator disagreed" to a successor.
+
+**Do not try to date rows by `candles.created_at`.** It is a table-level default rewritten by the
+upsert path: `min(created_at)` for 11-16…11-18 bars is **2026-07-09**. It cannot tell you when a row
+was written, so it cannot tell you whether a sleeve was unpriced last Tuesday. Filing times plus a
+live contradiction is the available instrument.
+
+## The coverage parser must read the header-identified status column, never the joined row (2026-11-19)
+
+A quick `re.search(STATUS, joined_cells)` parser undercounted LIVE rows by 2 and was about to produce
+a phantom regression ("stocks lost a LIVE row; pm-edge lost its only LIVE row"). Cause: a LIVE
+pm-edge row carries the note "DEGRADED since 2026-07-10", and with the statuses tried in priority
+order `DEGRADED` matched inside the *note* before `LIVE` matched in the status cell.
+
+Fix, and the standing shape for this instrument:
+
+```python
+hdr = [c.strip().lower() for c in rows[0].strip().strip('|').split('|')]
+si  = next((i for i, h in enumerate(hdr) if 'status' in h), None)
+cell = cells[si] if si < len(cells) else ''
+hit  = next((s for s in STAT if re.search(r'\b' + re.escape(s), cell)), None)
+```
+
+And the validation that catches it: **run the parser against the previous run's commit and require it
+to reproduce that run's published numbers** (`python /tmp/cov.py 0cfe0bb` → 61/97, exactly as
+printed last week). Also assert `UNMATCHED: 0`. Any coverage delta you report is otherwise
+indistinguishable from a change in your own instrument — and an instrument change dressed as a
+regression sends a builder after nothing.
+
+## yfinance error counts: one log file, always the same one (2026-11-19)
+
+`grep -rc 'possibly delisted' volumes/logs/*.log` returned **8,320** against a prior-run figure of
+5,391 — a 54% "explosion" that was pure instrument drift: `project.atlas-pm-edge.err.log` contributes
+2,929 of its own, and past entries had only ever counted
+`project.atlas-dash-scheduler.err.log`. Pin the file, name it in the scorecard line, and treat any
+multi-file glob over `volumes/logs/` as a different series than the one you are comparing to.
+
+## Builder-eligibility, fourth clause: done-evidence must live inside the repo (2026-11-19)
+
+Build `e11fc21` graded PASS but **blocked slot 1** and spent the window on item 2, because the slot-1
+item's done-evidence was "every Coinbase transaction type present in the live export" — owner data,
+not in the repo, and the builder correctly refused to guess at money math. That is a whole slot lost
+to an item that was *written* ineligible, by this skill's own predecessor.
+
+Add to the eligibility questions you ask of every item you place in a builder slot: **can this item's
+done-evidence be produced from the repo and the live DB alone?** If it needs an owner export, a
+vendor account, a screenshot, or any artifact the builder cannot reach, either re-scope it to the
+in-repo half (here: make the importer fail loudly on unknown transaction types, which is testable
+with fixtures) or move it to the owner section — never both-at-once in one builder line.
