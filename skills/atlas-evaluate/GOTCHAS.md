@@ -768,3 +768,49 @@ done-evidence be produced from the repo and the live DB alone?** If it needs an 
 vendor account, a screenshot, or any artifact the builder cannot reach, either re-scope it to the
 in-repo half (here: make the importer fail loudly on unknown transaction types, which is testable
 with fixtures) or move it to the owner section — never both-at-once in one builder line.
+
+## A COMMIT IS NOT PUBLICATION — the push is, and it is the step the 1,800 s ceiling eats (2026-11-19)
+
+The 09-14 lesson established the closing order: stage → commit → `pull --rebase` → push. Correct, and
+insufficient. Job `edb4f732` followed it exactly, committed the full weekly evaluation as `339202f` at
+**01:34:09**, and was killed at **01:34:10**: `status=failed`, `terminal_reason=timeout`, **1,805 s**
+against ai-server's `src/config.py:77 session_timeout_seconds = 1800`. The wall clock landed in the
+one-second window **between the commit and the push**.
+
+The result is the nastiest observable this loop produces: a complete, rigorous, correctly-committed
+scorecard that **does not exist** for anybody. `origin` doesn't have it, the runtime clone doesn't
+have it, and atlas-manager — reading the already-307-behind runtime clone — raised a "52 days stale,
+three sessions produced no artifact" alarm whose answer was sitting in an unpushed local commit. That
+alarm then cost another whole evaluation window to diagnose. Two such windows in a row were burnt on
+phantoms before anyone ran `git rev-list --left-right --count origin/master...HEAD`.
+
+So, three rules:
+
+1. **Run `git rev-list --left-right --count origin/master...HEAD` and require `0 0` before you write
+   your final message.** Not "I committed" — `0 0`. A non-zero right-hand number means this run's
+   output is invisible and the run has produced nothing, whatever your transcript says.
+2. **Push the SCORECARD the moment it is written**, before the backlog re-route and before the
+   CHANGELOG. Two pushes in a run is free; losing the expensive artifact to the ceiling is not. The
+   analysis is ~25 minutes and irreversible; the publish is ~20 seconds. Do not leave the cheap,
+   load-bearing step at the far edge of the budget.
+3. **Inherit this suspicion.** The 10-12 lesson says an *uncommitted* predecessor is an unreliable
+   narrator. Extend it: a predecessor that says *"this entry is committed"* has told you nothing about
+   whether it was **published**. Check the remote, not the reflog. `edb4f732`'s own Headline 1 declared
+   the escalation condition did not fire because the entry "is committed" — true, and the run was
+   nevertheless a total loss until a successor pushed it.
+
+Do **not** fix this by editing SKILL.md yourself. The closing order lives in the lane's own executor
+skill, which is a MISSION §M protected path (owner-approval-only), and `session_timeout_seconds` is
+ai-server config the atlas builder cannot reach at any effort size. Record it as an **owner item**
+(filed as G on 11-19) and put the lesson here, where it binds you without a contract change.
+
+**Coda — the same invisibility class lives in the ai-server pipe too, so never `git add` this file in
+production.** This file is a synced copy: the canonical is in the atlas repo, the installed copy lives
+in the ai-server **production** checkout, where main commits are blocked by a pre-commit guard and doc
+learnings reach `origin/runtime-learnings` via the hourly `scripts/sync-learnings.sh`. That script
+collects work with `git diff --name-only -- <allowlist>`, i.e. **worktree vs index**. So if you stage
+the installed copy and leave worktree == index, `git diff` returns empty, the script prints *"nothing
+to publish"*, and your lesson is stranded on one disk — exactly the defect this entry is about, one
+pipe over. On 11-19 the file was found `MM` (a prior session had staged it), which still publishes
+because the worktree had moved on; `M ` would not have. Copy into the worktree, verify with
+`bash scripts/sync-learnings.sh --dry-run` that the path is listed, and leave the index alone.
