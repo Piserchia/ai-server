@@ -274,6 +274,65 @@
   channel such as a review-flagged task notice), treat the summary as a
   disk-only artifact and surface a parked-DECISION escalation via a
   route that does not go through the scheduled-completion gate.
+- 2026-11-21 the dark channel is BOTH routes, not just the summary (completes
+  the 2026-11-19 "SKILL.md step 6 is a NO-OP" entry): `TASK_QUESTION:` is dark
+  for a schedule-fired scout too, so there is NO non-failure way for a
+  scheduled run to reach the owner. Traced at source this run:
+  (1) completion - `should_notify_job` (`src/notify/outbox.py:93-114`) returns
+  False for `status="completed"` + `origin_channel="scheduler"` (not in
+  `COMPLETION_DM_CHANNELS = ("telegram","web","cli")`, line 67).
+  (2) question - `TASK_QUESTION:` writes a `task_question` audit event
+  (`session.py:452`); its ONLY consumer is `_update_task_after_job`
+  (`main.py:1666`), which `_process_job` calls exclusively under
+  `if job.task_id:` (`main.py:746`). `_tick_schedules` builds its Job with
+  `created_by="scheduler"`, `origin_channel="scheduler"` and **no `task_id`**
+  (`main.py:2130-2140`), so the event is written and never read - no
+  `awaiting_user`, no `_notify_task`, no DM.
+  (3) no laundering via dispatch - `effective_origin_channel`
+  (`main.py:1389`) makes a `system`-origin child INHERIT the parent's
+  `"scheduler"`, so an `enqueue_job` child's completion DM is suppressed by
+  the same gate.
+  (4) the one live route is `status == "failed"` (`outbox.py:110-111`, always
+  eligible). Do NOT exploit that by failing the job on purpose - a
+  deliberately-failed scout run corrupts schedule-adherence telemetry and the
+  terminal-reason vocabulary just to send a message.
+  Consequence: this is the mechanism behind the governor's standing
+  "[E-0278] section 1: it cannot tell the owner so through any channel but
+  this file". Until a code change lands (add `"scheduler"` to
+  `COMPLETION_DM_CHANNELS`, or special-case `alpha-scout`/`alpha-governor` in
+  `build_job_notice`, or give scheduled alpha rows a task_id - all OWNER
+  decisions, item #20), a scheduled scout's escalation is a disk-only artifact
+  and the owner sees it only by reading `jobs.result['summary']` or the ledger.
+- 2026-11-21 Grep's `glob=` DOES accept a `**/` prefix even though it rejects
+  `*/` (sharpens the 2026-10-05 entry, which concluded the capacity check
+  "cannot be done as one Grep"): measured this run,
+  `Grep(pattern='"stage"', path="<atlas>/alpha-lab/ideas",
+        glob="**/state.json", output_mode="content")`
+  returned all **25** state.json stage lines in ONE call, where the same call
+  with `glob="*/state.json"` returns "No matches found". So the whole capacity
+  check is one Glob (`.../ideas/**/state.json`, for the roster) plus one Grep
+  (`glob="**/state.json"`, for the stages) - no per-idea Read fan-out needed.
+  The `*`-crosses-one-directory-level blind spot is real; `**` is the fix in
+  Grep's `glob=` just as in Glob's `pattern=`.
+- 2026-11-21 capacity is NO LONGER the binding constraint, and the summary must
+  say which constraint actually binds: measured 25 ideas, 23 `verdict`, **2
+  non-terminal** (A-0011 1/6, A-0014 0/6) against `max_active_ideas: 4`, and
+  `^- \[ \]` in INBOX.md = **0** (28 of 28 checked). So 2 idea slots are FREE
+  and the queue is EMPTY - the run still files nothing because the FENCE is
+  saturated (2026-10-22 entry, still current) and MINING is dry: zero DECISIONs
+  since [E-0191] 2026-10-22, every ledger entry since ([E-0192]..[E-0279], ~50
+  entries) is a PROTOCOL-VIOLATION governor self-report carrying no
+  offered-but-unfiled item, and lifetime refinements are exactly one (A-0008
+  parent A-0004, depth 1). Do not let a free slot read as license (the
+  2026-10-17 rule generalises): report "2 slots free, fence-bound" rather than
+  "at capacity", because the two readings imply opposite owner actions.
+- 2026-11-21 two prose family proposals ALREADY stand unflipped - [E-0193]
+  section 5d (EDGAR) and [E-0272] section 1 (treasury-auction) - and
+  FAMILIES.md is byte-unchanged since 2026-09-23 (`457e1fec`, ~60 d) with
+  **zero** `status: proposed` sections. SKILL.md step 6 invites a prose family
+  proposal; when two already sit unactioned, a third is padding. Cite the two
+  standing proposals by ledger id and spend the summary on the parked holds
+  instead.
 - 2026-10-04 F-08 NAV-source scope: family F-08
   (etf-primary-market-frictions) requires that every candidate names the
   *exact free NAV source* in the idea_text, or triage blocks the card as

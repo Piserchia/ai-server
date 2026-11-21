@@ -1,3 +1,57 @@
+## 2026-11-21 — GOTCHAS: 4 runtime learnings from scout job 109652b9
+
+**Files created**: none
+**Files changed**: `skills/alpha-scout/GOTCHAS.md` — four entries inserted
+  before the F-08 NAV-source scope entry (same precedent as the 2026-10-19 /
+  2026-10-22 / 2026-11-19 entries):
+  (1) **the dark channel is BOTH routes, not just the summary** —
+  `TASK_QUESTION:` is also dark for a schedule-fired scout, completing the
+  2026-11-19 "SKILL.md step 6 is a NO-OP" entry. Traced at source:
+  `should_notify_job` (`src/notify/outbox.py:93-114`) excludes
+  `origin_channel="scheduler"`; `_update_task_after_job` (`main.py:1666`) is
+  the only consumer of `task_question` events and `_process_job` calls it
+  only under `if job.task_id:` (`main.py:746`) while `_tick_schedules` builds
+  scheduled jobs with no `task_id`; a dispatched child inherits `"scheduler"`
+  via `effective_origin_channel` (`main.py:1389`) so it cannot launder the
+  message either; the only live route is `status == "failed"` and that must
+  NOT be exploited. This is the mechanism behind the governor's standing
+  "[E-0278] §1" complaint and a plausible cause of [E-0087]/[E-0118] sitting
+  51/46 days unanswered.
+  (2) **Grep's `glob=` DOES accept `**/` even though it rejects `*/`** —
+  sharpens the 2026-10-05 entry: `Grep(pattern='"stage"', path="<atlas>/
+  alpha-lab/ideas", glob="**/state.json")` returns all 25 lines in one call;
+  the capacity check is now one Glob + one Grep with no per-idea Read
+  fan-out.
+  (3) **capacity is NOT the binding constraint** — measured 2 non-terminal
+  ideas against max_active_ideas=4 and 0 unchecked INBOX lines, yet the run
+  files nothing because the fence is saturated and mining is dry (no
+  DECISION since [E-0191]; ~50 entries since are all PROTOCOL-VIOLATION
+  self-reports). Report "2 slots free, fence-bound" not "at capacity" —
+  the two readings imply opposite owner actions.
+  (4) **two prose family proposals already stand unflipped** — [E-0193] §5d
+  (EDGAR) and [E-0272] §1 (treasury-auction); FAMILIES.md is byte-unchanged
+  since 2026-09-23 with zero `status: proposed` sections. SKILL.md step 6's
+  invitation to propose a third is padding when two sit unactioned.
+**Why**: the alpha-scout session (job 109652b9-a239-424e-a0fb-97b94e6ede67,
+  2026-11-21 pm schedule) measured these findings under the read-only guard
+  profile (INV-20) and cannot write them itself — the scout's Edit was
+  guard-denied as the 2026-10-22 "scout cannot write its own GOTCHAS" entry
+  predicted; this server-patch is the sanctioned route (same precedent as
+  the 2026-10-19 CHANGELOG entry). Payload explicitly forbids code changes
+  and names owner item #20 (widening `COMPLETION_DM_CHANNELS` is an owner
+  decision, read as intentional Phase-1 spec per [E-0278] §1) as the
+  boundary this docs-only patch respects.
+**Side effects**: None — documentation-only change. The notify/scheduler
+  gate at `src/notify/outbox.py:113` is unchanged; a separate server-patch
+  (contingent on owner approval of item #20) is required to actually
+  deliver scheduled-scout escalations.
+**Gotchas discovered**: the 2026-11-19 entry framed the gap as "summary
+  never reaches Telegram" — that framing was incomplete, because
+  `TASK_QUESTION:` has the same silence by a different mechanism
+  (missing task_id, not missing channel). Both routes fail-shut for the
+  same class of jobs (scheduler-created, no task_id), and both would need
+  a code change to open.
+
 ## 2026-11-19 — GOTCHAS: fence still saturated + scheduled-run Telegram-summary delivery gap
 
 **Files created**: none
