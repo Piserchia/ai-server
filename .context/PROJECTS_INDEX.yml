@@ -1,0 +1,365 @@
+# .context/PROJECTS_INDEX.yml — the combined project index.
+#
+# ONE machine-readable map of every project the ai-server hosts or tracks:
+# where its code lives, whether it is live, which launchd units run it, which
+# ports and hostnames it owns, how it deploys and how to check it is healthy,
+# and where its manifest.yml (the per-project deploy contract) actually lives.
+#
+# It is an INDEX, not a second source of truth. The authorities stay where
+# they are and this file must agree with them:
+#   - projects/<slug>/manifest.yml   — the deploy contract (src/registry/manifest.py)
+#   - projects/_ports.yml            — port allocation (never reuse a port)
+#   - .context/PROJECTS_REGISTRY.md  — human-readable registry
+#   - Caddyfile.d/<slug>.conf        — hostname → port routing
+# `python scripts/check_projects_index.py` checks that they agree (duplicate
+# ports/hostnames, registry or port-file entries missing from the index,
+# Caddy snippets that point at the wrong port, manifest drift). On the Mini it
+# reads projects/<slug>/manifest.yml directly; elsewhere pass
+# `--manifest <slug>=<path>` for any manifest you have a copy of.
+#
+# Field notes:
+#   status        live | retired | content (not hosted, no deploy)
+#   access        public | cf-access (Cloudflare Access gated) | mixed
+#   topology      dev-repo | in-place | content   (manifest delivery.topology)
+#   manifest.location
+#                 github   — committed in the project's canonical repo, readable
+#                            from GitHub by any machine
+#                 mini     — exists only in projects/<slug>/ on the Mac mini
+#                            (local-only repo, or a repo this index's author
+#                            could not read); a fresh machine cannot see it
+#                 none     — the project has no manifest (content projects)
+#   verified      what the values below were checked against, and when.
+#                 "registry" = .context/PROJECTS_REGISTRY.md; "manifest" = the
+#                 manifest itself. Anything not checked against the manifest is
+#                 a claim from docs and should be confirmed on the Mini with
+#                 `python scripts/check_projects_index.py` (it reads the real
+#                 manifests there).
+#   deploy.command
+#                 what to send (Telegram `/task …`) to deploy it. Deploys are
+#                 always their own step; a patch session never deploys.
+#   health.command
+#                 a local probe to run ON THE MINI (loopback port + manifest
+#                 healthcheck path). Expect HTTP 200.
+#
+# Keep it current: when a project is added, retired, re-homed or re-ported,
+# update this file in the same change as _ports.yml / the registry, then run
+# the check.
+
+version: 1
+updated: "2026-11-21"
+domain: chrispiserchia.com
+
+# The server itself. Listed so port and hostname uniqueness covers it.
+core:
+  name: ai-server
+  repo: github.com/Piserchia/ai-server
+  branch: main
+  dev_clone: ~/Documents/repos/ai-server
+  runtime_clone: "~/Library/Application Support/ai-server"
+  ports:
+    - port: 8080
+      service: web-gateway
+      launchd: com.assistant.web
+  hostnames:
+    - host: chrispiserchia.com
+      port: 8080            # /api/* only; everything else is the static landing page
+    - host: dashboard.chrispiserchia.com
+      port: 8080
+    - host: health.chrispiserchia.com
+      port: 8080            # only /health (Caddyfile.d/health.conf)
+  launchd:
+    - com.assistant.runner
+    - com.assistant.web
+    - com.assistant.bot
+    - com.assistant.caddy
+    - com.assistant.healthcheck-all
+    - com.assistant.backup
+    - com.assistant.sync-learnings
+  deploy:
+    command: "/task deploy server"
+    skill: server-deploy
+  health:
+    command: "curl -fsS http://127.0.0.1:8080/health"
+
+projects:
+  - slug: atlas
+    name: Atlas
+    status: live
+    type: service
+    repo: github.com/Piserchia/atlas
+    branch: master
+    topology: dev-repo
+    dev_clone: ~/Documents/repos/atlas
+    runtime_clone: projects/atlas          # pull-only
+    hostname: atlas.chrispiserchia.com
+    access: cf-access
+    port: 8791
+    healthcheck: /
+    services:
+      - name: atlas
+        launchd: com.assistant.project.atlas
+        port: 8791
+        start: ./scripts/start-web.sh
+      - name: atlas-dash-scheduler
+        launchd: com.assistant.project.atlas-dash-scheduler
+        port: null                         # portless
+        start: ./scripts/start-dash-scheduler.sh
+      - name: atlas-pm-edge
+        launchd: com.assistant.project.atlas-pm-edge
+        port: null                         # portless
+        start: ./scripts/start-pmedge.sh
+    deploy:
+      skill: atlas-redeploy
+      autonomy: gated-auto
+      command: "/task redeploy atlas"
+      migrate: "dbmate --migrations-dir db/migrations up"
+    health:
+      command: "curl -fsS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8791/"
+    manifest:
+      location: github
+      path: github.com/Piserchia/atlas/blob/master/manifest.yml
+    verified: "manifest (GitHub master), registry, _ports.yml, Caddyfile.d — 2026-11-21"
+
+  - slug: baseball-bingo
+    name: Baseball Bingo
+    status: live
+    type: service
+    repo: github.com/Piserchia/baseball-bingo
+    branch: main
+    topology: in-place                     # dev-repo promotion pending (owner call)
+    dev_clone: null
+    runtime_clone: projects/baseball-bingo # writable (in-place)
+    hostname: bingo.chrispiserchia.com
+    access: public
+    port: 8790
+    healthcheck: /healthz
+    services:
+      - name: baseball-bingo
+        launchd: com.assistant.project.baseball-bingo
+        port: 8790
+        start: "uvicorn web.main:app (via the ai-server venv; sources project .env)"
+    deploy:
+      skill: app-patch                     # no delivery block yet; project-redeploy refuses it
+      autonomy: none
+      command: "/task app-patch baseball-bingo (inline restart) — no gated deploy until a delivery block exists"
+      migrate: null
+    health:
+      command: "curl -fsS http://127.0.0.1:8790/healthz"
+    manifest:
+      location: mini
+      path: projects/baseball-bingo/manifest.yml
+      note: "May also be committed in Piserchia/baseball-bingo; that repo was not readable when this index was written."
+    verified: "registry, _ports.yml, Caddyfile.d, hosting CHANGELOG — 2026-11-21 (manifest not seen)"
+
+  - slug: content-forge
+    name: Content Forge
+    status: live
+    type: service
+    repo: null                             # local-only git repo, no remote
+    branch: main
+    topology: in-place
+    dev_clone: ~/Documents/repos/ai-server/projects/content-forge
+    runtime_clone: projects/content-forge
+    hostname: content-forge.chrispiserchia.com
+    access: cf-access
+    port: 8792
+    healthcheck: null                      # not documented in ai-server; read it from the manifest
+    services:
+      - name: content-forge
+        launchd: com.assistant.project.content-forge
+        port: 8792
+        start: "uvicorn on 127.0.0.1:8792"
+    deploy:
+      skill: project-redeploy
+      autonomy: human-approval
+      command: "/task deploy-director: content-forge"
+      migrate: null
+    health:
+      command: "curl -fsS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8792/"
+    manifest:
+      location: mini
+      path: projects/content-forge/manifest.yml
+      note: "No off-site copy at all: the repo has no remote, so disk loss loses the code and the manifest."
+    verified: "registry, _ports.yml, Caddyfile.d — 2026-11-21 (manifest not seen)"
+
+  - slug: pickem
+    name: Arlington Degenerates Pick'em
+    status: live
+    type: service
+    repo: github.com/alfredbot-ai-butler/pickem
+    branch: main
+    topology: dev-repo
+    dev_clone: ~/Documents/repos/pickem
+    runtime_clone: projects/pickem         # pull-only
+    hostname: pickem.chrispiserchia.com
+    access: public
+    port: 8793
+    healthcheck: /healthz
+    services:
+      - name: pickem
+        launchd: com.assistant.project.pickem
+        port: 8793
+        start: ".venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8793"
+    deploy:
+      skill: project-redeploy
+      autonomy: gated-auto
+      command: "/task deploy-director: pickem"
+      migrate: null
+    health:
+      command: "curl -fsS http://127.0.0.1:8793/healthz"
+    manifest:
+      location: mini
+      path: projects/pickem/manifest.yml
+      note: "Committed in the bot-account repo, which this index's author could not read. The build plan's manifest says git.repo Piserchia/pickem while the registry says alfredbot-ai-butler/pickem — confirm which is right."
+    verified: "registry, _ports.yml, Caddyfile.d, build plan 2026-09-09 — 2026-11-21 (manifest not seen)"
+
+  - slug: moneymachine
+    name: MoneyMachine Company
+    status: live
+    type: service
+    repo: github.com/alfredbot-ai-butler/moneymachine
+    branch: main
+    topology: dev-repo
+    dev_clone: ~/Documents/repos/moneymachine
+    runtime_clone: projects/moneymachine   # pull-only; the page's data source
+    hostname: moneymachine.chrispiserchia.com
+    access: cf-access
+    port: 8794
+    healthcheck: /healthz
+    services:
+      - name: moneymachine
+        launchd: com.assistant.project.moneymachine
+        port: 8794
+        start: "bash web/run.sh"
+    deploy:
+      skill: project-redeploy
+      autonomy: gated-auto
+      command: "/task deploy-director: moneymachine"
+      migrate: null
+    health:
+      command: "curl -fsS http://127.0.0.1:8794/healthz"
+    manifest:
+      location: mini
+      path: projects/moneymachine/manifest.yml
+      note: "Committed in the bot-account repo, not readable from here. Caddyfile.d/moneymachine.conf was written on the Mini on 2026-10-29 (hosting CHANGELOG) but is not committed to main."
+    verified: "registry, _ports.yml, moneymachine plan — 2026-11-21 (manifest and Caddy snippet not seen)"
+
+  - slug: sportsbetting
+    name: Props (NBA player props)
+    status: live
+    type: service
+    repo: github.com/alfredbot-ai-butler/sportsbetting
+    branch: main
+    upstream: github.com/Piserchia/sportsbetting-app   # ported from; NOT what runs
+    topology: dev-repo
+    dev_clone: ~/Documents/repos/sportsbetting
+    runtime_clone: projects/sportsbetting  # pull-only
+    hostname: props.chrispiserchia.com     # subdomain "props", not the slug
+    access: mixed                          # public card; /me + /api/me behind a CF Access JWT check
+    port: 8795
+    healthcheck: /healthz
+    services:
+      - name: sportsbetting
+        launchd: com.assistant.project.sportsbetting
+        port: 8795
+        start: "FastAPI (uvicorn) serving the React SPA"
+      - name: sportsbetting-scheduler
+        launchd: com.assistant.project.sportsbetting-scheduler
+        port: null                         # portless in-project scheduler
+        start: "in-project scheduler (stats, props, sims, publish)"
+    deploy:
+      skill: project-redeploy
+      autonomy: gated-auto
+      command: "/task deploy-director: sportsbetting"
+      migrate: null
+    health:
+      command: "curl -fsS http://127.0.0.1:8795/healthz && curl -fsS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8795/api/games/today"
+    manifest:
+      location: mini
+      path: projects/sportsbetting/manifest.yml
+      note: "Committed in the bot-account repo, not readable from here. No Caddyfile.d/sportsbetting.conf is committed to ai-server."
+    verified: "registry, _ports.yml — 2026-11-21 (manifest and Caddy snippet not seen)"
+
+  - slug: research
+    name: Research reports
+    status: content
+    type: content
+    repo: github.com/alfredbot-ai-butler/research   # DR mirror; prod is the writer
+    branch: main
+    topology: content
+    runtime_clone: projects/research       # prod-written by design
+    hostname: null
+    port: null
+    services: []
+    deploy: null
+    health: null
+    manifest:
+      location: none
+    verified: "registry — 2026-11-21"
+
+  - slug: research-deep
+    name: Deep research reports
+    status: content
+    type: content
+    repo: github.com/alfredbot-ai-butler/research-deep  # DR mirror per registry
+    branch: main
+    topology: content
+    runtime_clone: projects/research-deep
+    hostname: null
+    port: null
+    services: []
+    deploy: null
+    health: null
+    manifest:
+      location: none
+      note: "A Nov 21 push run on the Mini reported this repo has no remote configured, which contradicts the registry's DR mirror. Confirm on the Mini."
+    verified: "registry — 2026-11-21"
+
+  - slug: ideas
+    name: Ideas
+    status: content
+    type: content
+    repo: github.com/alfredbot-ai-butler/ideas  # DR mirror; prod is the writer
+    branch: main
+    topology: content
+    runtime_clone: projects/ideas
+    hostname: null
+    port: null
+    services: []
+    deploy: null
+    health: null
+    manifest:
+      location: none
+    verified: "registry — 2026-11-21"
+
+  - slug: market-tracker
+    name: Market Tracker
+    status: retired                        # 2026-07-09, superseded by Atlas
+    type: service
+    repo: github.com/Piserchia/market-tracker   # archived
+    branch: main
+    topology: in-place
+    runtime_clone: null                    # nested prod copy was quarantined 2026-08-30
+    hostname: null                         # was market-tracker.chrispiserchia.com
+    port: null
+    retired_ports: [8787, 8788, 8789]      # never reuse
+    retired_launchd:                       # should be unloaded on the Mini
+      - com.assistant.project.market-tracker
+      - com.assistant.project.market-tracker-stocks
+      - com.assistant.project.market-tracker-crypto
+    services: []
+    deploy: null
+    health: null
+    manifest:
+      location: github
+      path: github.com/Piserchia/market-tracker/blob/main/manifest.yml
+      note: "Stale on purpose: it still declares ports 8787-8789. Do not register it."
+    verified: "manifest (GitHub main), registry, _ports.yml — 2026-11-21"
+
+# Repos that look like projects but are not hosted. Kept here so nobody
+# deploys the wrong one.
+related_repos:
+  - repo: github.com/Piserchia/sportsbetting-app
+    relation: upstream of `sportsbetting` (ported 2026-11-17)
+    hosted: false
+    note: "The live NBA props app is projects/sportsbetting from the alfredbot-ai-butler repo. Changes here do not reach props.chrispiserchia.com."
