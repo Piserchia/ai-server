@@ -110,6 +110,14 @@ A manifest with no block derives a legacy `in-place` default, so enforcement is
 | `moneymachine` | dev-repo (GitHub `alfredbot-ai-butler/moneymachine` canonical; Mini dev clone `~/Documents/repos/moneymachine`; runtime clone pull-only) | yes · gated-auto (since 2026-10-27) | **ACTIVE** — block live 2026-10-21 as manifest-only; page hosted 2026-10-27 (gates: mmcore pytest, web venv + pytest, `/healthz` 200) |
 | `sportsbetting` | dev-repo (GitHub `alfredbot-ai-butler/sportsbetting` canonical, private; Mini dev clone `~/Documents/repos/sportsbetting`; runtime clone pull-only) | yes · gated-auto | **ACTIVE from creation 2026-11-17** — `env_files: [".env"]`; gates: pytest, frontend build when `frontend/**` changes, `/healthz` 200, `/api/games/today` 200; services `sportsbetting` + `sportsbetting-scheduler` |
 
+**Auto-deploy on merge (2026-11-21):** every row above that is dev-repo +
+pull-only + `gated-auto` (atlas, pickem, moneymachine, sportsbetting) is
+watched by `scripts/healthcheck-all.sh` `check_project_deploys`: a new
+non-markdown commit on its `delivery.branch` dispatches its own executor
+within ~5–15 min. In-place projects (baseball-bingo, content-forge) and
+content repos are not touched. Opt one out with `DEPLOY_AUTOPILOT_SKIP=<slug>`
+in the server `.env`.
+
 Until a block is added a project runs exactly as before. Atlas's block is
 active (runner now cwd-scopes atlas patch jobs to the Mini dev clone and gates
 deploys). Adding bingo's block activates the same enforcement for it — do it

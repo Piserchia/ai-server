@@ -15,7 +15,19 @@ Multi-project hosting on a single public domain via:
 - `register-project.sh <slug> [--dry-run]` — add/update a project's hosting config. Reads `projects/<slug>/manifest.yml`, generates Caddy snippet + launchd plist(s) + DB row.
 - `healthcheck-all.sh` — probe all projects (runs on 5-min timer via launchd);
   also the runner-liveness backstop, the swing watchdog and the deploy
-  autopilot. Its owner alerts go `notify_send` → `"$VENV_PY" -m src.notify
+  autopilot — two of them since 2026-11-21: `check_deploy_pending` (this
+  checkout's origin/main → a `deploy-director` job) and
+  `check_project_deploys` (every `projects/*/manifest.yml` with a
+  dev-repo + pull-only + gated-auto delivery contract: a new commit on its
+  `delivery.branch` → that project's own `delivery.deploy.skill` executor,
+  `payload.project_slug` set, LPUSHed, `created_by='deploy-autopilot'`).
+  One attempt per tip (`volumes/state/autodeploy-<slug>`), markdown-only
+  ranges skipped, tip ≥10 min old, fast-forward only, serialized behind any
+  deploy in flight (`deploy_in_flight`), one dispatch per tick; a follow-up
+  judges each attempt by the executor's `deployed-sha-<slug>` marker and
+  alerts the owner once when it didn't ship. `.env` switches:
+  `DEPLOY_AUTOPILOT=0` (both), `DEPLOY_AUTOPILOT_PROJECTS=0`,
+  `DEPLOY_AUTOPILOT_SKIP=a,b`, `DEPLOY_AUTOPILOT_INCLUDE_DOCS=1`. Its owner alerts go `notify_send` → `"$VENV_PY" -m src.notify
   send --kind ops_alert --severity critical` (direct Telegram HTTP + a
   `notifications` row as alert history) and fall back to the raw curl when
   there is no usable venv python or the CLI did not deliver (A7,

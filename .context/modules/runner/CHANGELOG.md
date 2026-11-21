@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-11-21 — `deploy-autopilot` is an autonomous trigger for the deploy-authority gate
+
+**Agent task**: project deploy autopilot (hosting CHANGELOG 2026-11-21).
+**Files changed**: `src/runner/delivery.py` — `_AUTONOMOUS_PREFIXES` gains `"deploy-autopilot"`; `tests/test_delivery.py::TestClassifyTrigger` pins it.
+**Why**: `scripts/healthcheck-all.sh` now dispatches project deploys with `created_by='deploy-autopilot'`. Unlisted, that read as a HUMAN trigger, so a `human-approval` or `manual-only` contract would have let an unattended deploy through; the script filters to `gated-auto` itself, and this makes the runner's gate agree.
+**Side effects**: none for `gated-auto` projects or for the server autopilot's `deploy-director` job (not a deploy skill, so the gate never runs on it).
+
 ## 2026-11-20 — INV-9: the QuotaExhausted requeue is a guarded running→queued flip, pushed after it wins
 
 **Agent task**: the "same INV-9 class, still open" item the claim-guard review recorded (GOTCHAS 2026-11-17).

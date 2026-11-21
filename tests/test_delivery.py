@@ -20,7 +20,7 @@ class TestClassifyTrigger:
     @pytest.mark.parametrize("cb", [
         "scheduler", "escalation:abc123", "auto-continue:ff", "evaluator:9",
         "eval-fix:1", "learning:22", "writeback:7", "event", "plan:xy",
-        "self-diagnose", "cascade",
+        "self-diagnose", "cascade", "deploy-autopilot",
     ])
     def test_autonomous_prefixes(self, cb):
         assert delivery.classify_trigger(cb) == "autonomous"
