@@ -376,5 +376,18 @@ def test_project_deploy_target_reads_atlas_manifest_shape(env):
 def test_deploy_in_flight_counts_every_redeploy_kind():
     fn = _fn("deploy_in_flight")
     for needle in ("'server-deploy'", "'deploy_director'", "%\\_redeploy", "%-redeploy",
-                   "resolved_skill LIKE"):
+                   "resolved_skill LIKE", "kind = 'task' AND status = 'queued'"):
         assert needle in fn
+
+
+def test_fetches_cannot_hang_the_timer():
+    src = SCRIPT.read_text()
+    assert src.count("http.lowSpeedLimit=1000 -c http.lowSpeedTime=20") == 2   # both autopilots
+
+
+def test_missing_marker_at_tip_warns_once(env):
+    env.add_project("moneymachine", branch="main", skill="project-redeploy")
+    env.run()
+    env.run()
+    assert env.log().count("no deployed-sha marker") == 1
+    assert env.inserts() == []

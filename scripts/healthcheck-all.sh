@@ -262,8 +262,10 @@ check_swing_freshness || true
 # ── Deploy-in-flight probe (shared by both autopilots, 2026-11-21) ──────────
 # Returns 0 ("busy") when ANY deploy machinery is queued or running — server
 # or project — or when the answer is unknown (psql down = stand down). The
-# `resolved_skill` arm catches deploys that arrived as kind='task' via
-# `/task redeploy …` routing. Serializing every deploy means a server deploy
+# `resolved_skill` arm catches a RUNNING deploy that arrived as kind='task'
+# via `/task redeploy …` routing; `resolved_skill` is only stamped when the
+# session starts, so a still-QUEUED kind='task' row whose description starts
+# with deploy/redeploy counts as in flight too. Serializing every deploy means a server deploy
 # (which restarts the runner) never lands on top of a project deploy, and two
 # project deploys never race each other.
 deploy_in_flight() {   # 0 = busy or unknown, 1 = idle
@@ -272,7 +274,9 @@ deploy_in_flight() {   # 0 = busy or unknown, 1 = idle
         AND (kind IN ('server-deploy','server_deploy','deploy-director','deploy_director')
              OR resolved_skill IN ('server-deploy','deploy-director')
              OR kind LIKE '%\_redeploy' OR kind LIKE '%-redeploy'
-             OR resolved_skill LIKE '%-redeploy')" 2>/dev/null || echo x)
+             OR resolved_skill LIKE '%-redeploy'
+             OR (kind = 'task' AND status = 'queued'
+                 AND description ~* '^[[:space:]]*(/task[[:space:]]+)?(re)?deploy'))" 2>/dev/null || echo x)
     active=$(printf '%s' "$active" | tr -d '[:space:]')
     [[ "$active" =~ ^[0-9]+$ ]] || return 0
     (( active > 0 ))
@@ -298,7 +302,8 @@ check_deploy_pending() {
     autopilot=$(grep -E '^DEPLOY_AUTOPILOT=' "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
     [[ "$autopilot" == "0" || "$autopilot" == "false" ]] && return 0
 
-    git -C "$PROJECT_DIR" fetch origin main --quiet 2>/dev/null || return 0
+    git -C "$PROJECT_DIR" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
+        fetch origin main --quiet 2>/dev/null || return 0
     head=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null) || return 0
     remote=$(git -C "$PROJECT_DIR" rev-parse origin/main 2>/dev/null) || return 0
     [[ "$head" == "$remote" ]] && return 0
@@ -362,8 +367,10 @@ check_deploy_pending || true
 #              A tip is tried once; a red deploy waits for the NEXT commit
 #              (no token loop on a broken gate).
 #   docs       a new range that touches only *.md files dispatches nothing —
-#              the loops' ledger commits — and the next code change ships
-#              them, because executors deploy from the deployed-sha marker.
+#              most of the loops' ledger commits — and the next code change
+#              ships them, because executors deploy from the deployed-sha
+#              marker. (Loop commits that also touch .json/.jsonl/.yaml DO
+#              dispatch; narrowing that needs a per-project path list.)
 #              DEPLOY_AUTOPILOT_INCLUDE_DOCS=1 deploys them too.
 #   guards     tip ≥ DEPLOY_QUIET_SECONDS old; fast-forward only (divergence
 #              = one owner alert, no dispatch); nothing deploy-shaped in
@@ -447,7 +454,7 @@ project_deploy_followup() {   # $1 slug  $2 runtime clone
     else
         status=$(psql assistant -tAc "SELECT status FROM jobs WHERE id='$st_job'::uuid;" 2>/dev/null | tr -d '[:space:]')
         echo "$(date -u +%FT%TZ) FAIL project-deploy $slug ${st_tip:0:8} not shipped (job ${st_job:0:8} ${status:-unknown})" >> "$LOG"
-        alert_owner "⚠️ Auto-deploy of $slug ${st_tip:0:8} didn't finish green on $(hostname -s) (job ${st_job:0:8}, ${status:-status unknown}). If a test or build check failed, the old version is still serving. The job summary says what happened; the next commit to the branch triggers a fresh attempt." || true
+        alert_owner "⚠️ Auto-deploy of $slug ${st_tip:0:8} didn't finish green on $(hostname -s) (job ${st_job:0:8}, ${status:-status unknown}). If a test or build check failed, the old version is still serving. The job summary says what happened; the next code commit to the branch triggers a fresh attempt." || true
     fi
     printf '%s %s 1\n' "$st_tip" "$st_job" > "$state" 2>/dev/null || true
 }
@@ -476,16 +483,31 @@ check_project_deploys() {
 
         project_deploy_followup "$slug" "$P"
 
+        # HEAD first: moneymachine's page pulls its own clone every 60 s, and a
+        # pull landing between the fetch and a later HEAD read would look like
+        # divergence (HEAD past the tip we just read).
+        head=$(git -C "$P" rev-parse HEAD 2>/dev/null) || continue
+        # A stalled https fetch must not hang the whole timer (launchd won't
+        # start the next tick while this one runs): abort under 1 KB/s for 20 s.
         GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10" \
-            git -C "$P" fetch origin "$branch" --quiet 2>/dev/null || {
+            git -C "$P" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
+            fetch origin "$branch" --quiet 2>/dev/null || {
             echo "$(date -u +%FT%TZ) WARN project-deploy $slug: fetch origin $branch failed" >> "$LOG"
             continue; }
         tip=$(git -C "$P" rev-parse "origin/$branch" 2>/dev/null) || continue
-        head=$(git -C "$P" rev-parse HEAD 2>/dev/null) || continue
         marker=$(cat "$PROJ_STATE_DIR/deployed-sha-$slug" 2>/dev/null || true)
         deployed=$head
         if [[ -n "$marker" ]] && git -C "$P" cat-file -e "$marker^{commit}" 2>/dev/null; then
             deployed=$marker
+        elif [[ "$head" == "$tip" ]]; then
+            # No usable marker and the clone already sits at the tip (e.g. a
+            # clone that pulls itself): nothing to compare against, so this
+            # project can't be auto-deployed until one manual redeploy seeds
+            # the marker. Say so instead of staying silent.
+            if [[ ! -e "$PROJ_STATE_DIR/autodeploy-$slug.nomarker" ]]; then   # once, not every tick
+                echo "$(date -u +%FT%TZ) WARN project-deploy $slug: no deployed-sha marker — run one redeploy to seed it" >> "$LOG"
+                : > "$PROJ_STATE_DIR/autodeploy-$slug.nomarker" 2>/dev/null || true
+            fi
         fi
         # already shipped (marker at or past the tip)
         [[ "$tip" == "$deployed" ]] && continue
