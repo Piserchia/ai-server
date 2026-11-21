@@ -124,7 +124,7 @@ dir. Options:
 
 ## Symptom: `_writeback` fails with `exit code 143` (SIGTERM) after server-deploy
 
-### Root cause (diagnosed 2026-11-17, job `463e06f8`, parent `547cb86b`, self-diagnose `7026f688`)
+### Root cause (diagnosed 2026-11-17, job `463e06f8`, parent `547cb86b`, self-diagnose `7026f688`; recurrence 2026-11-21, job `86c6b5bf`, parent `d0bd2b44`, self-diagnose `90d0b65c` — same timing: writeback spawned 00:19:00, SIGTERM at 00:19:10, ~10s into its run, matching the T+20s restart from step 4)
 
 Server-deploy step 4 schedules a detached `launchctl kickstart -k …runner`
 for T+20s via `nohup sleep 20`. If the parent session hits `TASK_COMPLETE`
