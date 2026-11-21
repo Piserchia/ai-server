@@ -734,3 +734,13 @@ def test_seed_schedules_swing_rows_carry_env_required():
     assert "env_required" not in rows["atlas-swing-evaluate"]
     assert "env_required" not in rows["atlas-value-monitor"]
     assert src.count('"env_required":[') == 4      # the four rows, nothing else
+
+
+def test_autopilot_dispatch_goes_to_the_front_of_the_queue():
+    # 2026-11-20: a reboot catch-up (37 schedules) plus a 40-job atlas-report
+    # fan-out pushed a 3-commit deploy out by six hours on 11-17. The deploy
+    # autopilot now LPUSHes deploy-director (front, like the INV-12 quota
+    # requeue) instead of RPUSHing it behind the backlog.
+    fn = _bash_function("scripts/healthcheck-all.sh", "check_deploy_pending")
+    assert "redis-cli lpush jobs:queue" in fn
+    assert "rpush" not in fn.lower()

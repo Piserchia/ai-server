@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-11-20 — INV-9: the QuotaExhausted requeue is a guarded running→queued flip, pushed after it wins
+
+**Agent task**: the "same INV-9 class, still open" item the claim-guard review recorded (GOTCHAS 2026-11-17).
+**Files changed**: `src/runner/main.py` — new `_requeue_front_for_quota(job_id, error_message, log)`, shared by the `QuotaExhausted` handler AND its per-provider twin (`ExecutorFailed` `rate_limited`, which the independent review found had the identical LPUSH-first unguarded flip); it runs `UPDATE jobs SET status='queued', error_message WHERE id=:id AND status='running'` first and LPUSHes only on rowcount 1; rowcount 0 (the user cancelled while the session was dying — `_cancel_listener` stamped `cancelled`) writes an audit `note`, logs and returns False (the caller writes no `job_requeued_for_quota` row); the LPUSH after a won flip is try/except-guarded like the tail requeue (a Redis blip leaves a `queued` row that `requeue_stranded_queued` heals at the next start). The quota/lane pause is still applied either way. `src/db.py` — `QUEUE_JOBS` comment names the two front-of-queue writers. `tests/test_quota.py::TestQuotaRequeueIsGuarded` (4: predicate + flip-before-push ordering; a lost flip requeues nothing; the rate_limited twin; an LPUSH failure after a won flip does not escape).
+**Why**: unguarded and LPUSH-first, a cancel racing a quota requeue flipped a terminal row back to `queued` and re-ran it. With this every runner status write on a job row is a guarded UPDATE except `_cancel_listener`'s own `cancelled` stamp (reviewed, left as is: it may overwrite a `completed` that lands between `interrupt()` and the UPDATE — GOTCHAS 2026-11-20).
+**Side effects**: none on a healthy fleet; the new warning fires only when a cancel races a quota requeue.
+
 ## 2026-11-17 — INV-9: the queued→running claim is one guarded UPDATE (Tier B whole-branch review #4)
 
 **Agent task**: the dated follow-up recorded at Tier B's merge (gateway CHANGELOG 2026-10-29 caveat; runner GOTCHAS 2026-10-29).

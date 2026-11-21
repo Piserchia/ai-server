@@ -143,10 +143,13 @@ def test_no_unguarded_orm_flip_remains():
     import textwrap
     from src.runner import main as runner_main
     tree = ast.parse(textwrap.dedent(inspect.getsource(runner_main._process_job)))
+    # exactly one `job.status = running` and exactly one rowcount check live in
+    # _process_job itself (the quota requeue's check is in _requeue_front_for_quota)
     flips = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
              and ast.unparse(n.targets[0]) == "job.status"
              and ast.unparse(n.value) == "JobStatus.running.value"]
-    checks = [n for n in ast.walk(tree) if isinstance(n, ast.If) and "rowcount" in ast.unparse(n.test)]
+    checks = [n for n in ast.walk(tree) if isinstance(n, ast.If)
+              and "res.rowcount == 0" in ast.unparse(n.test)]
     assert len(flips) == 1 and len(checks) == 1
     assert flips[0].lineno > checks[0].end_lineno
     claims = [n for n in ast.walk(tree) if isinstance(n, ast.Call)

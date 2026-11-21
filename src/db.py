@@ -41,7 +41,10 @@ redis: aioredis.Redis = aioredis.from_url(
 
 # ── Queue constants (one place, don't inline strings) ───────────────────────
 
-QUEUE_JOBS = "jobs:queue"                         # RPUSH from gateways, BLPOP from runner
+QUEUE_JOBS = "jobs:queue"                         # RPUSH from gateways, BLPOP from runner;
+                                                  # LPUSH (front) only for the two quota requeues
+                                                  # (INV-12 global + per-provider rate_limited) and
+                                                  # the deploy autopilot (2026-11-20)
 CHANNEL_JOB_STREAM = "jobs:stream"                # pub: jobs:stream:<job_id>
 CHANNEL_JOB_DONE = "jobs:done"                    # pub: jobs:done:<job_id>
 CHANNEL_JOB_CANCEL = "jobs:cancel"                # pub: jobs:cancel (body = job_id)

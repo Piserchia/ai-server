@@ -541,6 +541,37 @@ async def _hold_if_provider_paused(job: Job, log) -> bool:
     return True
 
 
+async def _requeue_front_for_quota(job_id: uuid.UUID, error_message: str, log) -> bool:
+    """INV-9 (2026-11-20): the running→queued requeue both quota paths share
+    (Anthropic `QuotaExhausted`, per-provider `rate_limited`). ONE guarded
+    `UPDATE … WHERE id=:id AND status='running'`, then the LPUSH (INV-12,
+    front). Unguarded and LPUSH-first, a `cancelled` row stamped by
+    _cancel_listener while the session was dying was flipped back to `queued`
+    and re-run. Returns False when the row was no longer running (the caller
+    then writes no requeue audit) — the row keeps the terminal state someone
+    else gave it. The LPUSH is guarded like the tail requeue: on a Redis blip
+    the row stays `queued` with no Redis entry and `requeue_stranded_queued`
+    heals it at the next runner start; the id survives in the log line."""
+    async with session_scope() as s:
+        res = await s.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.running.value)
+            .values(status=JobStatus.queued.value, error_message=error_message)
+        )
+    if res.rowcount == 0:
+        audit_log.append(str(job_id), "note",
+                         text="quota requeue skipped — row no longer running (cancelled meanwhile)")
+        log.warning("quota requeue skipped — job no longer running (cancelled meanwhile)")
+        return False
+    try:
+        await redis.lpush(QUEUE_JOBS, str(job_id))
+    except Exception:
+        log.exception("quota requeue: row flipped to queued but LPUSH failed — "
+                      "healed by requeue_stranded_queued at next runner start",
+                      job_id=str(job_id))
+    return True
+
+
 async def _process_job(job_id: uuid.UUID) -> None:
     job: Job | None = None
     for delay in _JOB_FETCH_DELAYS:
@@ -719,17 +750,12 @@ async def _process_job(job_id: uuid.UUID) -> None:
                 log.exception("task lifecycle update failed (non-fatal)")
 
     except quota.QuotaExhausted as exc:
-        # Pause the queue, requeue this job at the front so it retries after reset
+        # Pause the queue, requeue this job at the front so it retries after reset.
         await quota.pause_queue(exc.reset_at, exc.reason,
                                 source=getattr(exc, "source", "estimated"))
-        await redis.lpush(QUEUE_JOBS, str(job_id))
-        async with session_scope() as s:
-            await s.execute(
-                update(Job).where(Job.id == job_id).values(
-                    status=JobStatus.queued.value,
-                    error_message=f"queued for quota reset ({exc.reason[:100]})",
-                )
-            )
+        if not await _requeue_front_for_quota(
+                job_id, f"queued for quota reset ({exc.reason[:100]})", log):
+            return
         audit_log.append(str(job_id), "job_requeued_for_quota", reason=exc.reason[:200])
         log.warning("quota exhausted — queue paused, job requeued")
 
@@ -838,15 +864,9 @@ async def _process_job(job_id: uuid.UUID) -> None:
             # The stream carries no reset time → settings.quota_pause_minutes.
             # Not failed, not escalated, no task DM (same as QuotaExhausted).
             until = await quota.pause_provider(exc.provider, None, reason)
-            await redis.lpush(QUEUE_JOBS, str(job_id))
-            async with session_scope() as s:
-                await s.execute(
-                    update(Job).where(Job.id == job_id).values(
-                        status=JobStatus.queued.value,
-                        error_message=(f"queued for {exc.provider} quota reset "
-                                       f"({reason[:100]})"),
-                    )
-                )
+            if not await _requeue_front_for_quota(
+                    job_id, f"queued for {exc.provider} quota reset ({reason[:100]})", log):
+                return
             audit_log.append(str(job_id), "job_requeued_for_quota", reason=reason[:200],
                              provider=exc.provider, until=until.isoformat())
             log.warning("executor rate limited — provider lane paused, job requeued",

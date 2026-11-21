@@ -284,6 +284,13 @@ schedule rows; `resolve_session_timeout` in `runner/main.py` reads it.
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-11-20 — deploy autopilot dispatches to the FRONT of the queue (LPUSH)
+
+**Agent task**: follow-up to the 11-17 deploy of `a98894f`, which the autopilot dispatched at 15:28 and prod ran at 21:54 — behind a 37-schedule reboot catch-up and a 40-job `atlas-report` fan-out (position 21 of 60, two workers, ~3 min median).
+**Files changed**: `scripts/healthcheck-all.sh` `check_deploy_pending` — `redis-cli lpush jobs:queue` (was `rpush`); failure-path messages say LPUSH. `tests/test_scripts_syntax.py::test_autopilot_dispatch_goes_to_the_front_of_the_queue` pins it.
+**Why**: a deploy carries fixes for the very jobs queued behind it; the quiet window (tip ≥ 10 min old), the 30-min cooldown and the "no deploy machinery in flight" check are unchanged, so this only reorders, never adds, dispatches.
+**Side effects**: `server-deploy` restarts the runner mid-backlog more often — that path already reconciles orphans on startup. Front-of-queue writers are now three: the two quota requeues (INV-12 global + per-provider `rate_limited`) and this.
+
 ## 2026-10-22 — Whole-tier review applied: `.project`-matched venv in the three timer scripts, backup PARTIAL/trap/pg_database, drill WARNs + quoted identifier, `uninstall` removes the timers
 
 **Agent task**: whole-tier review of `observability/phase-1` (plan `docs/superpowers/plans/2026-10-21-observability-phase1-recut.md` "Whole-tier review applied 2026-10-22").

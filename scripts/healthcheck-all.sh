@@ -312,12 +312,14 @@ check_deploy_pending() {
                 'server — deploy autopilot: ' || '$pending' || ' pending commit(s) on origin/main (' || LEFT('$remote',8) || '); dispatched by healthcheck-all check_deploy_pending',
                 'queued', 'deploy-autopilot', NOW()) RETURNING id;" 2>/dev/null | head -1 | tr -d ' ') || return 0
     [[ -n "$job_id" ]] || return 0
-    if redis-cli rpush jobs:queue "$job_id" > /dev/null 2>&1; then
+    # LPUSH = front of the queue (2026-11-20): a deploy must not wait behind a
+    # reboot catch-up burst or a sweep fan-out (11-17: 6 h behind 77 jobs).
+    if redis-cli lpush jobs:queue "$job_id" > /dev/null 2>&1; then
         echo "$now" > "$DEPLOY_STATE" 2>/dev/null || true
         echo "$(date -u +%FT%TZ) AUTOPILOT dispatched deploy-director $job_id ($pending pending)" >> "$LOG"
     else
-        psql assistant -qc "UPDATE jobs SET status='cancelled', error_message='autopilot RPUSH failed; row cancelled to avoid stranding' WHERE id='$job_id'::uuid;" 2>/dev/null || true
-        echo "$(date -u +%FT%TZ) WARN deploy-autopilot enqueue failed at RPUSH; job row cancelled" >> "$LOG"
+        psql assistant -qc "UPDATE jobs SET status='cancelled', error_message='autopilot LPUSH failed; row cancelled to avoid stranding' WHERE id='$job_id'::uuid;" 2>/dev/null || true
+        echo "$(date -u +%FT%TZ) WARN deploy-autopilot enqueue failed at LPUSH; job row cancelled" >> "$LOG"
     fi
     return 0
 }

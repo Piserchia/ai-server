@@ -876,3 +876,97 @@ class TestQuotaNoticeLabelsTheSource:
         src = inspect.getsource(tg._quota_notifier)
         assert "quota.last_source()" in src
         assert "quota_paused_text(" in src
+
+
+# ── INV-9 (2026-11-20): the QuotaExhausted requeue is a guarded running→queued flip ──
+
+
+class TestQuotaRequeueIsGuarded:
+    """`_process_job`'s QuotaExhausted handler used to `UPDATE … SET status='queued'`
+    with no status predicate and LPUSH first — a `cancelled` row stamped by
+    `_cancel_listener` inside that window was flipped back to `queued` and the
+    job re-ran. Now: guarded `WHERE status='running'` first, LPUSH only when
+    the flip won (same flip-then-push shape as cancel_job_durable / plans)."""
+
+    async def test_flip_is_guarded_and_precedes_the_lpush(self, main_harness, fake_redis):
+        from src.runner import main as runner_main
+        h = main_harness(session_exc=quota.QuotaExhausted(_future(10), "5-hour limit"),
+                         job=_job(payload={}))
+        order: list[str] = []
+        real_execute, real_lpush = h.db.execute, fake_redis.lpush
+
+        async def spy_execute(stmt):
+            order.append("update")
+            return await real_execute(stmt)
+
+        async def spy_lpush(*a, **k):
+            order.append("lpush")
+            return await real_lpush(*a, **k)
+
+        h.db.execute = spy_execute
+        fake_redis.lpush = spy_lpush
+        await runner_main._process_job(h.job.id)
+        requeues = [s for s in h.db.executed
+                    if "queued" in str(_update_values(s).get("status", ""))]
+        assert len(requeues) == 1
+        sql = str(requeues[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "jobs.status = 'running'" in sql.split("WHERE", 1)[1]        # the INV-9 predicate
+        assert order.index("lpush") > order.index("update"), order           # flip, then push
+        assert await fake_redis.lrange(QUEUE_JOBS, 0, -1) == [str(h.job.id)]
+        assert "job_requeued_for_quota" in _kinds(h.job.id)
+
+    async def test_lost_flip_requeues_nothing(self, main_harness, fake_redis):
+        # The user cancelled while the session was running: _cancel_listener
+        # stamped `cancelled`; our guarded UPDATE matches 0 rows → no LPUSH, no
+        # requeue audit, nothing finished. The global pause still applies (the
+        # quota really is exhausted).
+        from src.runner import main as runner_main
+        h = main_harness(session_exc=quota.QuotaExhausted(_future(10), "5-hour limit"),
+                         job=_job(payload={}))
+
+        async def lost(stmt):
+            # the claim UPDATE wins (the job runs); only the requeue flip loses
+            h.db.executed.append(stmt)
+            is_requeue = _update_values(stmt).get("status") == "queued"
+            return SimpleNamespace(rowcount=0 if is_requeue else 1)
+
+        h.db.execute = lost
+        await runner_main._process_job(h.job.id)
+        assert await fake_redis.llen(QUEUE_JOBS) == 0
+        assert "job_requeued_for_quota" not in _kinds(h.job.id)
+        assert h.finished == []
+        assert (await quota.is_paused())[0] is True
+
+    async def test_rate_limited_lane_requeue_is_guarded_too(self, main_harness, fake_redis):
+        # The per-provider twin (ExecutorFailed rate_limited) shares the helper:
+        # a lost flip leaves the lane paused, no LPUSH, no requeue audit.
+        from src.runner import main as runner_main
+        from src.runner.session import ExecutorFailed
+        h = main_harness(session_exc=ExecutorFailed("codex", "gpt-6-luna", "rate_limited", "429"))
+
+        async def lost(stmt):
+            h.db.executed.append(stmt)
+            return SimpleNamespace(rowcount=0 if _update_values(stmt).get("status") == "queued" else 1)
+
+        h.db.execute = lost
+        await runner_main._process_job(h.job.id)
+        assert (await quota.is_provider_paused("codex"))[0] is True
+        assert await fake_redis.llen(QUEUE_JOBS) == 0
+        assert "job_requeued_for_quota" not in _kinds(h.job.id)
+        assert h.finished == []
+        requeues = [s for s in h.db.executed if _update_values(s).get("status") == "queued"]
+        sql = str(requeues[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "jobs.status = 'running'" in sql.split("WHERE", 1)[1]
+
+    async def test_lpush_failure_after_a_won_flip_does_not_escape(self, main_harness, fake_redis):
+        from src.runner import main as runner_main
+        h = main_harness(session_exc=quota.QuotaExhausted(_future(10), "5-hour limit"),
+                         job=_job(payload={}))
+
+        async def boom(*a, **k):
+            raise ConnectionError("redis down")
+
+        fake_redis.lpush = boom
+        await runner_main._process_job(h.job.id)                    # no exception escapes
+        assert h.finished == []
+        assert "job_requeued_for_quota" in _kinds(h.job.id)          # the row IS queued

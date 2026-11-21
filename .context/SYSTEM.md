@@ -145,7 +145,7 @@ Out-of-band (launchd, no bot/runner dependency): healthcheck-all.sh /
 | INV-6 | Only whitelisted chat IDs can submit jobs via Telegram | `gateway/telegram_bot.py:_guard` |
 | INV-7 | Only auth'd web requests can submit jobs | `gateway/web.py:_check_auth` |
 | INV-8 | Cancel requests honored within 2s | `runner/main.py:_cancel_listener` |
-| INV-9 | Job status transitions are valid; a user `cancelled` is never overwritten by a trailing finish (the cancel-race) | `_finish_job` guards `WHERE status != 'cancelled'` + rowcount check |
+| INV-9 | Job status transitions are valid; a user `cancelled` is never overwritten by a trailing finish (the cancel-race), by the queued→running claim, or by a running→queued quota requeue | `_finish_job` guards `WHERE status != 'cancelled'`; `_process_job`'s claim guards `WHERE status='queued'`; `_requeue_front_for_quota` guards `WHERE status='running'` — all rowcount-checked (2026-11-17/20) |
 | INV-10 | Skills in `plan` mode cannot write files | SDK-level permission_mode |
 | INV-11 | Audit logs are append-only | filesystem O_APPEND in `audit_log.append` |
 | INV-12 | Quota exhaustion pauses queue until reset; jobs requeued at front (global/Anthropic only; a paused non-Anthropic lane holds its jobs to the TAIL — T6, plan §4g) | `runner/main.py:_process_job` |

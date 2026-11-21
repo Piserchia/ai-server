@@ -922,3 +922,8 @@ Owner ran runbook §5 (`timers-only`, then the full `install-launchd.sh`) and on
 ## 2026-11-17 — Same INV-9 class, still open: the `QuotaExhausted` requeue flips running→queued with no predicate
 
 Noted by the claim-guard review: `main._process_job`'s `QuotaExhausted` handler does `update(Job).where(Job.id == job_id).values(status='queued')` without a status predicate, so a `cancelled` stamped by `_cancel_listener` inside that window would be overwritten back to `queued` (and the job re-run). Pre-existing, narrow (a cancel racing a quota requeue), not fixed in the claim-guard commit. Fix shape: `.where(Job.id == job_id, Job.status == 'running')` + skip the RPUSH on rowcount 0.
+**Fixed 2026-11-20** exactly so (`tests/test_quota.py::TestQuotaRequeueIsGuarded`); the LPUSH now follows the flip.
+
+## 2026-11-20 — Last unguarded status write: `_cancel_listener`'s `cancelled` stamp
+
+With the claim (11-17) and both quota requeues (11-20) guarded, the one remaining `update(Job).where(Job.id == …)` with no status predicate on a job row is `_cancel_listener`'s `cancelled` stamp after `interrupt()` returns True. Window: a session that completes between `interrupt()` returning and the UPDATE committing gets stamped `cancelled` over `completed`. Narrow, and the user DID ask for a cancel, so the recorded state is arguably the one they wanted — recorded, not fixed. Fix shape if ever: `.where(Job.id == id, Job.status == 'running')`.
