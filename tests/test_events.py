@@ -351,7 +351,11 @@ class TestEventLoopBreakerGating:
 
         monkeypatch.setattr(events_mod, "_check_circuit_breaker", breaker)
         monkeypatch.setattr(events_mod, "_check_skill_failures", fake_skill)
+        async def fake_no_progress():
+            calls.append("alpha_stop")
+
         monkeypatch.setattr(events_mod, "_check_project_health", fake_project)
+        monkeypatch.setattr(events_mod, "_check_alpha_no_progress", fake_no_progress)
         monkeypatch.setattr(events_mod, "_check_idle_queue_alpha", fake_idle_alpha)
         asyncio.run(event_loop(shutdown))
         return calls
@@ -360,19 +364,23 @@ class TestEventLoopBreakerGating:
         async def breaker():
             return True
 
-        assert self._run_cycle(monkeypatch, breaker) == ["idle_alpha"]
+        assert self._run_cycle(monkeypatch, breaker) == ["alpha_stop", "idle_alpha"]
 
     def test_breaker_inactive_runs_all_checks(self, monkeypatch):
         async def breaker():
             return False
 
-        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle_alpha"]
+        assert self._run_cycle(monkeypatch, breaker) == [
+            "skill", "project", "alpha_stop", "idle_alpha",
+        ]
 
     def test_breaker_crash_fails_open_and_loop_survives(self, monkeypatch):
         async def breaker():
             raise RuntimeError("redis down")
 
-        assert self._run_cycle(monkeypatch, breaker) == ["skill", "project", "idle_alpha"]
+        assert self._run_cycle(monkeypatch, breaker) == [
+            "skill", "project", "alpha_stop", "idle_alpha",
+        ]
 
 
 class TestEventLoopStartup:
@@ -428,3 +436,124 @@ class TestIdleQueueAlpha:
 
     def test_just_under_cooldown(self):
         assert self._predicate()(0, NOW - timedelta(hours=3, minutes=59), 0) is False
+
+
+    def test_paused_governor_schedule_blocks(self):
+        # 2026-11-21: `/schedule pause alpha-governor` must also silence the
+        # idle drainer, or the lab cannot be paused from Telegram at all.
+        assert self._predicate()(0, None, 0, governor_paused=True) is False
+        assert self._predicate()(0, NOW - timedelta(hours=9), 0, governor_paused=True) is False
+
+
+class _FakeSession:
+    """Answers the no-progress check's queries in order; records statements."""
+
+    def __init__(self, answers):
+        from types import SimpleNamespace
+        self._answers = [SimpleNamespace(scalar=(lambda v=v: v)) for v in answers]
+        self.statements = []
+        self.committed = False
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+        return self._answers.pop(0)
+
+    async def commit(self):
+        self.committed = True
+
+
+class _FakeRedis:
+    def __init__(self, value=None):
+        self.value = value
+        self.sets = []
+
+    async def get(self, key):
+        return self.value
+
+    async def set(self, key, value):
+        self.sets.append((key, value))
+
+
+class TestAlphaNoProgressStop:
+    """2026-11-21: ~129 governor/scout runs over 30 days with zero
+    alpha-research jobs (atlas alpha-lab LEDGER E-0270/E-0277). The stop
+    pauses the alpha schedules after ALPHA_NO_PROGRESS_RUN_LIMIT overhead
+    runs with no research job, and tells the owner once."""
+
+    def test_floor_is_the_window_start_when_nothing_newer(self):
+        from src.runner.events import _alpha_no_progress_floor
+        floor = _alpha_no_progress_floor(NOW, NOW - timedelta(days=30), None, window_hours=72)
+        assert floor == NOW - timedelta(hours=72)
+
+    def test_recent_research_job_moves_the_floor(self):
+        from src.runner.events import _alpha_no_progress_floor
+        last = NOW - timedelta(hours=5)
+        assert _alpha_no_progress_floor(NOW, last, None, window_hours=72) == last
+
+    def test_trip_moves_the_floor_so_a_resume_starts_fresh(self):
+        from src.runner.events import _alpha_no_progress_floor
+        tripped = NOW - timedelta(hours=1)
+        assert _alpha_no_progress_floor(
+            NOW, NOW - timedelta(days=30), tripped, window_hours=72
+        ) == tripped
+
+    def test_trips_at_the_limit_not_below(self):
+        from src.runner.events import ALPHA_NO_PROGRESS_RUN_LIMIT as LIMIT
+        from src.runner.events import _should_pause_alpha_for_no_progress as trip
+        assert trip(LIMIT, False) is True
+        assert trip(LIMIT - 1, False) is False
+
+    def test_already_paused_never_trips(self):
+        from src.runner.events import _should_pause_alpha_for_no_progress as trip
+        assert trip(10_000, True) is False
+
+    def test_stalled_lab_pauses_all_three_rows_and_notifies_once(self, monkeypatch):
+        # answers: governor paused? no -> last research 30 d ago -> 13 runs
+        session = _FakeSession([False, NOW - timedelta(days=30), 13, None])
+        fake_redis = _FakeRedis()
+        notices = []
+
+        async def fake_enqueue_notice(notice):
+            notices.append(notice)
+
+        monkeypatch.setattr(events_mod, "async_session", session)
+        monkeypatch.setattr(events_mod, "redis", fake_redis)
+        monkeypatch.setattr(events_mod, "enqueue_notice", fake_enqueue_notice)
+        asyncio.run(events_mod._check_alpha_no_progress())
+
+        assert session.committed
+        update_sql = str(session.statements[-1])
+        assert update_sql.startswith("UPDATE schedules")
+        params = session.statements[-1].compile().params
+        assert params["paused"] is True
+        assert set(params["name_1"]) == set(events_mod.ALPHA_SCHEDULE_NAMES)
+        assert len(notices) == 1
+        assert notices[0].notice_kind == "ops_alert"
+        assert "/schedule resume alpha-governor" in notices[0].body
+        assert fake_redis.sets and fake_redis.sets[0][0] == "alpha:no_progress_tripped_at"
+
+    def test_paused_lab_reads_nothing_else(self, monkeypatch):
+        session = _FakeSession([True])
+        monkeypatch.setattr(events_mod, "async_session", session)
+        monkeypatch.setattr(events_mod, "redis", _FakeRedis())
+        asyncio.run(events_mod._check_alpha_no_progress())
+        assert len(session.statements) == 1
+        assert not session.committed
+
+    def test_below_limit_changes_nothing(self, monkeypatch):
+        session = _FakeSession([False, NOW - timedelta(days=30), 3])
+        fake_redis = _FakeRedis()
+        monkeypatch.setattr(events_mod, "async_session", session)
+        monkeypatch.setattr(events_mod, "redis", fake_redis)
+        asyncio.run(events_mod._check_alpha_no_progress())
+        assert not session.committed
+        assert fake_redis.sets == []

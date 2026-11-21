@@ -44,7 +44,7 @@
 | `src/runner/quota.py` | Detect rate limits; global (Anthropic) queue pause + per-provider lane pauses `quota:provider:<p>:*` (T6, 2026-10-21) | config, db | runner.session, runner.main |
 | `src/runner/writeback.py` | Classify whether a session needs a CHANGELOG follow-up | — | runner.main |
 | `src/runner/review.py` | Code-review sub-agent; evaluates diffs post-session (Anthropic belt 2) and PRE-push for non-Anthropic lanes (T5 gate: `diff_for_gate`, fixed reviewer) | config, audit_log, claude_agent_sdk, runner.claude_env | runner.main, runner.session |
-| `src/runner/events.py` | Event-trigger rules engine (4th async task) | db, models, gateway.jobs | runner.main |
+| `src/runner/events.py` | Event-trigger rules engine (4th async task); alpha-lab idle drainer + no-progress stop | db, models, gateway.jobs, notify.outbox | runner.main |
 | `src/runner/mcp_projects.py` | MCP server: project tools (list, get, logs, restart) | config, db, models | runner.session |
 | `src/runner/mcp_dispatch.py` | MCP server: job enqueue tool (task/parent linkage + depends_on deferral) | gateway.jobs, db, models | runner.session |
 | `src/runner/retention.py` | Audit log rotation (compress + archive old JSONL) | config | server-upkeep skill |
@@ -63,7 +63,7 @@
 | `src/gateway/jobs.py` | Shared enqueue/cancel/find helpers + `ORIGIN_CHANNELS` / `origin_from_created_by` | db, models, audit_log | web, telegram_bot, notify.outbox |
 | `src/gateway/web.py` | FastAPI: /api/jobs + dashboard + retrospective routes (+ per-project delivery contract on /api/projects) | config, db, models, gateway.jobs, audit_log, registry.models, runner.retrospective, runner.delivery | (entry point) |
 | `src/gateway/telegram_bot.py` | Telegram commands + NL-first plain-text asks + task/plan notification cards; delivers the notifications outbox (A6: claim + `notify:outbox` nudge + 30 s poll, `legacy_mode` when `NOTIFY_OUTBOX=0`), `jd:` [Details] button, quota notices as ops rows | config, db, models, gateway.jobs, audit_log, registry.models, runner.router, runner.plans, runner.schedule_adherence, notify.outbox, notify.telegram, runner.proposals | (entry point) |
-| `src/notify/outbox.py` | Notifications outbox (A4, 2026-10-21): `Notice`, kind vocabulary, card eligibility (`should_notify_job`), `lane_label`, job/task/ops builders, `enqueue_notice` (always inserts — the switch is the bot's), claim/lease, retry math, `mark_*` | db, models, audit_log, gateway.jobs | runner.main, gateway.telegram_bot, notify.__main__ |
+| `src/notify/outbox.py` | Notifications outbox (A4, 2026-10-21): `Notice`, kind vocabulary, card eligibility (`should_notify_job`), `lane_label`, job/task/ops builders, `enqueue_notice` (always inserts — the switch is the bot's), claim/lease, retry math, `mark_*` | db, models, audit_log, gateway.jobs | runner.main, runner.events, gateway.telegram_bot, notify.__main__ |
 | `src/notify/telegram.py` | Telegram renderer (4096 / 64-byte / 8-button limits, no parse_mode), `send_via_bot`, `send_via_http`, `TelegramSendError` (token chokepoint) | — | gateway.telegram_bot, notify.__main__ |
 | `src/notify/__main__.py` | `python -m src.notify send` / `drain` for launchd alerters, the canary and ops; mirrors the bot's legacy_mode | config, notify.outbox, notify.telegram | scripts/healthcheck-all.sh + schedule-monitor.sh, credential canary (E10) |
 | `scripts/register-project.sh` | Project registration: manifest → Caddy + launchd + DB | yq, caddy, psql | — |

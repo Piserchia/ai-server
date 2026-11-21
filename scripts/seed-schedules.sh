@@ -191,6 +191,8 @@ upsert 'alpha-governor' '30 9 * * *' 'alpha-governor' 'alpha-governor: daily alp
 # Flywheel generator (owner-approved 2026-09-23): twice daily, read-only +
 # dispatch (no payload — reads the dev clone like alpha-intake); the
 # idle-queue drainer in events.py adds governor runs between these.
+# events.py's no-progress stop (2026-11-21) pauses all three rows after 10
+# governor/scout runs with no alpha-research job; resume with /schedule resume.
 upsert 'alpha-scout-am' '10 8 * * *' 'alpha-scout' 'alpha-scout: morning idea generation -> FAMILIES/LESSONS-fenced mechanism-first candidates, dedup, FILE-mode dispatch within caps (skills/alpha-scout)'
 upsert 'alpha-scout-pm' '10 20 * * *' 'alpha-scout' 'alpha-scout: evening idea generation -> FAMILIES/LESSONS-fenced mechanism-first candidates, dedup, FILE-mode dispatch within caps (skills/alpha-scout)'
 

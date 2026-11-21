@@ -25,11 +25,19 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
+from sqlalchemy import update as sql_update
 
-from src.db import KEY_EVENTS_BREAKER, TTL_EVENTS_BREAKER, async_session, redis
+from src.db import (
+    KEY_ALPHA_NO_PROGRESS_TRIPPED_AT,
+    KEY_EVENTS_BREAKER,
+    TTL_EVENTS_BREAKER,
+    async_session,
+    redis,
+)
 from src.gateway.jobs import enqueue_job
-from src.models import Job, JobStatus, Project
+from src.models import Job, JobStatus, Project, Schedule
+from src.notify.outbox import build_ops_notice, enqueue_notice
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +359,134 @@ async def _check_project_health() -> None:
 ALPHA_IDLE_COOLDOWN_HOURS = 4
 ALPHA_DAILY_JOB_VALVE = 12  # server-side mirror of alpha-lab budget.yaml
 
+# The alpha-lab schedule rows (scripts/seed-schedules.sh). The seeder never
+# un-pauses a row, so a pause set here survives every redeploy.
+ALPHA_GOVERNOR_SCHEDULE = "alpha-governor"
+ALPHA_SCHEDULE_NAMES: tuple[str, ...] = (
+    ALPHA_GOVERNOR_SCHEDULE,
+    "alpha-scout-am",
+    "alpha-scout-pm",
+)
+
+# No-progress stop (2026-11-21). The governor and scout are overhead: they
+# exist to keep `alpha-research` stage jobs flowing. From 2026-10-22 to
+# 2026-11-21 the lab ran ~129 governor/scout jobs and zero research jobs
+# (atlas alpha-lab LEDGER [E-0270]/[E-0277]: both live chains held on owner
+# DECISION-REQUESTs, the scout filing nothing), and nothing stopped it —
+# the daily valve above counts only research jobs, so it never trips when
+# research is the thing that stalled. This stop pauses all three schedule
+# rows (which, via `governor_paused`, also silences the idle drainer) once
+# ALPHA_NO_PROGRESS_RUN_LIMIT overhead runs have accumulated with no
+# research job, counted inside a rolling window, and tells the owner once.
+ALPHA_OVERHEAD_KINDS: tuple[str, ...] = ("alpha-governor", "alpha-scout")
+ALPHA_NO_PROGRESS_WINDOW_HOURS = 72
+ALPHA_NO_PROGRESS_RUN_LIMIT = 10  # ~2.5 days at the stalled cadence (~4/day)
+
+
+def _alpha_no_progress_floor(
+    now: datetime,
+    last_research_at: datetime | None,
+    tripped_at: datetime | None,
+    window_hours: int = ALPHA_NO_PROGRESS_WINDOW_HOURS,
+) -> datetime:
+    """Pure: the instant overhead runs are counted from — the latest of the
+    window start, the last alpha-research job, and the last auto-pause.
+    A research job resets the count; so does a trip, so an owner who
+    resumes the rows gets a fresh LIMIT runs before it can trip again."""
+    floor = now - timedelta(hours=window_hours)
+    for t in (last_research_at, tripped_at):
+        if t is not None and t > floor:
+            floor = t
+    return floor
+
+
+def _should_pause_alpha_for_no_progress(
+    overhead_runs_since_floor: int,
+    governor_paused: bool,
+    limit: int = ALPHA_NO_PROGRESS_RUN_LIMIT,
+) -> bool:
+    """Pure: trip when LIMIT governor/scout runs landed since the floor with
+    no research job among them. Already paused → nothing to do."""
+    if governor_paused:
+        return False
+    return overhead_runs_since_floor >= limit
+
+
+def _parse_iso(value: object) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode()
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+async def _check_alpha_no_progress() -> None:
+    """Pause the alpha-lab schedules when the governor/scout keep running
+    and no alpha-research job has run (see ALPHA_NO_PROGRESS_* above)."""
+    now = datetime.now(timezone.utc)
+    async with async_session() as s:
+        result = await s.execute(
+            select(Schedule.paused).where(Schedule.name == ALPHA_GOVERNOR_SCHEDULE)
+        )
+        governor_paused = bool(result.scalar())
+        if governor_paused:
+            return
+
+        result = await s.execute(
+            select(func.max(Job.created_at)).where(Job.kind == "alpha-research")
+        )
+        last_research_at = result.scalar()
+
+        tripped_at = _parse_iso(await redis.get(KEY_ALPHA_NO_PROGRESS_TRIPPED_AT))
+        floor = _alpha_no_progress_floor(now, last_research_at, tripped_at)
+
+        result = await s.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(Job.kind.in_(ALPHA_OVERHEAD_KINDS))
+            .where(Job.created_at > floor)
+        )
+        overhead_runs = result.scalar() or 0
+
+        if not _should_pause_alpha_for_no_progress(overhead_runs, governor_paused):
+            return
+
+        await s.execute(
+            sql_update(Schedule)
+            .where(Schedule.name.in_(ALPHA_SCHEDULE_NAMES))
+            .values(paused=True)
+        )
+        await s.commit()
+
+    since = (
+        last_research_at.strftime("%Y-%m-%d %H:%M UTC") if last_research_at else "never"
+    )
+    logger.warning(
+        "alpha-lab no-progress stop: %s governor/scout runs since %s, "
+        "last alpha-research job %s; paused %s",
+        overhead_runs, floor.isoformat(), since, ", ".join(ALPHA_SCHEDULE_NAMES),
+    )
+    resume = " ".join(f"/schedule resume {n}" for n in ALPHA_SCHEDULE_NAMES)
+    await enqueue_notice(build_ops_notice(
+        kind="ops_alert",
+        severity="warn",
+        text=(
+            f"alpha-lab paused: {overhead_runs} governor/scout runs since "
+            f"{floor:%Y-%m-%d %H:%M} UTC, none of them a research job "
+            f"(last research job: {since}). "
+            f"Paused {', '.join(ALPHA_SCHEDULE_NAMES)} and the idle-queue "
+            f"governor. To restart: {resume}"
+        ),
+        subject="ops:alpha-no-progress",
+    ))
+    # The floor for the next count. If this write fails, the rolling window
+    # is the fallback floor (an owner resume inside it may trip once more).
+    await redis.set(KEY_ALPHA_NO_PROGRESS_TRIPPED_AT, now.isoformat())
+
 
 def _should_trigger_idle_alpha(
     queued_or_running: int,
@@ -358,6 +494,7 @@ def _should_trigger_idle_alpha(
     alpha_jobs_24h: int,
     cooldown_hours: int = ALPHA_IDLE_COOLDOWN_HOURS,
     daily_valve: int = ALPHA_DAILY_JOB_VALVE,
+    governor_paused: bool = False,
 ) -> bool:
     """
     Pure function: idle queue + stale alpha-governor + daily alpha job
@@ -366,7 +503,14 @@ def _should_trigger_idle_alpha(
     Turns quiet hours into flywheel hours (owner decision 2026-09-23,
     spec 2026-09-23-alpha-flywheel-design.md); any queued job suppresses
     it, so kernel ops and every other loop always win.
+
+    A paused `alpha-governor` schedule row also suppresses it
+    (2026-11-21): before this, `/schedule pause alpha-governor` stopped
+    the 09:30 slot but this drainer kept enqueuing a governor every ~4 h,
+    so the lab could not be paused at all from Telegram.
     """
+    if governor_paused:
+        return False
     if queued_or_running > 0:
         return False
     if alpha_jobs_24h >= daily_valve:
@@ -406,7 +550,14 @@ async def _check_idle_queue_alpha() -> None:
         )
         alpha_jobs_24h = result.scalar() or 0
 
-    if _should_trigger_idle_alpha(active_count, last_governor, alpha_jobs_24h):
+        result = await s.execute(
+            select(Schedule.paused).where(Schedule.name == ALPHA_GOVERNOR_SCHEDULE)
+        )
+        governor_paused = bool(result.scalar())
+
+    if _should_trigger_idle_alpha(
+        active_count, last_governor, alpha_jobs_24h, governor_paused=governor_paused
+    ):
         await enqueue_job(
             "alpha-governor: idle-queue flywheel run -> resume stalled chains, "
             "drain INBOX, audits (skills/alpha-governor)",
@@ -452,6 +603,13 @@ async def event_loop(shutdown: asyncio.Event) -> None:
         # spawns on an idle queue, not on failures, so it can't amplify a
         # failure storm. (The idle-queue retrospective trigger that sat here
         # was removed by E5, 2026-10-29.)
+        # No-progress stop runs first so a trip silences the drainer in the
+        # same cycle. Not breaker-gated either: it only ever pauses.
+        try:
+            await _check_alpha_no_progress()
+        except Exception:
+            logger.exception("event loop: alpha no-progress check error (non-fatal)")
+
         try:
             await _check_idle_queue_alpha()
         except Exception:
