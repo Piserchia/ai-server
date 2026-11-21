@@ -1,0 +1,998 @@
+# Review package: main..HEAD
+
+## Commits
+9230ebd refactor(frontend): remove the pick-history section from the player page
+5bf907b fix(stats): key team rows by (sport, team), not the bare abbreviation
+
+## Files changed
+ .context/CHANGELOG.md                   |  67 ++++++++++++++
+ app/scoring/stats.py                    |  42 +++++++--
+ frontend/src/api.ts                     |   9 ++
+ frontend/src/components/PickHistory.tsx | 149 --------------------------------
+ frontend/src/pages/Analytics.tsx        |   3 +-
+ frontend/src/pages/Player.tsx           |  21 ++---
+ frontend/src/theme.css                  |  31 +------
+ tests/test_stats.py                     |  89 ++++++++++++++-----
+ 8 files changed, 187 insertions(+), 224 deletions(-)
+
+## Diff
+diff --git a/.context/CHANGELOG.md b/.context/CHANGELOG.md
+index ab05153..1c1e241 100644
+--- a/.context/CHANGELOG.md
++++ b/.context/CHANGELOG.md
+@@ -1,15 +1,82 @@
+ # CHANGELOG — pickem
+ 
+ Format: newest entry first. One entry per work session that touches code or
+ docs; note the task(s), the commit range if known, and what changed.
+ 
++## 2026-10-09 — Remove the pick-history section from the player page
++
++Owner's call: it "doesn't serve any purpose and it's just large and noisy."
++Removed the SPA section only — the API contract with the ai-server
++`pickem-analysis` skill is untouched.
++
++- **`frontend/src/pages/Player.tsx`** — dropped the "Pick history" `<section>`,
++  the `PickHistory` import, and the now-unused `history` destructuring.
++  Module docstring's claim that the stats "and the pick history are computed
++  together server-side and must agree" no longer describes a section that
++  exists, so it was rewritten.
++- **`frontend/src/components/PickHistory.tsx`** — deleted (confirmed via
++  `grep -rn PickHistory frontend/src` that nothing else imported it).
++- **`frontend/src/api.ts`** — kept `PickHistoryRow` and `PlayerDetail.history`
++  (the SPA no longer renders them, but `GET /api/players/{id}` still returns
++  `history` for the `pickem-analysis` skill, a cross-repo consumer); added a
++  comment on `history` explaining why it stays. `app/api.py` /
++  `_pick_history` untouched, per that two-repo contract.
++- **`frontend/src/theme.css`** — removed the pick-history-only rules
++  (`table.board td .spread`, `table.board tr.group-row th`, `.res`,
++  `.res--correct`, `.res--incorrect`, `.res--missing`) after confirming by
++  grep that nothing else in `frontend/src` references them. Left `.muted`
++  and `.group-note` in place — both are shared with `WeekReview.tsx` /
++  `Compare.tsx` — and renamed the section comment from "pick history" to
++  "shared table bits" since that's all that's left in it.
++
++Gate: `npm run lint && npm run build` clean (Player's bundle shrank from
++11.45 kB to 8.86 kB; module count 618 → 617). `.venv/bin/pytest -q`
++unaffected (546 passed, 7 deselected) since no backend code changed.
++
++## 2026-10-09 — Team rows keyed by (sport, team), not the bare abbreviation
++
++Confirmed on production data: `HOU` is both the NFL Texans and the NCAAF
++Cougars, and `app/scoring/stats.py` aggregated picked teams into `teams`
++dicts keyed on the raw CBS abbreviation, so the player page's "Teams backed
++most" table (`top_teams`) and the league `/analytics` "most trusted teams"
++table (`most_trusted`) silently merged the two teams' picks into one row
++(188 league-wide picks sit on `HOU`).
++
++- **`app/scoring/stats.py`** — `player_stats`'s `top_teams` and
++  `league_analytics`'s `most_trusted` now key their internal `teams` dicts
++  on `(sport, team)` instead of the bare team string, and each row carries
++  a new `sport` field. Tie-break keys extended with `sport` so both stay
++  deterministic: `top_teams` is `(-picks, -correct, team, sport)`;
++  `most_trusted` is `(-pick_rate, -picks, team, sport)`. Both caps
++  (`_TOP_TEAMS`, `_TRUSTED_TEAMS`) now count (sport, team) pairs, so e.g.
++  HOU-NFL and HOU-NCAAF occupy two of the five/ten slots. Docstrings
++  (module-level and both functions') updated to explain the keying and why
++  (CBS abbreviations are only unique per sport).
++- **`tests/test_stats.py`** — updated every assertion pinning `top_teams`/
++  `most_trusted` row shape or contents to include `sport`; added
++  `test_the_same_abbreviation_in_two_sports_is_two_team_rows`, a fixture
++  where the same abbreviation (`HOU`) appears in an NCAAF game and an NFL
++  game and one player picks it in both, asserting two separate rows (one
++  per sport) whose `picks` sum to the player's total picks on that
++  abbreviation, plus the parallel `most_trusted` assertion.
++- **`frontend/src/api.ts`** — `TopTeam` and `TrustedTeam` gained a
++  `sport: string` field (with doc comments explaining the collision).
++- **`frontend/src/pages/Player.tsx`** / **`Analytics.tsx`** — `TEAM_COLUMNS`
++  / `TRUSTED_COLUMNS` gained a "Sport" column right after the team name;
++  `rowKey` on both `PrizeTable` calls changed from `row.team` to
++  `` `${row.sport}-${row.team}` `` — the bare team name is no longer a
++  unique React key once two sports can share an abbreviation.
++
++Full suite: 546 passed, 7 deselected (`live`). Frontend: `npm run lint` and
++`npm run build` both clean.
++
+ ## 2026-10-09 — Final whole-branch review fix wave (I2 + I3)
+ 
+ Two findings from the final reviewer of plan 2026-10-08-pickem-charts, on
+ `feat/nl-charts`.
+ 
+ **I2 — `app/charts/sandbox.py` authorizer READ branch.** The original
+ "allow-by-exclusion" shape (`table in ALLOWED_TABLES or table not in
+ real_tables → OK`) was first tightened to strict deny-by-default, but
+ `tests/test_chart_sandbox.py::test_runaway_query_times_out` then failed:
+ instrumenting the authorizer showed SQLite issues `SQLITE_READ` against a
+diff --git a/app/scoring/stats.py b/app/scoring/stats.py
+index a84c293..fa3d7b8 100644
+--- a/app/scoring/stats.py
++++ b/app/scoring/stats.py
+@@ -11,21 +11,25 @@ Conventions, chosen to match the engine's rather than to invent new ones:
+   (record pct, sport splits, dog/fav, consensus, streaks, Monday night, and
+   every league-wide percentage) counts graded picks only, so a game still in
+   progress can never drag a percentage down. `side_lean` counts *made*
+   picks instead (`picked_team IS NOT NULL`): it describes behaviour, not
+   accuracy, and a pick on an ungraded game is still a pick that was made.
+   `top_teams` reports both populations side by side -- `picks` (made) and
+   `graded`/`correct` (scored) -- because a row that divided a graded
+   numerator by a made-pick denominator would read 0% for every team in a
+   week the pool has not scored yet. Any hit rate shown for a team is
+   `correct / graded`; `picks` is a separate fact about how often the player
+-  backed them.
++  backed them. Both `top_teams` and league analytics' `most_trusted` key a
++  team row on (sport, team), not the bare abbreviation -- CBS abbreviations
++  are only unique *within* a sport (`HOU` is both the NFL Texans and the
++  NCAAF Cougars), so a bare-abbreviation key silently merges two different
++  teams' picks into one row.
+ * **A missed game** is a completed-week game the player never picked --
+   both a `MISSING` row and *no row at all*, because CBS omits `picks`
+   entirely for an entry that never submitted. Absence is the normal shape
+   of a no-show, and nothing here may assume a player has a row per game.
+   `record.missed` is `engine._missed_by_player`, so the two modules cannot
+   drift apart on the definition.
+ * **Never infer "not played" from `games.status`** -- it stays 'scheduled'
+   while a game is live with scores on it. What counts here is decided by
+   the picks' results (graded = the pool has scored it) and, for the weekly
+   series, by `weeks.status = 'final'`.
+@@ -279,20 +283,24 @@ def _missed_by_week(conn: sqlite3.Connection) -> dict[int, int]:
+ 
+ # -------------------------------------------------------------- one player
+ 
+ 
+ def player_stats(conn: sqlite3.Connection, player_id: int) -> dict | None:
+     """Everything the player page shows about one entry, or None if unknown.
+ 
+     Reads the player's picks once, in kickoff order, and folds every
+     tendency out of that single pass; the crowd's majority per game and the
+     weekly ladder come from league-wide maps computed alongside.
++
++    `top_teams` rows are keyed on (sport, team): CBS abbreviations are only
++    unique per sport, so a bare-abbreviation key would merge, e.g., the NFL
++    Texans and the NCAAF Cougars under one `HOU` row.
+     """
+     player = conn.execute(
+         "SELECT id, name FROM players WHERE id = ?", (player_id,)
+     ).fetchone()
+     if player is None:
+         return None
+ 
+     picks = conn.execute(
+         """
+         SELECT g.id AS game_id, g.sport AS sport,
+@@ -327,23 +335,25 @@ def player_stats(conn: sqlite3.Connection, player_id: int) -> dict | None:
+     }
+     mnf = {"correct": 0, "picks": 0}
+     current = longest = 0
+ 
+     for pick in picks:
+         side = pick["side"]
+         if side is None:
+             continue  # a MISSING row -- counted by `missed`, never a tendency
+ 
+         team = pick["home_team"] if side == "HOME" else pick["away_team"]
++        team_sport = pick["sport"]
+         side_lean["home" if side == "HOME" else "away"] += 1
+         team_row = teams.setdefault(
+-            team, {"team": team, "picks": 0, "graded": 0, "correct": 0}
++            (team_sport, team),
++            {"team": team, "sport": team_sport, "picks": 0, "graded": 0, "correct": 0},
+         )
+         team_row["picks"] += 1
+ 
+         if pick["result"] not in _GRADED:
+             continue  # picked, not yet scored: no rate may see it
+         hit = 1 if pick["result"] == "CORRECT" else 0
+ 
+         team_row["graded"] += 1
+         team_row["correct"] += hit
+         record["correct" if hit else "incorrect"] += 1
+@@ -383,21 +393,21 @@ def player_stats(conn: sqlite3.Connection, player_id: int) -> dict | None:
+ 
+     return {
+         "id": player["id"],
+         "name": player["name"],
+         "record": record,
+         "by_sport": by_sport,
+         "dog_fav": dog_fav,
+         "side_lean": side_lean,
+         "top_teams": sorted(
+             teams.values(),
+-            key=lambda row: (-row["picks"], -row["correct"], row["team"]),
++            key=lambda row: (-row["picks"], -row["correct"], row["team"], row["sport"]),
+         )[:_TOP_TEAMS],
+         "streaks": {"current": current, "longest": longest},
+         "weekly_correct": _weekly_correct(conn, player_id),
+         "consensus": consensus,
+         "mnf": mnf,
+         "tiebreaker": {"avg_error": _avg_tb_error(conn, player_id)},
+     }
+ 
+ 
+ def _weekly_correct(conn: sqlite3.Connection, player_id: int) -> list[dict]:
+@@ -469,20 +479,26 @@ def league_analytics(conn: sqlite3.Connection) -> dict:
+     """Week difficulty, the teams the pool trusts, its coldest games, the
+     score a player who blindly backed every favourite would have, and how
+     the pool's habits moved week to week.
+ 
+     `weeks`, `all_favorites_benchmark` and `trends` share one x-axis --
+     every completed week, in order -- so the dashboard can draw the
+     benchmark and the trend lines straight through the weekly average.
+     `most_trusted` and `upsets` span every graded game instead, including
+     games already final inside a week that is still running.
+ 
++    `most_trusted` rows are keyed on (sport, team), the same reason
++    `player_stats`'s `top_teams` is: CBS abbreviations are only unique per
++    sport, so a bare-abbreviation key would merge two different teams'
++    picks into one row (e.g. the NFL Texans and the NCAAF Cougars, both
++    `HOU`).
++
+     `trends` is the per-week series behind the week page's summary, read
+     from the same helpers (`_dog_by_week`, `_week_shape`,
+     `engine.tb_error_map`, `_missed_by_week`), so a number on the league
+     chart and the same number on a week's page are one computation.
+     """
+     games = _games(conn)
+     graded = _graded_by_game(conn)
+     completed = engine._completed_weeks(conn)
+     correct_by_week = engine.weekly_correct_map(conn)
+     played_by_week = engine._players_who_played(conn)
+@@ -507,21 +523,29 @@ def league_analytics(conn: sqlite3.Connection) -> dict:
+         )
+ 
+     by_week: dict[int, list[tuple[dict, dict]]] = {}
+     teams: dict[str, dict] = {}
+     scored = []
+     for game_id, facts in graded.items():
+         game = games[game_id]
+         by_week.setdefault(game["week_id"], []).append((game, facts))
+         for side, team in (("HOME", game["home_team"]), ("AWAY", game["away_team"])):
+             row = teams.setdefault(
+-                team, {"team": team, "picks": 0, "offered": 0, "games": 0, "covers": 0}
++                (game["sport"], team),
++                {
++                    "team": team,
++                    "sport": game["sport"],
++                    "picks": 0,
++                    "offered": 0,
++                    "games": 0,
++                    "covers": 0,
++                },
+             )
+             row["picks"] += facts["picks"][side]
+             row["offered"] += facts["graded"]
+             row["games"] += 1
+             row["covers"] += 1 if facts["cover"] == side else 0
+         scored.append(
+             {
+                 "week": game["week_id"],
+                 "game": f"{game['away_team']} @ {game['home_team']}",
+                 "pct_correct": _rate(facts["correct"], facts["graded"]),
+@@ -529,27 +553,28 @@ def league_analytics(conn: sqlite3.Connection) -> dict:
+                 "id": game_id,
+             }
+         )
+ 
+     # Ties on pick rate break towards the bigger sample first (a team backed
+     # 3-of-5 twice outranks one backed 3-of-5 once), then alphabetically.
+     trusted = sorted(
+         (
+             {
+                 "team": row["team"],
++                "sport": row["sport"],
+                 "pick_rate": _rate(row["picks"], row["offered"]),
+                 "cover_rate": _rate(row["covers"], row["games"]),
+                 "picks": row["picks"],
+             }
+             for row in teams.values()
+         ),
+-        key=lambda row: (-row["pick_rate"], -row["picks"], row["team"]),
++        key=lambda row: (-row["pick_rate"], -row["picks"], row["team"], row["sport"]),
+     )[:_TRUSTED_TEAMS]
+ 
+     scored.sort(key=lambda row: (row["pct_correct"], row["week"], row["kickoff"], row["id"]))
+ 
+     benchmark = []
+     for week in completed:
+         correct = 0
+         for game, facts in by_week.get(week, []):
+             spread = game["pool_spread"]
+             if not spread:  # no line, or a pick'em: there is no favourite to back
+@@ -575,21 +600,26 @@ def league_analytics(conn: sqlite3.Connection) -> dict:
+                 "favorite_cover_pct": _pct(shape["favorites_covered"], shape["lined"]),
+                 "consensus_pct": _pct(shape["majority_correct"], shape["majority_games"]),
+                 "avg_tb_error": _mean(tb_errors.get(week, {}).values()),
+                 "missed_picks": missed.get(week, 0),
+             }
+         )
+ 
+     return {
+         "weeks": weeks,
+         "most_trusted": [
+-            {"team": row["team"], "pick_rate": row["pick_rate"], "cover_rate": row["cover_rate"]}
++            {
++                "team": row["team"],
++                "sport": row["sport"],
++                "pick_rate": row["pick_rate"],
++                "cover_rate": row["cover_rate"],
++            }
+             for row in trusted
+         ],
+         "upsets": [
+             {"week": row["week"], "game": row["game"], "pct_correct": row["pct_correct"]}
+             for row in scored[:_UPSETS]
+         ],
+         "all_favorites_benchmark": benchmark,
+         "trends": trends,
+     }
+ 
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index b3049dc..e7d0824 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -130,20 +130,23 @@ export interface SportRecord {
+ }
+ 
+ export interface SplitRecord {
+   picks: number;
+   correct: number;
+   pct: number;
+ }
+ 
+ export interface TopTeam {
+   team: string;
++  /** CBS abbreviations repeat across sports (e.g. "HOU" is both the NFL
++   *  Texans and the NCAAF Cougars), so a team row is only unique per sport. */
++  sport: string;
+   picks: number;
+   /** Picks of this team that have been graded — `correct / graded` is the rate. */
+   graded: number;
+   correct: number;
+ }
+ 
+ export interface WeeklyCorrect {
+   week: number;
+   correct: number;
+   rank: number;
+@@ -177,20 +180,23 @@ export interface PickHistoryRow {
+   /** "HOME" | "AWAY" | null (no pick made). */
+   picked: string | null;
+   /** The spread from the picked team's side: positive = underdog. */
+   spread: number | null;
+   /** "CORRECT" | "INCORRECT" | "PENDING" | "MISSING". */
+   result: string;
+ }
+ 
+ export interface PlayerDetail {
+   stats: PlayerStats;
++  /** The SPA no longer renders this (the "Pick history" section was
++   *  removed), but the API still returns it: the ai-server
++   *  `pickem-analysis` skill reads it as a cross-repo consumer. */
+   history: PickHistoryRow[];
+ }
+ 
+ export interface CompareResult {
+   players: PlayerStats[];
+   /** Weeks won outright among the compared players, by player id (string key). */
+   head_to_head: { weeks_won: Record<string, number> };
+ }
+ 
+ // --------------------------------------------------------------- weeks
+@@ -338,20 +344,23 @@ export interface WeekDetail {
+ // ---------------------------------------------------------- analytics
+ 
+ export interface WeekDifficulty {
+   week: number;
+   avg_correct: number;
+   max_correct: number;
+ }
+ 
+ export interface TrustedTeam {
+   team: string;
++  /** CBS abbreviations repeat across sports (e.g. "HOU" is both the NFL
++   *  Texans and the NCAAF Cougars), so a team row is only unique per sport. */
++  sport: string;
+   pick_rate: number;
+   cover_rate: number;
+ }
+ 
+ export interface UpsetGame {
+   week: number;
+   game: string;
+   pct_correct: number;
+ }
+ 
+diff --git a/frontend/src/components/PickHistory.tsx b/frontend/src/components/PickHistory.tsx
+deleted file mode 100644
+index 2d36499..0000000
+--- a/frontend/src/components/PickHistory.tsx
++++ /dev/null
+@@ -1,149 +0,0 @@
+-/**
+- * Every pick a player has made, grouped by week, newest week first.
+- *
+- * The pick cell is the point of the table: it names the side the player
+- * actually took and the line they took it at — `NE +3.5`, `SEA −3.5` — which
+- * is the only place on the site where a spread is shown from the picker's
+- * point of view. `spread` arrives already flipped to the picked team's side
+- * (positive = getting points = an underdog pick), so nothing is recomputed
+- * here.
+- *
+- * Four results exist and all four are visible: CORRECT, INCORRECT, PENDING
+- * (played or not, the pool has not scored it) and MISSING (a completed
+- * week's game this player never picked). PENDING is deliberately quiet —
+- * most of the season's rows are pending, and colouring them would drown the
+- * two that matter.
+- */
+-
+-import type { PickHistoryRow } from "../api";
+-
+-/** U+2212, the real minus sign: −3.5 lines up under a digit, -3.5 does not. */
+-const MINUS = "−";
+-
+-const RESULT_LABEL: Record<string, string> = {
+-  CORRECT: "correct",
+-  INCORRECT: "wrong",
+-  PENDING: "not scored yet",
+-  MISSING: "no pick made",
+-};
+-
+-const RESULT_CLASS: Record<string, string> = {
+-  CORRECT: "res res--correct",
+-  INCORRECT: "res res--incorrect",
+-  PENDING: "res res--pending",
+-  MISSING: "res res--missing",
+-};
+-
+-/** "NE @ SEA" + "AWAY" → "NE". Null when no pick was made. */
+-function pickedTeam(row: PickHistoryRow): string | null {
+-  if (!row.picked) return null;
+-  const [away, home] = row.game.split(" @ ");
+-  const team = row.picked === "HOME" ? home : away;
+-  return team ?? null;
+-}
+-
+-/** The line as the picker took it: `+3.5`, `−3.5`, `PK` for a pick'em. */
+-function spreadLabel(spread: number | null): string {
+-  if (spread === null) return "";
+-  if (spread === 0) return "PK";
+-  const size = Math.abs(spread);
+-  return spread > 0 ? `+${size}` : `${MINUS}${size}`;
+-}
+-
+-function PickCell({ row }: { row: PickHistoryRow }) {
+-  const team = pickedTeam(row);
+-  if (team === null) return <span className="muted">no pick</span>;
+-  const line = spreadLabel(row.spread);
+-  return (
+-    <>
+-      <strong>{team}</strong>
+-      {line ? <span className="spread"> {line}</span> : null}
+-    </>
+-  );
+-}
+-
+-interface WeekGroup {
+-  week: number;
+-  rows: PickHistoryRow[];
+-  correct: number;
+-  incorrect: number;
+-  ungraded: number;
+-}
+-
+-function groupByWeek(history: PickHistoryRow[]): WeekGroup[] {
+-  const weeks = new Map<number, WeekGroup>();
+-  for (const row of history) {
+-    let group = weeks.get(row.week);
+-    if (!group) {
+-      group = { week: row.week, rows: [], correct: 0, incorrect: 0, ungraded: 0 };
+-      weeks.set(row.week, group);
+-    }
+-    group.rows.push(row);
+-    if (row.result === "CORRECT") group.correct += 1;
+-    else if (row.result === "INCORRECT") group.incorrect += 1;
+-    else group.ungraded += 1;
+-  }
+-  // Newest first: a player checking in mid-season wants this week, not week 1.
+-  // Rows inside a week keep the API's kickoff order.
+-  return [...weeks.values()].sort((a, b) => b.week - a.week);
+-}
+-
+-function weekSummary(group: WeekGroup): string {
+-  const graded = group.correct + group.incorrect;
+-  const parts = [graded > 0 ? `${group.correct}–${group.incorrect}` : "nothing scored yet"];
+-  if (group.ungraded > 0) parts.push(`${group.ungraded} open`);
+-  return parts.join(" · ");
+-}
+-
+-export default function PickHistory({ history }: { history: PickHistoryRow[] }) {
+-  if (history.length === 0) {
+-    return (
+-      <p className="empty">
+-        No picks on record yet. Once this entry submits a week, every game shows up here with
+-        the line they took.
+-      </p>
+-    );
+-  }
+-
+-  const groups = groupByWeek(history);
+-
+-  return (
+-    <div className="table-wrap">
+-      <table className="board">
+-        <caption className="visually-hidden">Pick history by week</caption>
+-        <thead>
+-          <tr>
+-            <th>Game</th>
+-            <th>Sport</th>
+-            <th>Pick</th>
+-            <th>Result</th>
+-          </tr>
+-        </thead>
+-        {groups.map((group) => (
+-          <tbody key={group.week}>
+-            <tr className="group-row">
+-              <th scope="colgroup" colSpan={4}>
+-                Week {group.week}
+-                <span className="group-note">{weekSummary(group)}</span>
+-              </th>
+-            </tr>
+-            {group.rows.map((row, index) => (
+-              <tr key={`${row.game}-${index}`}>
+-                <td className="name">{row.game}</td>
+-                <td className="muted">{row.sport}</td>
+-                <td>
+-                  <PickCell row={row} />
+-                </td>
+-                <td>
+-                  <span className={RESULT_CLASS[row.result] ?? "res"}>
+-                    {RESULT_LABEL[row.result] ?? row.result}
+-                  </span>
+-                </td>
+-              </tr>
+-            ))}
+-          </tbody>
+-        ))}
+-      </table>
+-    </div>
+-  );
+-}
+diff --git a/frontend/src/pages/Analytics.tsx b/frontend/src/pages/Analytics.tsx
+index 5129e52..0746a04 100644
+--- a/frontend/src/pages/Analytics.tsx
++++ b/frontend/src/pages/Analytics.tsx
+@@ -389,20 +389,21 @@ function TrendCards({ point }: { point: TrendPoint }) {
+           <div className="stat-value">{card.value}</div>
+           <div className="stat-detail">{card.detail}</div>
+         </div>
+       ))}
+     </div>
+   );
+ }
+ 
+ const TRUSTED_COLUMNS: Column<TrustedTeam>[] = [
+   { key: "team", label: "Team", className: "name", render: (row) => row.team },
++  { key: "sport", label: "Sport", className: "name", render: (row) => row.sport },
+   {
+     key: "pick",
+     label: "Picked by",
+     className: "num",
+     render: (row) => pct(row.pick_rate),
+   },
+   {
+     key: "cover",
+     label: "Covered",
+     className: "num",
+@@ -619,21 +620,21 @@ export default function Analytics() {
+ 
+       <section className="panel">
+         <h2 className="panel-title">Most trusted teams</h2>
+         <p className="panel-sub race-rule">
+           “Picked by” is the share of graded picks that took this team when it was on the board;
+           “covered” is how often that trust paid off.
+         </p>
+         <PrizeTable
+           rows={data.most_trusted}
+           columns={TRUSTED_COLUMNS}
+-          rowKey={(row) => row.team}
++          rowKey={(row) => `${row.sport}-${row.team}`}
+           caption="Most trusted teams"
+           empty="No graded games yet — nothing has been scored, so no team has a record to trust."
+         />
+       </section>
+ 
+       <section className="panel">
+         <h2 className="panel-title">Coldest games</h2>
+         <p className="panel-sub race-rule">
+           The graded games the pool read worst: the lower the number, the more entries got it
+           wrong.
+diff --git a/frontend/src/pages/Player.tsx b/frontend/src/pages/Player.tsx
+index 137094b..5b4c0ff 100644
+--- a/frontend/src/pages/Player.tsx
++++ b/frontend/src/pages/Player.tsx
+@@ -1,39 +1,38 @@
+ /**
+- * One entry's page: tendencies, weekly trajectory, teams, every pick, and
+- * the AI write-up.
++ * One entry's page: tendencies, weekly trajectory, teams, and the AI
++ * write-up.
+  *
+- * Everything on it comes from a single `/api/players/:id` call — the stats
+- * and the pick history are computed together server-side and must agree.
++ * Everything on it comes from a single `/api/players/:id` call.
+  *
+  * Written for an ungraded league first. Today every player here has one
+  * pending pick and nothing scored: the stat cards read `0–0` with "nothing
+  * graded yet" rather than a wall of 0.0%, the trajectory chart says no week
+  * has finished, and the teams table shows `—` for a hit rate it cannot
+  * compute. `top_teams` is the trap worth naming: `picks` is how often the
+  * player backed that team, `graded`/`correct` is what has been scored, and
+  * the rate is `correct / graded` — dividing by `picks` would report 0% for
+  * every team in a week the pool has not scored.
+  */
+ 
+ import { useEffect, useState } from "react";
+ import { Link, useParams } from "react-router-dom";
+ import { ApiError, getPlayer, type PlayerDetail, type TopTeam } from "../api";
+ import AnalysisPanel from "../components/AnalysisPanel";
+-import PickHistory from "../components/PickHistory";
+ import PrizeTable, { type Column } from "../components/PrizeTable";
+ import StatGrid from "../components/StatGrid";
+ import TrendChart from "../components/TrendChart";
+ import { displayName, pct } from "../format";
+ 
+ const TEAM_COLUMNS: Column<TopTeam>[] = [
+   { key: "team", label: "Team", className: "name", render: (row) => row.team },
++  { key: "sport", label: "Sport", className: "name", render: (row) => row.sport },
+   { key: "picks", label: "Times picked", className: "num", render: (row) => row.picks },
+   { key: "graded", label: "Graded", className: "num", render: (row) => row.graded },
+   {
+     key: "rate",
+     label: "Hit rate",
+     className: "num",
+     // Never `correct / picks`: an unscored week would report 0% for a team
+     // the player is actually 3-for-3 with.
+     render: (row) => (row.graded > 0 ? pct(row.correct / row.graded) : "—"),
+   },
+@@ -85,21 +84,21 @@ export default function Player() {
+       cancelled = true;
+     };
+   }, [playerId]);
+ 
+   if (playerId === null) return <NotFoundPanel reason="that is not a player id" />;
+ 
+   const current = loaded !== null && loaded.id === playerId ? loaded : null;
+   if (current !== null && "error" in current) return <NotFoundPanel reason={current.error} />;
+   if (current === null) return <p className="loading">Loading the player…</p>;
+ 
+-  const { stats, history } = current.detail;
++  const { stats } = current.detail;
+   const name = displayName(stats.name);
+ 
+   return (
+     <>
+       <section className="panel">
+         <div className="page-head">
+           <h2 className="panel-title">{name}</h2>
+           <span className="page-actions">
+             <Link to={`/player/${stats.id}/charts`}>Charts</Link>
+             <Link to="/">All standings</Link>
+@@ -120,30 +119,22 @@ export default function Player() {
+ 
+       <section className="panel">
+         <h2 className="panel-title">Teams backed most</h2>
+         <p className="panel-sub race-rule">
+           How often {name} has taken each side, and how those picks have scored. The hit rate is
+           out of graded picks, not out of every pick made.
+         </p>
+         <PrizeTable
+           rows={stats.top_teams}
+           columns={TEAM_COLUMNS}
+-          rowKey={(row) => row.team}
++          rowKey={(row) => `${row.sport}-${row.team}`}
+           caption="Teams backed most"
+           empty="No picks on record yet."
+         />
+       </section>
+ 
+-      <section className="panel">
+-        <h2 className="panel-title">Pick history</h2>
+-        <p className="panel-sub race-rule">
+-          Each pick with the line it was taken at — a plus means {name} was getting points.
+-        </p>
+-        <PickHistory history={history} />
+-      </section>
+-
+       {/* Keyed so navigating from one player to another remounts the panel:
+           its poll timer and state belong to the player it was started for. */}
+       <AnalysisPanel key={stats.id} playerId={stats.id} name={name} />
+     </>
+   );
+ }
+diff --git a/frontend/src/theme.css b/frontend/src/theme.css
+index e862356..010fc17 100644
+--- a/frontend/src/theme.css
++++ b/frontend/src/theme.css
+@@ -640,63 +640,34 @@ table.board td.split {
+ .split-legend .side--home {
+   color: var(--accent);
+ }
+ 
+ /* Matches the away bar segment (`.split-seg--away`) — not `--muted`, or the
+    legend text would name a color the bar itself is not drawn in. */
+ .split-legend .side--away {
+   color: #5b7099;
+ }
+ 
+-/* ---------------------------------------------------- pick history */
++/* ---------------------------------------------------- shared table bits */
+ 
+-table.board td .spread,
+ table.board td.muted,
+ .muted {
+   color: var(--muted);
+ }
+ 
+-table.board tr.group-row th {
+-  background: var(--panel-hi);
+-  color: var(--text);
+-  font-size: 0.85rem;
+-  text-transform: none;
+-  letter-spacing: 0;
+-  position: static;
+-}
+-
+ .group-note {
+   color: var(--muted);
+   font-weight: 400;
+   font-size: 0.78rem;
+   margin-left: 10px;
+ }
+ 
+-.res {
+-  font-size: 0.8rem;
+-  color: var(--muted);
+-}
+-
+-.res--correct {
+-  color: var(--good);
+-  font-weight: 600;
+-}
+-
+-.res--incorrect {
+-  color: var(--bad);
+-  font-weight: 600;
+-}
+-
+-.res--missing {
+-  color: var(--warn);
+-}
+-
+ /* --------------------------------------------------- compare picker */
+ 
+ .picker-search input {
+   width: 100%;
+   max-width: 320px;
+   background: var(--bg);
+   color: var(--text);
+   border: 1px solid var(--line);
+   border-radius: var(--radius);
+   padding: 8px 12px;
+diff --git a/tests/test_stats.py b/tests/test_stats.py
+index 9ffaad4..59a2677 100644
+--- a/tests/test_stats.py
++++ b/tests/test_stats.py
+@@ -52,21 +52,24 @@ def test_unknown_player_id_is_none(season_db):
+ def test_player_stats_carries_every_documented_section(season_db):
+     ann = stats_for(season_db, "Ann")
+ 
+     assert set(ann) == {
+         "id", "name", "record", "by_sport", "dog_fav", "side_lean", "top_teams",
+         "streaks", "weekly_correct", "consensus", "mnf", "tiebreaker",
+     }
+     assert (ann["id"], ann["name"]) == (ids(season_db)["Ann"], "Ann")
+     # A team row carries both populations: `picks` is made picks, and the
+     # hit rate a page shows must be `correct / graded`, never correct/picks.
+-    assert all(set(row) == {"team", "picks", "graded", "correct"} for row in ann["top_teams"])
++    assert all(
++        set(row) == {"team", "sport", "picks", "graded", "correct"}
++        for row in ann["top_teams"]
++    )
+ 
+ 
+ def test_record_counts_graded_picks_and_missed_games(season_db):
+     # Ann picked all 12 and got 9 right; Eve skipped one game entirely.
+     assert stats_for(season_db, "Ann")["record"] == {
+         "correct": 9, "incorrect": 3, "missed": 0, "pct": 9 / 12
+     }
+     assert stats_for(season_db, "Eve")["record"] == {
+         "correct": 2, "incorrect": 9, "missed": 1, "pct": 2 / 11
+     }
+@@ -118,25 +121,25 @@ def test_dog_fav_matches_a_direct_count_of_pick_spread_signs(season_db, name):
+ # ------------------------------------------------------- lean and top teams
+ 
+ 
+ def test_side_lean_and_top_teams_count_made_picks(season_db):
+     ann = stats_for(season_db, "Ann")
+ 
+     assert ann["side_lean"] == {"home": 8, "away": 4}
+     # Every fixture team is picked at most once by a given player, so the
+     # top five fall out of the tiebreak: correct picks first, then name.
+     assert ann["top_teams"] == [
+-        {"team": "DAL", "picks": 1, "graded": 1, "correct": 1},
+-        {"team": "LSU", "picks": 1, "graded": 1, "correct": 1},
+-        {"team": "ND", "picks": 1, "graded": 1, "correct": 1},
+-        {"team": "OSU", "picks": 1, "graded": 1, "correct": 1},
+-        {"team": "OU", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "DAL", "sport": "NFL", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "LSU", "sport": "NCAAF", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "ND", "sport": "NCAAF", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "OSU", "sport": "NCAAF", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "OU", "sport": "NCAAF", "picks": 1, "graded": 1, "correct": 1},
+     ]
+ 
+ 
+ def test_side_lean_skips_a_missing_row(season_db):
+     eve = stats_for(season_db, "Eve")
+ 
+     assert eve["side_lean"] == {"home": 5, "away": 6}  # 11 made picks, not 12
+ 
+ 
+ def test_top_teams_rank_by_volume_then_hits_then_name(db):
+@@ -147,20 +150,58 @@ def test_top_teams_rank_by_volume_then_hits_then_name(db):
+     assert [(row["team"], row["picks"], row["graded"], row["correct"]) for row in top] == [
+         ("DAL", 2, 2, 2),  # the only team picked twice
+         ("CHI", 1, 1, 1),  # then the single picks that hit, by name
+         ("PHI", 1, 1, 1),
+         ("GB", 1, 1, 0),  # then the single picks that missed, by name
+         ("WAS", 1, 1, 0),
+     ]
+     assert len(top) == 5  # five distinct teams picked over the two weeks
+ 
+ 
++def test_the_same_abbreviation_in_two_sports_is_two_team_rows(db):
++    """`HOU` is both the NFL Texans and the NCAAF Cougars on CBS. A row keyed
++    on the bare abbreviation would merge their picks into one misleading
++    team; keying on (sport, team) keeps them apart."""
++    build_season(db, [
++        {
++            "nfl_week": 1,
++            "ncaaf_week": 1,
++            "games": [
++                _home_game("NCAAF", "HOU", "RICE", "2025-09-06T16:00:00Z", 3.0, "H"),
++                _home_game("NFL", "IND", "HOU", "2025-09-07T17:00:00Z", 3.0, "H"),
++            ],
++            "picks": {
++                # Hal backs the NCAAF Cougars (HOME, and it covers) and the
++                # NFL Texans (AWAY, and it does not) in the same week.
++                "Hal": [("HOME", "CORRECT"), ("AWAY", "INCORRECT")],
++            },
++            "tb_answers": {},
++        }
++    ])
++
++    hal = player_stats(db, ids(db)["Hal"])
++
++    assert hal["top_teams"] == [
++        {"team": "HOU", "sport": "NCAAF", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "HOU", "sport": "NFL", "picks": 1, "graded": 1, "correct": 0},
++    ]
++    # Hal made exactly two picks on the abbreviation "HOU" -- one per sport.
++    assert sum(row["picks"] for row in hal["top_teams"]) == 2
++
++    trusted = league_analytics(db)["most_trusted"]
++    hou_trusted = [row for row in trusted if row["team"] == "HOU"]
++    assert hou_trusted == [
++        {"team": "HOU", "sport": "NCAAF", "pick_rate": 1.0, "cover_rate": 1.0},
++        {"team": "HOU", "sport": "NFL", "pick_rate": 1.0, "cover_rate": 0.0},
++    ]
++
++
+ # ----------------------------------------------------------------- streaks
+ 
+ 
+ def test_streaks_run_across_weeks_in_kickoff_order(season_db):
+     # Ann: CCCC CCII CCCI -> a 6-game run, and she ends on a loss.
+     assert stats_for(season_db, "Ann")["streaks"] == {"current": 0, "longest": 6}
+     # Ben: CCCI CCCI CICC -> best run 3, currently riding 2.
+     assert stats_for(season_db, "Ben")["streaks"] == {"current": 2, "longest": 3}
+ 
+ 
+@@ -284,24 +325,24 @@ def test_pending_picks_count_as_lean_but_never_as_a_rate(db):
+     build_season(db, _in_progress_season())
+ 
+     stats = player_stats(db, ids(db)["Zoe"])
+ 
+     assert stats["record"] == {"correct": 2, "incorrect": 1, "missed": 0, "pct": 2 / 3}
+     assert stats["side_lean"] == {"home": 4, "away": 0}  # the PENDING pick counts here
+     assert stats["dog_fav"]["dog"] == {"picks": 3, "correct": 2, "pct": 2 / 3}
+     # SEA is picked but unscored: one pick, nothing graded, nothing correct.
+     # Reading a hit rate off correct/picks here would libel every team.
+     assert stats["top_teams"] == [
+-        {"team": "DAL", "picks": 1, "graded": 1, "correct": 1},
+-        {"team": "PHI", "picks": 1, "graded": 1, "correct": 1},
+-        {"team": "GB", "picks": 1, "graded": 1, "correct": 0},
+-        {"team": "SEA", "picks": 1, "graded": 0, "correct": 0},
++        {"team": "DAL", "sport": "NFL", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "PHI", "sport": "NFL", "picks": 1, "graded": 1, "correct": 1},
++        {"team": "GB", "sport": "NFL", "picks": 1, "graded": 1, "correct": 0},
++        {"team": "SEA", "sport": "NFL", "picks": 1, "graded": 0, "correct": 0},
+     ]
+     # C / PENDING / C / I -- the ungraded pick is skipped, not a streak-breaker.
+     assert stats["streaks"] == {"current": 0, "longest": 2}
+     assert stats["weekly_correct"] == []  # the week is not final: nothing to rank
+     assert stats["record"]["missed"] == 0  # ... and nothing is missed yet either
+ 
+ 
+ def test_a_live_game_is_graded_by_its_results_not_by_games_status(season_db):
+     """`games.status` stays 'scheduled' while a game is live with scores."""
+     before = stats_for(season_db, "Ann")
+@@ -390,31 +431,33 @@ def test_a_completed_week_nobody_picked_is_a_zero_row_not_a_gap(db):
+ 
+     assert analytics["weeks"] == [{"week": 1, "avg_correct": 0.0, "max_correct": 0}]
+     assert analytics["all_favorites_benchmark"] == [{"week": 1, "correct": 0}]
+     assert analytics["most_trusted"] == []
+ 
+ 
+ def test_most_trusted_teams_rank_by_pick_rate(season_db):
+     trusted = league_analytics(season_db)["most_trusted"]
+ 
+     # SEA drew 4 of 5 picks; ten teams drew 3 of 5, so one (UGA) is cut.
+-    assert [(row["team"], row["pick_rate"], row["cover_rate"]) for row in trusted] == [
+-        ("SEA", 4 / 5, 1.0),
+-        ("BUF", 3 / 5, 1.0),
+-        ("CHI", 3 / 5, 1.0),
+-        ("DAL", 3 / 5, 1.0),
+-        ("LSU", 3 / 5, 1.0),
+-        ("ND", 3 / 5, 1.0),
+-        ("NYJ", 3 / 5, 0.0),
+-        ("ORE", 3 / 5, 0.0),
+-        ("OSU", 3 / 5, 1.0),
+-        ("TEX", 3 / 5, 0.0),
++    assert [
++        (row["team"], row["sport"], row["pick_rate"], row["cover_rate"]) for row in trusted
++    ] == [
++        ("SEA", "NFL", 4 / 5, 1.0),
++        ("BUF", "NFL", 3 / 5, 1.0),
++        ("CHI", "NFL", 3 / 5, 1.0),
++        ("DAL", "NFL", 3 / 5, 1.0),
++        ("LSU", "NCAAF", 3 / 5, 1.0),
++        ("ND", "NCAAF", 3 / 5, 1.0),
++        ("NYJ", "NFL", 3 / 5, 0.0),
++        ("ORE", "NCAAF", 3 / 5, 0.0),
++        ("OSU", "NCAAF", 3 / 5, 1.0),
++        ("TEX", "NCAAF", 3 / 5, 0.0),
+     ]
+ 
+ 
+ def test_upsets_are_the_ten_coldest_games_in_a_stable_order(season_db):
+     upsets = league_analytics(season_db)["upsets"]
+ 
+     assert [(row["week"], row["game"], row["pct_correct"]) for row in upsets] == [
+         (2, "OU @ TEX", 2 / 5),
+         (3, "UW @ ORE", 2 / 5),
+         (3, "NYJ @ MIA", 2 / 5),
+@@ -457,22 +500,22 @@ def test_a_game_nobody_got_right_still_knows_which_side_covered(db):
+             "games": [_home_game("NFL", "DAL", "NYG", "2025-09-07T17:00:00Z", -3.0, "H")],
+             "picks": {"Ace": [("AWAY", "INCORRECT")]},
+             "tb_answers": {},
+         }
+     ])
+ 
+     analytics = league_analytics(db)
+ 
+     assert analytics["upsets"] == [{"week": 1, "game": "NYG @ DAL", "pct_correct": 0.0}]
+     assert analytics["most_trusted"] == [
+-        {"team": "NYG", "pick_rate": 1.0, "cover_rate": 0.0},
+-        {"team": "DAL", "pick_rate": 0.0, "cover_rate": 1.0},  # unpicked, still covered
++        {"team": "NYG", "sport": "NFL", "pick_rate": 1.0, "cover_rate": 0.0},
++        {"team": "DAL", "sport": "NFL", "pick_rate": 0.0, "cover_rate": 1.0},  # unpicked, still covered
+     ]
+     assert analytics["all_favorites_benchmark"] == [{"week": 1, "correct": 1}]
+ 
+ 
+ def test_analytics_on_an_empty_database_is_empty_not_broken(db):
+     assert league_analytics(db) == {
+         "weeks": [], "most_trusted": [], "upsets": [], "all_favorites_benchmark": [],
+         "trends": [],
+     }
+     assert compare_players(db, []) == {"players": [], "head_to_head": {"weeks_won": {}}}
