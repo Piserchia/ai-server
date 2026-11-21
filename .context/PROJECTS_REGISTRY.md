@@ -135,6 +135,8 @@ readable documentation.
 3. Write `.context/CONTEXT.md` following the standard
 4. Run `bash scripts/register-project.sh <slug>`
 5. Update this registry
+6. Add the project to `.context/PROJECTS_INDEX.yml` (the combined deploy/health
+   index) and run `python scripts/check_projects_index.py`
 
 Phase 4's `new-project` skill automates steps 1-5.
 

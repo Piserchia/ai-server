@@ -18,6 +18,7 @@
 | Find a design doc / check whether it is current | `docs/LIBRARY.md` (generated; `python scripts/lib.py status <id>` / `show <id> --section <n>`) |
 | Understand a skill | `skills/<name>/SKILL.md` (frontmatter = config, body = system prompt) |
 | Check what's hosted | `.context/PROJECTS_REGISTRY.md` |
+| Drive an update or deploy across projects (repo, status, launchd units, ports, hostnames, deploy + health commands, where each manifest lives) | `.context/PROJECTS_INDEX.yml`; check it with `python scripts/check_projects_index.py` (`--strict` on the Mini) |
 | Check what skills exist | `.context/SKILLS_REGISTRY.md` |
 | Review system performance | `src/runner/retrospective.py`, `skills/review-and-improve/SKILL.md` |
 | Regression-test a skill's behaviour | `evals/README.md`, `evals/run.py`, `evals/cases/<skill>.yml` |
@@ -41,6 +42,7 @@ SERVER.md                           ← Architecture overview for humans
   PROTOCOL.md                       ← Write-back protocol (server-scoped, mandatory)
   PROJECT_PROTOCOL.md               ← Write-back protocol (project-scoped)
   PROJECTS_REGISTRY.md              ← Index of hosted projects
+  PROJECTS_INDEX.yml                ← Machine-readable combined project index (deploy/health map)
   SKILLS_REGISTRY.md                ← Index of installed skills
   modules/
     runner/   CONTEXT.md, CHANGELOG.md, skills/PATTERNS.md
