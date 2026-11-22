@@ -53,6 +53,13 @@ healthcheck **deploy autopilot** notices the pending range and dispatches a
 `deploy-director` job (or send `/task deploy server` yourself) — the
 self-healing `server-deploy` skill does the rest (ff-only pull, `pipenv sync`
 against the committed lock, migrate, test gate, seed schedules, restart).
+Projects get the same treatment since 2026-11-21: for every project whose
+manifest has a dev-repo, pull-only, gated-auto delivery contract (atlas,
+pickem, moneymachine, sportsbetting today), a new non-markdown commit on its
+delivery branch dispatches that project's own executor (`atlas-redeploy` or
+`project-redeploy`) directly — red test/build gate = old code keeps serving,
+and a deploy that didn't ship DMs the owner once. Both autopilots serialize:
+nothing dispatches while any deploy is queued or running.
 
 ## Data stores
 

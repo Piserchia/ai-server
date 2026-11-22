@@ -142,11 +142,12 @@ def test_healthcheck_resolves_and_guards_the_interpreter():
 
 
 def test_healthcheck_curl_blocks_are_fallbacks_only():
-    # Both alert sites: `if notify_send … ; then … elif curl … ; then` — the
-    # curl is never the first branch any more.
+    # Every alert site: `if notify_send … ; then … elif curl … ; then` — the
+    # curl is never the first branch any more. Three sites: runner-down,
+    # swing watchdog, and the project deploy autopilot's `alert_owner`.
     src = _read("scripts/healthcheck-all.sh")
-    assert src.count("if notify_send ops_alert") == 2, "runner-down and swing-watchdog both go through notify_send"
-    assert src.count("elif curl -sf --max-time 10") == 2
+    assert src.count("if notify_send ops_alert") == 3, "runner-down, swing-watchdog and alert_owner all go through notify_send"
+    assert src.count("elif curl -sf --max-time 10") == 3
     assert not re.search(r"^\s*if curl -sf --max-time 10", src, re.M)
 
 

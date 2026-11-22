@@ -39,9 +39,14 @@ logger = logging.getLogger(__name__)
 
 # created_by prefixes the runner itself stamps on autonomously-spawned jobs.
 # Anything else (telegram:<chat>, a bare user, god, eval) is a human trigger.
+# `deploy-autopilot` is the healthcheck timer (scripts/healthcheck-all.sh): it
+# dispatches project deploys with nobody watching, so a human-approval or
+# manual-only contract must refuse it (2026-11-21 — before then it read as a
+# human trigger and only the script's own gated-auto filter stood in the way).
 _AUTONOMOUS_PREFIXES = (
     "scheduler", "escalation", "auto-continue", "evaluator", "eval-fix",
     "learning", "writeback", "event", "plan:", "self-diagnose", "cascade",
+    "deploy-autopilot",
 )
 
 

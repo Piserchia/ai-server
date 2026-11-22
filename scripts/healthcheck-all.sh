@@ -259,6 +259,29 @@ check_swing_freshness() {
 
 check_swing_freshness || true
 
+# ── Deploy-in-flight probe (shared by both autopilots, 2026-11-21) ──────────
+# Returns 0 ("busy") when ANY deploy machinery is queued or running — server
+# or project — or when the answer is unknown (psql down = stand down). The
+# `resolved_skill` arm catches a RUNNING deploy that arrived as kind='task'
+# via `/task redeploy …` routing; `resolved_skill` is only stamped when the
+# session starts, so a still-QUEUED kind='task' row whose description starts
+# with deploy/redeploy counts as in flight too. Serializing every deploy means a server deploy
+# (which restarts the runner) never lands on top of a project deploy, and two
+# project deploys never race each other.
+deploy_in_flight() {   # 0 = busy or unknown, 1 = idle
+    local active
+    active=$(psql assistant -tAc "SELECT count(*) FROM jobs WHERE status IN ('queued','running')
+        AND (kind IN ('server-deploy','server_deploy','deploy-director','deploy_director')
+             OR resolved_skill IN ('server-deploy','deploy-director')
+             OR kind LIKE '%\_redeploy' OR kind LIKE '%-redeploy'
+             OR resolved_skill LIKE '%-redeploy'
+             OR (kind = 'task' AND status = 'queued'
+                 AND description ~* '^[[:space:]]*(/task[[:space:]]+)?(re)?deploy'))" 2>/dev/null || echo x)
+    active=$(printf '%s' "$active" | tr -d '[:space:]')
+    [[ "$active" =~ ^[0-9]+$ ]] || return 0
+    (( active > 0 ))
+}
+
 # ── Deploy autopilot (continuous delivery, 2026-07-31) ──────────────────────
 # Pushed-but-undeployed commits used to wait for a human to say "deploy".
 # This zero-token check notices a pending origin/main range and dispatches a
@@ -279,7 +302,8 @@ check_deploy_pending() {
     autopilot=$(grep -E '^DEPLOY_AUTOPILOT=' "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
     [[ "$autopilot" == "0" || "$autopilot" == "false" ]] && return 0
 
-    git -C "$PROJECT_DIR" fetch origin main --quiet 2>/dev/null || return 0
+    git -C "$PROJECT_DIR" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
+        fetch origin main --quiet 2>/dev/null || return 0
     head=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null) || return 0
     remote=$(git -C "$PROJECT_DIR" rev-parse origin/main 2>/dev/null) || return 0
     [[ "$head" == "$remote" ]] && return 0
@@ -299,12 +323,9 @@ check_deploy_pending() {
     [[ "$last" =~ ^[0-9]+$ ]] || last=0
     (( now - last < DEPLOY_INTERVAL_SECONDS )) && return 0
 
-    # no deploy machinery already in flight
-    active=$(psql assistant -tAc "SELECT count(*) FROM jobs WHERE status IN ('queued','running')
-        AND (kind IN ('server-deploy','server_deploy','deploy-director','deploy_director')
-             OR resolved_skill IN ('server-deploy','deploy-director'))" 2>/dev/null || echo 1)
-    [[ "$active" =~ ^[0-9]+$ ]] || return 0
-    (( active > 0 )) && return 0
+    # no deploy machinery already in flight (server OR project — a server
+    # deploy restarts the runner, which would kill a project deploy mid-run)
+    deploy_in_flight && return 0
 
     pending=$(git -C "$PROJECT_DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
     job_id=$(psql assistant -tAc "INSERT INTO jobs (id, kind, description, status, created_by, created_at)
@@ -325,6 +346,225 @@ check_deploy_pending() {
 }
 
 check_deploy_pending || true
+
+# ── Project deploy autopilot (2026-11-21) ───────────────────────────────────
+# The server autopilot above watches only this checkout. This one watches every
+# project whose manifest carries a gated-auto dev-repo delivery contract and,
+# when a new commit lands on that project's delivery branch, dispatches the
+# project's OWN deploy executor (`delivery.deploy.skill`: atlas-redeploy, or
+# project-redeploy by default) straight onto the front of the queue. Noticing
+# costs zero tokens; the executor (a low-effort session that escalates only on
+# failure) does pull → migrate → gates → build → restart → healthcheck, and a
+# red test/build gate leaves the old code serving. No deploy-director hop: the
+# preflight it adds for projects (in-flight guard, divergence, marker) is done
+# here, and the follow-up below is the verify step.
+#
+#   eligible   topology dev-repo + runtime_clone pull-only + deployable not
+#              false + autonomy gated-auto + ≥1 service + the executor skill
+#              exists. In-place, human-approval, manual-only and content
+#              projects are left exactly as they are.
+#   once/tip   volumes/state/autodeploy-<slug> = "<tip> <job_id|-> <0|1>".
+#              A tip is tried once; a red deploy waits for the NEXT commit
+#              (no token loop on a broken gate).
+#   docs       a new range that touches only *.md files dispatches nothing —
+#              most of the loops' ledger commits — and the next code change
+#              ships them, because executors deploy from the deployed-sha
+#              marker. (Loop commits that also touch .json/.jsonl/.yaml DO
+#              dispatch; narrowing that needs a per-project path list.)
+#              DEPLOY_AUTOPILOT_INCLUDE_DOCS=1 deploys them too.
+#   guards     tip ≥ DEPLOY_QUIET_SECONDS old; fast-forward only (divergence
+#              = one owner alert, no dispatch); nothing deploy-shaped in
+#              flight anywhere (deploy_in_flight); one dispatch per tick.
+#   follow-up  once no deploy is in flight, the attempt is judged by the
+#              executor's marker: at/after the tip = shipped (logged);
+#              otherwise ONE owner alert naming the job.
+#   switches   .env DEPLOY_AUTOPILOT=0 stops both autopilots;
+#              DEPLOY_AUTOPILOT_PROJECTS=0 stops this one;
+#              DEPLOY_AUTOPILOT_SKIP=slug,slug skips those projects.
+PROJ_STATE_DIR="$PROJECT_DIR/volumes/state"
+
+env_value() {   # $1 = NAME → its value from this checkout's .env (read-only)
+    grep -E "^$1=" "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true
+}
+
+alert_owner() {   # $1 = text; 0 = delivered (notify first, curl fallback)
+    local token chat_ids chat_id
+    token=$(env_value TELEGRAM_BOT_TOKEN)
+    chat_ids=$(env_value TELEGRAM_ALLOWED_CHAT_IDS)
+    chat_id=$(printf '%s' "$chat_ids" | cut -d, -f1 | tr -d '[:space:]')
+    if notify_send ops_alert "$1"; then
+        echo "$(date -u +%FT%TZ) ALERT project-deploy sent via notify" >> "$LOG"
+        return 0
+    elif [[ -z "$token" || -z "$chat_id" ]]; then
+        echo "$(date -u +%FT%TZ) WARN project-deploy alert skipped: telegram creds missing in .env" >> "$LOG"
+        return 1
+    elif curl -sf --max-time 10 "https://api.telegram.org/bot${token}/sendMessage" \
+            --data-urlencode "chat_id=${chat_id}" \
+            --data-urlencode "text=$1" > /dev/null 2>&1; then
+        echo "$(date -u +%FT%TZ) ALERT project-deploy DM sent (curl fallback)" >> "$LOG"
+        return 0
+    fi
+    echo "$(date -u +%FT%TZ) WARN project-deploy DM failed (telegram unreachable?)" >> "$LOG"
+    return 1
+}
+
+# Prints "<kind> <branch>" when projects/<slug>/manifest.yml is an eligible
+# autopilot target, nothing otherwise. `yq -r` works with both the Go (brew)
+# and the Python yq. `deployable` is read raw: `//` treats false as missing.
+project_deploy_target() {   # $1 = manifest path
+    local m="$1" topo clone deployable autonomy nsvc skill branch
+    topo=$(yq -r '.delivery.topology // ""' "$m" 2>/dev/null) || return 0
+    [[ "$topo" == "dev-repo" ]] || return 0
+    clone=$(yq -r '.delivery.runtime_clone // ""' "$m" 2>/dev/null)
+    [[ "$clone" == "pull-only" ]] || return 0
+    deployable=$(yq -r '.delivery.deployable' "$m" 2>/dev/null)
+    [[ "$deployable" == "false" ]] && return 0
+    autonomy=$(yq -r '.delivery.deploy.autonomy // "gated-auto"' "$m" 2>/dev/null)
+    [[ "$autonomy" == "gated-auto" ]] || return 0
+    nsvc=$(yq -r '.delivery.deploy.services // [] | length' "$m" 2>/dev/null)
+    [[ "$nsvc" =~ ^[0-9]+$ ]] && (( nsvc > 0 )) || return 0
+    skill=$(yq -r '.delivery.deploy.skill // ""' "$m" 2>/dev/null)
+    [[ -z "$skill" || "$skill" == "null" ]] && skill="project-redeploy"   # = DeployPolicy default
+    [[ "$skill" =~ ^[a-z0-9][a-z0-9-]*$ && -f "$PROJECT_DIR/skills/$skill/SKILL.md" ]] || return 0
+    branch=$(yq -r '.delivery.branch // "main"' "$m" 2>/dev/null)
+    [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || return 0
+    printf '%s %s\n' "${skill//-/_}" "$branch"
+}
+
+# True (0) when every path changed in $2..$3 of repo $1 is a *.md file.
+range_is_docs_only() {
+    local files
+    files=$(git -C "$1" diff --name-only "$2" "$3" 2>/dev/null) || return 1
+    [[ -n "$files" ]] || return 0
+    ! printf '%s\n' "$files" | grep -qvE '\.md$'
+}
+
+# Judge the last dispatched attempt for <slug> once no deploy is in flight.
+project_deploy_followup() {   # $1 slug  $2 runtime clone
+    local slug="$1" P="$2" state st_tip st_job st_rep marker status
+    state="$PROJ_STATE_DIR/autodeploy-$slug"
+    [[ -s "$state" ]] || return 0
+    read -r st_tip st_job st_rep < "$state" || return 0
+    [[ "$st_rep" == "0" && "$st_job" =~ ^[0-9a-f-]{36}$ ]] || return 0
+    deploy_in_flight && return 0
+    marker=$(cat "$PROJ_STATE_DIR/deployed-sha-$slug" 2>/dev/null || true)
+    if [[ -n "$marker" ]] && { [[ "$marker" == "$st_tip" ]] ||
+            git -C "$P" merge-base --is-ancestor "$st_tip" "$marker" 2>/dev/null; }; then
+        echo "$(date -u +%FT%TZ) AUTOPILOT $slug deployed ${st_tip:0:8} (job ${st_job:0:8})" >> "$LOG"
+    else
+        status=$(psql assistant -tAc "SELECT status FROM jobs WHERE id='$st_job'::uuid;" 2>/dev/null | tr -d '[:space:]')
+        echo "$(date -u +%FT%TZ) FAIL project-deploy $slug ${st_tip:0:8} not shipped (job ${st_job:0:8} ${status:-unknown})" >> "$LOG"
+        alert_owner "⚠️ Auto-deploy of $slug ${st_tip:0:8} didn't finish green on $(hostname -s) (job ${st_job:0:8}, ${status:-status unknown}). If a test or build check failed, the old version is still serving. The job summary says what happened; the next code commit to the branch triggers a fresh attempt." || true
+    fi
+    printf '%s %s 1\n' "$st_tip" "$st_job" > "$state" 2>/dev/null || true
+}
+
+check_project_deploys() {
+    local now flag skip manifest slug P target kind branch state st_tip st_job st_rep
+    local head tip marker deployed base tip_age pending job_id
+    now=$(date +%s)
+    flag=$(env_value DEPLOY_AUTOPILOT)
+    [[ "$flag" == "0" || "$flag" == "false" ]] && return 0
+    flag=$(env_value DEPLOY_AUTOPILOT_PROJECTS)
+    [[ "$flag" == "0" || "$flag" == "false" ]] && return 0
+    skip=",$(env_value DEPLOY_AUTOPILOT_SKIP | tr -d '[:space:]'),"
+    mkdir -p "$PROJ_STATE_DIR" 2>/dev/null || true
+
+    for manifest in "$PROJECT_DIR"/projects/*/manifest.yml; do
+        [[ -f "$manifest" ]] || continue
+        P=$(dirname "$manifest")
+        slug=$(basename "$P")            # the executor's slug = directory name
+        [[ "$slug" =~ ^[a-z0-9][a-z0-9-]*$ ]] || continue
+        [[ "$skip" == *",$slug,"* ]] && continue
+        target=$(project_deploy_target "$manifest")
+        [[ -n "$target" ]] || continue
+        kind=${target% *}; branch=${target#* }
+        git -C "$P" rev-parse --git-dir > /dev/null 2>&1 || continue
+
+        project_deploy_followup "$slug" "$P"
+
+        # HEAD first: moneymachine's page pulls its own clone every 60 s, and a
+        # pull landing between the fetch and a later HEAD read would look like
+        # divergence (HEAD past the tip we just read).
+        head=$(git -C "$P" rev-parse HEAD 2>/dev/null) || continue
+        # A stalled https fetch must not hang the whole timer (launchd won't
+        # start the next tick while this one runs): abort under 1 KB/s for 20 s.
+        GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10" \
+            git -C "$P" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
+            fetch origin "$branch" --quiet 2>/dev/null || {
+            echo "$(date -u +%FT%TZ) WARN project-deploy $slug: fetch origin $branch failed" >> "$LOG"
+            continue; }
+        tip=$(git -C "$P" rev-parse "origin/$branch" 2>/dev/null) || continue
+        marker=$(cat "$PROJ_STATE_DIR/deployed-sha-$slug" 2>/dev/null || true)
+        deployed=$head
+        if [[ -n "$marker" ]] && git -C "$P" cat-file -e "$marker^{commit}" 2>/dev/null; then
+            deployed=$marker
+        elif [[ "$head" == "$tip" ]]; then
+            # No usable marker and the clone already sits at the tip (e.g. a
+            # clone that pulls itself): nothing to compare against, so this
+            # project can't be auto-deployed until one manual redeploy seeds
+            # the marker. Say so instead of staying silent.
+            if [[ ! -e "$PROJ_STATE_DIR/autodeploy-$slug.nomarker" ]]; then   # once, not every tick
+                echo "$(date -u +%FT%TZ) WARN project-deploy $slug: no deployed-sha marker — run one redeploy to seed it" >> "$LOG"
+                : > "$PROJ_STATE_DIR/autodeploy-$slug.nomarker" 2>/dev/null || true
+            fi
+        fi
+        # already shipped (marker at or past the tip)
+        [[ "$tip" == "$deployed" ]] && continue
+        git -C "$P" merge-base --is-ancestor "$tip" "$deployed" 2>/dev/null && continue
+
+        st_tip="" st_job="" st_rep=""
+        state="$PROJ_STATE_DIR/autodeploy-$slug"
+        [[ -s "$state" ]] && read -r st_tip st_job st_rep < "$state"
+        [[ "$st_tip" == "$tip" ]] && continue          # this tip was already tried
+
+        # fast-forward only — runtime-born commits are a human problem. One
+        # DM per divergent HEAD (not per new tip: atlas's loops push several
+        # times a day), then silence until someone reconciles the clone.
+        if ! git -C "$P" merge-base --is-ancestor "$head" "$tip" 2>/dev/null; then
+            if [[ "$(cat "$state.diverged" 2>/dev/null)" != "$head" ]]; then
+                echo "$(date -u +%FT%TZ) WARN project-deploy $slug: runtime clone diverged from origin/$branch — skipping until reconciled" >> "$LOG"
+                alert_owner "⚠️ Can't auto-deploy $slug: its runtime copy on $(hostname -s) has commits that aren't on GitHub ($(git -C "$P" rev-list --count "$tip..$head" 2>/dev/null || echo '?') ahead), so a fast-forward pull would refuse. A person needs to reconcile it; auto-deploys of $slug are paused until then." || true
+                printf '%s\n' "$head" > "$state.diverged" 2>/dev/null || true
+            fi
+            continue
+        fi
+        rm -f "$state.diverged" 2>/dev/null || true
+
+        # what's new since the last attempt (or since the last deploy)
+        base=$deployed
+        if [[ -n "$st_tip" ]] && git -C "$P" merge-base --is-ancestor "$st_tip" "$tip" 2>/dev/null &&
+                git -C "$P" merge-base --is-ancestor "$deployed" "$st_tip" 2>/dev/null; then
+            base=$st_tip
+        fi
+        if [[ "$(env_value DEPLOY_AUTOPILOT_INCLUDE_DOCS)" != "1" ]] && range_is_docs_only "$P" "$base" "$tip"; then
+            continue
+        fi
+
+        tip_age=$(( now - $(git -C "$P" log -1 --format=%ct "$tip" 2>/dev/null || echo "$now") ))
+        (( tip_age < DEPLOY_QUIET_SECONDS )) && continue
+        deploy_in_flight && return 0
+
+        pending=$(git -C "$P" rev-list --count "$deployed..$tip" 2>/dev/null || echo "?")
+        job_id=$(psql assistant -tAc "INSERT INTO jobs (id, kind, description, payload, status, created_by, created_at)
+            VALUES (gen_random_uuid(), '$kind',
+                    '$slug — deploy autopilot: $pending undeployed commit(s), origin/$branch at ' || LEFT('$tip',8) || '; dispatched by healthcheck-all check_project_deploys',
+                    '{\"project_slug\": \"$slug\"}'::json,
+                    'queued', 'deploy-autopilot', NOW()) RETURNING id;" 2>/dev/null | head -1 | tr -d ' ') || return 0
+        [[ -n "$job_id" ]] || return 0
+        if redis-cli lpush jobs:queue "$job_id" > /dev/null 2>&1; then
+            printf '%s %s 0\n' "$tip" "$job_id" > "$state" 2>/dev/null || true
+            echo "$(date -u +%FT%TZ) AUTOPILOT dispatched $kind $job_id for $slug ($pending pending, tip ${tip:0:8})" >> "$LOG"
+        else
+            psql assistant -qc "UPDATE jobs SET status='cancelled', error_message='autopilot LPUSH failed; row cancelled to avoid stranding' WHERE id='$job_id'::uuid;" 2>/dev/null || true
+            echo "$(date -u +%FT%TZ) WARN project-deploy $slug enqueue failed at LPUSH; job row cancelled" >> "$LOG"
+        fi
+        return 0        # one dispatch per tick; the rest wait behind it
+    done
+    return 0
+}
+
+check_project_deploys || true
 
 # Summary (visible in healthcheck.out.log)
 echo "$(date -u +%FT%TZ) checked=$CHECKED healthy=$HEALTHY failed=$FAILED"

@@ -250,3 +250,12 @@ the acceptance evaluator re-checks claims.
 - **Multi-service label format**: `com.assistant.project.<slug>-<service-name>`
   for sub-services (see the manifest `services` array); the primary service is
   `com.assistant.project.<slug>`.
+- **The healthcheck timer dispatches you too** (2026-11-21, `created_by =
+  deploy-autopilot`): `scripts/healthcheck-all.sh` `check_project_deploys`
+  enqueues this skill (or the manifest's `delivery.deploy.skill`) when a new
+  non-markdown commit lands on the delivery branch. Its description carries
+  only the slug, a commit count and the tip SHA — derive the range yourself as
+  above. The autopilot judges your run solely by the `deployed-sha-<slug>`
+  marker afterwards (marker at/after the tip = shipped, otherwise one owner
+  DM), so the "advance the marker only on a fully green deploy" rule is what
+  makes its alert truthful.
