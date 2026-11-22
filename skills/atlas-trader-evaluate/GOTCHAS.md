@@ -479,3 +479,93 @@ rewrite old entries.
   it early either: 59 is not 60 (PROTOCOL §1 binds in both directions). State
   the maturity date, the sign, and the gap, and file the conjunction as an owner
   decision.
+- 2026-11-22: a `daily_loss` halt BLOCKS THE DE-RISK IT EXISTS TO ENABLE, and the
+  design knows it. `risk.validate` computes `halt_kinds = active | check_breakers(...)`
+  (`risk.py:85-86`) and then blanket-rejects every intent on line 90-91 — so a
+  breaker that trips at step 7 blocks that same step's intents, and the kernel is
+  NOT side-aware (a sell-to-cash is rejected exactly like a buy). `risk.py:92`
+  already exempts `daily_loss` when `mode == "flatten"` ("to move the book to the
+  cash floor", line 12) — but `executor.py:225` sets `flatten = HALT_KILL_SWITCH in
+  halts`, so flatten is reachable ONLY from the kill-switch and a gate-driven
+  risk_off rotation runs `mode="normal"` and dies. T-0054: the first gate flip in
+  the vertical's life (11-20, risk_on→risk_off) emitted 19 intents (sell 116 of 117
+  SPY in 9 chunks, buy 819 SGOV) and ALL 19 were rejected `"halt active:
+  ['daily_loss']"`. Whenever you see `gate_flipped=True` on a `breaker_tripped`
+  row, the crash truncation that is strategy_v1's ONLY advertised compensation was
+  withheld on the one day it was called for — lead with it.
+- 2026-11-22: **PROTOCOL §4's demotion lever is INERT in v1 code — do not mistake
+  the DB write for compliance.** `trader.strategy_state.stage` is write-through
+  only: its sole reference in the order path is `executor.py:424`, which reads the
+  stage and writes it straight back (`st.get("stage") or "paper"`). Nothing
+  consults it. The executor's trading set is `config/settings.yaml:23
+  active_strategies` via `executor.py:69-72`, then `executor.py:402` hardcodes
+  `cfg = self.strategies["strategy_v1"]`. So demoting in the DB changes NOTHING
+  about Monday's run. And both config routes are traps: editing
+  `strategy_v1.yaml`'s `stage:` while it stays in `active_strategies` turns
+  `tests/test_adoption_gate.py::test_active_strategies_exist_and_are_paper_stage`
+  RED, and emptying `active_strategies` makes line 402 raise `KeyError` MID-RUN
+  (after the run row, health check and broker reconciliation already executed).
+  Fire the mandated DB demotion anyway, then report the inertness as the finding
+  and escalate — never quietly treat the write as enforcement.
+- 2026-11-22: a demotion can COLLIDE with a pending de-risk, on a deadline. After
+  a halt fires, `clear_recoverable_halts` clears `daily_loss` where `ts::date <
+  today`, so the NEXT session's run clears it at step 4 and proceeds; and
+  `diff_to_intents` trades any symbol past the drift band even when
+  `is_rebalance_day=False` (SPY at 88.7% against a 0% risk_off target = ~88.7pt
+  drift vs a 5pt band). So the blocked rotation re-fires automatically one session
+  later with NO action from anyone. When you demote in the same grade, say which
+  way inaction resolves and give the owner the UTC deadline — the governor's
+  mandated act and the executor's queued act can point in opposite directions.
+- 2026-11-22: a supervisory LLM session can re-enter the ONLY order path twice in
+  one job. T-0054 job `122a33ce` ran `python -m trader.executor` at 17:30:54Z and
+  AGAIN at 17:31:29Z, the second time piped into an inline `python -c` just to
+  pretty-print `kernel_rejected` — and that second pass wrote the
+  `halted_standing` row. Tell: run-row count > paper-job count for a date (6 rows
+  / 5 sessions). It was harmless only because the halt the first pass created
+  blocked the second at step 4; had the first been `ok`, the full submit path
+  re-ran 35s later with only idempotent `client_order_id`s in the way. ALWAYS
+  reconcile `count(trader.runs)` per date against `count(jobs)` per date, and read
+  the audit JSONL's Bash `input.command` values rather than trusting one row per
+  job.
+- 2026-11-22: the 17:31Z sample instant is FAIL-OPEN inside the breaker too. On a
+  down-trending day the breaker sees less loss than the session delivered: 11-20
+  was −301 bp at 17:31Z and **−323.36 bp close-to-close**, so a session breaching
+  only after 17:31Z is invisible to `check_breakers` entirely. Cheap exact
+  validation of any close-convention rebuild: `GET paper-api.alpaca.markets/v2/
+  account` returns `equity`/`last_equity` as of the last close — T-0054's
+  `117*SPY + 99*SGOV + 482.63` reproduced the broker's 91153.76 **to the cent**.
+  Use the broker as the third witness, not just the stored rows.
+- 2026-11-22: F33's halt-forensics check can come back CLEAN, and that is a
+  reportable pass, not a skipped step. T-0054's 11-20 halt quoted −3.01% and the
+  true 11-19→11-20 single-session move from `runs.equity` was −3.014% — correct
+  for the first time in the vertical's life, because BOTH endpoints were genuinely
+  consecutive sessions each holding an `equity_curve` row, so `prior_close_equity`
+  did not widen. Also run the complement every week (no-halt ≠ no-breach): T-0054's
+  only step-5 return, 11-18, moved +0.45% then −0.97% — nowhere near the limit, so
+  nothing went unevaluated. Compute both; report both.
+- 2026-11-22: PROTOCOL §4 rule 2 ("two daily-breaker trips in 10 sessions") needs
+  the trips counted on the independent SESSION list, not on dates. T-0054's trips
+  (11-06, 11-20) are **11 sessions apart** — no 10-session window holds both, so
+  the rule misses by exactly ONE session. Report the spacing explicitly when it is
+  near, because one more trip inside ten fires it. Related: rule 2's remedy is
+  "back to paper", which is a NO-OP when the strategy is already at paper — say so
+  rather than implying a rule fired.
+- 2026-11-22: T-0002's kill criterion is "(a) < 80% over 4 CONSECUTIVE weeks", and
+  a week at EXACTLY 80% breaks the run (80 is not < 80). T-0054's series was
+  10-19 60%, 10-26 100%, 11-02 **80%**, 11-09 0%, 11-16 60% ⇒ consecutive count
+  **2**, not 4. Compute the whole series and the run length every week; do not
+  fire early (PROTOCOL §1 binds in both directions) and do not lose track of how
+  close it is. Note its remedy (demote to `validated`) converges on §4 rule 3's.
+- 2026-11-22: the §6 no-lessons baseline deadline (2026-11-26) arrived still
+  un-runnable: `trader_strategist`/`trader_adversary` are STILL missing from
+  `dashboard/atlas_dash/knowledge.py:23-27` (unfixed since 2026-08-30, ~12 weeks).
+  With no injected lessons there is no treatment arm. The governor's duty-6 move is
+  to FILE the instruction to record it MISSED-BY-CONSTRUCTION with the roster line
+  cited as cause — do NOT let the research cycle burn budget fabricating a baseline,
+  and do not run it yourself. Check how many research cycles (Wed 13:00 UTC) fall
+  before the deadline and say so.
+- 2026-11-22: the two skill copies (prod `skills/atlas-trader-evaluate/` and atlas
+  `integrations/ai-server/skills/atlas-trader-evaluate/`) were found IN SYNC for
+  the second week running — `diff` is now cheap and usually clean, so keep running
+  it, but the real discipline is re-syncing the atlas copy in the SAME commit as
+  the ledger entry right after you append here, before the push.
