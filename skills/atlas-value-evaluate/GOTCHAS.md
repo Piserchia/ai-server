@@ -228,3 +228,85 @@
   LATER than the commit that published the entry is proof. Then correct by
   append, never by editing the predecessor (G-0007a class, now twice in eight
   weeks).
+- **Fetch the regime EVEN at N=0 — it is the one leg that can turn "emitted
+  nothing" from expected into costly, and it can EXPIRE as a defence.** Every
+  grade G-0002..G-0012 could truthfully say the put sleeve was sitting out a
+  tape it is *expected* to sit out. G-0013 fetched SPY live and the defence was
+  gone: 690.68, **5.74% BELOW** the 200-DMA (732.74), 12wk −10.44%, 4wk −9.10%,
+  −11.35% off the 12wk high, VIX 28.44 — the first sub-200-DMA print in the
+  vertical's life, i.e. exactly the tape the skill says the sleeve **must win**.
+  Recipe (`value/.venv/bin/python`): `tradingcore.alpaca_data.DataClient`
+  `.get_daily_bars(['SPY'], today-400d, today)` → sort by `t[:10]`, `sma200 =
+  mean(closes[-200:])`; `tradingcore.fred.fetch_vix()` → `(vix, date)`. Then
+  **compute the vertical's own breaker through the real code path**
+  (`weekly.py:120-121`): `breaker_on = (SPY < sma200) and (vix_stale or vix >
+  screen.yaml regime_breaker.vix_level)`. Do not assume a down tape disables the
+  put sleeve — at VIX 28.44 vs a 30.0 level the breaker was **OFF**, so puts
+  were *permitted* with 1.56 points of headroom, which is what made the silence
+  chargeable rather than designed.
+- **Grade the remedy's SUFFICIENCY CLAIM, not just the remedy.** G-0012 traced
+  its predecessor's fix forward and proved it a no-op (already in these
+  GOTCHAS), then asserted a "minimum sufficient set" of its own. That assertion
+  is also a claim about code and also failed: `pv` is **quote-derived** —
+  `theses.py:88 pv = portfolio.get("value_usd")` ← `weekly.py:281
+  pctx.get("value_usd")` ← `holdings.py:47 "total or None"` ← `holdings.py:37
+  px = quotes[sym]["last"]`. With Tradier dark every `px` is 0, `total` is 0.0,
+  `total or None` is **None**, so `if pv:` is False and the five `ok=False`
+  sites stay unreachable *after the whole filed fix set lands*. Trace scalars to
+  their SOURCE, not to the function that returns them.
+- **`x or None` on an accumulator is a blindness amplifier — grep for it.**
+  `holdings.py:47` turns a legitimately-zero total into `None`, which then reads
+  downstream as "no portfolio" rather than "portfolio worth 0 priced by a dark
+  feed". The two are indistinguishable at the consumer.
+- **Check whether a FAIL site is dead by ARITHMETIC, not only by guard.** The
+  unreachability analysis in these GOTCHAS stops at guards (`if pv:`,
+  `if kind == "msp"`). Go further and substitute the config constants: site
+  `theses.py:128` is `used + slug > pv*sector_cap/100` with `used = 0.0`
+  (`sector_exp` is `{}`), `slug_pct: 5.0`, `sector_cap_pct: 25.0` ⇒
+  `0.05·pv > 0.25·pv`, **false at every pv**, and `0.025·pv` under
+  `half_slug_pct`. So the `long` sleeve — the only sleeve that can emit — has no
+  reachable FAIL under ANY combination of the filed fixes. A guard-only analysis
+  reports this site as "merely blocked on `pv`".
+- **Apply the unfalsifiability test to YOUR OWN ladder, not only to the code.**
+  All three STOP_READING legs are unreachable by a vertical that emits nothing:
+  legs 1-2 are functions of the governor's own verdicts over checks that are
+  vacuous (3 of 4) or unfalsifiable (compliance #1), and leg 3 needs a 12-week
+  shadow return, which needs `shadow_curve` rows, which need emitted cards. In
+  G-0013 leg 3's *regime* precondition became **armed for the first time ever**
+  and the return term was still undefined. A vertical that cannot emit can never
+  trip the escalation built to catch a vertical that performs badly. Report it;
+  do **not** invent a bar to compensate — that is hardening by judgment.
+- **Write §8 (the wrap-up) as a SECOND COMMIT.** The rule "never narrate wrap-up
+  in the past tense before performing it" has an obvious mechanical solution
+  that took seven grades to find: commit the grade + DR, then append a §8 of
+  verified-state-only and commit that. Two commits, zero forward-written claims,
+  and the predecessor-correction rule is never engaged against yourself.
+- **Stamp the header from `date -u` BEFORE writing the body.** That guarantees
+  header < commit — the conservative direction. G-0012 filed the forward-stamp
+  defect as DR-0016 item 5 against N-0009, published the correction, and then
+  shipped a header `2m57s AFTER` its own publishing commit `ea9a88f`. Check your
+  predecessor with `git log -1 --format=%cI <commit>` every run; it is now 3
+  instances in 9 weeks (G-0007a, N-0009, G-0012). Declare the convention in the
+  entry so the next governor can audit it.
+- **`psql -v var=... -c "... :var::jsonb"` fails with `syntax error at or near
+  ":"`.** Do not fight it. Write the payload to `/tmp/x.json`, then generate a
+  dollar-quoted statement to a file and `psql -f`: `print("insert into
+  value.grades (week, verdict, payload) values ('<wk>','<v>', $j$" + payload +
+  "$j$::jsonb) returning id, week, verdict, ts;")`. The `returning` clause plus
+  the GOTCHAS key-count read-back is the whole verification.
+- **The ledger's `G-` sequence interleaves governor and research grades — sort
+  by the header TIME, not the number.** Governor grades land ~17:00Z Sunday;
+  research-card grades land ~13:00-13:30Z Tue (G-0001/0003/0005). At G-0013 the
+  file held 13 `## [G-` headers but only **9** governor grades against 8
+  `value.grades` rows. Mis-counting here corrupts the "Nth consecutive CONCERN"
+  figure, which is the one number the owner tracks.
+- **Read the worker job summaries for findings with NO ledger surface — and
+  commend good blocked-lane conduct explicitly.** G-0013's F12 (`portfolio_context`
+  returns `mode: "holdings"` with `value_usd: null`, `holdings: {}` *and* a
+  computed `stale_days` when quotes are dark — false provenance of the
+  `earnings_veto` class) existed only in job `38868cc9`'s summary. The same
+  summary held the first live-price measurement of the screen and the first
+  in-the-wild reproduction of the Stage-2 trap-guard no-op. A worker that
+  correctly refuses to touch code in a blocked week produces its entire output
+  as prose in a job row; if the governor does not read it and file it, it is
+  gone.
