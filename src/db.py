@@ -73,6 +73,10 @@ KEY_QUOTA_PROVIDER_PREFIX = "quota:provider:"     # per-provider lane pause (T6,
                                                   # A job on a paused lane is held: NOT run, RPUSHed to
                                                   # the TAIL after a bounded delay (plan §4g), while the
                                                   # loop keeps draining every other lane.
+# 2026-11-21: ISO time the event loop last auto-paused the alpha-lab schedules
+# for no progress. No TTL: it is the floor of the next count, so an owner
+# resume starts from zero instead of re-tripping at once.
+KEY_ALPHA_NO_PROGRESS_TRIPPED_AT = "alpha:no_progress_tripped_at"
 KEY_SCHEDULE_GAP_NOTIFIED_PREFIX = "schedule:gap_notified:"  # D1 (2026-10-21): + "<slug>:<YYYY-MM-DD>".
                                                   # SET NX by the scheduler AFTER the schedule_deferred
                                                   # ops notice was inserted (a dropped insert does not

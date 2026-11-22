@@ -2,6 +2,13 @@
 
 <!-- Newest entries at top. Every session that modifies this module appends here. -->
 
+## 2026-11-21 — alpha-lab no-progress stop; a paused governor row silences the idle drainer
+
+**Agent task**: owner task "Pause the stalled alpha-lab research loop" (atlas alpha-lab LEDGER [E-0270]/[E-0277]: ~129 governor/scout jobs since 2026-10-22, zero `alpha-research` jobs, both live chains held on owner DECISION-REQUESTs E-0087/E-0118).
+**Files changed**: `src/runner/events.py` — `_should_trigger_idle_alpha` gains `governor_paused` and `_check_idle_queue_alpha` reads the `alpha-governor` schedule row's `paused`; new `_check_alpha_no_progress` (called before the drainer, outside the breaker gate) with pure `_alpha_no_progress_floor` / `_should_pause_alpha_for_no_progress` and constants `ALPHA_SCHEDULE_NAMES`, `ALPHA_OVERHEAD_KINDS`, `ALPHA_NO_PROGRESS_WINDOW_HOURS` (72), `ALPHA_NO_PROGRESS_RUN_LIMIT` (10): pauses `alpha-governor`, `alpha-scout-am`, `alpha-scout-pm`, enqueues one `ops_alert` with the resume commands, records the trip in `KEY_ALPHA_NO_PROGRESS_TRIPPED_AT`. `src/db.py` — that key. `.context/SYSTEM.md` — events imports `notify.outbox`. `tests/test_events.py` — `TestAlphaNoProgressStop` (8) + the paused-row drainer case; the loop-ordering tests include the new check.
+**Why**: nothing stopped a lab whose research lane had stalled. The 24 h valve counts only research jobs, so it never trips when research is what stalled, and `/schedule pause alpha-governor` left the idle drainer firing every ~4 h.
+**Side effects**: on the first deploy the stop trips within one 60 s cycle (last research job 2026-10-22) — the three rows pause and the owner gets one Telegram notice. The seeder never un-pauses a row, so redeploys keep the pause; `/schedule resume <name>` ×3 restarts, with a fresh count of 10 from the resume.
+
 ## 2026-11-20 — INV-9: the QuotaExhausted requeue is a guarded running→queued flip, pushed after it wins
 
 **Agent task**: the "same INV-9 class, still open" item the claim-guard review recorded (GOTCHAS 2026-11-17).
