@@ -84,3 +84,50 @@
   server-side GOTCHAS instead; `sync-learnings.sh` publishes it hourly to
   `origin/runtime-learnings`. Prod main commits are guarded, so do not
   commit here either — just leave the edit for the sync.
+- G-0007: "drop it from `env_required`" is NOT a psql act, and telling the
+  owner it is will waste their edit. The swing payload is declared in
+  **server code** — `scripts/seed-schedules.sh:143-146` — and the script's
+  `upsert` does
+  `job_payload = COALESCE(EXCLUDED.job_payload, schedules.job_payload)`,
+  so a **declared payload WINS** and a hand-edited `schedules.job_payload`
+  is silently reverted at the next deploy (seed-schedules runs every
+  `server-deploy`, step 3b). Dropping `env_required` is therefore an INV-4
+  ai-server commit. **`paused` is absent from that `DO UPDATE` set**, so
+  `paused = true` DOES survive re-seeding — the "park the lane" option is
+  durable where the "drop the key" DB edit is not. Always recommend
+  provisioning the token into `~/Documents/repos/atlas/.env` first: zero
+  code, zero deploy, zero review gate.
+- G-0007: the frozen SPY/BIL pair is **not reconstructible** when the worker
+  is down, so don't go hunting for a benchmark table. `spy_close`/`bil_close`
+  are **in-row columns of `swing.equity_curve`**, written by the swing worker
+  at each equity snapshot, and SPY/BIL exist in neither `public.assets`
+  (0 of 68 symbols) nor `public.candles`. A deferred worker kills the
+  numerator and the comparator in one stroke, which makes the skill's "a
+  grade without the pair is invalid" rule unsatisfiable by construction.
+  The sanctioned form is "undefined at N = 0 funded days", quoted WITH the
+  row count — that is a different statement from a grade that failed to pull.
+- G-0007: there is a SECOND failure mode beside the 08-17 governor-dark
+  class, and it looks identical in `swing.*`: **alerted-and-unanswered.**
+  Always pull `notifications` (`notice_kind`, `severity`, `status`,
+  `attempts`) before writing "the owner may not know" — G-0001…G-0006 all
+  leaned on non-awareness, and G-0007 measured 13 of 14 notices `sent`
+  (1 failed-then-resent), a `critical` R18 DM on every market day, and the
+  watchdog 5/5 days, against zero owner action. Once delivery is proven the
+  finding changes shape: it is no longer a monitoring gap, it is an
+  unanswered decision, and the right output is a forced explicit choice
+  (provision / park / accept) rather than a re-raised alerting DR.
+- G-0007 corollary: one root cause can bill the owner **three DMs per market
+  day** (07:15 schedule-monitor `ops_alert`, ~08:40 `schedule_deferred`
+  one-per-project-per-UTC-day, ~11:00 R18 `ops_alert` critical). Count them
+  before praising alert coverage — the R18 counter measures a lane that is
+  deliberately deferred, so its `critical` severity stops discriminating
+  "broken" from "parked", which is how a channel dies before it matters.
+- `schedule-monitor` printing `schedule_deferred_24h=0` while still emitting
+  4 DEFERRED findings is CONSISTENT on a weekend, not a monitor failure: the
+  24h counter reads the deferral stream (last firing Friday) while the
+  findings read last-deferral-ever. Don't file it.
+- A clean `git status` in the shared clone is worth a sentence when a prior
+  grade reported dirt: G-0006's untracked `AGENTS.md`/`.agents/`/`.codex/`
+  were tracked by commit `a89688d` (2026-11-21, a pm-edge Codex-mirror
+  commit), not by a human cleanup. Check `git log --since=<prior grade> --
+  <paths>` before carrying a housekeeping note forward.
